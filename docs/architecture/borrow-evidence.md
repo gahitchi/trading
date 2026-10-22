@@ -1,0 +1,7 @@
+# Borrow availability and financing evidence
+
+**Research model, not a broker order permit.** `lab.borrow.BorrowBook` imports dated per-ticker share-availability and annual borrow-fee snapshots from CSV, rejects duplicate/invalid evidence, and answers `borrow_rate(ticker, day) -> (apr, provenance)` using no future snapshots. A missing, stale or unshortable observation raises `BorrowUnavailable`; qualified research must abstain from opening that short rather than assigning a zero borrowing fee.
+
+For confirmed historical short positions, `BorrowBook.cost` returns daily accrual plus per-asset provenance. `lab.margin.financing_cost(..., verified_borrow_fee=...)` can accept the resulting total while preserving the old assumed rate when no proven feed is connected. **The actual backtest and paper execution agents have not yet been wired to this schedule.** Until they are, those agents report an *assumed* uniform stock-borrow fee and cannot claim short-history eligibility. Real Interactive Brokers share borrowing must be verified independently; historical snapshots cannot grant a live locate.
+
+Expected CSV columns are `ticker,as_of,available,apr,source` with ISO date, strict true/false flag and explicit annual fee. The default freshness limit is three calendar days, configurable for weekend/holiday data policy; audit the data vendor, corporate actions and short-sale restrictions before using this in a trading strategy.

@@ -39,8 +39,25 @@ def borrowed_cash(cash: float, short_value: float) -> float:
     return max(0.0, short_value - cash)
 
 
-def financing_cost(cash: float, short_value: float, days: float, m: MarginSettings) -> tuple[float, float]:
-    """(borrow fee, debit interest) for holding the book `days` calendar days."""
-    borrow = short_value * m.borrow_apr * days * DAY
+def financing_cost(
+    cash: float, short_value: float, days: float, m: MarginSettings, *, verified_borrow_fee: float | None = None
+) -> tuple[float, float]:
+    """(borrow fee, debit interest) for holding the book `days` calendar days.
+
+    When a point-in-time BorrowBook validated the whole short book, its exact
+    cost can replace the legacy uniform assumed APR. Otherwise retain the
+    explicitly disclosed *assumed* research fee, never claim it was verified.
+    """
+    if verified_borrow_fee is not None and (
+        not isinstance(verified_borrow_fee, (int, float))
+        or not __import__("math").isfinite(verified_borrow_fee)
+        or verified_borrow_fee < 0
+    ):
+        raise ValueError("verified_borrow_fee must be finite and nonnegative")
+    borrow = (
+        verified_borrow_fee
+        if verified_borrow_fee is not None
+        else short_value * m.borrow_apr * days * DAY
+    )
     debit = borrowed_cash(cash, short_value) * m.debit_apr * days * DAY
     return borrow, debit
