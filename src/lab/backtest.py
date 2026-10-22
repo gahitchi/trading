@@ -32,6 +32,7 @@ from lab.agents import (
     SignalAgentConfig,
 )
 from lab.agents.cross_sectional import CrossSectionalAgent, CrossSectionalAgentConfig
+from lab.borrow import BorrowBook, BorrowUnavailable
 from lab.config import LabConfig, RiskSettings
 from lab.metrics import summarize
 from lab.signals.base import Signal
@@ -66,6 +67,9 @@ class RunResult:
     financing: float = 0.0  # borrow fees + debit interest accrued (ASSUMED rates, lab.toml [margin])
     borrow_fees: float = 0.0
     margin_account: bool = False
+    borrow_model: str = "assumed"
+    borrow_fingerprint: str | None = None
+    borrow_evidence: list = field(default_factory=list)
 
 
 def _ns(d: date) -> int:
@@ -138,6 +142,14 @@ def run(
     warm = pd.Timestamp(warmup_start or cfg.warmup_start)
     last = pd.Timestamp(end) if end else None
     tickers = sorted({s.ticker for s in sleeves} | {t for _, _, ts in cross_sectional for t in ts})
+    borrow_book = None
+    if cfg.borrow.history is not None:
+        try:
+            borrow_book = BorrowBook.from_csv(cfg.borrow.history, max_age_days=cfg.borrow.max_age_days)
+        except (OSError, ValueError) as exc:
+            raise BorrowUnavailable(f"cannot load borrow history {cfg.borrow.history}: {exc}") from exc
+    if "borrow_book" in (execution_overrides or {}):
+        raise ValueError("configure borrow history through cfg.borrow, not execution_overrides")
 
     engine = BacktestEngine(
         BacktestEngineConfig(trader_id=TraderId("LAB-001"), logging=LoggerConfig(stdout_level=LogLevel.ERROR))
@@ -246,12 +258,15 @@ def run(
                 cash_buffer=cfg.costs.cash_buffer,
                 capital=capital,
                 margin=cfg.margin,
+                borrow_book=borrow_book,
                 **(execution_overrides or {}),
             )
         )
         engine.add_strategy(execution)
 
         engine.run()
+        if execution.borrow_error:
+            raise BorrowUnavailable(f"backtest invalid: {execution.borrow_error}")
 
         snaps = recorder.equity
         idx = pd.DatetimeIndex(
@@ -282,6 +297,9 @@ def run(
             financing=execution.financing,
             borrow_fees=execution.borrow_fees,
             margin_account=margin_book,
+            borrow_model="historical_close_book" if borrow_book is not None else "assumed",
+            borrow_fingerprint=borrow_book.fingerprint() if borrow_book is not None else None,
+            borrow_evidence=execution.borrow_ledger.evidence if execution.borrow_ledger is not None else [],
         )
     finally:
         engine.dispose()

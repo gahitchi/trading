@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime
 import pandas as pd
 
 from lab import data, experiments
+from lab.borrow import BorrowUnavailable
 from lab.config import ConfigError, LabConfig, Period, load_config
 from lab.signals.builtin import BUILTIN
 from lab.signals.registry import SignalNotFound, available_research, resolve
@@ -400,6 +401,34 @@ def cmd_research_promote(cfg, a):
     print(f"{a.id} promoted; it can now be used with: lab paper --signals {a.id}")
 
 
+# ----------------------------------------------------------------------------- active profile
+
+
+def cmd_risk_profile(cfg, a):
+    """Read-only audit of the effective profile already wired into paper/backtest."""
+    from dataclasses import asdict
+
+    report = {
+        "profile": cfg.risk.profile,
+        "status": "ACTIVE_CONFIGURATION_PAPER_ONLY",
+        "risk": asdict(cfg.risk),
+        "portfolio": asdict(cfg.portfolio),
+        "broker_shortability_verified": False,
+        "real_money_authorized": False,
+    }
+    if a.json:
+        print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+    else:
+        print(f"profile {report['profile']} (paper accounts only)")
+        for k, v in report["risk"].items():
+            if k != "profile":
+                print(f"  risk.{k}: {v}")
+        for k, v in report["portfolio"].items():
+            print(f"  portfolio.{k}: {v}")
+        print("borrow locate and broker permissions require independent verification")
+    return 0
+
+
 # ----------------------------------------------------------------------------- paper
 
 
@@ -766,6 +795,10 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--model")
     c.set_defaults(fn=cmd_llm_check)
 
+    rp = sub.add_parser("risk-profile", help="show active risk budget and exposure ceilings")
+    rp.add_argument("--json", action="store_true")
+    rp.set_defaults(fn=cmd_risk_profile)
+
     pp = sub.add_parser("paper", help="paper trade on Interactive Brokers (paper accounts only)")
     pp.add_argument("--signals", nargs="+", default=["sma_trend"])
     pp.add_argument("--tickers", nargs="+")
@@ -820,7 +853,7 @@ def main(argv=None) -> int:
         return 0
     try:
         return a.fn(cfg, a) or 0
-    except (data.DataError, ConfigError) as e:
+    except (data.DataError, ConfigError, BorrowUnavailable) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

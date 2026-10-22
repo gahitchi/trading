@@ -37,6 +37,11 @@ rebalance_band = 0.02         # resize a held position only if the change exceed
 cash_buffer = 0.01            # size buys on 99% of equity: next-open fills can gap above the close
 
 [risk]
+# Set profile to calm|cautious|balanced|dynamic|aggressive for adaptive risk units.
+# 'custom' preserves the existing operating limits until the user opts into a preset.
+# Profiles cannot exceed the hard limits below; dynamic/aggressive shorts need operator
+# short caps > 0, gross > 1, broker permissions and confirmed borrow availability.
+profile = "custom"
 # Fractions of equity. Weights are signed (negative = short). These defaults are long-only, unlevered.
 max_weight = 0.25       # max |weight| of one stock
 max_gross = 1.0         # max sum of |weights|; above 1 is leverage (capped by [margin] initial: 2.0 at Reg T)
@@ -89,3 +94,8 @@ null_samples = 30             # bootstrap resamples of real data for the noise-f
 min_sharpe_edge = 0.10        # train Sharpe must beat buy-and-hold by at least this
 max_p_value = 0.05            # and beat at least 95% of the noise-floor samples
 min_dsr = 0.95                # and its active return's Deflated Sharpe Ratio (all trials counted) >= this
+
+# Optional historical short eligibility/fees for research (not a paper-broker locate).
+# [borrow]
+# history = "data/borrow.csv"
+# max_age_days = 3

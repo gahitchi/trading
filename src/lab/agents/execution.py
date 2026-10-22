@@ -23,6 +23,7 @@ from lab.agents.messages import (
     RiskEvent,
 )
 from lab.agents.schedule import next_at
+from lab.borrow import BorrowBook, BorrowUnavailable, HistoricalBorrowLedger
 from lab.config import MarginSettings
 from lab.halt import read_halt, set_halt
 from lab.safety import is_paper_account, read_kill_switch
@@ -71,6 +72,7 @@ class ExecutionAgentConfig(StrategyConfig):
         adopt_broker_positions: bool = False,
         weekdays_only: bool = True,
         margin: MarginSettings | None = None,
+        borrow_book: BorrowBook | None = None,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. margin: financing rates accrued on short and levered books.
@@ -100,6 +102,11 @@ class ExecutionAgentConfig(StrategyConfig):
         self.adopt_broker_positions = adopt_broker_positions
         self.weekdays_only = weekdays_only
         self.margin = margin or MarginSettings()
+        if live and borrow_book is not None:
+            raise ValueError("historical borrow evidence cannot authorize live paper-broker orders")
+        if state_path and borrow_book is not None:
+            raise ValueError("historical borrow runs require a fresh ledger, not persisted paper state")
+        self.borrow_book = borrow_book
 
 
 class ExecutionAgent(Strategy):
@@ -120,6 +127,7 @@ class ExecutionAgent(Strategy):
         super().__init__(config)
         self.weights: dict[str, float] = {}
         self.prices: dict[str, float] = {}
+        self.price_stamps: dict[str, int] = {}
         self.price_ts = 0
         self.new_data = False
         self.alert_pending = False
@@ -138,6 +146,8 @@ class ExecutionAgent(Strategy):
         self.financing = 0.0
         self.borrow_fees = 0.0
         self.accrued_to = 0  # bar timestamp the financing has been accrued up to
+        self.borrow_ledger = HistoricalBorrowLedger(config.borrow_book) if config.borrow_book is not None else None
+        self.borrow_error: str | None = None
         self.held: dict[str, float] = dict.fromkeys(config.instruments, 0.0)
         # Write-ahead order journal: every order is recorded here BEFORE it is sent, and stays
         # until the broker reports it closed. After a crash between order and fill, the fills are
@@ -202,6 +212,7 @@ class ExecutionAgent(Strategy):
 
     def _on_signal(self, msg):
         self.prices[msg.ticker] = msg.price
+        self.price_stamps[msg.ticker] = msg.ts
         self.price_ts = max(self.price_ts, msg.ts)
         self.new_data = True
         if not self.alert_pending:
@@ -344,11 +355,16 @@ class ExecutionAgent(Strategy):
     def _accrue(self) -> None:
         """Charge borrow fees and debit interest for the calendar days since the last accrual."""
         ts = self.price_ts
+        verified_fee = None
+        if self.borrow_ledger is not None and ts > self.accrued_to:
+            verified_fee = self.borrow_ledger.close(datetime.fromtimestamp(ts / 1e9, NY).date(), self.held, self.prices)
         if self.accrued_to and ts > self.accrued_to:
             days = round((ts - self.accrued_to) / 86_400e9)
             if days > 0:
                 _, short_value = self._book()
-                borrow, debit = mg.financing_cost(self.cash, short_value, days, self.config.margin)
+                borrow, debit = mg.financing_cost(
+                    self.cash, short_value, days, self.config.margin, verified_borrow_fee=verified_fee
+                )
                 self.borrow_fees += borrow
                 self.financing += borrow + debit
         if ts and ts > self.accrued_to:
@@ -409,8 +425,36 @@ class ExecutionAgent(Strategy):
 
     # ------------------------------------------------------------------ the daily decision
 
+    def _unsafe_held_marks(self) -> list[str]:
+        """No new opening trade is safe if the held book cannot be marked consistently."""
+        if not self.config.live and self.config.borrow_book is None:
+            return []
+        stale = []
+        for ticker, qty in self.held.items():
+            if not qty:
+                continue
+            mark = self.prices.get(ticker)
+            ts = self.price_stamps.get(ticker)
+            if mark is None or not math.isfinite(mark) or mark <= 0 or not self.price_ts or ts != self.price_ts:
+                stale.append(ticker)
+        return stale
+
     def rebalance(self):
-        snap = self.snapshot()
+        if self.borrow_error:
+            return  # backtest.run refuses to return metrics for this invalid run
+        unsafe = self._unsafe_held_marks()
+        if unsafe:
+            self.blocked_reason = f"missing/stale marks for held positions: {', '.join(sorted(unsafe))}"
+            if self.borrow_ledger is not None:
+                self.borrow_error = self.blocked_reason
+            self._risk_event("stale_data", self.blocked_reason + "; no new orders until all held marks are current")
+            return
+        try:
+            snap = self.snapshot()
+        except BorrowUnavailable as exc:
+            self.borrow_error = str(exc)
+            self._risk_event("borrow_history_invalid", self.borrow_error)
+            return
         self.publish_message(T_EQUITY, snap)  # RiskAgent may halt here; its reply arrives synchronously
         if not math.isfinite(snap.equity) or snap.equity <= 0:
             self._risk_event("blocked", f"cannot size orders: equity={snap.equity}")
@@ -450,6 +494,7 @@ class ExecutionAgent(Strategy):
 
         reduce_only = self.reduce_only or (halt is not None and halt["kind"] == "margin_call")
         orders = []
+        borrow_blocked = False
         for ticker, iid in self.config.instruments.items():
             price = self.prices.get(ticker)
             if not price:
@@ -462,6 +507,13 @@ class ExecutionAgent(Strategy):
             if reduce_only:
                 # Margin call: exposure may only shrink, never flip or grow.
                 target = 0 if target * current <= 0 else math.copysign(min(abs(target), abs(current)), current)
+            if self.config.borrow_book is not None:
+                target, reason = self.config.borrow_book.restrict_target(
+                    ticker, current, target, datetime.fromtimestamp(self.price_ts / 1e9, NY).date()
+                )
+                if reason:
+                    borrow_blocked = True
+                    self._risk_event("borrow_unavailable", reason + "; new short exposure blocked")
             diff = target - current
             if diff == 0:
                 continue
@@ -487,6 +539,11 @@ class ExecutionAgent(Strategy):
         sent = 0
         opened = 0.0
         for opening, target, current, iid, ticker, price in orders:
+            if borrow_blocked and opening > 0:
+                # Do not open the long hedge of an unavailable short (or any other
+                # new exposure from the now-incomplete approved portfolio).
+                target = _with_opening(current, target, 0)
+                opening = 0
             if opening > 0 and opening * price > self.config.max_order_value:
                 cap = math.floor(self.config.max_order_value / price)
                 target = _with_opening(current, target, cap)
@@ -585,10 +642,19 @@ class ExecutionAgent(Strategy):
         for coid, info in list(self.pending.items()):
             order = self.cache.order(ClientOrderId(coid))
             if order is None:
-                # The broker reports no such order: it never arrived (crash between journal and send),
-                # or was rejected before acceptance. Nothing was traded, so the journal entry goes.
-                self._risk_event("order_unknown", f"{info['ticker']}: order {coid} unknown to the broker; dropped")
-                self._close_pending(coid)
+                # Absence from the reconciliation cache is NOT proof the order never
+                # reached IBKR. A crash may occur after submission but before any
+                # acknowledgment, and broker reports may be incomplete/delayed.
+                # Keep the write-ahead intent so a delayed fill remains attributable.
+                # Do not issue a replacement order until the uncertainty is resolved.
+                detail = (
+                    f"{info['ticker']}: journaled order {coid} not confirmed by broker reconciliation; "
+                    "possible in-flight order. Preserve intent and require audited investigation"
+                )
+                self._risk_event("order_unknown", detail)
+                halt = self._halt()
+                if halt is None or halt.get("kind") != "reconciliation_mismatch":
+                    self._hard_halt("reconciliation_mismatch", detail)
                 continue
             for e in order.events():
                 if type(e).__name__ == "OrderFilled":

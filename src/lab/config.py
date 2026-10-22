@@ -45,6 +45,7 @@ class RiskSettings:
     max_short_gross: float = 0.0  # sum of short |weights|; 0 = long-only
     min_net: float = 0.0  # net exposure (longs - shorts) range
     max_net: float = 1.0
+    profile: str = "custom"  # custom preserves pre-profile settings
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,12 @@ class ResearchSettings:
 
 
 @dataclass(frozen=True)
+class BorrowSettings:
+    history: Path | None = None  # historical research only; never a paper-broker locate
+    max_age_days: int = 3
+
+
+@dataclass(frozen=True)
 class LabConfig:
     root: Path
     data_dir: Path
@@ -116,6 +123,7 @@ class LabConfig:
     paper: PaperSettings
     research: ResearchSettings
     raw: dict = field(repr=False, default_factory=dict)
+    borrow: BorrowSettings = field(default_factory=BorrowSettings)
 
     def period(self, name: str) -> Period:
         if name not in self.periods:
@@ -191,6 +199,13 @@ def load_config(path: str | Path | None = None) -> LabConfig:
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: {e}") from e
     root = path.parent.resolve()
+    br = raw.get("borrow", {})
+    if not isinstance(br, dict) or set(br) - {"history", "max_age_days"}:
+        raise ConfigError("borrow: expected history and max_age_days only")
+    history, age = br.get("history", ""), br.get("max_age_days", 3)
+    if not isinstance(history, str) or type(age) is not int or age < 0:
+        raise ConfigError("borrow: history must be a path string and max_age_days a nonnegative integer")
+    borrow = BorrowSettings(root / history if history else None, age)
 
     try:
         paths = raw["paths"]
@@ -228,6 +243,7 @@ def load_config(path: str | Path | None = None) -> LabConfig:
         max_short_gross=float(rk.get("max_short_gross", 0.0)),
         min_net=float(rk.get("min_net", 0.0)),
         max_net=float(rk.get("max_net", 1.0)),
+        profile=str(rk.get("profile", "custom")),
     )
     mg = raw.get("margin", {})
     try:
@@ -251,6 +267,12 @@ def load_config(path: str | Path | None = None) -> LabConfig:
             f"portfolio.max_leverage {portfolio.max_leverage} exceeds risk.max_gross {risk.max_gross}: "
             "raise the gross limit deliberately or lower the leverage"
         )
+    # Apply operator-selected risk units once, before constructing the node,
+    # so backtests and paper trading use the same effective limits.
+    from lab.risk_profiles import apply_profile
+
+    risk, portfolio = apply_profile(risk, portfolio, risk.profile)
+    _check_risk(risk, margin)
 
     research = ResearchSettings(
         provider=str(rs["provider"]),
@@ -305,4 +327,5 @@ def load_config(path: str | Path | None = None) -> LabConfig:
         ),
         research=research,
         raw=raw,
+        borrow=borrow,
     )
