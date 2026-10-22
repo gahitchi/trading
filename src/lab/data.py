@@ -338,18 +338,15 @@ def block_bootstrap(df: pd.DataFrame, seed: int, block: int = 20) -> pd.DataFram
     return pd.DataFrame({"open": out_o, "high": out_h, "low": out_l, "close": out_c, "volume": v[pick]}, index=d.index)
 
 
-def block_bootstrap_panel(frames: dict[str, pd.DataFrame], seed: int, block: int = 20) -> dict[str, pd.DataFrame]:
-    """Joint calendar-block bootstrap with preserved instrument availability.
+def block_bootstrap_panel(
+    frames: dict[str, pd.DataFrame], seed: int, block: int = 20, *, return_diagnostics: bool = False
+) -> dict[str, pd.DataFrame] | tuple[dict[str, pd.DataFrame], dict]:
+    """Sample a common market-date path without conditioning it on late listings.
 
-    Draw *one* source-calendar interval for every destination interval. A source
-    block is eligible only when it contains all observations required by the
-    destination block. Missing dates remain missing; no late-listing history or
-    post-delisting price is invented. All concurrently observed assets receive
-    shocks from the *same* sampled source market date.
-
-    This conditions the null on the observed availability mask. Sparse panels
-    may have very few eligible source blocks: report that limitation when
-    interpreting statistical significance; no historical market is generated.
+    An instrument uses the common donor only if all required source sessions exist.
+    Otherwise *that instrument alone* draws a valid interval from its own history.
+    Availability masks are exact: no invented prelisting/postdelisting bars and no
+    backfills. Diagnose where fallback sacrifices cross-asset dependence.
     """
     if not frames:
         raise DataError("joint bootstrap requires at least one instrument")
@@ -362,36 +359,52 @@ def block_bootstrap_panel(frames: dict[str, pd.DataFrame], seed: int, block: int
         raise DataError("joint bootstrap requires at least two market sessions")
     masks = {t: calendar.isin(df.index) for t, df in ordered.items()}
     rng = np.random.default_rng(seed)
+
+    # CRITICAL: sample this before inspecting ANY ticker mask. Otherwise one
+    # newly listed instrument narrows older instruments' return distribution.
     global_pick = np.empty(n, dtype=np.int64)
     for start in range(0, n, block):
         width = min(block, n - start)
-        eligible = np.ones(n - width + 1, dtype=bool)
-        # Masks are indexed on the UNION calendar, not row numbers within
-        # each ticker. Every target observation must have a source observation.
-        for mask in masks.values():
-            for offset in np.flatnonzero(mask[start : start + width]):
-                eligible &= mask[offset : offset + n - width + 1]
-        options = np.flatnonzero(eligible)
-        if not len(options):
-            raise DataError(f"no joint source block for union-calendar interval {start}:{start + width}")
-        donor_start = int(options[rng.integers(len(options))])
+        donor_start = int(rng.integers(0, n - width + 1))
         global_pick[start : start + width] = np.arange(donor_start, donor_start + width)
 
     out = {}
+    per_instrument = {}
+    fallback_total = participating_total = 0
     for t, df in ordered.items():
         mask = masks[t]
-        donor_dates = calendar[global_pick[mask]]
-        donor = df.loc[donor_dates]
+        pick = global_pick.copy()
+        fallback_blocks = participating_blocks = 0
+        for start in range(0, n, block):
+            width = min(block, n - start)
+            offsets = np.flatnonzero(mask[start : start + width])
+            if not len(offsets):
+                continue
+            participating_blocks += 1
+            # Co-movement is preserved wherever the common donor exists.
+            if mask[pick[start + offsets]].all():
+                continue
+            # Require this asset's *own* available sessions, never the mask
+            # of another ticker. The destination interval itself is eligible.
+            eligible = np.ones(n - width + 1, dtype=bool)
+            for offset in offsets:
+                eligible &= mask[offset : offset + n - width + 1]
+            options = np.flatnonzero(eligible)
+            if not len(options):
+                raise DataError(f"{t}: no valid donor for interval {start}:{start + width}")
+            donor_start = int(options[rng.integers(len(options))])
+            pick[start + offsets] = donor_start + offsets
+            fallback_blocks += 1
+
+        donor_dates = calendar[pick[mask]]
+        donor_rows = df.index.get_indexer(donor_dates)
+        if (donor_rows < 0).any():
+            raise DataError(f"{t}: donor calendar lost a required instrument observation")
         opn, high, low, close, volume = (df[k].to_numpy(dtype=float) for k in COLUMNS)
         previous_close = np.concatenate([[opn[0]], close[:-1]])
         gap, day_move = opn / previous_close, close / opn
         excursion_up = high / np.maximum(opn, close)
         excursion_down = low / np.minimum(opn, close)
-        # Translate shared calendar donors into asset-specific source row
-        # indices without forward/backward filling non-trading sessions.
-        donor_rows = df.index.get_indexer(donor.index)
-        if (donor_rows < 0).any():
-            raise DataError(f"{t}: donor calendar lost a required instrument observation")
         rebuilt_open = np.empty(len(df))
         rebuilt_close = np.empty(len(df))
         last = close[0]
@@ -410,4 +423,19 @@ def block_bootstrap_panel(frames: dict[str, pd.DataFrame], seed: int, block: int
             index=df.index,
         )
         out[t] = validate(resampled, t)
-    return out
+        fallback_total += fallback_blocks
+        participating_total += participating_blocks
+        per_instrument[t] = {
+            "fallback_blocks": fallback_blocks,
+            "participating_blocks": participating_blocks,
+            "fallback_fraction": fallback_blocks / participating_blocks if participating_blocks else 0.0,
+        }
+
+    diagnostics = {
+        "method": "shared_calendar_with_per_instrument_fallback",
+        "fallback_blocks": fallback_total,
+        "participating_blocks": participating_total,
+        "fallback_fraction": fallback_total / participating_total if participating_total else 0.0,
+        "per_instrument": per_instrument,
+    }
+    return (out, diagnostics) if return_diagnostics else out

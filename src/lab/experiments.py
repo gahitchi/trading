@@ -320,10 +320,12 @@ def _null_worker(args):
     from lab.config import load_config
 
     cfg = load_config(cfg_path)
-    boot = data.block_bootstrap_panel({t: frames[t] for t in tickers}, seed)
+    boot, diagnostics = data.block_bootstrap_panel(
+        {t: frames[t] for t in tickers}, seed, return_diagnostics=True
+    )
     cand = run_spec(cfg, spec, tickers, boot, period).metrics
     base = run_spec(cfg, BASELINE, tickers, boot, period).metrics
-    return cand.get("sharpe", 0) - base.get("sharpe", 0)
+    return cand.get("sharpe", 0) - base.get("sharpe", 0), diagnostics["fallback_fraction"]
 
 
 def null_test(
@@ -352,10 +354,20 @@ def null_test(
     jobs = [(str(cfg.root / "lab.toml"), spec, tickers, frames, period, s) for s in range(1, samples + 1)]
     workers = workers if workers is not None else max(1, min(samples, 4, (os.cpu_count() or 2) - 1))
     if workers == 1:
-        edges = [_null_worker(j) for j in jobs]
+        measurements = [_null_worker(j) for j in jobs]
     else:
         with ProcessPoolExecutor(workers) as pool:
-            edges = list(pool.map(_null_worker, jobs))
+            measurements = list(pool.map(_null_worker, jobs))
+    edges = [edge for edge, _fallback in measurements]
+    fallback_fractions = [fallback for _edge, fallback in measurements]
+    # A high fallback share makes the null too dependent on instrument-specific
+    # synthetic history to claim synchronized multi-asset significance.
+    max_fallback = 0.25
+    if max(fallback_fractions) > max_fallback:
+        raise data.DataError(
+            f"null test not qualified: fallback block fraction {max(fallback_fractions):.1%} "
+            f"exceeds calibrated limit {max_fallback:.0%}"
+        )
     beat = sum(e >= observed_edge for e in edges)
     s = pd.Series(edges)
     return {
@@ -366,6 +378,9 @@ def null_test(
         "null_std": float(s.std(ddof=1)) if samples > 1 else 0.0,
         "null_p95": float(s.quantile(0.95)),
         "null_edges": [round(e, 4) for e in edges],
+        "fallback_fraction_mean": float(np.mean(fallback_fractions)),
+        "fallback_fraction_max": max(fallback_fractions),
+        "fallback_fraction_policy_max": max_fallback,
     }
 
 

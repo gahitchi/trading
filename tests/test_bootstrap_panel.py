@@ -64,3 +64,29 @@ def test_joint_bootstrap_rejects_invalid_block_size_and_missing_data():
     invalid.iloc[5, invalid.columns.get_loc("close")] = np.nan
     with pytest.raises(data.DataError):
         data.block_bootstrap_panel({"X": invalid}, 7)
+
+
+def test_late_listing_does_not_change_established_assets_null():
+    """G002-F2 regression: an unrelated late listing must not lower GOOG volatility."""
+    rng = np.random.default_rng(14)
+    close = 100 * np.exp(np.cumsum(rng.normal(0, 0.022, 600)))
+    established = _prices(close)
+    young = established.iloc[-90:].copy()
+    for seed in range(12):
+        alone = data.block_bootstrap_panel({"CORE": established}, seed)["CORE"]
+        panel = data.block_bootstrap_panel({"CORE": established, "LATE": young}, seed)
+        pd.testing.assert_frame_equal(alone, panel["CORE"])
+        assert panel["LATE"].index.equals(young.index)
+
+
+def test_fallback_diagnostics_and_explicit_significance_limit():
+    established = _prices(100 * np.exp(np.cumsum(np.random.default_rng(2).normal(0, 0.01, 240))))
+    late = established.iloc[-35:]
+    result, info = data.block_bootstrap_panel(
+        {"CORE": established, "LATE": late}, 19, return_diagnostics=True
+    )
+    assert result["LATE"].index.equals(late.index)
+    assert info["per_instrument"]["CORE"]["fallback_blocks"] == 0
+    assert info["per_instrument"]["LATE"]["fallback_blocks"] > 0
+    assert 0.0 < info["fallback_fraction"] <= 1.0
+    assert info["fallback_blocks"] <= info["participating_blocks"]
