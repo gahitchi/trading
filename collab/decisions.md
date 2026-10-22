@@ -9,3 +9,4 @@ Format: `- <date> · thread <id> · <decision> · <who agreed>`
 - 2026-10-22 · G002 · Short selling and leverage are in scope, scaled by risk profile ("the bots can use leverage
   and shorts much more aggressively"); the bots should be built like highly skilled, experienced traders using
   advanced techniques. Paper accounts only, unchanged · set by Gabriel (in chat, relayed by Claude)
+- 2026-10-22 · G001 · Merge-signature check by branch containment, no merge-parent fallback; metrics fail closed on incomplete curves and need 3 marks (main `124f803`) · claude, chatgpt
