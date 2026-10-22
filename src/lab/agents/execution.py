@@ -22,9 +22,12 @@ from lab.agents.messages import (
     RiskEvent,
 )
 from lab.agents.schedule import next_at
+from lab.halt import read_halt, set_halt
 from lab.safety import is_paper_account, read_kill_switch
 
 NY = ZoneInfo("America/New_York")
+# Hard halts under which exits are still sent (everything else in a halt sends nothing at all).
+_REDUCE_ONLY_HALTS = {"circuit_breaker", "margin_call"}
 _KEEP_TRADE_IDS = 2000  # broker trade IDs remembered for de-duplication (far more than a few days of fills)
 
 
@@ -46,6 +49,8 @@ class ExecutionAgentConfig(StrategyConfig):
         paper_account: str = "",
         state_path: str | None = None,
         kill_path: str | None = None,
+        halt_path: str | None = None,
+        adopt_path: str | None = None,
         heartbeat_path: str | None = None,
         adopt_broker_positions: bool = False,
         weekdays_only: bool = True,
@@ -72,6 +77,8 @@ class ExecutionAgentConfig(StrategyConfig):
         self.paper_account = paper_account
         self.state_path = state_path
         self.kill_path = kill_path
+        self.halt_path = halt_path  # hard-halt file (lab/halt.py)
+        self.adopt_path = adopt_path  # request file written by `lab recover --adopt-broker`
         self.heartbeat_path = heartbeat_path
         self.adopt_broker_positions = adopt_broker_positions
         self.weekdays_only = weekdays_only
@@ -131,6 +138,7 @@ class ExecutionAgent(Strategy):
         self.subscribe_topic(T_APPROVED, self._on_approved)
         if self.config.live:
             now = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY)
+            previous = self._read_heartbeat()
             self._recover_pending()
             if self.config.adopt_broker_positions:
                 self._adopt_broker_positions()
@@ -141,6 +149,29 @@ class ExecutionAgent(Strategy):
                 "startup",
                 f"execution agent started; ledger cash {self.cash:,.2f}, positions {self._nonzero(self.held)}",
             )
+            if previous and previous.get("running"):
+                # The last run never stopped cleanly (crash, container or gateway restart): resumed by itself.
+                self._risk_event(
+                    "auto_resumed",
+                    f"restarted after an unclean stop (last heartbeat {previous.get('at')}); start-up checks "
+                    "passed, trading resumes"
+                    if not self._halt()
+                    else f"restarted after an unclean stop (last heartbeat {previous.get('at')}); a hard halt is active",
+                )
+            account = self._account_id()
+            if account is not None and not self._paper_guard():
+                return
+            halt = self._halt()
+            if halt:
+                self._risk_event(
+                    "hard_halt",
+                    f"hard halt active since {halt.get('at')}: {halt['kind']}: {halt.get('reason', '')}. "
+                    "No orders until an operator runs `lab recover --reason ...`",
+                )
+
+    def on_stop(self):
+        if self.config.live:
+            self._write_heartbeat(running=False)
 
     def _on_signal(self, msg):
         self.prices[msg.ticker] = msg.price
@@ -151,7 +182,7 @@ class ExecutionAgent(Strategy):
 
     def _on_approved(self, msg):
         self.weights.update(msg.weights)
-        self.halted = self.halted or msg.halted
+        self.halted = msg.halted  # follows the RiskAgent: halted until its breaker is cleared
 
     def _schedule(self, after: datetime):
         nxt = next_at(after, self.config.rebalance_time, weekdays_only=self.config.weekdays_only)
@@ -165,31 +196,64 @@ class ExecutionAgent(Strategy):
         if self.new_data:
             self.new_data = False
             self.rebalance()
+        elif self.config.live:
+            # A transient condition: nothing to clear, the next session's data resumes trading.
+            self._risk_event(
+                "stale_data",
+                "no new daily bar since the last rebalance (market holiday or data delay); no orders today",
+            )
         self._schedule(datetime.fromtimestamp(event.ts_event / 1e9, NY))
 
     def _on_heartbeat(self, _event):
         if self.pending:
             self._recover_pending()  # safety net: settle journaled orders from the broker's latest state
-        kill = self._kill()
-        if kill:
+        if self._kill():
             self._cancel_open_orders()
-        if self.config.heartbeat_path:
-            p = Path(self.config.heartbeat_path)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(
-                json.dumps(
-                    {
-                        "at": datetime.now(UTC).isoformat(timespec="seconds"),
-                        "cash": round(self.cash, 2),
-                        "positions": self._nonzero(self.held),
-                        "kill_switch": kill["mode"] if kill else None,
-                        "halted": self.halted,
-                        "blocked": self.blocked_reason or None,
-                        "orders_sent": self.orders_sent,
-                        "account": self._account_id(),
-                    }
-                )
+        self._write_heartbeat(running=True)
+
+    def _read_heartbeat(self) -> dict | None:
+        p = Path(self.config.heartbeat_path) if self.config.heartbeat_path else None
+        if p is None or not p.exists():
+            return None
+        try:
+            return json.loads(p.read_text())
+        except json.JSONDecodeError:
+            return {"running": True, "at": "unreadable"}
+
+    def _write_heartbeat(self, *, running: bool):
+        if not self.config.heartbeat_path:
+            return
+        kill = self._kill()
+        halt = self._halt()
+        p = Path(self.config.heartbeat_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(
+            json.dumps(
+                {
+                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                    "running": running,  # False only after a clean stop: a restart then is not an auto-resume
+                    "cash": round(self.cash, 2),
+                    "positions": self._nonzero(self.held),
+                    "pending_orders": len(self.pending),
+                    "kill_switch": kill["mode"] if kill else None,
+                    "hard_halt": halt["kind"] if halt else None,
+                    "halted": self.halted,
+                    "blocked": self.blocked_reason or None,
+                    "orders_sent": self.orders_sent,
+                    "account": self._account_id(),
+                }
             )
+        )
+        tmp.replace(p)
+
+    def _halt(self) -> dict | None:
+        return read_halt(self.config.halt_path) if self.config.halt_path else None
+
+    def _hard_halt(self, kind: str, reason: str):
+        if self.config.halt_path:
+            set_halt(self.config.halt_path, kind, reason)
+        self._risk_event("hard_halt", f"{kind}: {reason}. No orders until `lab recover --reason ...`")
 
     # ------------------------------------------------------------------ state
 
@@ -279,13 +343,28 @@ class ExecutionAgent(Strategy):
             self._risk_event("blocked", f"cannot size orders: equity={snap.equity}")
             return
 
+        if self.config.adopt_path and Path(self.config.adopt_path).exists():
+            # The operator chose the broker's positions as the truth (lab recover --adopt-broker).
+            self._adopt_broker_positions()
+            Path(self.config.adopt_path).unlink()
+            snap = self.snapshot()
+
+        halt = self._halt()
+        if halt and halt["kind"] not in _REDUCE_ONLY_HALTS:
+            self.blocked_reason = f"hard halt: {halt['kind']}"
+            self._risk_event("hard_halt", f"{halt['kind']} since {halt.get('at')}: no orders (lab recover clears it)")
+            return
+
         diffs = self.reconcile()
         if diffs:
             self.blocked_reason = "ledger and broker disagree: " + "; ".join(diffs)
             self._risk_event(
                 "reconciliation_mismatch",
-                self.blocked_reason + ". No orders until resolved (lab paper --adopt-broker resets the ledger).",
+                self.blocked_reason + ". Fill recovery could not explain it. Check the broker account, then "
+                "`lab recover --reason ... --adopt-broker` to take the broker's positions as the truth.",
             )
+            if self.config.live:
+                self._hard_halt("reconciliation_mismatch", self.blocked_reason)
             return
         self.blocked_reason = ""
 
@@ -301,7 +380,8 @@ class ExecutionAgent(Strategy):
             price = self.prices.get(ticker)
             if not price:
                 continue
-            w = 0.0 if (self.halted or flatten) else self.weights.get(ticker, 0.0)
+            # Under a breaker or margin halt the only orders allowed are those that reduce exposure to zero.
+            w = 0.0 if (self.halted or flatten or halt) else self.weights.get(ticker, 0.0)
             target = math.floor(w * snap.equity * (1 - self.config.cash_buffer) / price) if w > 0 else 0
             current = self.held.get(ticker, 0.0)
             diff = target - current
@@ -376,6 +456,8 @@ class ExecutionAgent(Strategy):
             msg = f"refusing to trade: broker account {account!r} is not the configured paper account {expected!r}"
             self.log.error(msg)
             self._risk_event("paper_guard", msg)
+            if self.config.halt_path:
+                set_halt(self.config.halt_path, "paper_guard", msg)
             self.shutdown_system(msg)
         return ok
 

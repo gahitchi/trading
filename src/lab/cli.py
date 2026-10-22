@@ -504,6 +504,46 @@ def cmd_resume(cfg, a):
         print("kill switch was not set")
 
 
+def cmd_recover(cfg, a):
+    """Clear a hard halt (lab/halt.py) after an operator has looked at it. Audited."""
+    from lab.halt import HARD_KINDS, clear_halt, read_halt
+    from lab.notify import Notifier
+    from lab.paper import adopt_path, halt_path, recoveries_path
+
+    halt = read_halt(halt_path(cfg))
+    if halt is None:
+        print("no hard halt is active")
+        return 0
+    print(f"hard halt: {halt['kind']} ({HARD_KINDS.get(halt['kind'], '')})")
+    print(f"  since {halt.get('at')}: {halt.get('reason', '')}")
+    for h in halt.get("history", []):
+        print(f"  then {h['at']}: {h['kind']}: {h['reason']}")
+    if not a.reason:
+        print(
+            '\nto clear it: lab recover --reason "what you checked and why it is safe"'
+            + ("  [--adopt-broker]" if halt["kind"] == "reconciliation_mismatch" else "")
+        )
+        return 1
+    if halt["kind"] == "reconciliation_mismatch" and not a.adopt_broker:
+        raise SystemExit(
+            "a reconciliation mismatch is cleared by deciding which book is right: add --adopt-broker to take the "
+            "broker's positions as the truth (after checking the broker account), or fix the cause and re-run"
+        )
+    if halt["kind"] == "paper_guard":
+        print("note: the account guard will stop trading again unless the broker now reports the paper account")
+    if a.adopt_broker:
+        p = adopt_path(cfg)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"reason": a.reason, "at": datetime.now(UTC).isoformat(timespec="seconds")}))
+    clear_halt(halt_path(cfg), a.reason, audit=recoveries_path(cfg))
+    msg = f"hard halt {halt['kind']} cleared by operator: {a.reason}" + (
+        "; the ledger adopts the broker's positions at the next rebalance" if a.adopt_broker else ""
+    )
+    print(msg + f". Recorded in {recoveries_path(cfg).relative_to(cfg.root)}")
+    Notifier().send_now(msg)
+    return 0
+
+
 def _heartbeat_age(cfg):
     from lab.paper import heartbeat_path
 
@@ -748,6 +788,12 @@ def build_parser() -> argparse.ArgumentParser:
     k.add_argument("--reason", default="manual")
     k.set_defaults(fn=cmd_kill)
     sub.add_parser("resume", help="clear the kill switch").set_defaults(fn=cmd_resume)
+    rc = sub.add_parser("recover", help="show or clear a hard halt (breaker, account guard, mismatch); audited")
+    rc.add_argument("--reason", default="", help="what you checked and why trading may resume (required to clear)")
+    rc.add_argument(
+        "--adopt-broker", action="store_true", help="for a mismatch: take the broker's positions as the ledger's truth"
+    )
+    rc.set_defaults(fn=cmd_recover)
     hl = sub.add_parser("health", help="exit 0 if the agents' heartbeat is fresh (for Docker)")
     hl.add_argument("--max-age", type=int, default=180)
     hl.set_defaults(fn=cmd_health)

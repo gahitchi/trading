@@ -94,6 +94,7 @@ Offline check on real prices: `cd examples/goog-offline && lab data sample && la
 | `lab llm-check`, `lab notify-test`, `lab doctor` | provider check, alert check, pre-flight check |
 | `lab paper [--smoke] [--test-order] [--check-only] [--adopt-broker]` | paper trading on Interactive Brokers |
 | `lab kill [--flatten]`, `lab resume`, `lab health` | kill switch, Docker health check |
+| `lab recover [--reason] [--adopt-broker]` | show or clear a hard halt (audited) |
 
 ## The scientific protocol
 
@@ -187,12 +188,19 @@ reconciles its ledger with IB and sends **market-on-open** orders; 09:30 they fi
 ## Safety
 
 - **Paper-only, three layers**: (1) before connecting, live ports (4001, 7496, Docker 4003) and non-`DU` account
-  IDs are refused; (2) before every order, the execution agent checks that IB reports exactly the configured paper
-  account, and shuts the system down otherwise; (3) no code path builds a live configuration.
+  IDs are refused; (2) at start-up and before every order, the execution agent checks that IB reports exactly the
+  configured paper account, and otherwise halts (a hard halt) and shuts the system down; (3) no code path builds a
+  live configuration.
 - **Kill switch**: `lab kill` stops new orders and cancels open ones within a minute; `--flatten` also exits all
   positions at the next open; `lab resume` clears it. An unreadable kill file still halts.
-- **Reconciliation**: before every rebalance the agents' ledger must match IB's positions, or nothing trades
-  (`lab paper --adopt-broker` resets the ledger to IB's positions deliberately).
+- **Unattended by default, with two kinds of stop**: transient trouble (disconnects, restarts, late data, rejects)
+  resumes by itself once the start-up checks pass again; hard halts (drawdown breaker, wrong account, an unexplained
+  ledger/broker difference) survive restarts until `lab recover --reason ...` clears them (RUNBOOK §9).
+- **Reconciliation**: every order is journaled before it is sent; fills that happen while the agents are down are
+  booked from IB's reports at start-up, once per trade ID. Before every rebalance the ledger must match IB's
+  positions, or it is a hard halt (`lab recover --adopt-broker` takes IB's positions deliberately).
+- **Tested against a simulated IB paper broker**: the paper node itself, not a copy, runs in `tests/test_harness.py`
+  (lab.sim), including a week of trading that must match the backtest fill for fill.
 - **Limits**: per-order notional cap, orders per day, daily buy turnover, NautilusTrader's order-rate limit, risk
   agent position/gross caps and drawdown circuit breaker.
 - **Alerts** (Telegram) for every risk event, fills and a daily equity report; heartbeat-based Docker health check.

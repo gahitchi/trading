@@ -7,8 +7,10 @@ Daily cycle (New York time):
   16:15  ExecutionAgent reconciles its ledger with IB, then sends market-on-open orders
   09:30  IB fills them in the opening auction
 
-Runtime files (results/paper/): ledger.json, heartbeat.json, KILL (kill switch),
-journal-YYYYMM.jsonl, smoke-*.json
+Runtime files (results/paper/): ledger.json (cash, positions, journaled orders),
+risk.json (equity peak), heartbeat.json, KILL (kill switch), HALT (hard halt, lab/halt.py),
+ADOPT (operator request to adopt the broker's positions), recoveries.jsonl (audit of
+cleared halts), journal-YYYYMM.jsonl, smoke-*.json
 """
 
 from __future__ import annotations
@@ -65,6 +67,18 @@ def kill_path(cfg: LabConfig) -> Path:
 
 def heartbeat_path(cfg: LabConfig) -> Path:
     return runtime_dir(cfg) / "heartbeat.json"
+
+
+def halt_path(cfg: LabConfig) -> Path:
+    return runtime_dir(cfg) / "HALT"
+
+
+def adopt_path(cfg: LabConfig) -> Path:
+    return runtime_dir(cfg) / "ADOPT"
+
+
+def recoveries_path(cfg: LabConfig) -> Path:
+    return runtime_dir(cfg) / "recoveries.jsonl"
 
 
 @dataclass(frozen=True)
@@ -212,6 +226,8 @@ def build_node(
                 max_weight=cfg.risk.max_weight,
                 max_gross=cfg.risk.max_gross,
                 max_drawdown=cfg.risk.max_drawdown,
+                state_path=str(rt / "risk.json"),
+                halt_path=str(halt_path(cfg)),
             )
         )
     )
@@ -243,6 +259,8 @@ def build_node(
                 paper_account=p.account_id,
                 state_path=str(rt / "ledger.json"),
                 kill_path=str(kill_path(cfg)),
+                halt_path=str(halt_path(cfg)),
+                adopt_path=str(adopt_path(cfg)),
                 heartbeat_path=str(heartbeat_path(cfg)),
                 adopt_broker_positions=adopt_broker,
             )

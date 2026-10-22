@@ -25,7 +25,10 @@ services:
       READ_ONLY_API: "no"
       TWOFA_TIMEOUT_ACTION: restart
       RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
-      AUTO_RESTART_TIME: "11:45 PM"  # daily restart without a fresh 2FA prompt
+      # Daily gateway restart (no fresh 2FA prompt), during market hours on purpose: the agents' orders
+      # go out at 16:15 and fill in the 09:30 auction, so 11:45 AM New York is when nothing is pending
+      # and the 16:10 bar request is hours away. The agents reconnect or restart by themselves.
+      AUTO_RESTART_TIME: "11:45 AM"
       EXISTING_SESSION_DETECTED_ACTION: primary
       TIME_ZONE: America/New_York
       TZ: America/New_York

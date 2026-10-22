@@ -123,19 +123,41 @@ First real decision: the next weekday at 16:15 New York time; orders fill at the
 
 ## 9. Daily operations
 
+The agents run unattended and continuously by default. What they do when something goes wrong:
+
+- **Transient trouble resumes by itself.** A broker or gateway disconnect, the gateway's daily restart (11:45 AM
+  New York, when nothing is pending), a container restart, a late or missing daily bar, a rejected order. Docker
+  restarts the agents; at start-up they re-check the paper account, reconcile positions, cash and open orders with
+  IBKR, and book any fills that happened while they were down (from IBKR's reports, once per trade ID). Then they
+  carry on. You get a Telegram message (`auto_resumed`, `fill_recovered`, `stale_data`, ...) but nothing to do.
+- **Hard halts wait for you.** The drawdown circuit breaker (positions are exited first), a broker account other
+  than your `DU…` paper account, or a ledger/broker difference that fill recovery cannot explain. The halt is the
+  file `results/paper/HALT`: it survives restarts, and no order goes out (except the breaker's exits) until you
+  clear it with `lab recover`.
+
 | Task | Command |
 |---|---|
-| status | `docker compose ps`, `cat results/paper/heartbeat.json` |
+| status | `docker compose ps`, `cat results/paper/heartbeat.json` (`hard_halt`, `pending_orders`, `kill_switch`) |
 | performance, costs, implementation shortfall | `lab paper-report` |
 | stop all new orders now | `docker compose exec lab lab kill --reason "..."` (add `--flatten` to also exit positions) |
-| resume | `docker compose exec lab lab resume` |
-| ledger/broker mismatch alert | inspect positions in IB; if IB is right: stop `lab`, run once with `--adopt-broker` |
+| undo the kill switch | `docker compose exec lab lab resume` |
+| see a hard halt | `docker compose exec lab lab recover` |
+| clear a breaker or account halt | `docker compose exec lab lab recover --reason "what you checked"` |
+| ledger/broker mismatch | check the positions in IBKR; if IBKR is right: `lab recover --reason "..." --adopt-broker` (the ledger takes IBKR's positions at the next rebalance; no restart needed) |
 | change strategy | edit `LAB_SIGNALS` / `LAB_TICKERS` in `.env`, `docker compose up -d lab` |
 | trade a research hypothesis | `lab research promote <id>` (reads you the code first), then add it to `LAB_SIGNALS` |
 | update | `git pull && docker compose build lab && docker compose up -d` |
 
-Runtime files in `results/paper/`: `ledger.json` (the agents' cash and positions), `journal-YYYYMM.jsonl` (every
-message), `heartbeat.json`, `KILL` (kill switch), `smoke-*.json`.
+Every cleared halt is recorded with your reason in `results/paper/recoveries.jsonl`.
+
+Runtime files in `results/paper/`: `ledger.json` (the agents' cash, positions and orders sent but not yet settled),
+`risk.json` (equity peak for the drawdown limit), `journal-YYYYMM.jsonl` (every message), `heartbeat.json`,
+`KILL` (kill switch), `HALT` (hard halt), `recoveries.jsonl`, `smoke-*.json`.
+
+**Tested before it touches IBKR.** `tests/test_harness.py` runs this exact node (same agents, same start-up
+reconciliation) against a simulated IBKR paper broker: a week of trading must reproduce the backtest fill for fill;
+crashes between order and fill, restarts with open orders, rejects, partial fills, a wrong account, the kill
+switch, every hard halt and its recovery are each a test.
 
 ## 10. Judging the paper test
 

@@ -13,6 +13,7 @@ URGENT = {
     "circuit_breaker",
     "paper_guard",
     "reconciliation_mismatch",
+    "hard_halt",
     "kill_switch",
     "order_rejected",
     "order_denied",
@@ -21,6 +22,13 @@ URGENT = {
     "daily_cap",
     "order_capped",
     "order_expired",
+    # transient conditions the system handled by itself; worth knowing, nothing to do
+    "auto_resumed",
+    "fill_recovered",
+    "order_unknown",
+    "foreign_fill",
+    "stale_data",
+    "breaker_cleared",
 }
 
 

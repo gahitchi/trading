@@ -182,3 +182,84 @@ def test_kill_switch_stops_orders(goog_lab, frames, tmp_path):
     assert "kill_switch" in _kinds(h)
     heartbeat = json.loads((h.runtime / "heartbeat.json").read_text())
     assert heartbeat["kill_switch"] == "halt" and heartbeat["account"] == "IB-DU1234567"
+
+
+# ---------------------------------------------------------------------------- halt classes
+
+
+def _lab(h, *args):
+    from lab.cli import main as lab_main
+
+    return lab_main(["--config", str(h.cfg.root / "lab.toml"), *args])
+
+
+def test_unexplained_mismatch_is_a_hard_halt_until_an_operator_adopts_the_broker(goog_lab, frames, tmp_path):
+    from lab.halt import read_halt
+
+    h = _harness(goog_lab, frames, tmp_path, spec=SignalSpec("buy_and_hold"))
+    h.session()
+    b = h.broker()
+    b.state["positions"]["GOOG"] += 5  # a trade nobody journaled (e.g. placed by hand in the paper account)
+    b.save()
+    h.session()
+    assert read_halt(h.runtime / "HALT")["kind"] == "reconciliation_mismatch"
+    orders = len(h.broker().state["orders"])
+    h.session()  # restarted: still halted, nothing sent
+    assert len(h.broker().state["orders"]) == orders and "hard_halt" in _kinds(h)
+
+    assert _lab(h, "recover") == 1  # shows the halt, needs a reason
+    with pytest.raises(SystemExit, match="adopt-broker"):
+        _lab(h, "recover", "--reason", "checked")
+    assert _lab(h, "recover", "--reason", "manual test trade, broker is right", "--adopt-broker") == 0
+    assert read_halt(h.runtime / "HALT") is None
+    audit = [json.loads(x) for x in (h.runtime / "recoveries.jsonl").read_text().splitlines()]
+    assert audit[-1]["halt"]["kind"] == "reconciliation_mismatch" and "broker is right" in audit[-1]["operator_reason"]
+    h.session()
+    assert h.ledger()["positions"] == h.broker().positions()
+    assert "ledger_reset" in _kinds(h)
+
+
+def test_circuit_breaker_flattens_survives_a_restart_and_needs_recover(goog_lab, frames, tmp_path):
+    from lab.halt import read_halt
+
+    h = _harness(goog_lab, frames, tmp_path, spec=SignalSpec("buy_and_hold"))
+    h.session()
+    assert h.broker().positions()
+    # Pretend equity once stood at twice today's level: the next snapshot is a 50% drawdown.
+    (h.runtime / "risk.json").write_text(json.dumps({"peak": 2 * goog_lab.paper.capital, "halted": False}))
+    h.session()
+    assert read_halt(h.runtime / "HALT")["kind"] == "circuit_breaker"
+    assert h.broker().positions() == {}  # flattened at the next open
+    h.session()  # restart: the breaker holds, buy_and_hold is not allowed back in
+    assert h.broker().positions() == {}
+    assert _lab(h, "recover", "--reason", "drawdown reviewed") == 0
+    h.session()
+    assert "breaker_cleared" in _kinds(h)
+    h.session()  # the day after the breaker is cleared, targets apply again
+    assert h.broker().positions()
+    _assert_books_agree(h)
+
+
+def test_unclean_stop_resumes_by_itself_and_says_so(goog_lab, frames, tmp_path):
+    h = _harness(goog_lab, frames, tmp_path, spec=SignalSpec("buy_and_hold"))
+    h.session()
+    hb = json.loads((h.runtime / "heartbeat.json").read_text())
+    assert hb["running"] is False  # a clean stop
+    hb["running"] = True  # as if the container had been killed
+    (h.runtime / "heartbeat.json").write_text(json.dumps(hb))
+    h.session()
+    assert "auto_resumed" in _kinds(h) and "hard_halt" not in _kinds(h)
+    _assert_books_agree(h)
+
+
+def test_wrong_account_stays_halted_after_the_account_is_fixed(goog_lab, frames, tmp_path):
+    from lab.halt import read_halt
+
+    h = _harness(goog_lab, frames, tmp_path, spec=SignalSpec("buy_and_hold"))
+    h.session(before_start=lambda b: b.inject("account", id="U7654321"))
+    assert read_halt(h.runtime / "HALT")["kind"] == "paper_guard"
+    h.session(before_start=lambda b: b.inject("account", id="DU1234567"))
+    assert h.broker().state["orders"] == {}
+    assert _lab(h, "recover", "--reason", "gateway was logged into the wrong account; fixed") == 0
+    h.session()
+    assert h.broker().positions()
