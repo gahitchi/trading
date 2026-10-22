@@ -124,7 +124,9 @@ def test_cross_currency_equity_cash_and_fx_portfolio_valutation():
         prices={"SHARE.XNAS": MarketPrice("SHARE.XNAS", D("50"), D("50.5"), T)},
         fx=quotes(), reporting_currency="EUR", as_of=T, max_age=AGE,
     )
-    assert value == D("100") + (D("210") / D("1.10020"))
+    # Converting each balance/position separately can differ at the last
+    # Decimal context digit from converting their rounded aggregate.
+    assert abs(value - (D("100") + D("210") / D("1.10020"))) < D("1e-23")
 
 
 def test_missing_pricing_short_positions_duplicate_holding_and_fx_security_rejected():

@@ -1,6 +1,5 @@
 """Audited, counterfactual multi-asset portfolio stress analysis."""
 
-import json
 from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
