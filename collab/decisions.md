@@ -13,3 +13,6 @@ Format: `- <date> · thread <id> · <decision> · <who agreed>`
 - 2026-10-22 · G003 · Unattended, continuous, uninterrupted trading is the base (default) mode; manual and
   supervised modes are options the operator can choose. Paper accounts only, unchanged · set by Gabriel (in chat,
   relayed by Claude)
+- 2026-10-22 · C002 · Work in turns, not in parallel: while one agent builds, the other doesn't change code; when a
+  turn ends, the other reviews it and takes its turn. Gabriel starts each turn · set by Gabriel (in chat, relayed by
+  Claude)
