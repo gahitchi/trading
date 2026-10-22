@@ -1,5 +1,7 @@
 # Runbook: connecting trading-lab to an IBKR paper account
 
+> **STATUS — SUPERVISED PAPER TESTS ONLY.** This is a legacy connectivity runbook, not a deployment approval. The automated strategy path lacks authoritative startup reconciliation and crash-safe order lifecycle, so **do not use the unattended `docker compose up -d lab` steps as proof of safety**. The required design and acceptance checklist are in [docs/architecture/README.md](docs/architecture/README.md) and [docs/architecture/verification-and-roadmap.md](docs/architecture/verification-and-roadmap.md). First run smoke tests with `--smoke` and **without** `--test-order`, under operator supervision. A deeply out-of-the-money test limit order can still fill; no submitted order is risk-free.
+
 From zero to agents trading a paper account, with a verification step at every stage. Expect an afternoon,
 plus IBKR's account-approval time.
 
@@ -80,7 +82,7 @@ for each, lists any positions, then disconnects. Then the full order-path check:
 docker compose run --rm -e LAB_IB_CLIENT_ID=8 lab paper --smoke --test-order
 ```
 
-It places a 1-share limit buy at **half** the last close (it cannot fill), waits for IB to accept it, and
+It places a 1-share limit buy at **half** the last close (intended to be far from the market but **it can still fill**), waits for IB to accept it, and
 cancels it. Expected:
 
 ```
@@ -88,7 +90,7 @@ cancels it. Expected:
   ✓ instruments: 2 loaded
   ✓ historical bars: SPY: 9 bars, last close ...
   ✓ broker positions: {}
-  ✓ test order: submitted BUY 1 SPY LIMIT ...; accepted by the broker; cancelled
+  ✓ test order (supervised only): submitted BUY 1 SPY LIMIT ...; accepted by the broker; cancelled
 smoke test PASSED
 ```
 
