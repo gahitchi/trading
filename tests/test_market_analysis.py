@@ -76,9 +76,7 @@ def test_uncorrelated_independent_assets_remain_finite():
 def test_undefined_correlation_reported_null_not_nan():
     prices = np.full(320, 100.0)
     idx = pd.bdate_range("2024-01-01", periods=320)
-    sample = pd.DataFrame(
-        {"open": prices, "high": prices, "low": prices, "close": prices, "volume": 1000}, index=idx
-    )
+    sample = pd.DataFrame({"open": prices, "high": prices, "low": prices, "close": prices, "volume": 1000}, index=idx)
     result = run({"A": sample})
     assert result["risk"]["correlation"] == [[None]]
     assert result["features"]["A"]["realized_vol_annual"] == 0

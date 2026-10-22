@@ -206,15 +206,19 @@ def cmd_analyze(cfg, a):
         return
     market = result["market"]
     print(f"Market analysis {result['as_of']} | {len(tickers)} instruments | {result['qualification']}")
-    print(f"  21-day positive breadth {market['breadth_positive_21d']:.1%}; "
-          f"12-1m positive breadth {market['breadth_positive_skip_recent']:.1%}")
+    print(
+        f"  21-day positive breadth {market['breadth_positive_21d']:.1%}; "
+        f"12-1m positive breadth {market['breadth_positive_skip_recent']:.1%}"
+    )
     print(f"  Descriptive market state: {market['descriptive_regime']}")
     print(f"  Median annualized realized volatility: {market['median_asset_vol_annual']:.1%}")
     for ticker, values in result["features"].items():
-        print(f"  {ticker}: 12-1m {values['momentum_skip_recent']:+.1%}; "
-              f"realized vol {values['realized_vol_annual']:.1%}; "
-              f"historical ES {values['historical_expected_shortfall_loss']:.1%}; "
-              f"median dollar volume ${values['median_dollar_volume']:,.0f}")
+        print(
+            f"  {ticker}: 12-1m {values['momentum_skip_recent']:+.1%}; "
+            f"realized vol {values['realized_vol_annual']:.1%}; "
+            f"historical ES {values['historical_expected_shortfall_loss']:.1%}; "
+            f"median dollar volume ${values['median_dollar_volume']:,.0f}"
+        )
     print(f"  Deterministic analysis ID: {result['analysis_id']}")
     for warning in result["warnings"]:
         print(f"  WARNING: {warning}")

@@ -37,9 +37,7 @@ def test_analysis_loader_does_not_mutate_saved_rows(goog_lab, tmp_path):
 
     config = replace(goog_lab, data_dir=tmp_path)
     idx = pd.bdate_range("2024-01-01", periods=8)
-    raw = pd.DataFrame(
-        {"open": 100, "high": 102, "low": 98, "close": 101, "volume": 1e6}, index=idx
-    )
+    raw = pd.DataFrame({"open": 100, "high": 102, "low": 98, "close": 101, "volume": 1e6}, index=idx)
     raw.iloc[2, raw.columns.get_loc("volume")] = np.nan
     raw.to_parquet(tmp_path / "X.parquet")
     restored = data.load_many_unmodified(config, ["X"])["X"]

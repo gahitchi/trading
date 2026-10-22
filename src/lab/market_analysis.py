@@ -119,9 +119,7 @@ def _asset_stats(frame: pd.DataFrame, spec: AnalysisSpec) -> dict:
     mdd = _finite(np.max(1 - close / peak), "drawdown")
     latest_dd = _finite(1 - close[-1] / peak[-1], "drawdown")
     short = _finite(close[-1] / close[-22] - 1, "21-day momentum")
-    momentum = _finite(
-        close[-1 - spec.skip_recent] / close[-1 - spec.momentum_days] - 1, "skip-month momentum"
-    )
+    momentum = _finite(close[-1 - spec.skip_recent] / close[-1 - spec.momentum_days] - 1, "skip-month momentum")
     dollar_volume = close[-spec.liquidity_window :] * volume[-spec.liquidity_window :]
     return {
         "close": _finite(close[-1], "close"),
@@ -154,10 +152,7 @@ def analyze_market(
     selected = _panel(frames, as_of, spec)
     tickers = list(selected)
     returns = np.column_stack(
-        [
-            f["close"].to_numpy(dtype=float)[1:] / f["close"].to_numpy(dtype=float)[:-1] - 1
-            for f in selected.values()
-        ]
+        [f["close"].to_numpy(dtype=float)[1:] / f["close"].to_numpy(dtype=float)[:-1] - 1 for f in selected.values()]
     )
     cov_raw = np.atleast_2d(np.cov(returns[-spec.risk_window :], rowvar=False, ddof=1))
     diagonal = np.diag(np.diag(cov_raw))
