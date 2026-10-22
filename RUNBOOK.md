@@ -42,6 +42,14 @@ printf '%s' 'your-paper-password' > secrets/tws_password && chmod 600 secrets/tw
 `max_order_value`, `max_orders_per_day` and `max_daily_turnover` are hard limits; `[risk]` holds the position cap,
 gross cap and drawdown circuit breaker. `.env` and `secrets/` are git-ignored: never commit them.
 
+**Shorts and leverage (optional).** The defaults are long-only and unlevered. To let the agents short or lever up,
+raise `[risk] max_short_gross`, `max_gross` and the net range, and `[portfolio] max_leverage` or `leverage`
+(README, "Long/short, leverage and margin"). First check in IBKR's Client Portal that the account is a **margin**
+account with short-selling permissions (paper accounts normally mirror the live account's type). Set
+`[margin] debit_apr` to IBKR's current rate for your balance. Shorts IBKR cannot borrow are rejected: the agents
+report it and stay flat in that stock. Watch `borrow_fees` and `financing` in `ledger.json` against IBKR's
+statement: the ledger's figures are estimates, IBKR's are what you pay.
+
 ## 4. Start IB Gateway
 
 ```bash
