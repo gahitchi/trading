@@ -23,9 +23,15 @@ def max_drawdown(equity: pd.Series) -> tuple[float, int]:
 
 def summarize(equity: pd.Series, *, fills: list | None = None, gross: pd.Series | None = None) -> dict:
     """equity: daily portfolio value indexed by date, first value = starting capital."""
-    equity = equity.dropna()
-    if len(equity) < 2:
-        return {"days": len(equity)}
+    values = equity.to_numpy(dtype=float)
+    if not np.isfinite(values).all():
+        # Fail closed: a missing or non-finite mark means the curve is incomplete, and dropping it would
+        # silently stitch over the gap (ChatGPT, G001-F2).
+        bad = equity.index[~np.isfinite(values)][0]
+        raise ValueError(f"equity curve has a missing or non-finite mark on {bad}; refusing to compute metrics")
+    if len(equity) < 3:
+        # Two marks give one return: no volatility or Sharpe can be estimated (ChatGPT, G001-F4).
+        return {"days": len(equity), "insufficient": "at least 3 equity marks are needed for risk metrics"}
     rets = equity.pct_change().dropna()
     years = max((equity.index[-1] - equity.index[0]).days / 365.25, 1e-9)
     total = equity.iloc[-1] / equity.iloc[0] - 1

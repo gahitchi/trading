@@ -146,8 +146,12 @@ def is_message(path: str) -> bool:
     return path.startswith(OUTBOX + "/") and path.endswith(".md") and len(PurePosixPath(path).parts) == 5
 
 
-def collect(include_worktree: bool = True) -> dict[str, list[dict]]:
-    """All messages from all branches, each read only from a branch its author owns. Keyed by thread."""
+def collect(include_worktree: bool = True, any_worktree_author: bool = False) -> dict[str, list[dict]]:
+    """All messages from all branches, each read only from a branch its author owns. Keyed by thread.
+
+    any_worktree_author: also take other agents' files present in the working tree (merged copies) at face
+    value. Only for structural checks: authorship of such files is verified separately by `check --base`.
+    """
     found: dict[str, dict] = {}
     refs = git("for-each-ref", "--format=%(refname:short)", "refs/remotes", "refs/heads").split()
     for ref in refs:
@@ -158,26 +162,14 @@ def collect(include_worktree: bool = True) -> dict[str, list[dict]]:
         for path in git("ls-tree", "-r", "--name-only", ref, "--", OUTBOX, check=False).splitlines():
             if is_message(path) and path_agent(path) in (owner, "gabriel") and path not in found:
                 found[path] = parse_message(git("show", f"{ref}:{path}"), path)
-    # GitHub Actions may check out only the submitted branch, omitting refs to
-    # the other agent. The second parent of an actual merge retains the
-    # original foreign outbox snapshot. Read it as *history*, never as a
-    # writable outbox. Without this fallback pytest/CI mistakes a C001 reply
-    # for the opener when origin/main is not fetched as a ref.
-    local_owner = owner_of(current_branch())
-    for row in git("rev-list", "--merges", "--parents", "HEAD").splitlines():
-        parents = row.split()[2:]
-        for parent in parents:
-            for path in git("ls-tree", "-r", "--name-only", parent, "--", OUTBOX, check=False).splitlines():
-                author = path_agent(path)
-                if is_message(path) and author in AGENTS and author != local_owner and path not in found:
-                    found[path] = parse_message(git("show", f"{parent}:{path}"), path)
     if include_worktree:
         owner = owner_of(current_branch())
         base = root() / OUTBOX
         if base.exists():
             for f in sorted(base.rglob("*.md")):
                 path = f.relative_to(root()).as_posix()
-                if is_message(path) and path_agent(path) in (owner, "gabriel") and path not in found:
+                allowed = any_worktree_author or path_agent(path) in (owner, "gabriel")
+                if is_message(path) and allowed and path not in found:
                     found[path] = parse_message(f.read_text(), path)
     threads: dict[str, list[dict]] = {}
     for msg in found.values():
@@ -335,6 +327,12 @@ def cmd_sync(a) -> int:
 # ----------------------------------------------------------------------------- validation
 
 
+def on_owned_branch(sha: str, agent: str) -> bool:
+    """True if a branch owned by `agent` (local or remote) contains commit `sha`."""
+    refs = git("for-each-ref", "--contains", sha, "--format=%(refname:short)", "refs/remotes", "refs/heads").split()
+    return any(owner_of(r.split("/", 1)[1] if r.startswith("origin/") else r) == agent for r in refs)
+
+
 def merged_from_owner(path: str, author: str) -> bool:
     """A file written by another agent is allowed on this branch only as an unchanged copy from
     a branch that agent owns (e.g. after merging main into a chatgpt branch)."""
@@ -345,10 +343,6 @@ def merged_from_owner(path: str, author: str) -> bool:
         branch = ref.split("/", 1)[1] if ref.startswith("origin/") else ref
         if owner_of(branch) == author and git("rev-parse", f"{ref}:{path}", check=False).strip() == here:
             return True
-    for row in git("rev-list", "--merges", "--parents", "HEAD").splitlines():
-        for parent in row.split()[2:]:
-            if git("rev-parse", f"{parent}:{path}", check=False).strip() == here:
-                return True
     return False
 
 
@@ -368,7 +362,7 @@ def cmd_check(a) -> int:
             except CollabError as e:
                 errors.append(str(e))
     try:
-        threads = collect()
+        threads = collect(any_worktree_author=True)
     except CollabError as e:
         errors.append(str(e))
         threads = {}
@@ -393,20 +387,15 @@ def cmd_check(a) -> int:
     if a.base and owner:
         for sha in git("rev-list", "--no-merges", f"{a.base}..HEAD").split():
             signed = re.findall(r"^Agent:\s*(\S+)\s*$", git("log", "-1", "--format=%B", sha), flags=re.M | re.I)
-            # A legitimate merge brings the other agent's original commits
-            # into our ancestry. Check those commits against the branch owned
-            # by their signer; do not treat that as us authoring their work.
-            containing = git(
-                "for-each-ref", "--contains", sha, "--format=%(refname:short)", "refs/remotes", "refs/heads"
-            ).split()
-            owners = {owner_of(ref.split("/", 1)[1] if ref.startswith("origin/") else ref) for ref in containing}
-            # Historical unsigned commits predate collaboration v2. Do not
-            # retroactively reject them; require trailers for new agent work
-            # via protocol/review, while validating existing signed commits.
             for agent in signed:
                 signer = agent.lower()
-                if signer not in (owner, "gabriel") and signer not in owners:
-                    errors.append(f"commit {sha[:8]} is signed 'Agent: {agent}' on {owner}'s branch {branch!r}")
+                # A commit signed by the other agent is legitimate here only if it already lives on a
+                # branch that agent owns, i.e. it arrived by merging that branch (idea: ChatGPT, G001-F1).
+                if signer not in (owner, "gabriel") and not on_owned_branch(sha, signer):
+                    errors.append(
+                        f"commit {sha[:8]} is signed 'Agent: {agent}' on {owner}'s branch {branch!r}, "
+                        f"and no branch owned by {signer} contains it"
+                    )
     for e in errors:
         print(f"ERROR {e}")
     print(
