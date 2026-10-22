@@ -399,10 +399,7 @@ def cmd_check(a) -> int:
             containing = git(
                 "for-each-ref", "--contains", sha, "--format=%(refname:short)", "refs/remotes", "refs/heads"
             ).split()
-            owners = {
-                owner_of(ref.split("/", 1)[1] if ref.startswith("origin/") else ref)
-                for ref in containing
-            }
+            owners = {owner_of(ref.split("/", 1)[1] if ref.startswith("origin/") else ref) for ref in containing}
             # Historical unsigned commits predate collaboration v2. Do not
             # retroactively reject them; require trailers for new agent work
             # via protocol/review, while validating existing signed commits.

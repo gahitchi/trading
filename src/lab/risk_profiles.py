@@ -101,7 +101,9 @@ def resolve_profile(cfg: LabConfig, name: str) -> tuple[LabConfig, dict]:
         "max_orders_per_day": paper.max_orders_per_day,
         "max_daily_turnover": paper.max_daily_turnover,
     }
-    fingerprint = hashlib.sha256(json.dumps({"name": profile.value, "limits": limits}, sort_keys=True).encode()).hexdigest()
+    fingerprint = hashlib.sha256(
+        json.dumps({"name": profile.value, "limits": limits}, sort_keys=True).encode()
+    ).hexdigest()
     research_capabilities = {
         "short_selling": profile in (RiskProfile.DYNAMIC, RiskProfile.AGGRESSIVE),
         "margin_leverage": profile in (RiskProfile.DYNAMIC, RiskProfile.AGGRESSIVE),

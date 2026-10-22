@@ -67,8 +67,11 @@ class AdvancedRiskPolicy:
 
     def __post_init__(self):
         for label in (
-            "max_gross_leverage", "max_short_gross_fraction", "initial_margin_fraction",
-            "maintenance_margin_fraction", "max_stress_loss_fraction",
+            "max_gross_leverage",
+            "max_short_gross_fraction",
+            "initial_margin_fraction",
+            "maintenance_margin_fraction",
+            "max_stress_loss_fraction",
         ):
             _num(getattr(self, label), label, positive=label == "max_gross_leverage")
         if not Decimal(0) < self.maintenance_margin_fraction <= self.initial_margin_fraction <= Decimal(1):
@@ -137,20 +140,21 @@ def evaluate_margin_scenario(
         else:
             long_value += p.quantity * market.bid
             stressed_long += p.quantity * market.bid * (Decimal(1) + shock)
-        exposure.append({
-            "instrument": p.instrument_id,
-            "side": "SHORT" if p.quantity < 0 else "LONG",
-            "quantity": str(p.quantity),
-            "scenario_return": str(shock),
-        })
+        exposure.append(
+            {
+                "instrument": p.instrument_id,
+                "side": "SHORT" if p.quantity < 0 else "LONG",
+                "quantity": str(p.quantity),
+                "scenario_return": str(shock),
+            }
+        )
     equity = cash_after_financing_and_short_proceeds + long_value - short_liability - margin_loan
     if equity <= 0:
         raise AdvancedRiskError("non-positive equity cannot authorize scenario analysis")
     gross = long_value + short_liability
     stressed_gross = stressed_long + stressed_short
     finance_cost = (
-        margin_loan * margin_loan_fee_apr * Decimal(holding_days) / Decimal(365)
-        if margin_loan > 0 else Decimal(0)
+        margin_loan * margin_loan_fee_apr * Decimal(holding_days) / Decimal(365) if margin_loan > 0 else Decimal(0)
     )
     stressed_equity = cash_after_financing_and_short_proceeds + stressed_long - stressed_short - margin_loan
     stressed_equity -= borrow_cost + finance_cost

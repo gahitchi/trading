@@ -40,6 +40,8 @@ jobs:
         python: ["3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # collab tests need merged outbox history
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
