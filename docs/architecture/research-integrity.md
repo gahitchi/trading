@@ -19,6 +19,12 @@ Ingestion stages: `FETCHED → STAGED → VALIDATED → QUARANTINED|APPROVED →
 
 **Current gap:** `yfinance` is an exploration source, not point-in-time institutional historical evidence.
 
+The isolated `market_analysis.py` slice now computes descriptive market
+features only, with exact as-of dates and deterministic source hashes.
+It does not repair as-of provenance gaps caused by the current storage
+pipeline or establish statistically qualified forecasts. See
+[market-analysis-engine.md](market-analysis-engine.md).
+
 ## 2. Experiment protocol
 
 One immutable experiment record includes:

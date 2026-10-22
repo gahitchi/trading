@@ -2,6 +2,11 @@
 
 **Status: planned command/API grammar only.** The current repository has a `lab` CLI with `data`, `research`, `paper`, `health`, `kill`, etc. Commands below do **not** exist unless explicitly marked current. Never paste an example without checking which version is deployed.
 
+**Implemented (research-only) addition:** `lab analyze --tickers ... --as-of ... --json`
+produces exploratory historical market/risk reports with an immutable input
+fingerprint; unlike most planned commands below, `lab analyze` is available
+on the hardening branch. It does not deploy a strategy or approve an order.
+
 ## 1. Progressive disclosure
 
 The entry screen must separate:

@@ -11,6 +11,7 @@ import pandas as pd
 
 from lab import data, experiments
 from lab.config import ConfigError, LabConfig, Period, load_config
+from lab.market_analysis import MarketAnalysisError
 from lab.signals.builtin import BUILTIN
 from lab.signals.registry import SignalNotFound, available_research, resolve
 
@@ -152,6 +153,71 @@ def cmd_data_list(cfg, a):
         print(
             f"{t:<6} {e['rows']:>5} days  {e['first']} .. {e['last']}  {e['source']}{'' if e['adjusted'] else ' (unadjusted)'}"
         )
+
+
+# ----------------------------------------------------------------------------- descriptive market analytics
+
+
+def cmd_analyze(cfg, a):
+    """Read-only, historical analysis; sealed holdout is never accessible here."""
+    from dataclasses import asdict
+    from datetime import timedelta
+    from pathlib import Path
+
+    from lab.market_analysis import AnalysisSpec, MarketAnalysisError, analyze_market
+
+    tickers = _tickers(cfg, a.tickers)
+    history = data.load_many(cfg, tickers)
+    max_research_date = cfg.period("holdout").start - timedelta(days=1)
+    if a.as_of:
+        try:
+            as_of = date.fromisoformat(a.as_of)
+        except ValueError as exc:
+            raise MarketAnalysisError("--as-of must be an ISO YYYY-MM-DD exchange-session date") from exc
+        if as_of > max_research_date:
+            raise MarketAnalysisError(
+                f"analysis cutoff {as_of} overlaps the sealed holdout; last permissible research date "
+                f"is {max_research_date}"
+            )
+    else:
+        as_of = min(max_research_date, *(f.index[-1].date() for f in history.values()))
+    spec = AnalysisSpec(
+        lookback=a.lookback,
+        risk_window=a.risk_window,
+        momentum_days=a.momentum_days,
+        skip_recent=a.skip_recent,
+        covariance_shrinkage=a.shrinkage,
+    )
+    result = analyze_market(history, as_of=as_of, spec=spec, provenance=data.manifest(cfg))
+    issues = data.quality_warning(data.quality(cfg, tickers))
+    if issues:
+        result["warnings"].append("Data quality: " + issues)
+    result["spec"] = asdict(spec)
+    if a.output:
+        output = Path(a.output)
+        if output.exists():
+            raise MarketAnalysisError(f"output exists; refusing to overwrite {output}")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n")
+    if a.json:
+        print(json.dumps(result, indent=2, sort_keys=True, allow_nan=False))
+        return
+    market = result["market"]
+    print(f"Market analysis {result['as_of']} | {len(tickers)} instruments | {result['qualification']}")
+    print(f"  21-day positive breadth {market['breadth_positive_21d']:.1%}; "
+          f"12-1m positive breadth {market['breadth_positive_skip_recent']:.1%}")
+    print(f"  Descriptive market state: {market['descriptive_regime']}")
+    print(f"  Median annualized realized volatility: {market['median_asset_vol_annual']:.1%}")
+    for ticker, values in result["features"].items():
+        print(f"  {ticker}: 12-1m {values['momentum_skip_recent']:+.1%}; "
+              f"realized vol {values['realized_vol_annual']:.1%}; "
+              f"historical ES {values['historical_expected_shortfall_loss']:.1%}; "
+              f"median dollar volume ${values['median_dollar_volume']:,.0f}")
+    print(f"  Deterministic analysis ID: {result['analysis_id']}")
+    for warning in result["warnings"]:
+        print(f"  WARNING: {warning}")
+    if a.output:
+        print(f"  Saved JSON: {a.output}")
 
 
 # ----------------------------------------------------------------------------- experiments
@@ -683,6 +749,18 @@ def build_parser() -> argparse.ArgumentParser:
         x.add_argument("--tickers", nargs="+")
         x.add_argument("--set", action="append", help="override a parameter, e.g. sma_trend.fast=20")
 
+    am = sub.add_parser("analyze", help="deterministic historical market/risk diagnostics (research only)")
+    am.add_argument("--tickers", nargs="+")
+    am.add_argument("--as-of", help="exchange-session date YYYY-MM-DD, strictly before the sealed holdout")
+    am.add_argument("--lookback", type=int, default=252, help="history length in sessions")
+    am.add_argument("--risk-window", type=int, default=63, help="rolling risk lookback in sessions")
+    am.add_argument("--momentum-days", type=int, default=252, help="lookback for skip-recent momentum")
+    am.add_argument("--skip-recent", type=int, default=21, help="exclude last N sessions from long momentum")
+    am.add_argument("--shrinkage", type=float, default=0.15, help="sample covariance diagonal shrinkage")
+    am.add_argument("--json", action="store_true", help="print full reproducible JSON report")
+    am.add_argument("--output", help="write the JSON report to a new file (never overwrites)")
+    am.set_defaults(fn=cmd_analyze)
+
     b = sub.add_parser("backtest", help="compare signals against buy-and-hold")
     b.add_argument("signals", nargs="*", default=["sma_trend", "rsi_reversion"])
     b.add_argument(
@@ -795,7 +873,7 @@ def main(argv=None) -> int:
         return 0
     try:
         return a.fn(cfg, a) or 0
-    except (data.DataError, ConfigError) as e:
+    except (data.DataError, ConfigError, MarketAnalysisError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

@@ -94,4 +94,8 @@ For each subsystem, produce **one contract and one implementation PR** with:
 - observability (metrics, alerts, audit events);
 - measurable exit criteria and evidence links.
 
-Do not bundle unrelated broker, strategy, research and infrastructure changes into the same unreviewed release. Read [data-and-decision-contracts.md](data-and-decision-contracts.md), [execution-recovery.md](execution-recovery.md), [research-integrity.md](research-integrity.md), [deployment-operations.md](deployment-operations.md), [verification-and-roadmap.md](verification-and-roadmap.md) and [decisions.md](decisions.md).
+Do not bundle unrelated broker, strategy, research and infrastructure changes into the same unreviewed release. See also the [market analysis engine](market-analysis-engine.md) for the
+descriptive quant diagnostics implementation, evidence limitations and
+future probabilistic/ML modeling design.
+
+Read [data-and-decision-contracts.md](data-and-decision-contracts.md), [execution-recovery.md](execution-recovery.md), [research-integrity.md](research-integrity.md), [deployment-operations.md](deployment-operations.md), [verification-and-roadmap.md](verification-and-roadmap.md) and [decisions.md](decisions.md).

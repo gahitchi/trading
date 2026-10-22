@@ -32,6 +32,18 @@ Product experience is specified separately in
 User-facing workflows depend on reliable state and auditable commands; the proposed
 commands are **not** available in the current CLI.
 
+## Descriptive quant diagnostics — implemented research slice
+
+`src/lab/market_analysis.py` and `lab analyze` implement a deterministic
+pre-holdout statistical panel: historical momentum, risk, drawdowns,
+liquidity proxies, cross-sectional breadth and shrinkage covariance.
+Numerical/temporal tests are in `tests/test_market_analysis.py` and
+`tests/test_analyze_cli.py`. All reports are marked
+`EXPLORATORY_ONLY`, with data hashes and explicit warnings. See
+[market-analysis-engine.md](market-analysis-engine.md) for the
+as-of-data caveat, uncertainty, and staged ML designs. This is
+**neither trained price prediction nor broker execution authorization**.
+
 ## 1. Implementation order (dependency-aware)
 
 | Phase | Scope | Required proof |

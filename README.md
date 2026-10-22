@@ -34,6 +34,23 @@ Two layers of cooperating agents:
       └── training results only ─────┘                │ you: lab research promote
 ```
 
+## Market analysis (research-only)
+
+`lab analyze` computes point-in-time *descriptive* market diagnostics from validated historical
+OHLCV, without connecting to IBKR or authorizing orders. It includes 12-1 momentum,
+realized/downside volatility, historical VaR/expected shortfall, drawdowns,
+cross-asset shrunk covariance, market breadth and dollar-volume liquidity proxies.
+
+```bash
+lab analyze --tickers GOOG --as-of 2010-12-30 --lookback 252 --json
+lab analyze --tickers GOOG --lookback 252 --output results/market-analysis.json
+```
+
+The date must precede the configured holdout. Missing sessions or invalid history
+are errors, not imputed data. **All results are EXPLORATORY_ONLY:** the currently
+available research datasets do not establish as-of corporate actions, delistings
+or a verified vendor revision history. See the [market-analysis engineering design](docs/architecture/market-analysis-engine.md).
+
 ## Contents
 
 - [What is verified, and where](#what-is-verified-and-where)
