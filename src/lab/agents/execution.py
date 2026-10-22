@@ -21,6 +21,7 @@ from lab.agents.messages import (
     FillReport,
     RiskEvent,
 )
+from lab.execution_state import ExecutionStateError, apply_order_fill, read_execution_state
 from lab.persistence import atomic_json_write
 from lab.safety import is_paper_account, read_kill_switch
 
@@ -74,6 +75,8 @@ class ExecutionAgentConfig(StrategyConfig):
         self.heartbeat_path = heartbeat_path
         self.adopt_broker_positions = adopt_broker_positions
         self.expected_sleeves = tuple(expected_sleeves)
+        if live and (not state_path or not kill_path or not self.expected_sleeves):
+            raise ValueError("paper execution requires durable state, kill switch and an expected sleeve roster")
 
 
 class ExecutionAgent(Strategy):
@@ -111,19 +114,21 @@ class ExecutionAgent(Strategy):
         self.held: dict[str, float] = dict.fromkeys(config.instruments, 0.0)
         self.unresolved_orders: dict[str, dict] = {}
         self.daily_usage = {"session": "", "orders": 0, "bought": 0.0}
+        self.processed_fills: set[str] = set()
+        self.safety_halt = False
         if config.state_path and Path(config.state_path).exists():
-            state = json.loads(Path(config.state_path).read_text())
-            self.cash = float(state["cash"])
-            self.commissions = float(state.get("commissions", 0.0))
-            self.held.update({t: float(q) for t, q in state.get("positions", {}).items() if t in self.held})
-            self.unresolved_orders = dict(state.get("unresolved_orders", {}))
-            self.daily_usage = dict(state.get("daily_usage", self.daily_usage))
-            if (
-                not isinstance(self.unresolved_orders, dict)
-                or not isinstance(self.daily_usage, dict)
-                or not {"session", "orders", "bought"} <= self.daily_usage.keys()
-            ):
-                raise ValueError("invalid persisted execution state; refusing to start")
+            try:
+                raw = json.loads(Path(config.state_path).read_text(encoding="utf-8"))
+                state = read_execution_state(raw, set(config.instruments), live=config.live)
+            except (OSError, ValueError, TypeError) as exc:
+                raise ExecutionStateError(f"untrusted execution checkpoint: {exc}") from exc
+            self.cash = state["cash"]
+            self.commissions = state["commissions"]
+            self.held.update(state["positions"])
+            self.unresolved_orders = state["unresolved_orders"]
+            self.daily_usage = state["daily_usage"]
+            self.processed_fills = state["processed_fills"]
+            self.safety_halt = state["safety_halt"]
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -134,6 +139,13 @@ class ExecutionAgent(Strategy):
             now = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY)
             if self.config.adopt_broker_positions:
                 self._adopt_broker_positions()
+            # Prove that the checkpoint can be persisted before enabling any trading.
+            self._save()
+            if self.unresolved_orders or self.safety_halt:
+                self._risk_event(
+                    "startup_blocked",
+                    f"unresolved intents {list(self.unresolved_orders)}; sticky safety halt {self.safety_halt}",
+                )
             self._schedule(now)
             self.clock.set_timer("heartbeat", timedelta(seconds=60), callback=self._on_heartbeat)
             self._on_heartbeat(None)
@@ -143,6 +155,18 @@ class ExecutionAgent(Strategy):
             )
 
     def _on_signal(self, msg):
+        if self.config.live and (
+            msg.sleeve not in self.config.expected_sleeves
+            or msg.ticker not in self.config.instruments
+            or not math.isfinite(msg.price)
+            or msg.price <= 0
+            or not math.isfinite(msg.target)
+            or not 0 <= msg.target <= 1
+        ):
+            self._latch_safety_halt(f"invalid live signal: {msg.sleeve}/{msg.ticker}")
+            return
+        if msg.ts < self.sleeve_timestamps.get(msg.sleeve, -1):
+            return  # a delayed historical reply must not replace newer prices
         self.sleeve_timestamps[msg.sleeve] = msg.ts
         self.prices[msg.ticker] = msg.price
         self.price_ts = max(self.price_ts, msg.ts)
@@ -151,7 +175,15 @@ class ExecutionAgent(Strategy):
             self._schedule(datetime.fromtimestamp(msg.ts / 1e9, NY))
 
     def _on_approved(self, msg):
-        self.approved_timestamp = max(self.approved_timestamp, msg.ts)
+        if self.config.live and (
+            set(msg.weights) - set(self.config.instruments)
+            or any(not math.isfinite(w) or w < 0 for w in msg.weights.values())
+        ):
+            self._latch_safety_halt("invalid approved target weights")
+            return
+        if msg.ts < self.approved_timestamp:
+            return
+        self.approved_timestamp = msg.ts
         self.weights.update(msg.weights)
         self.halted = self.halted or msg.halted
 
@@ -210,16 +242,39 @@ class ExecutionAgent(Strategy):
         return float(self.portfolio.net_position(self.config.instruments[ticker]))
 
     def reconcile(self) -> list[str]:
-        """Differences between the ledger and the broker's positions, as messages."""
+        """Fail closed on mismatched positions or *any* outstanding broker orders.
+
+        This checks the Nautilus cache after live-node reconciliation. It is not
+        proof that an unavailable broker has provided a complete current snapshot.
+        """
         diffs = []
-        for t in self.config.instruments:
-            b, mine = self._broker_position(t), self.held.get(t, 0.0)
-            if abs(b - mine) > 1e-9:
-                diffs.append(f"{t}: ledger {mine:g} vs broker {b:g}")
+        try:
+            for t in self.config.instruments:
+                b, mine = self._broker_position(t), self.held.get(t, 0.0)
+                if not math.isfinite(b) or abs(b - mine) > 1e-9:
+                    diffs.append(f"{t}: ledger {mine:g} vs broker {b:g}")
+            if self.config.live:
+                known = set(self.config.instruments.values())
+                for position in self.cache.positions_open():
+                    if position.instrument_id not in known:
+                        diffs.append(f"unmanaged broker position {position.instrument_id}")
+                for order in self.cache.orders_open():
+                    diffs.append(f"outstanding broker order {order.client_order_id}")
+                for order in self.cache.orders_inflight():
+                    diffs.append(f"inflight broker order {order.client_order_id}")
+        except Exception as exc:
+            diffs.append(f"broker cache unavailable: {type(exc).__name__}: {exc}")
         return diffs
 
     def _adopt_broker_positions(self):
-        """Operator-requested reset: take the broker's positions as truth, at their cost basis."""
+        """Explicit reset, never a way to clear unknown orders or a sticky halt."""
+        if self.unresolved_orders or self.safety_halt:
+            raise ExecutionStateError("verify every order/fill and resolve the safety halt before ledger adoption")
+        if self.cache.orders_open() or self.cache.orders_inflight():
+            raise ExecutionStateError("cannot adopt while any broker order is open or in flight")
+        known = set(self.config.instruments.values())
+        if any(p.instrument_id not in known for p in self.cache.positions_open()):
+            raise ExecutionStateError("cannot adopt: broker has positions outside the managed universe")
         adopted = {}
         for t, iid in self.config.instruments.items():
             q = self._broker_position(t)
@@ -234,7 +289,6 @@ class ExecutionAgent(Strategy):
                 raise RuntimeError("cannot adopt positions while broker orders remain open")
         self.held = dict.fromkeys(self.config.instruments, 0.0)
         self.cash = self.config.capital
-        self.unresolved_orders.clear()
         for t, (q, avg) in adopted.items():
             self.held[t] = q
             self.cash -= q * avg
@@ -255,11 +309,14 @@ class ExecutionAgent(Strategy):
             atomic_json_write(
                 p,
                 {
+                    "version": 2,
                     "cash": self.cash,
                     "commissions": self.commissions,
                     "positions": self._nonzero(self.held),
                     "unresolved_orders": self.unresolved_orders,
                     "daily_usage": self.daily_usage,
+                    "processed_fills": sorted(self.processed_fills),
+                    "safety_halt": self.safety_halt,
                     "updated": datetime.now(UTC).isoformat(timespec="seconds"),
                 },
             )
@@ -269,6 +326,12 @@ class ExecutionAgent(Strategy):
 
     def _risk_event(self, kind: str, detail: str):
         self.publish_message(T_RISK, RiskEvent(self.clock.timestamp_ns(), kind, detail))
+
+    def _latch_safety_halt(self, reason: str):
+        self.safety_halt = True
+        self.blocked_reason = reason
+        self._save()
+        self._risk_event("safety_halt", reason)
 
     def _cancel_open_orders(self):
         for iid in self.config.instruments.values():
@@ -286,15 +349,26 @@ class ExecutionAgent(Strategy):
             or datetime.fromtimestamp(self.sleeve_timestamps[sleeve] / 1e9, NY).date() != session
         ]
         if self.config.expected_sleeves and (
-            not self.approved_timestamp
-            or datetime.fromtimestamp(self.approved_timestamp / 1e9, NY).date() != session
+            not self.approved_timestamp or datetime.fromtimestamp(self.approved_timestamp / 1e9, NY).date() != session
         ):
             missing.append("risk approval")
+        if self.config.expected_sleeves and self.approved_timestamp < max(
+            (self.sleeve_timestamps.get(s, 0) for s in self.config.expected_sleeves), default=0
+        ):
+            missing.append("approval predates latest signal")
+        for ticker in self.config.instruments:
+            px = self.prices.get(ticker, 0)
+            if not math.isfinite(px) or px <= 0:
+                missing.append(f"{ticker} price")
         return missing
 
     def rebalance(self):
         session = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY).date()
         if self.config.live:
+            if self.safety_halt:
+                self.blocked_reason = "sticky execution safety halt: operator reconciliation required"
+                self._risk_event("safety_halt", self.blocked_reason)
+                return
             missing = self._missing_session_signals(session)
             if missing:
                 self.blocked_reason = f"session {session}: missing/stale signals: {', '.join(missing)}"
@@ -383,7 +457,7 @@ class ExecutionAgent(Strategy):
         oid = str(order.client_order_id)
         self.unresolved_orders[oid] = {
             "ticker": ticker,
-            "side": str(side),
+            "side": "BUY" if diff > 0 else "SELL",
             "quantity": abs(diff),
             "filled": 0.0,
         }
@@ -417,15 +491,22 @@ class ExecutionAgent(Strategy):
         fee = float(ev.commission.as_double())
         buy = ev.order_side == OrderSide.BUY
         ticker = str(ev.instrument_id.symbol)
+        oid = str(ev.client_order_id)
+        try:
+            if not math.isfinite(px) or px <= 0 or not math.isfinite(fee) or fee < 0:
+                raise ExecutionStateError(f"invalid fill price/commission on {oid}")
+            if ticker not in self.held:
+                raise ExecutionStateError(f"fill for unknown ticker {ticker}")
+            if not apply_order_fill(self.unresolved_orders, self.processed_fills, oid, str(ev.trade_id), qty):
+                return  # callback replay after a broker reconnect, already booked
+        except (ExecutionStateError, ValueError) as exc:
+            if self.config.live:
+                self._latch_safety_halt(f"untrusted fill: {exc}")
+                return
+            raise
         self.cash += -qty * px - fee if buy else qty * px - fee
         self.commissions += fee
         self.held[ticker] = self.held.get(ticker, 0.0) + (qty if buy else -qty)
-        oid = str(ev.client_order_id)
-        if oid in self.unresolved_orders:
-            pending = self.unresolved_orders[oid]
-            pending["filled"] += qty
-            if pending["filled"] >= pending["quantity"] - 1e-9:
-                del self.unresolved_orders[oid]
         self._save()
         self.publish_message(T_FILL, FillReport(ev.ts_event, ticker, "BUY" if buy else "SELL", qty, px, fee))
 

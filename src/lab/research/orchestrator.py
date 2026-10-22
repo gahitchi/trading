@@ -285,15 +285,10 @@ class Orchestrator:
                 return False
             feedback = "The Critic asked for revisions:\n" + "\n".join(f"- {i}" for i in review["issues"])
         if last_passing is not None:
-            code, report = last_passing
-            h.write("signal.py", code)
-            h.write("checks.json", {"ok": True, "stage": report.stage, "errors": [], "info": report.info})
-            h.set_status(
-                "implemented",
-                "fix attempts exhausted; validating the last version that passed the "
-                "sandbox (critic's open issues are in review.json)",
-            )
-            return True
+            # Static checks do not override a human/AI critic's unresolved defects.
+            # Never promote code which was not explicitly accepted.
+            h.set_status("rejected_by_critic", "review did not accept the final checked implementation")
+            return False
         h.set_status("broken", "could not produce code that passes the sandbox")
         return False
 

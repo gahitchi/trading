@@ -35,3 +35,25 @@ The system remains PAPER-ONLY and requires further integration and fault-injecti
 
 **Operator warning:** Do not treat a healthy heartbeat as proof of broker
 connectivity or permission to trade. The default deployment is not unattended-safe.
+
+## Second pass: fail-closed execution and research review
+
+- Paper execution requires a durable state path, kill switch and complete expected
+  sleeve roster. The execution checkpoint is now schema version 2.
+- Corrupt or legacy paper ledgers **do not auto-migrate**. First verify the actual
+  account ledger, fills, cash and open orders against the broker. Preserve backups.
+- Every order intent is journaled before submission. Each fill is keyed by the
+  client order ID and broker trade ID; duplicate callbacks do not apply twice.
+  Unknown/overfilling events latch a persistent safety halt.
+- Reconciliation checks configured position quantities, out-of-universe positions,
+  open orders, and in-flight orders in the reconciled Nautilus cache.
+- `--adopt-broker` cannot clear an unresolved intent or safety halt. Those require
+  explicit investigation and operator-controlled recovery based on broker records;
+  do not casually delete the checkpoint or reset state.
+- Invalid signal prices, weights, and non-finite values cannot trigger live orders.
+- Critic rejection or unresolved revisions no longer fall through into validation.
+
+**Important limitation:** the cache is not independently verified with a full
+IBKR execution-history import. There is not yet a reliable cash/balance proof,
+exchange-calendar scheduler, durable ACID order ledger, or an independent
+broker-side kill mechanism. Do not leave the system unattended.
