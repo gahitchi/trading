@@ -17,7 +17,7 @@ def test_lookups_are_asof_never_future_and_fail_on_staleness():
     a, proof = book.borrow_rate("GOOG", base + timedelta(days=2))
     assert a == 0.08 and proof["as_of"] == base.isoformat() and proof["age_days"] == 2
     with pytest.raises(BorrowUnavailable, match="stale"):
-        book.borrow_rate("GOOG", base + timedelta(days=5))
+        book.borrow_rate("GOOG", base + timedelta(days=8))  # last quote is now four days old
     with pytest.raises(BorrowUnavailable, match="no historical"):
         book.borrow_rate("GOOG", base - timedelta(days=1))
 
