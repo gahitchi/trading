@@ -421,13 +421,7 @@ class ExecutionAgent(Strategy):
                 continue
             mark = self.prices.get(ticker)
             ts = self.price_stamps.get(ticker)
-            if (
-                mark is None
-                or not math.isfinite(mark)
-                or mark <= 0
-                or not self.price_ts
-                or ts != self.price_ts
-            ):
+            if mark is None or not math.isfinite(mark) or mark <= 0 or not self.price_ts or ts != self.price_ts:
                 stale.append(ticker)
         return stale
 
