@@ -57,3 +57,13 @@ connectivity or permission to trade. The default deployment is not unattended-sa
 IBKR execution-history import. There is not yet a reliable cash/balance proof,
 exchange-calendar scheduler, durable ACID order ledger, or an independent
 broker-side kill mechanism. Do not leave the system unattended.
+
+## Point-in-time data invariant
+
+A stock's last available price observation is **not** a delisting announcement.
+The backtester now rejects earlier-ending histories unless an independently
+documented universe exit precedes the last available tradable open by enough
+sessions to simulate an exit. No forward-inferred liquidation is allowed.
+This does not repair unmodeled delisting returns, bankruptcy recovery,
+survivorship-biased tickers, broker halted markets or corporate-action errors.
+Treat missing data as an error, not a profitable trading instruction.

@@ -73,27 +73,35 @@ def _ns_close(d: date) -> int:
 
 
 def active_windows(frames: dict[str, pd.DataFrame], membership: dict | None) -> dict[str, list | None]:
-    """When each stock may be held: its point-in-time membership spells, cut short where
-    its data ends early (a delisting) so the exit can still fill at the last real open.
-    None means always (no membership file and data through the end)."""
+    """Use ONLY independently supplied membership dates, never future price-file ends.
+
+    An incomplete ticker series is not evidence of a known-in-advance delisting.
+    If a stock stops trading before the common research endpoint, require a
+    documented membership exit *and* later tradable bars to settle the exit.
+    Otherwise the backtest is unpriceable and must be rejected.
+    """
     ref_end = max(df.index[-1] for df in frames.values())
     out: dict[str, list | None] = {}
     for t, df in frames.items():
-        ends_early = df.index[-1] < ref_end - pd.Timedelta(days=5)
-        # The exit message goes out on the first inactive bar's close and fills at the next
-        # open, so the window must end two bars before the last one: the sell then fills at
-        # the last real open instead of against a stale price.
-        cutoff = df.index[max(0, len(df) - 3)].date() if ends_early else None
-        if membership is None and not ends_early:
+        ends_early = df.index[-1] < ref_end
+        if ends_early:
+            if len(df) < 3:
+                raise ValueError(f"{t}: truncated history has no reliable final exit window")
+            safe_last_exit = df.index[-3].date()
+            spells = membership.get(t, []) if membership is not None else []
+            if not spells or any(end is None or end > safe_last_exit for _, end in spells):
+                raise ValueError(
+                    f"{t}: price history ends on {df.index[-1].date()} before {ref_end.date()}; "
+                    "cannot infer a prescient liquidation from the file endpoint. "
+                    f"Supply independently verified point-in-time membership exits no later than {safe_last_exit}, "
+                    "or exclude this dataset from validation."
+                )
+        if membership is None:
             out[t] = None
             continue
-        spells = membership.get(t, []) if membership is not None else [(None, None)]
         windows = []
-        for a, b in spells:
-            until = b
-            if cutoff is not None:
-                until = min(until, cutoff) if until else cutoff
-            windows.append((_ns(a) if a else 0, _ns_close(until) if until else None))
+        for a, b in membership.get(t, []):
+            windows.append((_ns(a) if a else 0, _ns_close(b) if b else None))
         out[t] = windows
     return out
 
