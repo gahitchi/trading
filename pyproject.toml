@@ -36,6 +36,8 @@ packages = ["src/lab"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests import helpers as `from tests.conftest import ...`: make the repo root importable under plain `pytest`
+pythonpath = ["."]
 addopts = "-q -m 'not llm'"
 markers = [
     "llm: calls a real language model (slow, uses your plan's usage)",
