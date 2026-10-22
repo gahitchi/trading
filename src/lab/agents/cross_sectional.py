@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from nautilus_trader.common import DataActor, DataActorConfig
 
 from lab.agents.messages import T_SIGNAL, SignalUpdate
+from lab.agents.schedule import next_at, now_ny, parse_clock
 from lab.signals.base import CrossSectionalSignal, Window, clean_weights
 from lab.universe import bar_type
 
@@ -32,6 +33,9 @@ class CrossSectionalAgentConfig(DataActorConfig):
         live: bool = False,
         signal_time: str = "16:10",
         active_windows: dict | None = None,
+        weekdays_only: bool = True,
+        eval_delay_s: float = 120.0,
+        session_close: str = "16:00",
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. active_windows: ticker -> [(from_ns, until_ns)] or None."""
@@ -42,6 +46,9 @@ class CrossSectionalAgentConfig(DataActorConfig):
         self.live = live
         self.signal_time = signal_time
         self.active_windows = active_windows or {}
+        self.weekdays_only = weekdays_only
+        self.eval_delay_s = eval_delay_s  # seconds between requesting bars and ranking them
+        self.session_close = session_close
 
 
 class CrossSectionalAgent(DataActor):
@@ -83,10 +90,11 @@ class CrossSectionalAgent(DataActor):
             self.clock.set_time_alert_ns(f"xs-{at:%Y%m%d}", int(at.timestamp() * 1e9), callback=self._evaluate)
 
     def on_historical_bars(self, bars):
-        now_ny = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY)
+        now = now_ny(self.clock)
+        close = parse_clock(self.config.session_close)
         for b in sorted(bars, key=lambda b: b.ts_event):
             day = datetime.fromtimestamp(b.ts_event / 1e9, NY).date()
-            if day == now_ny.date() and now_ny.time() < time(16, 0):
+            if day == now.date() and now.time() < close:
                 continue  # today's bar is still forming
             self._add(b)
 
@@ -157,24 +165,18 @@ class CrossSectionalAgent(DataActor):
 
     def _request_history(self, *_):
         days = int(self.signal.lookback * 1.6) + 15
-        start = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY) - timedelta(days=days)
+        start = now_ny(self.clock) - timedelta(days=days)
         for iid in self.config.instruments.values():
             self.request_bars(bar_type(iid), start=start)
 
     def _schedule_live(self):
-        hh, mm = map(int, self.config.signal_time.split(":"))
-        now = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY)
-        fetch = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-        if fetch <= now:
-            fetch += timedelta(days=1)
-        while fetch.weekday() >= 5:
-            fetch += timedelta(days=1)
+        fetch = next_at(now_ny(self.clock), self.config.signal_time, weekdays_only=self.config.weekdays_only)
         self.clock.set_time_alert_ns(
-            f"xs-fetch-{fetch:%Y%m%d}", int(fetch.timestamp() * 1e9), callback=self._on_fetch_time
+            f"xs-fetch-{fetch:%Y%m%d-%H%M%S}", int(fetch.timestamp() * 1e9), callback=self._on_fetch_time
         )
-        evaluate = fetch + timedelta(minutes=2)  # after the requested bars have arrived
+        evaluate = fetch + timedelta(seconds=self.config.eval_delay_s)  # after the requested bars have arrived
         self.clock.set_time_alert_ns(
-            f"xs-eval-{evaluate:%Y%m%d}", int(evaluate.timestamp() * 1e9), callback=self._on_live_evaluate
+            f"xs-eval-{evaluate:%Y%m%d-%H%M%S}", int(evaluate.timestamp() * 1e9), callback=self._on_live_evaluate
         )
 
     def _on_fetch_time(self, _event):

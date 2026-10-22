@@ -13,6 +13,8 @@ journal-YYYYMM.jsonl, smoke-*.json
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -26,7 +28,7 @@ from nautilus_trader.adapters.interactive_brokers import (
     SymbologyMethod,
 )
 from nautilus_trader.common import Environment
-from nautilus_trader.live import LiveNode, LiveRiskEngineConfig
+from nautilus_trader.live import LiveNode, LiveNodeBuilder, LiveRiskEngineConfig
 from nautilus_trader.model import ActorId, TraderId, Venue
 
 from lab.agents import (
@@ -65,13 +67,44 @@ def heartbeat_path(cfg: LabConfig) -> Path:
     return runtime_dir(cfg) / "heartbeat.json"
 
 
-def _base_node(cfg: LabConfig, tickers: list[str]):
+@dataclass(frozen=True)
+class Schedule:
+    """New York clock times of the daily cycle (agents/schedule.py). lab paper uses lab.toml's times;
+    the live-node harness compresses a session into seconds."""
+
+    signal_time: str
+    rebalance_time: str
+    session_close: str = "16:00"
+    weekdays_only: bool = True
+    xs_eval_delay_s: float = 120.0
+
+    @classmethod
+    def from_config(cls, cfg: LabConfig) -> Schedule:
+        return cls(cfg.paper.signal_time, cfg.paper.rebalance_time)
+
+
+# Adds the broker's data and execution clients to a node builder. Default: Interactive Brokers.
+Clients = Callable[[LabConfig, dict], LiveNodeBuilder]
+
+
+def _base_node(cfg: LabConfig, tickers: list[str], clients: Clients | None = None):
     p = cfg.paper
     check_paper_settings(p.port, p.account_id)
     unknown = [t for t in tickers if t not in cfg.universe]
     if not tickers or unknown:
         raise ValueError(f"tickers must be in [universe] of lab.toml (unknown: {unknown})")
     iids = {t: instrument_id(t, cfg.universe[t]) for t in tickers}
+    builder = (clients or _ib_clients)(cfg, iids)
+    node = (
+        builder.with_risk_engine_config(LiveRiskEngineConfig(max_order_submit_rate=p.order_rate))
+        .with_reconciliation(True)
+        .build()
+    )
+    return node, iids
+
+
+def _ib_clients(cfg: LabConfig, iids: dict) -> LiveNodeBuilder:
+    p = cfg.paper
     provider = InteractiveBrokersInstrumentProviderConfig(
         symbology_method=SymbologyMethod.SIMPLIFIED,
         load_ids=set(iids.values()),
@@ -92,16 +125,12 @@ def _base_node(cfg: LabConfig, tickers: list[str]):
         account_id=p.account_id,
         instrument_provider=provider,
     )
-    node = (
+    return (
         LiveNode.builder("trading-lab", TraderId("LAB-001"), Environment.LIVE)
         .add_data_client(IB, InteractiveBrokersDataClientFactory(), data_cfg)
         .add_exec_client(IB, InteractiveBrokersExecutionClientFactory(), exec_cfg)
-        .with_risk_engine_config(LiveRiskEngineConfig(max_order_submit_rate=p.order_rate))
         .with_timeout_connection(30)
-        .with_reconciliation(True)
-        .build()
     )
-    return node, iids
 
 
 def build_node(
@@ -111,11 +140,14 @@ def build_node(
     *,
     adopt_broker: bool = False,
     notifier: Notifier | None = None,
+    clients: Clients | None = None,
+    schedule: Schedule | None = None,
 ) -> LiveNode:
     if not specs:
         raise ValueError("need at least one signal")
-    node, iids = _base_node(cfg, tickers)
+    node, iids = _base_node(cfg, tickers, clients)
     p = cfg.paper
+    sc = schedule or Schedule.from_config(cfg)
     rt = runtime_dir(cfg)
 
     per_strategy = 1.0 / len(specs)
@@ -132,7 +164,10 @@ def build_node(
                         signal=sig,
                         instruments=iids,
                         live=True,
-                        signal_time=p.signal_time,
+                        signal_time=sc.signal_time,
+                        session_close=sc.session_close,
+                        weekdays_only=sc.weekdays_only,
+                        eval_delay_s=sc.xs_eval_delay_s,
                     )
                 )
             )
@@ -152,7 +187,9 @@ def build_node(
                         ticker=t,
                         instrument_id=iids[t],
                         live=True,
-                        signal_time=p.signal_time,
+                        signal_time=sc.signal_time,
+                        session_close=sc.session_close,
+                        weekdays_only=sc.weekdays_only,
                     )
                 )
             )
@@ -194,7 +231,8 @@ def build_node(
                 rebalance_band=cfg.costs.rebalance_band,
                 cash_buffer=cfg.costs.cash_buffer,
                 capital=p.capital,
-                rebalance_time=p.rebalance_time,
+                rebalance_time=sc.rebalance_time,
+                weekdays_only=sc.weekdays_only,
                 max_order_value=p.max_order_value,
                 max_orders_per_day=p.max_orders_per_day,
                 max_daily_turnover=p.max_daily_turnover,
@@ -210,14 +248,17 @@ def build_node(
     return node
 
 
-def build_smoke_node(cfg: LabConfig, tickers: list[str], *, test_order: bool = False) -> tuple[LiveNode, Path]:
-    node, iids = _base_node(cfg, tickers)
+def build_smoke_node(
+    cfg: LabConfig, tickers: list[str], *, test_order: bool = False, clients: Clients | None = None
+) -> tuple[LiveNode, Path]:
+    node, iids = _base_node(cfg, tickers, clients)
     report = runtime_dir(cfg) / f"smoke-{datetime.now(UTC):%Y%m%d-%H%M%S}.json"
     node.add_strategy(
         SmokeTest(
             SmokeTestConfig(
                 order_id_tag="SMOKE",
                 instruments=iids,
+                venue=Venue(IB),
                 paper_account=cfg.paper.account_id,
                 report_path=str(report),
                 test_order=test_order,

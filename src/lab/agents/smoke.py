@@ -18,6 +18,7 @@ class SmokeTestConfig(StrategyConfig):
         self,
         *,
         instruments: dict,
+        venue,
         paper_account: str,
         report_path: str,
         wait_s: int = 45,
@@ -26,6 +27,7 @@ class SmokeTestConfig(StrategyConfig):
     ):
         super().__init__()
         self.instruments = instruments
+        self.venue = venue
         self.paper_account = paper_account
         self.report_path = report_path
         self.wait_s = wait_s
@@ -46,6 +48,7 @@ class SmokeTest(Strategy):
         super().__init__(config)
         self.bars: dict[str, int] = {}
         self.last_close: dict[str, float] = {}
+        self.last_bar: dict[str, str] = {}
         self.checks: dict[str, dict] = {}
         self.order_events: list[str] = []
         self.test_order_id = None
@@ -69,14 +72,19 @@ class SmokeTest(Strategy):
             t = str(b.bar_type.instrument_id.symbol)
             self.bars[t] = self.bars.get(t, 0) + 1
             self.last_close[t] = float(b.close)
+            # The bar's own timestamp, so the report shows which session the broker's "last bar" is.
+            self.last_bar[t] = datetime.fromtimestamp(b.ts_event / 1e9, UTC).isoformat(timespec="minutes")
 
     def _check(self, name: str, ok: bool, detail: str):
         self.checks[name] = {"ok": bool(ok), "detail": detail}
 
     def _evaluate(self, _event):
-        ids = [str(a.id) for a in self.cache.accounts()]
-        paper_ok = bool(ids) and all(is_paper_account(i) and i.endswith(self.config.paper_account) for i in ids)
-        self._check("paper account", paper_ok, f"broker reports {ids}, expected {self.config.paper_account}")
+        aid = self.cache.account_id(self.config.venue)
+        account = str(aid) if aid is not None else None
+        paper_ok = (
+            account is not None and is_paper_account(account) and account.split("-", 1)[-1] == self.config.paper_account
+        )
+        self._check("paper account", paper_ok, f"broker reports {account}, expected {self.config.paper_account}")
         missing = [t for t, iid in self.config.instruments.items() if self.cache.instrument(iid) is None]
         self._check(
             "instruments", not missing, f"missing {missing}" if missing else f"{len(self.config.instruments)} loaded"
@@ -87,7 +95,10 @@ class SmokeTest(Strategy):
             not nobars,
             f"none for {nobars}"
             if nobars
-            else ", ".join(f"{t}: {n} bars, last close {self.last_close.get(t)}" for t, n in self.bars.items()),
+            else ", ".join(
+                f"{t}: {n} bars, last close {self.last_close.get(t)} at {self.last_bar.get(t)} UTC"
+                for t, n in self.bars.items()
+            ),
         )
         positions = {t: float(self.portfolio.net_position(iid)) for t, iid in self.config.instruments.items()}
         self._check("broker positions", True, json.dumps({t: q for t, q in positions.items() if q}) or "{}")

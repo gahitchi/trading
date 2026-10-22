@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from nautilus_trader.model import OrderSide, TimeInForce
+from nautilus_trader.model import ClientOrderId, OrderSide, TimeInForce
 from nautilus_trader.trading import Strategy, StrategyConfig
 
 from lab.agents.messages import (
@@ -21,9 +21,11 @@ from lab.agents.messages import (
     FillReport,
     RiskEvent,
 )
+from lab.agents.schedule import next_at
 from lab.safety import is_paper_account, read_kill_switch
 
 NY = ZoneInfo("America/New_York")
+_KEEP_TRADE_IDS = 2000  # broker trade IDs remembered for de-duplication (far more than a few days of fills)
 
 
 class ExecutionAgentConfig(StrategyConfig):
@@ -46,6 +48,7 @@ class ExecutionAgentConfig(StrategyConfig):
         kill_path: str | None = None,
         heartbeat_path: str | None = None,
         adopt_broker_positions: bool = False,
+        weekdays_only: bool = True,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId.
@@ -71,6 +74,7 @@ class ExecutionAgentConfig(StrategyConfig):
         self.kill_path = kill_path
         self.heartbeat_path = heartbeat_path
         self.adopt_broker_positions = adopt_broker_positions
+        self.weekdays_only = weekdays_only
 
 
 class ExecutionAgent(Strategy):
@@ -104,11 +108,21 @@ class ExecutionAgent(Strategy):
         self.cash = config.capital
         self.commissions = 0.0
         self.held: dict[str, float] = dict.fromkeys(config.instruments, 0.0)
+        # Write-ahead order journal: every order is recorded here BEFORE it is sent, and stays
+        # until the broker reports it closed. After a crash between order and fill, the fills are
+        # recovered from the broker's reports at start-up (_recover_pending) instead of leaving the
+        # ledger behind the broker. Fills are applied once per broker trade ID.
+        self.pending: dict[str, dict] = {}
+        self.applied: list[str] = []
+        self._applied_set: set[str] = set()
         if config.state_path and Path(config.state_path).exists():
             state = json.loads(Path(config.state_path).read_text())
             self.cash = float(state["cash"])
             self.commissions = float(state.get("commissions", 0.0))
             self.held.update({t: float(q) for t, q in state.get("positions", {}).items() if t in self.held})
+            self.pending = dict(state.get("pending", {}))
+            self.applied = list(state.get("applied_trades", []))
+            self._applied_set = set(self.applied)
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -117,6 +131,7 @@ class ExecutionAgent(Strategy):
         self.subscribe_topic(T_APPROVED, self._on_approved)
         if self.config.live:
             now = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY)
+            self._recover_pending()
             if self.config.adopt_broker_positions:
                 self._adopt_broker_positions()
             self._schedule(now)
@@ -139,13 +154,10 @@ class ExecutionAgent(Strategy):
         self.halted = self.halted or msg.halted
 
     def _schedule(self, after: datetime):
-        hh, mm = map(int, self.config.rebalance_time.split(":"))
-        nxt = after.replace(hour=hh, minute=mm, second=0, microsecond=0)
-        if nxt <= after:
-            nxt += timedelta(days=1)
-        while nxt.weekday() >= 5:
-            nxt += timedelta(days=1)
-        self.clock.set_time_alert_ns(f"rebalance-{nxt:%Y%m%d}", int(nxt.timestamp() * 1e9), callback=self._on_alert)
+        nxt = next_at(after, self.config.rebalance_time, weekdays_only=self.config.weekdays_only)
+        self.clock.set_time_alert_ns(
+            f"rebalance-{nxt:%Y%m%d-%H%M%S}", int(nxt.timestamp() * 1e9), callback=self._on_alert
+        )
         self.alert_pending = True
 
     def _on_alert(self, event):
@@ -172,7 +184,7 @@ class ExecutionAgent(Strategy):
                         "halted": self.halted,
                         "blocked": self.blocked_reason or None,
                         "orders_sent": self.orders_sent,
-                        "accounts": [str(a.id) for a in self.cache.accounts()],
+                        "account": self._account_id(),
                     }
                 )
             )
@@ -237,6 +249,8 @@ class ExecutionAgent(Strategy):
                         "cash": self.cash,
                         "commissions": self.commissions,
                         "positions": self._nonzero(self.held),
+                        "pending": self.pending,
+                        "applied_trades": self.applied[-_KEEP_TRADE_IDS:],
                         "updated": datetime.now(UTC).isoformat(timespec="seconds"),
                     }
                 )
@@ -298,6 +312,10 @@ class ExecutionAgent(Strategy):
                 continue  # small drift: not worth the commission
             if self.cache.orders_open_count(instrument_id=iid) > 0:
                 continue
+            if any(p["ticker"] == ticker for p in self.pending.values()):
+                # An earlier order for this stock is not settled yet: never risk a duplicate.
+                self._risk_event("order_pending", f"{ticker}: previous order still unsettled; no new order today")
+                continue
             orders.append((diff, iid, ticker, price))
 
         orders.sort(key=lambda o: o[0] > 0)  # sells first
@@ -332,16 +350,28 @@ class ExecutionAgent(Strategy):
         side = OrderSide.BUY if diff > 0 else OrderSide.SELL
         tif = TimeInForce.AT_THE_OPEN if self.config.live else TimeInForce.GTC
         order = self.order_factory.market(iid, side, inst.make_qty(abs(diff)), time_in_force=tif)
+        self.pending[str(order.client_order_id)] = {
+            "ticker": ticker,
+            "side": "BUY" if diff > 0 else "SELL",
+            "qty": abs(diff),
+            "ts": self.clock.timestamp_ns(),
+        }
+        self._save()  # journaled before it can reach the broker
         self.submit_order(order)
         self.orders_sent += 1
         return True
 
+    def _account_id(self) -> str | None:
+        """The account the broker reports for our venue (e.g. 'IB-DU1234567'), or None before it reports."""
+        aid = self.cache.account_id(self.config.venue)
+        return str(aid) if aid is not None else None
+
     def _paper_guard(self) -> bool:
-        ids = [str(a.id) for a in self.cache.accounts()]
+        account = self._account_id()
         expected = self.config.paper_account
-        ok = bool(ids) and all(is_paper_account(i) and i.endswith(expected) for i in ids)
+        ok = account is not None and is_paper_account(account) and account.split("-", 1)[-1] == expected
         if not ok:
-            msg = f"refusing to trade: broker accounts {ids} are not the configured paper account {expected!r}"
+            msg = f"refusing to trade: broker account {account!r} is not the configured paper account {expected!r}"
             self.log.error(msg)
             self._risk_event("paper_guard", msg)
             self.shutdown_system(msg)
@@ -349,24 +379,72 @@ class ExecutionAgent(Strategy):
 
     # ------------------------------------------------------------------ order events
 
-    def on_order_filled(self, ev):
+    def _apply_fill(self, ev, *, recovered: bool = False) -> bool:
+        """Book one broker fill into the ledger, once per trade ID. Returns False for a repeat."""
+        trade = str(ev.trade_id)
+        if trade in self._applied_set:
+            return False
         qty, px = float(ev.last_qty), float(ev.last_px)
-        fee = float(ev.commission.as_double())
+        fee = float(ev.commission.as_double()) if ev.commission is not None else 0.0
         buy = ev.order_side == OrderSide.BUY
         ticker = str(ev.instrument_id.symbol)
         self.cash += -qty * px - fee if buy else qty * px - fee
         self.commissions += fee
         self.held[ticker] = self.held.get(ticker, 0.0) + (qty if buy else -qty)
+        self.applied.append(trade)
+        self._applied_set.add(trade)
+        if len(self.applied) > 2 * _KEEP_TRADE_IDS:
+            self.applied = self.applied[-_KEEP_TRADE_IDS:]
+            self._applied_set = set(self.applied)
         self._save()
         self.publish_message(T_FILL, FillReport(ev.ts_event, ticker, "BUY" if buy else "SELL", qty, px, fee))
+        if recovered:
+            self._risk_event(
+                "fill_recovered",
+                f"{ticker} {'BUY' if buy else 'SELL'} {qty:g} @ {px:.2f} (trade {trade}) filled while the node was down; "
+                "booked from the broker's report",
+            )
+        return True
+
+    def _close_pending(self, client_order_id) -> None:
+        if self.pending.pop(str(client_order_id), None) is not None:
+            self._save()
+
+    def _recover_pending(self) -> None:
+        """After a restart: settle every journaled order from what the broker reported at reconciliation."""
+        for coid, info in list(self.pending.items()):
+            order = self.cache.order(ClientOrderId(coid))
+            if order is None:
+                # The broker reports no such order: it never arrived (crash between journal and send),
+                # or was rejected before acceptance. Nothing was traded, so the journal entry goes.
+                self._risk_event("order_unknown", f"{info['ticker']}: order {coid} unknown to the broker; dropped")
+                self._close_pending(coid)
+                continue
+            for e in order.events():
+                if type(e).__name__ == "OrderFilled":
+                    self._apply_fill(e, recovered=True)
+            if order.is_closed:
+                self._close_pending(coid)
+
+    def on_order_filled(self, ev):
+        self._apply_fill(ev)
+        order = self.cache.order(ev.client_order_id)
+        if order is not None and order.is_closed:
+            self._close_pending(ev.client_order_id)
+
+    def on_order_canceled(self, ev):
+        self._close_pending(ev.client_order_id)
 
     def on_order_rejected(self, ev):
         self.rejections += 1
+        self._close_pending(ev.client_order_id)
         self._risk_event("order_rejected", f"{ev.instrument_id}: {ev.reason}")
 
     def on_order_denied(self, ev):
         self.rejections += 1
+        self._close_pending(ev.client_order_id)
         self._risk_event("order_denied", f"{ev.instrument_id}: {ev.reason}")
 
     def on_order_expired(self, ev):
+        self._close_pending(ev.client_order_id)
         self._risk_event("order_expired", f"{ev.instrument_id}: order expired unfilled")

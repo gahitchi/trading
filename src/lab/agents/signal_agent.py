@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from nautilus_trader.common import DataActor, DataActorConfig
 
 from lab.agents.messages import T_SIGNAL, SignalUpdate
+from lab.agents.schedule import next_at, now_ny, parse_clock
 from lab.signals.base import Signal, Window, clamp_target
 from lab.universe import bar_type
 
@@ -34,8 +35,11 @@ class SignalAgentConfig(DataActorConfig):
         live: bool = False,
         signal_time: str = "16:10",
         active_windows: list | None = None,
+        session_close: str = "16:00",
+        weekdays_only: bool = True,
         **_kwargs,
     ):
+        """signal_time / session_close: New York clock times, HH:MM or HH:MM:SS (see agents/schedule.py)."""
         super().__init__()
         self.signal = signal
         self.sleeve = sleeve
@@ -44,6 +48,8 @@ class SignalAgentConfig(DataActorConfig):
         self.trade_start_ns = trade_start_ns
         self.live = live
         self.signal_time = signal_time
+        self.session_close = session_close
+        self.weekdays_only = weekdays_only
         # [(from_ns, until_ns or None), ...]: when this stock may be held. None = always.
         self.active_windows = active_windows
 
@@ -77,13 +83,14 @@ class SignalAgent(DataActor):
             self._process(bar, publish=True)
 
     def on_historical_bars(self, bars):
-        now_ny = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY)
+        now = now_ny(self.clock)
+        close = parse_clock(self.config.session_close)
         fresh = []
         for b in sorted(bars, key=lambda b: b.ts_event):
             if b.ts_event <= self.last_ts:
                 continue
             day = datetime.fromtimestamp(b.ts_event / 1e9, NY).date()
-            if day == now_ny.date() and now_ny.time() < time(16, 0):
+            if day == now.date() and now.time() < close:
                 continue  # today's bar is still forming
             fresh.append(b)
         for i, b in enumerate(fresh):
@@ -141,19 +148,15 @@ class SignalAgent(DataActor):
 
     def _request_history(self, *_):
         days = int(self.signal.lookback * 1.6) + 15  # calendar days covering `lookback` sessions
-        start = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY) - timedelta(days=days)
+        start = now_ny(self.clock) - timedelta(days=days)
         self.request_bars(self.bar_type, start=start)
 
     def _schedule_daily_request(self):
-        hh, mm = map(int, self.config.signal_time.split(":"))
-        now = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY)
-        nxt = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-        if nxt <= now:
-            nxt += timedelta(days=1)
-        while nxt.weekday() >= 5:
-            nxt += timedelta(days=1)
+        nxt = next_at(now_ny(self.clock), self.config.signal_time, weekdays_only=self.config.weekdays_only)
         self.clock.set_time_alert_ns(
-            f"signal-{self.config.sleeve}-{nxt:%Y%m%d}", int(nxt.timestamp() * 1e9), callback=self._on_signal_time
+            f"signal-{self.config.sleeve}-{nxt:%Y%m%d-%H%M%S}",
+            int(nxt.timestamp() * 1e9),
+            callback=self._on_signal_time,
         )
 
     def _on_signal_time(self, _event):
