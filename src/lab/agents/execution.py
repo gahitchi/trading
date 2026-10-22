@@ -585,10 +585,19 @@ class ExecutionAgent(Strategy):
         for coid, info in list(self.pending.items()):
             order = self.cache.order(ClientOrderId(coid))
             if order is None:
-                # The broker reports no such order: it never arrived (crash between journal and send),
-                # or was rejected before acceptance. Nothing was traded, so the journal entry goes.
-                self._risk_event("order_unknown", f"{info['ticker']}: order {coid} unknown to the broker; dropped")
-                self._close_pending(coid)
+                # Absence from the reconciliation cache is NOT proof the order never
+                # reached IBKR. A crash may occur after submission but before any
+                # acknowledgment, and broker reports may be incomplete/delayed.
+                # Keep the write-ahead intent so a delayed fill remains attributable.
+                # Do not issue a replacement order until the uncertainty is resolved.
+                detail = (
+                    f"{info['ticker']}: journaled order {coid} not confirmed by broker reconciliation; "
+                    "possible in-flight order. Preserve intent and require audited investigation"
+                )
+                self._risk_event("order_unknown", detail)
+                halt = self._halt()
+                if halt is None or halt.get("kind") != "reconciliation_mismatch":
+                    self._hard_halt("reconciliation_mismatch", detail)
                 continue
             for e in order.events():
                 if type(e).__name__ == "OrderFilled":
