@@ -1,8 +1,8 @@
 """
 The signal interface: the ONLY thing a strategy author (human or AI) writes.
 
-A Signal sees a read-only window of past daily bars, ending with the bar that
-just closed, and returns its desired exposure to that stock:
+A Signal sees a read-only window of past daily bars (prices, volume and session
+dates), ending with the bar that just closed, and returns its desired exposure:
 
     0.0 = no position      1.0 = fully invested (its share of the portfolio)
 
@@ -22,15 +22,27 @@ import numpy as np
 
 
 class Window:
-    """Read-only numpy arrays of the most recent `len(window)` daily bars, oldest first."""
+    """Read-only numpy arrays of the most recent `len(window)` daily bars, oldest first.
 
-    __slots__ = ("open", "high", "low", "close", "volume")
+    open, high, low, close, volume: float arrays
+    dates: numpy datetime64[D] array of the session dates (New York), for calendar
+           effects; e.g. day of month: (w.dates - w.dates.astype("datetime64[M]")).astype(int) + 1
+    """
 
-    def __init__(self, o, h, lo, c, v):
+    __slots__ = ("close", "dates", "high", "low", "open", "volume")
+
+    def __init__(self, o, h, lo, c, v, dates=None):
         for name, arr in (("open", o), ("high", h), ("low", lo), ("close", c), ("volume", v)):
             a = np.asarray(arr, dtype=float)
             a.setflags(write=False)
             object.__setattr__(self, name, a)
+        d = (
+            np.asarray(dates, dtype="datetime64[D]")
+            if dates is not None
+            else np.full(len(self.close), np.datetime64("NaT", "D"))
+        )
+        d.setflags(write=False)
+        object.__setattr__(self, "dates", d)
 
     def __setattr__(self, *_):
         raise AttributeError("Window is read-only")
@@ -92,3 +104,44 @@ def rsi(close: np.ndarray, n: int) -> float:
     if ad == 0:
         return 100.0
     return float(100 - 100 / (1 + au / ad))
+
+
+class CrossSectionalSignal:
+    """A strategy that ranks stocks against each other (e.g. momentum: buy the past winners).
+
+    Once per day it sees a Window for every stock currently in the universe that has at
+    least `lookback` bars, and returns weights: fractions of this strategy's capital,
+    each >= 0, summing to at most 1. Stocks it leaves out get 0.
+    """
+
+    name: str = "unnamed"
+    description: str = ""
+    lookback: int = 1
+    defaults: dict = {}
+    cross_sectional = True
+
+    def __init__(self, **params):
+        unknown = set(params) - set(self.defaults)
+        if unknown:
+            raise ValueError(f"{self.name}: unknown parameters {sorted(unknown)}")
+        self.params = {**self.defaults, **params}
+        self.last: dict[str, float] = {}
+
+    def weights(self, windows: dict[str, Window]) -> dict[str, float]:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def label(self) -> str:
+        if not self.params:
+            return self.name
+        return f"{self.name}(" + ",".join(f"{k}={v}" for k, v in sorted(self.params.items())) + ")"
+
+
+def clean_weights(raw) -> dict[str, float]:
+    """Coerce a cross-sectional output into valid long-only weights summing to <= 1."""
+    out = {}
+    for k, v in (raw or {}).items():
+        x = clamp_target(v) if not isinstance(v, bool) else float(v)
+        if x > 0:
+            out[str(k)] = x
+    total = sum(out.values())
+    return {k: v / total for k, v in out.items()} if total > 1 else out

@@ -61,5 +61,9 @@ def summarize(equity: pd.Series, *, fills: list | None = None, gross: pd.Series 
 def fmt(m: dict) -> dict:
     """Human-readable version for tables."""
     pct = ("total_return", "cagr", "volatility", "max_drawdown", "avg_exposure")
-    return {k: (f"{v:+.1%}" if k in ("total_return", "cagr") else f"{v:.1%}") if k in pct and isinstance(v, float)
-            else (f"{v:.2f}" if isinstance(v, float) else v) for k, v in m.items()}
+    return {
+        k: (f"{v:+.1%}" if k in ("total_return", "cagr") else f"{v:.1%}")
+        if k in pct and isinstance(v, float)
+        else (f"{v:.2f}" if isinstance(v, float) else v)
+        for k, v in m.items()
+    }

@@ -70,4 +70,6 @@ class RiskAgent(DataActor):
             detail = f"drawdown {dd:.1%} >= limit {self.config.max_drawdown:.0%}: flattening and halting"
             self.log.warning(detail)
             self.publish_message(T_RISK, RiskEvent(snap.ts, "circuit_breaker", detail))
-            self.publish_message(T_APPROVED, self._approve(self.last_weights or dict.fromkeys(snap.positions, 0.0), snap.ts))
+            self.publish_message(
+                T_APPROVED, self._approve(self.last_weights or dict.fromkeys(snap.positions, 0.0), snap.ts)
+            )

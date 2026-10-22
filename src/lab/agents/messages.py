@@ -22,16 +22,17 @@ ALL_TOPICS = (T_SIGNAL, T_TARGETS, T_APPROVED, T_EQUITY, T_FILL, T_RISK)
 
 @dataclass(frozen=True)
 class SignalUpdate:
-    sleeve: str      # which signal-on-ticker produced this
+    sleeve: str  # which signal-on-ticker produced this
     ticker: str
-    target: float    # desired exposure 0..1 for this sleeve
-    price: float     # close of the bar the decision was made on
-    ts: int          # bar timestamp (UNIX ns)
+    target: float  # desired exposure 0..1 for this sleeve
+    price: float  # close of the bar the decision was made on
+    ts: int  # bar timestamp (UNIX ns)
+    active: bool = True  # False once the stock leaves the investable universe (delisting, index exit)
 
 
 @dataclass(frozen=True)
 class TargetWeights:
-    weights: dict    # ticker -> fraction of portfolio equity
+    weights: dict  # ticker -> fraction of portfolio equity
     ts: int
 
 
@@ -49,7 +50,7 @@ class EquitySnapshot:
     equity: float
     cash: float
     positions: dict  # ticker -> shares
-    gross: float     # invested value / equity
+    gross: float  # invested value / equity
 
 
 @dataclass(frozen=True)

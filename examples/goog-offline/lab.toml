@@ -37,6 +37,10 @@ max_weight = 0.25       # max fraction of equity in one stock
 max_gross = 1.0         # long-only, no leverage
 max_drawdown = 0.35     # circuit breaker: flatten and halt if equity drops 35% from its peak
 
+[portfolio]
+target_vol = 0.0        # annualized volatility target (e.g. 0.15); 0 = off. Scales exposure down, never up
+vol_window = 63         # trading days used to estimate volatility
+
 [paper]
 host = "127.0.0.1"
 port = 4002              # IB Gateway paper port (TWS paper: 7497). Live ports are refused.
@@ -46,6 +50,12 @@ market_data = "DELAYED_FROZEN"  # REALTIME needs IB market data subscriptions
 capital = 100000.0       # how much of the paper account the agents may allocate
 rebalance_time = "16:15" # New York time; orders go out as market-on-open for the next session
 signal_time = "16:10"    # New York time; agents fetch the completed daily bars
+max_order_value = 30000.0   # fat-finger guard: no single buy above this (USD)
+max_orders_per_day = 40
+max_daily_turnover = 1.0    # buys per day, as a fraction of equity
+order_rate = "10/00:00:01"  # NautilusTrader risk engine: at most 10 order submissions per second
+# Environment variables override these (used by the Docker deployment):
+#   LAB_IB_HOST, LAB_IB_PORT, LAB_IB_CLIENT_ID, LAB_PAPER_ACCOUNT
 
 [research]
 provider = "claude_code"   # "claude_code" (your Claude subscription) or "ollama" (local, free)
@@ -57,3 +67,4 @@ max_fix_attempts = 3          # engineer retries when generated code fails check
 null_samples = 20             # bootstrap resamples of real data for the noise-floor test
 min_sharpe_edge = 0.10        # train Sharpe must beat buy-and-hold by at least this
 max_p_value = 0.05            # and beat at least 95% of the noise-floor samples
+min_dsr = 0.95                # and its active return's Deflated Sharpe Ratio (all trials counted) >= this

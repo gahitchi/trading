@@ -12,10 +12,19 @@ ticker becomes in each environment:
 from __future__ import annotations
 
 import pandas as pd
-
 from nautilus_trader.model import (
-    AggressorSide, Bar, BarType, Currency, Equity, InstrumentId, Price, Quantity, Symbol,
-    TradeId, TradeTick, Venue,
+    AggressorSide,
+    Bar,
+    BarType,
+    Currency,
+    Equity,
+    InstrumentId,
+    Price,
+    Quantity,
+    Symbol,
+    TradeId,
+    TradeTick,
+    Venue,
 )
 
 SIM = Venue("SIM")
@@ -67,8 +76,27 @@ def to_market_events(df: pd.DataFrame, iid: InstrumentId, open_print_fraction: f
         hi = max(h[i], o[i], c[i])
         low = min(lo[i], o[i], c[i])
         size = max(1, int(v[i] * open_print_fraction))
-        events.append(TradeTick(iid, Price(o[i], 2), Quantity(size, 0), AggressorSide.NO_AGGRESSOR,
-                                TradeId(f"{sym}-open-{i}"), int(t_open[i]), int(t_open[i])))
-        events.append(Bar(bt, Price(o[i], 2), Price(hi, 2), Price(low, 2), Price(c[i], 2),
-                          Quantity(max(1, int(v[i])), 0), int(t_close[i]), int(t_close[i])))
+        events.append(
+            TradeTick(
+                iid,
+                Price(o[i], 2),
+                Quantity(size, 0),
+                AggressorSide.NO_AGGRESSOR,
+                TradeId(f"{sym}-open-{i}"),
+                int(t_open[i]),
+                int(t_open[i]),
+            )
+        )
+        events.append(
+            Bar(
+                bt,
+                Price(o[i], 2),
+                Price(hi, 2),
+                Price(low, 2),
+                Price(c[i], 2),
+                Quantity(max(1, int(v[i])), 0),
+                int(t_close[i]),
+                int(t_close[i]),
+            )
+        )
     return events

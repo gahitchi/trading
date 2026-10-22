@@ -80,13 +80,16 @@ class Provider:
 class ClaudeCodeProvider(Provider):
     name = "claude_code"
 
-    def __init__(self, model: str, timeout_s: int, workdir: Path, usage_log: Path | None = None,
-                 binary: str | None = None):
+    def __init__(
+        self, model: str, timeout_s: int, workdir: Path, usage_log: Path | None = None, binary: str | None = None
+    ):
         super().__init__(model, timeout_s, usage_log)
         self.binary = binary or shutil.which("claude")
         if not self.binary:
-            raise LLMError("Claude Code CLI not found. Install it (https://code.claude.com/docs/en/setup) "
-                           "and run `claude` once to log in with your subscription.")
+            raise LLMError(
+                "Claude Code CLI not found. Install it (https://code.claude.com/docs/en/setup) "
+                "and run `claude` once to log in with your subscription."
+            )
         self.workdir = workdir
 
     def _complete(self, system, prompt, schema):
@@ -94,21 +97,36 @@ class ClaudeCodeProvider(Provider):
         # leak into the agents, and no tools are enabled, so they can only answer.
         self.workdir.mkdir(parents=True, exist_ok=True)
         cmd = [
-            self.binary, "-p",
-            "--output-format", "json",
-            "--json-schema", json.dumps(schema),
-            "--system-prompt", system,
-            "--model", self.model,
-            "--tools", "",
-            "--permission-mode", "dontAsk",
-            "--permission-prompts", "none",
+            self.binary,
+            "-p",
+            "--output-format",
+            "json",
+            "--json-schema",
+            json.dumps(schema),
+            "--system-prompt",
+            system,
+            "--model",
+            self.model,
+            "--tools",
+            "",
+            "--permission-mode",
+            "dontAsk",
+            "--permission-prompts",
+            "none",
             "--strict-mcp-config",
             "--disable-slash-commands",
             "--no-session-persistence",
         ]
         try:
-            proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=self.workdir,
-                                  timeout=self.timeout_s, env=os.environ.copy())
+            proc = subprocess.run(
+                cmd,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                cwd=self.workdir,
+                timeout=self.timeout_s,
+                env=os.environ.copy(),
+            )
         except subprocess.TimeoutExpired as e:
             raise LLMError(f"claude timed out after {self.timeout_s}s") from e
         try:
@@ -131,20 +149,24 @@ class OllamaProvider(Provider):
         self.url = url.rstrip("/")
 
     def _complete(self, system, prompt, schema):
-        body = json.dumps({
-            "model": self.model,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
-            "format": schema,  # Ollama constrains decoding to this JSON schema
-            "stream": False,
-            "options": {"temperature": 0.2},
-        }).encode()
+        body = json.dumps(
+            {
+                "model": self.model,
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+                "format": schema,  # Ollama constrains decoding to this JSON schema
+                "stream": False,
+                "options": {"temperature": 0.2},
+            }
+        ).encode()
         req = urllib.request.Request(f"{self.url}/api/chat", data=body, headers={"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=self.timeout_s) as r:
                 payload = json.loads(r.read())
         except urllib.error.URLError as e:
-            raise LLMError(f"cannot reach Ollama at {self.url} ({e.reason}). Is `ollama serve` running "
-                           f"and the model pulled (`ollama pull {self.model}`)?") from e
+            raise LLMError(
+                f"cannot reach Ollama at {self.url} ({e.reason}). Is `ollama serve` running "
+                f"and the model pulled (`ollama pull {self.model}`)?"
+            ) from e
         except TimeoutError as e:
             raise LLMError(f"Ollama timed out after {self.timeout_s}s") from e
         if "error" in payload:
@@ -178,7 +200,9 @@ class Budget:
 def make_provider(settings, root: Path) -> Provider:
     usage = root / "research" / "usage.jsonl"
     if settings.provider == "claude_code":
-        return ClaudeCodeProvider(settings.model, settings.call_timeout_s, root / "research" / ".agent_workspace", usage)
+        return ClaudeCodeProvider(
+            settings.model, settings.call_timeout_s, root / "research" / ".agent_workspace", usage
+        )
     if settings.provider == "ollama":
         return OllamaProvider(settings.model, settings.call_timeout_s, settings.ollama_url, usage)
     raise LLMError(f"unknown provider {settings.provider!r}")

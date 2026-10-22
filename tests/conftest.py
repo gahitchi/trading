@@ -28,8 +28,14 @@ def _write_lab(tmp: Path, universe: dict, warmup: str, train, test, holdout) -> 
 @pytest.fixture
 def goog_lab(tmp_path):
     """A lab configured for the real GOOG 2004-2013 sample."""
-    p = _write_lab(tmp_path, {"GOOG": "XNAS"}, "2004-08-19", ("2005-07-01", "2009-12-31"),
-                   ("2010-01-01", "2011-12-31"), "2012-01-01")
+    p = _write_lab(
+        tmp_path,
+        {"GOOG": "XNAS"},
+        "2004-08-19",
+        ("2005-07-01", "2009-12-31"),
+        ("2010-01-01", "2011-12-31"),
+        "2012-01-01",
+    )
     cfg = load_config(p)
     data.save(cfg, "GOOG", data.sample_goog(), source="test", adjusted=False)
     return cfg

@@ -99,9 +99,16 @@ class Orchestrator:
         for h in self.all_hypotheses():
             p = h.read("proposal.json") or {}
             t = h.read("train.json")
-            entry = {"id": h.id, "title": p.get("title"), "hypothesis": p.get("hypothesis"),
-                     "outcome": {"candidate": "passed training", "failed_test": "passed training",
-                                 "promoted": "passed training"}.get(h.status, h.status)}
+            entry = {
+                "id": h.id,
+                "title": p.get("title"),
+                "hypothesis": p.get("hypothesis"),
+                "outcome": {
+                    "candidate": "passed training",
+                    "failed_test": "passed training",
+                    "promoted": "passed training",
+                }.get(h.status, h.status),
+            }
             if t:
                 entry["train_sharpe_edge_vs_buy_and_hold"] = round(t["rows"][1]["sharpe_edge"], 3)
                 entry["noise_floor_p_value"] = round(t["null"]["p_value"], 3)
@@ -114,29 +121,49 @@ class Orchestrator:
 
     def notebook(self, h: Hypothesis) -> None:
         p = h.read("proposal.json") or {}
-        lines = [f"\n## {h.id}: {p.get('title', '')}", f"_{_now()} · status: **{h.status}**_", "",
-                 f"**Hypothesis.** {p.get('hypothesis', '')}", "", f"**Mechanism.** {p.get('mechanism', '')}", "",
-                 f"**Prediction.** {p.get('prediction', '')}", ""]
+        lines = [
+            f"\n## {h.id}: {p.get('title', '')}",
+            f"_{_now()} · status: **{h.status}**_",
+            "",
+            f"**Hypothesis.** {p.get('hypothesis', '')}",
+            "",
+            f"**Mechanism.** {p.get('mechanism', '')}",
+            "",
+            f"**Prediction.** {p.get('prediction', '')}",
+            "",
+        ]
         review = h.read("review.json")
         if review:
-            lines += [f"**Critic** ({review['verdict']}, overfitting risk {review['overfitting_risk']}). {review['summary']}", ""]
+            lines += [
+                f"**Critic** ({review['verdict']}, overfitting risk {review['overfitting_risk']}). {review['summary']}",
+                "",
+            ]
         t = h.read("train.json")
         if t:
             c, b = t["rows"][1], t["rows"][0]
-            lines += [f"**Train {t['rows'][0].get('start')}..{t['rows'][0].get('end')}** on {', '.join(t['tickers'])}: "
-                      f"Sharpe {c.get('sharpe', 0):.2f} vs buy-and-hold {b.get('sharpe', 0):.2f} "
-                      f"(edge {c['sharpe_edge']:+.2f}); return {c.get('total_return', 0):+.1%} vs {b.get('total_return', 0):+.1%}; "
-                      f"max drawdown {c.get('max_drawdown', 0):.1%} vs {b.get('max_drawdown', 0):.1%}; "
-                      f"noise-floor p = {t['null']['p_value']:.3f} over {t['null']['samples']} bootstrap samples. "
-                      f"Checks: {', '.join(k + (' ✓' if v else ' ✗') for k, v in t['checks'].items())}.", ""]
+            lines += [
+                f"**Train {t['rows'][0].get('start')}..{t['rows'][0].get('end')}** on {', '.join(t['tickers'])}: "
+                f"Sharpe {c.get('sharpe', 0):.2f} vs buy-and-hold {b.get('sharpe', 0):.2f} "
+                f"(edge {c['sharpe_edge']:+.2f}); return {c.get('total_return', 0):+.1%} vs {b.get('total_return', 0):+.1%}; "
+                f"max drawdown {c.get('max_drawdown', 0):.1%} vs {b.get('max_drawdown', 0):.1%}; "
+                f"noise-floor p = {t['null']['p_value']:.3f} over {t['null']['samples']} bootstrap samples; "
+                f"deflated Sharpe {c.get('dsr', float('nan')):.2f} after {c.get('trials', 1)} trial(s). "
+                f"Checks: {', '.join(k + (' ✓' if v else ' ✗') for k, v in t['checks'].items())}.",
+                "",
+            ]
         te = h.read("test.json")
         if te:
             c, b = te["rows"][1], te["rows"][0]
-            lines += [f"**Test (out-of-sample)**: Sharpe {c.get('sharpe', 0):.2f} vs {b.get('sharpe', 0):.2f} "
-                      f"(edge {te['sharpe_edge']:+.2f}) → {'survived' if te['survived'] else 'did not survive'}.", ""]
+            lines += [
+                f"**Test (out-of-sample)**: Sharpe {c.get('sharpe', 0):.2f} vs {b.get('sharpe', 0):.2f} "
+                f"(edge {te['sharpe_edge']:+.2f}) → {'survived' if te['survived'] else 'did not survive'}.",
+                "",
+            ]
         n = sum(1 for x in self.all_hypotheses() if x.read("train.json"))
-        lines += [f"_Hypotheses validated so far: {n}. At p ≤ {self.cfg.research.max_p_value}, about "
-                  f"{n * self.cfg.research.max_p_value:.1f} would pass training by luck alone; the test period is the real filter._"]
+        lines += [
+            f"_Hypotheses validated so far: {n}. At p ≤ {self.cfg.research.max_p_value}, about "
+            f"{n * self.cfg.research.max_p_value:.1f} would pass training by luck alone; the test period is the real filter._"
+        ]
         self.root.mkdir(parents=True, exist_ok=True)
         with (self.root / "NOTEBOOK.md").open("a") as f:
             f.write("\n".join(lines) + "\n")
@@ -168,13 +195,37 @@ class Orchestrator:
             if h and h.status:
                 self.notebook(h)
 
+    def retry(self, hid: str) -> Hypothesis:
+        """Implement and validate an existing proposal again (e.g. after an infrastructure fix).
+        Only hypotheses that never reached validation can be retried: re-running one that
+        failed on data would be p-hacking."""
+        h = Hypothesis(self.root, hid)
+        if not h.dir.exists():
+            raise ValueError(f"no hypothesis {hid}")
+        if h.status not in ("broken", "error", "rejected_by_critic", "proposed", "implemented"):
+            raise ValueError(f"{hid} is {h.status!r}: it already met the data, so retrying would be p-hacking")
+        h.set_status("proposed", "retry requested")
+        budget = Budget(self.provider, self.cfg.research.max_llm_calls_per_cycle)
+        try:
+            if self._implement(h, budget):
+                self._validate(h)
+        except LLMError as e:
+            self.log(f"model call failed: {e}")
+            if h.status not in FINAL:
+                h.set_status("error", str(e))
+        finally:
+            self.notebook(h)
+        return h
+
     def _propose(self, budget: Budget) -> Hypothesis:
         train = self.cfg.period("train")
-        prompt = roles.researcher_prompt(list(self.cfg.universe), (str(train.start), str(train.end)),
-                                         self.past_for_researcher())
+        prompt = roles.researcher_prompt(
+            list(self.cfg.universe), (str(train.start), str(train.end)), self.past_for_researcher()
+        )
         self.log("Researcher: proposing a hypothesis...")
-        proposal = budget.call(role="researcher", system=roles.RESEARCHER_SYSTEM, prompt=prompt,
-                               schema=roles.PROPOSAL_SCHEMA)
+        proposal = budget.call(
+            role="researcher", system=roles.RESEARCHER_SYSTEM, prompt=prompt, schema=roles.PROPOSAL_SCHEMA
+        )
         hid = slug(proposal["id"])
         taken = {x.id for x in self.all_hypotheses()} | set(BUILTIN)
         base, k = hid, 2
@@ -208,7 +259,9 @@ class Orchestrator:
             self.log(f"Engineer: {'writing' if code is None else 'fixing'} {h.id} (attempt {attempt + 1})")
             code = self._engineer(h, budget, code, feedback)
             report = check_file(h.dir / "signal.py")
-            h.write("checks.json", {"ok": report.ok, "stage": report.stage, "errors": report.errors, "info": report.info})
+            h.write(
+                "checks.json", {"ok": report.ok, "stage": report.stage, "errors": report.errors, "info": report.info}
+            )
             if not report.ok:
                 self.log(f"  sandbox: {report.stage} check failed ({len(report.errors)} issue(s))")
                 feedback = "Automatic checks failed:\n" + report.text()
@@ -235,8 +288,11 @@ class Orchestrator:
             code, report = last_passing
             h.write("signal.py", code)
             h.write("checks.json", {"ok": True, "stage": report.stage, "errors": [], "info": report.info})
-            h.set_status("implemented", "fix attempts exhausted; validating the last version that passed the "
-                                        "sandbox (critic's open issues are in review.json)")
+            h.set_status(
+                "implemented",
+                "fix attempts exhausted; validating the last version that passed the "
+                "sandbox (critic's open issues are in review.json)",
+            )
             return True
         h.set_status("broken", "could not produce code that passes the sandbox")
         return False
@@ -246,7 +302,9 @@ class Orchestrator:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         if proc.returncode != 0:
             h.set_status("error", f"validator ({mode}) failed: {proc.stderr[-1500:]}")
-            self.log(f"  validator failed: {proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else proc.returncode}")
+            self.log(
+                f"  validator failed: {proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else proc.returncode}"
+            )
             return False
         return True
 
@@ -256,7 +314,9 @@ class Orchestrator:
             return False
         t = h.read("train.json")
         c = t["rows"][1]
-        self.log(f"  Sharpe edge {c['sharpe_edge']:+.2f}, p = {t['null']['p_value']:.3f} -> {'PASS' if t['passed'] else 'fail'}")
+        self.log(
+            f"  Sharpe edge {c['sharpe_edge']:+.2f}, p = {t['null']['p_value']:.3f} -> {'PASS' if t['passed'] else 'fail'}"
+        )
         if not t["passed"]:
             h.set_status("failed_train", "; ".join(k for k, v in t["checks"].items() if not v))
             return False

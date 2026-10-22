@@ -13,6 +13,8 @@ dependencies = [
     "pyarrow>=17",
     "yfinance>=0.2.54",
     "jsonschema>=4.23",
+    "tzdata>=2024.1",  # New York market hours in minimal containers
+    "matplotlib>=3.9",  # HTML reports
 ]
 
 [project.optional-dependencies]
@@ -38,3 +40,12 @@ addopts = "-q -m 'not llm'"
 markers = [
     "llm: calls a real language model (slow, uses your plan's usage)",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["research/hypotheses"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003", "SIM108", "B008", "RUF012", "E501"]  # E501: ruff format owns line length  # RUF012: Signal.defaults is a read-only class attribute by design

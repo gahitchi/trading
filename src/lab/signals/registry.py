@@ -70,8 +70,9 @@ def resolve(name: str, research_dir: Path, params: dict | None = None, *, requir
         known = sorted(BUILTIN) + available_research(research_dir)
         raise SignalNotFound(f"unknown signal {name!r}. Known: {', '.join(known)}")
     if require_tradable and status not in TRADABLE:
-        raise SignalNotFound(f"{name} is {status!r}; only promoted hypotheses can be paper traded "
-                             f"(lab research promote {name})")
+        raise SignalNotFound(
+            f"{name} is {status!r}; only promoted hypotheses can be paper traded (lab research promote {name})"
+        )
     if status not in LOADABLE and status not in TRADABLE:
         raise SignalNotFound(f"{name} is {status!r} and has no validated code yet")
     path = research_dir / "hypotheses" / name / "signal.py"

@@ -5,7 +5,14 @@ from lab.agents.risk import RiskAgent, RiskAgentConfig
 from lab.agents.signal_agent import SignalAgent, SignalAgentConfig
 
 __all__ = [
-    "AllocatorAgent", "AllocatorAgentConfig", "ExecutionAgent", "ExecutionAgentConfig",
-    "RecorderAgent", "RecorderAgentConfig", "RiskAgent", "RiskAgentConfig",
-    "SignalAgent", "SignalAgentConfig",
+    "AllocatorAgent",
+    "AllocatorAgentConfig",
+    "ExecutionAgent",
+    "ExecutionAgentConfig",
+    "RecorderAgent",
+    "RecorderAgentConfig",
+    "RiskAgent",
+    "RiskAgentConfig",
+    "SignalAgent",
+    "SignalAgentConfig",
 ]

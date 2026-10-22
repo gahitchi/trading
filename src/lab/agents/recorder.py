@@ -8,7 +8,13 @@ from pathlib import Path
 from nautilus_trader.common import DataActor, DataActorConfig
 
 from lab.agents.messages import (
-    T_APPROVED, T_EQUITY, T_FILL, T_RISK, T_SIGNAL, T_TARGETS, to_dict,
+    T_APPROVED,
+    T_EQUITY,
+    T_FILL,
+    T_RISK,
+    T_SIGNAL,
+    T_TARGETS,
+    to_dict,
 )
 
 
@@ -33,7 +39,7 @@ class RecorderAgent(DataActor):
     def on_start(self):
         if self.config.journal:
             Path(self.config.journal).parent.mkdir(parents=True, exist_ok=True)
-            self._fh = open(self.config.journal, "a", buffering=1)
+            self._fh = open(self.config.journal, "a", buffering=1)  # noqa: SIM115 - held open for the node's lifetime, closed in on_stop
         self.subscribe_topic(T_EQUITY, lambda m: self._keep(self.equity, m))
         self.subscribe_topic(T_FILL, lambda m: self._keep(self.fills, m))
         self.subscribe_topic(T_RISK, lambda m: self._keep(self.risk, m))

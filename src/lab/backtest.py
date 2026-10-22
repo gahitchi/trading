@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from datetime import date
 
 import pandas as pd
-
 from nautilus_trader.backtest import BacktestEngine
 from nautilus_trader.common import LogLevel
 from nautilus_trader.config import BacktestEngineConfig, LoggerConfig
@@ -20,9 +19,18 @@ from nautilus_trader.model import AccountType, ActorId, Money, OmsType, TraderId
 
 from lab import costs
 from lab.agents import (
-    AllocatorAgent, AllocatorAgentConfig, ExecutionAgent, ExecutionAgentConfig, RecorderAgent,
-    RecorderAgentConfig, RiskAgent, RiskAgentConfig, SignalAgent, SignalAgentConfig,
+    AllocatorAgent,
+    AllocatorAgentConfig,
+    ExecutionAgent,
+    ExecutionAgentConfig,
+    RecorderAgent,
+    RecorderAgentConfig,
+    RiskAgent,
+    RiskAgentConfig,
+    SignalAgent,
+    SignalAgentConfig,
 )
+from lab.agents.cross_sectional import CrossSectionalAgent, CrossSectionalAgentConfig
 from lab.config import LabConfig, RiskSettings
 from lab.metrics import summarize
 from lab.signals.base import Signal
@@ -60,32 +68,86 @@ def _ns(d: date) -> int:
     return int(pd.Timestamp(d).tz_localize(NY).value)
 
 
+def _ns_close(d: date) -> int:
+    return int((pd.Timestamp(d) + pd.Timedelta(hours=16)).tz_localize(NY).value)
+
+
+def active_windows(frames: dict[str, pd.DataFrame], membership: dict | None) -> dict[str, list | None]:
+    """When each stock may be held: its point-in-time membership spells, cut short where
+    its data ends early (a delisting) so the exit can still fill at the last real open.
+    None means always (no membership file and data through the end)."""
+    ref_end = max(df.index[-1] for df in frames.values())
+    out: dict[str, list | None] = {}
+    for t, df in frames.items():
+        ends_early = df.index[-1] < ref_end - pd.Timedelta(days=5)
+        # The exit message goes out on the first inactive bar's close and fills at the next
+        # open, so the window must end two bars before the last one: the sell then fills at
+        # the last real open instead of against a stale price.
+        cutoff = df.index[max(0, len(df) - 3)].date() if ends_early else None
+        if membership is None and not ends_early:
+            out[t] = None
+            continue
+        spells = membership.get(t, []) if membership is not None else [(None, None)]
+        windows = []
+        for a, b in spells:
+            until = b
+            if cutoff is not None:
+                until = min(until, cutoff) if until else cutoff
+            windows.append((_ns(a) if a else 0, _ns_close(until) if until else None))
+        out[t] = windows
+    return out
+
+
 def equal_weight(signal_factory, tickers: list[str]) -> list[Sleeve]:
     w = 1.0 / len(tickers)
     return [Sleeve(signal_factory(), t, w) for t in tickers]
 
 
-def run(cfg: LabConfig, sleeves: list[Sleeve], data: dict[str, pd.DataFrame], start: date, end: date | None,
-        *, label: str = "", risk: RiskSettings | None = None, capital: float | None = None,
-        keep_signals: bool = False, warmup_start: date | None = None) -> RunResult:
-    if not sleeves:
+def run(
+    cfg: LabConfig,
+    sleeves: list[Sleeve],
+    data: dict[str, pd.DataFrame],
+    start: date,
+    end: date | None,
+    *,
+    label: str = "",
+    risk: RiskSettings | None = None,
+    capital: float | None = None,
+    keep_signals: bool = False,
+    warmup_start: date | None = None,
+    execution_overrides: dict | None = None,
+    membership: dict | None = None,
+    normalize_active: bool = False,
+    cross_sectional: list | None = None,
+    target_vol: float = 0.0,
+) -> RunResult:
+    """sleeves: per-stock signals. cross_sectional: [(CrossSectionalSignal, weight, tickers)]."""
+    cross_sectional = cross_sectional or []
+    if not sleeves and not cross_sectional:
         raise ValueError("no sleeves")
     risk = risk or cfg.risk
     capital = capital or cfg.capital
     warm = pd.Timestamp(warmup_start or cfg.warmup_start)
     last = pd.Timestamp(end) if end else None
-    tickers = sorted({s.ticker for s in sleeves})
+    tickers = sorted({s.ticker for s in sleeves} | {t for _, _, ts in cross_sectional for t in ts})
 
-    engine = BacktestEngine(BacktestEngineConfig(
-        trader_id=TraderId("LAB-001"), logging=LoggerConfig(stdout_level=LogLevel.ERROR)))
+    engine = BacktestEngine(
+        BacktestEngineConfig(trader_id=TraderId("LAB-001"), logging=LoggerConfig(stdout_level=LogLevel.ERROR))
+    )
     try:
         engine.add_venue(
-            SIM, OmsType.NETTING, AccountType.CASH, [Money(capital, USD)], base_currency=USD,
-            fee_model=costs.fee_model(cfg.costs), fill_model=costs.fill_model(cfg.costs),
+            SIM,
+            OmsType.NETTING,
+            AccountType.CASH,
+            [Money(capital, USD)],
+            base_currency=USD,
+            fee_model=costs.fee_model(cfg.costs),
+            fill_model=costs.fill_model(cfg.costs),
             latency_model=costs.latency_model(),
             allow_cash_borrowing=True,  # overnight gaps can briefly overdraw, as in a margin account
         )
         iids = {}
+        frames = {}
         for t in tickers:
             if t not in data:
                 raise ValueError(f"no data for {t}")
@@ -95,34 +157,86 @@ def run(cfg: LabConfig, sleeves: list[Sleeve], data: dict[str, pd.DataFrame], st
                 raise ValueError(f"{t}: no data between {warm.date()} and {end}")
             iid = instrument_id(t, "SIM")
             iids[t] = iid
+            frames[t] = df
             engine.add_instrument(equity(iid))
             engine.add_data(to_market_events(df, iid, cfg.costs.open_print_fraction))
 
         start_ns = _ns(start)
+        windows = active_windows(frames, membership)
         signal_agents = []
         for i, s in enumerate(sleeves):
-            a = SignalAgent(SignalAgentConfig(
-                actor_id=ActorId(f"Signal-{i:03d}-{s.ticker}"), signal=s.signal, sleeve=s.id,
-                ticker=s.ticker, instrument_id=iids[s.ticker], trade_start_ns=start_ns))
+            a = SignalAgent(
+                SignalAgentConfig(
+                    actor_id=ActorId(f"Signal-{i:03d}-{s.ticker}"),
+                    signal=s.signal,
+                    sleeve=s.id,
+                    ticker=s.ticker,
+                    instrument_id=iids[s.ticker],
+                    trade_start_ns=start_ns,
+                    active_windows=windows[s.ticker],
+                )
+            )
             signal_agents.append(a)
             engine.add_actor(a)
-        engine.add_actor(AllocatorAgent(AllocatorAgentConfig(
-            actor_id=ActorId("Allocator"), sleeves={s.id: (s.ticker, s.weight) for s in sleeves})))
-        risk_agent = RiskAgent(RiskAgentConfig(
-            actor_id=ActorId("Risk"), max_weight=risk.max_weight, max_gross=risk.max_gross,
-            max_drawdown=risk.max_drawdown))
+        alloc_sleeves = {s.id: (s.ticker, s.weight) for s in sleeves}
+        xs_agents = []
+        for j, (sig, weight, xs_tickers) in enumerate(cross_sectional):
+            a = CrossSectionalAgent(
+                CrossSectionalAgentConfig(
+                    actor_id=ActorId(f"CrossSectional-{j:02d}-{sig.name}"),
+                    signal=sig,
+                    instruments={t: iids[t] for t in xs_tickers},
+                    trade_start_ns=start_ns,
+                    active_windows={t: windows[t] for t in xs_tickers},
+                )
+            )
+            xs_agents.append(a)
+            engine.add_actor(a)
+            for t in xs_tickers:
+                alloc_sleeves[f"{sig.name}:{t}"] = (t, weight / len(xs_tickers))
+        engine.add_actor(
+            AllocatorAgent(
+                AllocatorAgentConfig(
+                    actor_id=ActorId("Allocator"),
+                    sleeves=alloc_sleeves,
+                    normalize_active=normalize_active,
+                    absolute_groups={sig.name for sig, _, _ in cross_sectional},
+                    target_vol=target_vol,
+                    vol_window=cfg.portfolio.vol_window,
+                )
+            )
+        )
+        risk_agent = RiskAgent(
+            RiskAgentConfig(
+                actor_id=ActorId("Risk"),
+                max_weight=risk.max_weight,
+                max_gross=risk.max_gross,
+                max_drawdown=risk.max_drawdown,
+            )
+        )
         engine.add_actor(risk_agent)
         recorder = RecorderAgent(RecorderAgentConfig(actor_id=ActorId("Recorder"), keep_signals=keep_signals))
         engine.add_actor(recorder)
-        execution = ExecutionAgent(ExecutionAgentConfig(
-            order_id_tag="EXEC", instruments=iids, venue=SIM, min_trade_value=cfg.costs.min_trade_value,
-            rebalance_band=cfg.costs.rebalance_band, cash_buffer=cfg.costs.cash_buffer, capital=capital))
+        execution = ExecutionAgent(
+            ExecutionAgentConfig(
+                order_id_tag="EXEC",
+                instruments=iids,
+                venue=SIM,
+                min_trade_value=cfg.costs.min_trade_value,
+                rebalance_band=cfg.costs.rebalance_band,
+                cash_buffer=cfg.costs.cash_buffer,
+                capital=capital,
+                **(execution_overrides or {}),
+            )
+        )
         engine.add_strategy(execution)
 
         engine.run()
 
         snaps = recorder.equity
-        idx = pd.DatetimeIndex([pd.Timestamp(s.ts, tz="UTC").tz_convert(NY).normalize().tz_localize(None) for s in snaps])
+        idx = pd.DatetimeIndex(
+            [pd.Timestamp(s.ts, tz="UTC").tz_convert(NY).normalize().tz_localize(None) for s in snaps]
+        )
         eq = pd.Series([s.equity for s in snaps], index=idx, dtype=float)
         gross = pd.Series([s.gross for s in snaps], index=idx, dtype=float)
         eq = eq[~eq.index.duplicated(keep="last")]
@@ -132,7 +246,8 @@ def run(cfg: LabConfig, sleeves: list[Sleeve], data: dict[str, pd.DataFrame], st
             eq = pd.concat([pd.Series([capital], index=[eq.index[0] - pd.Timedelta(days=1)]), eq])
 
         result = RunResult(
-            label=label or ", ".join(sorted({s.signal.label() for s in sleeves})),
+            label=label
+            or ", ".join(sorted({s.signal.label() for s in sleeves} | {x[0].label() for x in cross_sectional})),
             equity=eq,
             metrics=summarize(eq, fills=recorder.fills, gross=gross),
             fills=recorder.fills,
@@ -140,7 +255,7 @@ def run(cfg: LabConfig, sleeves: list[Sleeve], data: dict[str, pd.DataFrame], st
             gross=gross,
             orders_sent=execution.orders_sent,
             rejections=execution.rejections,
-            signal_errors=sum(a.errors for a in signal_agents),
+            signal_errors=sum(a.errors for a in signal_agents) + sum(a.errors for a in xs_agents),
             ledger_vs_account=execution.cash - execution.account_cash(),
             min_cash=execution.min_cash,
             signals=recorder.signals,

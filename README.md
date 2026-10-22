@@ -1,126 +1,141 @@
 # trading-lab
 
-A research-only trading system for US stocks, built as two cooperating layers of agents on
-[NautilusTrader](https://nautilustrader.io) (Rust core, event-driven, identical code in
-backtests and live trading):
+[![ci](https://github.com/gahitchi/trading/actions/workflows/ci.yml/badge.svg)](https://github.com/gahitchi/trading/actions/workflows/ci.yml)
 
-- **Trading agents** (deterministic): turn signals into positions, enforce risk limits, place
-  orders, keep the record.
-- **Research swarm** (AI): proposes hypotheses, writes the code, reviews it. Deterministic code
-  decides what survives.
+A research-grade, paper-only trading system for US stocks, built on
+[NautilusTrader](https://nautilustrader.io) (Rust core, event-driven, identical code in backtests and live trading).
 
-It trades **paper accounts only**. Real money is refused at three independent layers.
+Two layers of cooperating agents:
+
+- **Trading agents** (deterministic, on NautilusTrader's message bus): signals → allocation → risk → execution,
+  with a recorder and alerting. The same agents run in backtests and on an Interactive Brokers paper account.
+- **Research swarm** (AI): a Researcher proposes falsifiable hypotheses, an Engineer implements them, a Critic
+  reviews them. Deterministic code (sandbox, validator, statistical gates) decides what survives.
+
+**Paper accounts only.** Real money is refused at three independent layers (see [Safety](#safety)).
 
 ```
- RESEARCH SWARM (runs on demand)                         TRADING AGENTS (message bus, every day)
+ RESEARCH SWARM (on demand)                               TRADING AGENTS (every trading day)
 
- Researcher (AI) ── hypothesis ──▶ Engineer (AI)          SignalAgent × (signal, stock)
-      ▲                              │ code                     │ target exposure 0..1
-      │                         Sandbox checks ◀─ retry ─┐      ▼
-      │                              │ pass              │  AllocatorAgent ──▶ RiskAgent ──▶ ExecutionAgent ──▶ broker
-      │                         Critic (AI) ── issues ───┘                          ▲              │
-      │                              │ accept                                       └── equity ────┤
-      │                         Validator: train vs buy-and-hold + noise floor     RecorderAgent ◀─┘ fills, events
-      │                              │ pass
-      │                         Gate: test period, once ──▶ candidate
-      └─ training results only ──────┘                        │ you: lab research promote
-                                                              ▼
-                                                     usable in paper trading
+ Researcher (AI) ── hypothesis ──▶ Engineer (AI)          SignalAgent × stock  ┐
+      ▲                              │ code               CrossSectionalAgent  ┘ targets
+      │                     Sandbox: static + behaviour         ▼
+      │                              │ ◀── retry ──┐      AllocatorAgent (equal-weight, point-in-time, vol target)
+      │                         Critic (AI) ── issues           ▼
+      │                              │ accept             RiskAgent (position, gross, drawdown breaker)
+      │       Validator: train vs buy-and-hold,                 ▼
+      │       noise floor, Deflated Sharpe                ExecutionAgent ─▶ broker (only component that orders)
+      │                              │ pass                     │ ledger · reconciliation · kill switch · caps
+      │       Gate: test period, once ──▶ candidate       RecorderAgent · AlertAgent (Telegram)
+      └── training results only ─────┘                │ you: lab research promote
 ```
 
-## Status: what has been verified, and where
+## Contents
 
-| Component | Verified |
+- [What is verified, and where](#what-is-verified-and-where)
+- [Install](#install) · [Quick start](#quick-start) · [Commands](#commands)
+- [The scientific protocol](#the-scientific-protocol)
+- [Data](#data) · [Signals](#writing-signals) · [Research swarm](#research-swarm)
+- [Paper trading and deployment](#paper-trading-and-deployment) · [Safety](#safety)
+- [Layout](#layout) · [Known limitations](#known-limitations)
+
+## What is verified, and where
+
+| Component | Verification |
 |---|---|
-| Backtest engine, all agents, costs, fills, risk limits | Automated tests on real GOOG prices (44 tests) |
-| Noise-floor test, holdout ledger, CLI | Automated tests + manual runs |
-| Research swarm via Claude Code | Real end-to-end cycles (Researcher → Engineer → Sandbox → Critic → Validator → Gate) |
-| Sandbox against malicious/broken generated code | Automated tests |
-| Paper node construction + paper-only guards | Automated tests (node builds; no connection) |
-| **Interactive Brokers connection, order flow** | **Not yet: needs your IB paper account.** First run: `lab paper --check-only`, then `lab paper` |
-| **Yahoo Finance download** | **Not yet: the build machine had no internet.** First run: `lab data fetch` |
-| **Ollama provider** | **Not yet: needs Ollama on your machine.** Check: `lab llm-check --provider ollama` |
+| Backtest engine, agents, costs, next-open fills, ledger = simulator account | 70 automated tests, real GOOG prices |
+| Kill switch, reconciliation, daily caps, delistings, point-in-time universe | automated tests through full backtests |
+| PSR / Deflated Sharpe / PBO / bootstrap CI | tests incl. calibration (false-discovery control, 95% coverage) |
+| Research swarm via Claude Code | real end-to-end cycles (propose → implement → review → validate → gate) |
+| Docker image and compose stack | GitHub Actions builds and runs the image on every push |
+| Paper node build, paper-only guards | automated tests (no connection) |
+| **IB Gateway connection, order routing** | **your first run: [RUNBOOK.md](RUNBOOK.md), `lab paper --smoke --test-order`** |
+| **Yahoo Finance download, Ollama provider** | **your first run: `lab data fetch`, `lab llm-check --provider ollama`** |
 
 ## Install
 
-Python 3.12–3.14. Uses [uv](https://docs.astral.sh/uv/) (`pacman -S uv` on Arch).
+Python 3.12–3.14, Linux or macOS. Uses [uv](https://docs.astral.sh/uv/) (`pacman -S uv` on Arch).
 
 ```bash
-git clone <your repo> trading-lab && cd trading-lab
+git clone https://github.com/gahitchi/trading.git && cd trading
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
-pytest                      # 44 tests, ~5 s, offline
+pytest                 # ~70 tests, ~15 s, offline
+lab doctor             # what is ready, what is missing
 ```
 
-For the research swarm, either:
-- **Claude Code** (uses your Claude subscription): install it, run `claude` once to log in, then `lab llm-check`.
-  Usage counts against your plan's normal limits. If `ANTHROPIC_API_KEY` is set in your shell, Claude Code bills
-  that key instead.
-- **Ollama** (free, local): `ollama pull qwen2.5-coder:7b`, set `provider = "ollama"` and the model in `lab.toml`,
-  then `lab llm-check`. An 8 GB GPU fits 7–8B models; expect weaker research than Claude.
+Research swarm, pick one:
+- **Claude Code** (your Claude subscription): install it, run `claude` once to log in, then `lab llm-check`.
+  Usage counts against your plan's limits; if `ANTHROPIC_API_KEY` is set, that key is billed instead.
+- **Ollama** (free, local): `ollama pull qwen2.5-coder:7b`, set `provider = "ollama"` in `lab.toml`.
 
 ## Quick start
 
 ```bash
-lab data fetch                       # daily bars for the [universe] in lab.toml (Yahoo, adjusted, free)
-lab backtest                         # built-in hypotheses vs buy-and-hold, training period
-lab null-test sma_trend              # is the difference bigger than noise?
-lab research run --cycles 3          # let the swarm propose, build and test 3 hypotheses
-lab research list                    # outcomes;  lab research show <id>  for details
+lab data fetch                          # daily bars for [universe] in lab.toml (Yahoo, adjusted, free)
+lab backtest                            # built-in hypotheses vs buy-and-hold; HTML report saved per run
+lab null-test sma_trend                 # is the edge bigger than noise?
+lab pbo sma_trend --grid fast=20,50,100 slow=150,200      # probability the "best" parameters are overfit
+lab walk-forward sma_trend --grid fast=20,50 slow=150,200 # rolling optimization, out-of-sample record
+lab research run --cycles 3             # the AI swarm proposes, builds and tests 3 hypotheses
 ```
 
-Offline check with real prices, no internet needed:
+Offline check on real prices: `cd examples/goog-offline && lab data sample && lab backtest`.
 
-```bash
-cd examples/goog-offline && lab data sample && lab backtest && lab null-test sma_trend
-```
+## Commands
+
+| | |
+|---|---|
+| `lab data fetch / import / membership / sample / list` | market data and the point-in-time universe |
+| `lab backtest [signals] [--period] [--set p=v] [--target-vol]` | strategies vs buy-and-hold, HTML report |
+| `lab null-test`, `lab pbo`, `lab walk-forward` | noise floor, overfitting probability, walk-forward analysis |
+| `lab holdout <signal>` | the one-time final exam (ledgered) |
+| `lab research run / list / show / retry / promote` | the AI research swarm |
+| `lab llm-check`, `lab notify-test`, `lab doctor` | provider check, alert check, pre-flight check |
+| `lab paper [--smoke] [--test-order] [--check-only] [--adopt-broker]` | paper trading on Interactive Brokers |
+| `lab kill [--flatten]`, `lab resume`, `lab health` | kill switch, Docker health check |
 
 ## The scientific protocol
 
-The lab is built to make self-deception hard.
+The lab is designed to make self-deception hard.
 
-- **Three periods** (`[periods]` in lab.toml). *Train*: develop and optimize. *Test*: checked once, by the
-  gate, only after a train pass. *Holdout*: the final exam, `lab holdout <signal>`, once per signal and
-  parameter set. Every use is logged in `results/holdout_ledger.json`; repeats need `--again "reason"`,
-  which is recorded too. `lab backtest` refuses the holdout period.
-- **A control**: every result is shown against buy-and-hold on the same stocks, same costs.
-- **A noise floor**: `null-test` reruns the comparison on block-bootstrapped copies of the real data
-  (same return distribution, no long-range pattern). The p-value is how often noise did at least as well.
-- **The swarm never sees test results**, so the test period stays out-of-sample across research cycles.
-- **Multiple testing is counted**: the notebook states how many hypotheses were validated and how many
-  would pass training by luck.
-- **Honest fills**: decisions are made after the close and fill at the *next* session's real opening
-  price, one tick of slippage, IBKR Pro Fixed commissions ($0.005/share, $1 minimum, 1% cap).
-- **Provenance**: every saved run stores the config and the data manifest it used.
+- **Three periods**: *train* to develop, *test* checked once by the gate, *holdout* for a final exam
+  (`lab holdout`, once per signal and parameter set, every use ledgered; `lab backtest` refuses it).
+- **A control**: every result is shown against buy-and-hold on the same stocks with the same costs.
+- **Noise floor**: the comparison repeated on block-bootstrapped copies of the real data; p = how often noise did as well.
+- **Deflated Sharpe Ratio** (Bailey & López de Prado, "The Deflated Sharpe Ratio", 2014): every
+  configuration ever evaluated on a dataset is logged in `results/trials.jsonl`; the DSR of the active return
+  charges for all of them. The research gate requires DSR ≥ 0.95.
+- **Probability of Backtest Overfitting** via combinatorially symmetric cross-validation, and **walk-forward
+  analysis** for anything with parameters.
+- **Bootstrap confidence intervals** on the active Sharpe ratio.
+- **The swarm never sees test results**, and a hypothesis that met the data can't be retried (`retry` refuses).
+- **Honest fills**: decisions after the close, fills at the *next* session's real opening price, one tick of
+  slippage, IBKR Pro Fixed commissions. Ledger and simulator account must agree to the cent (tested).
+- **Provenance**: each saved run stores the config, data manifest and data-quality flags with a self-contained
+  HTML report (equity, drawdown, rolling active Sharpe, monthly returns, all statistics).
 
-What a result needs before it means anything: beat buy-and-hold on *test*, beat the noise floor, hold
-across several stocks, survive the holdout once, then weeks of paper trading.
+Research runs measure the *strategy*: no per-stock caps, no circuit breaker (which would corrupt the control).
+Paper trading always enforces both.
 
-## Paper trading (Interactive Brokers)
+## Data
 
-1. Open an IBKR account and enable its paper-trading account. Note the paper account ID (`DU…`).
-2. Install IB Gateway (or TWS), log in **to the paper account**, and enable the API:
-   *Configure → Settings → API → Settings*: enable socket clients, port **4002** (Gateway) or **7497** (TWS).
-3. Set `account_id` in `[paper]` of lab.toml. Without IB market data subscriptions, keep
-   `market_data = "DELAYED_FROZEN"`.
-4. `lab paper --check-only --signals sma_trend` validates everything without connecting.
-5. `lab paper --signals sma_trend --tickers SPY QQQ` starts the agents.
+Every dataset carries quality labels (source, adjusted, survivorship-free) that follow it into every result;
+reports and tables print a warning when the data is biased.
 
-Daily cycle, New York time: at 16:10 the signal agents fetch the completed daily bars; at 16:15 the
-execution agent sends **market-on-open** orders, which fill in the next morning's opening auction. The agents
-keep their own cash ledger (`results/paper/ledger.json`, starting from `[paper] capital`), so other positions
-in your paper account don't affect them. Every message is journaled to `results/paper/journal-YYYYMM.jsonl`.
-Research hypotheses can be paper traded only after you approve them: `lab research promote <id>` shows the
-code and asks.
+- `lab data fetch`: Yahoo Finance, free, split/dividend adjusted, **not survivorship-free**.
+- `lab data import file.csv --ticker X --adjusted --survivorship-free --source VENDOR`: any vendor's CSV
+  (date, open, high, low, close, volume), e.g. exports from IBKR or vendors that include delisted stocks.
+- `lab data membership members.csv`: a point-in-time universe (`ticker,start,end`; several spells per ticker
+  allowed). Stocks are only held while they are members; capital is shared among the members of each day; when a
+  stock's data ends (delisting) the agents exit at its last real open.
 
-**Paper-only, in three layers**: (1) before connecting, live ports (4001, 7496) and non-paper account IDs are
-refused; (2) before *every* order, the execution agent checks that the broker reports exactly the configured
-`DU…` account, and shuts the system down otherwise; (3) no code path builds a live-money configuration.
+Survivorship-free data with a membership file is what makes results credible; free data gives a biased first look.
 
-## Writing a signal
+## Writing signals
 
-A signal is a pure function of one stock's past bars returning a target exposure between 0 and 1. The window
-holds only bars that have already closed, so look-ahead is impossible by construction:
+A per-stock signal is a pure function of one stock's past bars (prices, volume, session dates) returning a target
+exposure in [0, 1]; the window holds only closed bars, so look-ahead is impossible by construction.
 
 ```python
 from lab.signals.base import Signal, sma
@@ -131,58 +146,86 @@ class Breakout(Signal):
     lookback = 100
     defaults = {"n": 100}
 
-    def target(self, w):          # w.open/high/low/close/volume: numpy arrays, oldest first
+    def target(self, w):              # w.open/high/low/close/volume/dates: numpy arrays, oldest first
         return 1.0 if w.close[-1] > sma(w.close, self.params["n"]) else 0.0
 ```
 
-Add it to `BUILTIN` in `src/lab/signals/builtin.py`, then `lab backtest breakout`.
-Parameters can be overridden per run: `lab backtest sma_trend --set sma_trend.fast=20`.
+A cross-sectional signal (`CrossSectionalSignal`) ranks stocks against each other and returns weights
+(see `Momentum`, Jegadeesh & Titman 12-1 momentum). Register signals in `BUILTIN` in
+`src/lab/signals/builtin.py`.
 
-## Research swarm details
+## Research swarm
 
-Each hypothesis gets a folder in `research/hypotheses/<id>/`: `proposal.json`, `signal.py`, `checks.json`,
-`review.json`, `train.json`, `test.json`, `status.json` (with history) and `transcript.jsonl` (every prompt and
-answer). A readable log accumulates in `research/NOTEBOOK.md`. Model calls are logged in
-`research/usage.jsonl` and capped per cycle (`max_llm_calls_per_cycle`).
+Each hypothesis lives in `research/hypotheses/<id>/`: `proposal.json`, `signal.py`, `checks.json`, `review.json`,
+`train.json`, `test.json`, `status.json` and `transcript.jsonl` (every prompt and answer). `research/NOTEBOOK.md`
+is the readable log. Model calls are capped per cycle and logged in `research/usage.jsonl`.
 
-Generated code must pass a static check (one `Signal` subclass; imports limited to `math`, `numpy` and the
-signal helpers; no file, network or process access; no `eval`/`exec`/`getattr`/dunder tricks), then a
-behaviour check in a separate, resource-limited process. Validation also runs in a separate process. Static
-checks stop accidents and obvious escapes, not a determined attacker: read code before you promote it.
+Generated code must pass a static check (one `Signal` subclass; imports limited to `math`, `numpy` and the signal
+helpers; no file, network, process or introspection access) and a behaviour check in a separate,
+resource-limited process; validation runs in another separate process. These stop accidents and obvious
+escapes, not a determined attacker: read the code before you promote it.
 
-Statuses: `proposed` → `implemented` → `validated` → `candidate` → `promoted` (by you), or
-`broken`, `rejected_by_critic`, `failed_train`, `failed_test`, `error`.
+Statuses: `proposed` → `implemented` → `validated` → `candidate` → `promoted` (by you), or `broken`,
+`rejected_by_critic`, `failed_train`, `failed_test`, `error`. The AI swarm writes per-stock signals;
+cross-sectional strategies are human-written for now.
+
+## Paper trading and deployment
+
+Step by step: **[RUNBOOK.md](RUNBOOK.md)**. In short:
+
+```bash
+cp .env.example .env                    # TWS_USERID, LAB_PAPER_ACCOUNT (DU...), optional Telegram
+printf '%s' 'password' > secrets/tws_password && chmod 600 secrets/tws_password
+docker compose up -d ib-gateway
+docker compose run --rm -e LAB_IB_CLIENT_ID=8 lab paper --smoke --test-order
+docker compose up -d                    # agents run daily; health, alerts, journal, ledger on disk
+```
+
+Daily cycle (New York time): 16:10 the signal agents fetch completed daily bars from IB; 16:15 the execution agent
+reconciles its ledger with IB and sends **market-on-open** orders; 09:30 they fill in the opening auction.
+
+## Safety
+
+- **Paper-only, three layers**: (1) before connecting, live ports (4001, 7496, Docker 4003) and non-`DU` account
+  IDs are refused; (2) before every order, the execution agent checks that IB reports exactly the configured paper
+  account, and shuts the system down otherwise; (3) no code path builds a live configuration.
+- **Kill switch**: `lab kill` stops new orders and cancels open ones within a minute; `--flatten` also exits all
+  positions at the next open; `lab resume` clears it. An unreadable kill file still halts.
+- **Reconciliation**: before every rebalance the agents' ledger must match IB's positions, or nothing trades
+  (`lab paper --adopt-broker` resets the ledger to IB's positions deliberately).
+- **Limits**: per-order notional cap, orders per day, daily buy turnover, NautilusTrader's order-rate limit, risk
+  agent position/gross caps and drawdown circuit breaker.
+- **Alerts** (Telegram) for every risk event, fills and a daily equity report; heartbeat-based Docker health check.
 
 ## Layout
 
 ```
-lab.toml                      all settings (universe, periods, costs, risk, paper, research)
+lab.toml                    every setting: universe, periods, costs, risk, portfolio, paper, research
+Dockerfile, docker-compose.yml, .env.example, RUNBOOK.md
 src/lab/
-  agents/                     the trading agents and their messages
-  signals/                    Signal interface, built-in signals, registry
-  research/                   providers (Claude Code, Ollama), roles, sandbox, orchestrator, validator worker
-  backtest.py                 wires the agents into NautilusTrader's backtest engine
-  experiments.py              comparison, noise floor, holdout ledger
-  paper.py                    the same agents on Interactive Brokers' paper account
-  data.py  universe.py  costs.py  metrics.py  safety.py  config.py  cli.py
-tests/                        pytest suite (offline; `pytest -m llm` adds one real model call)
-examples/goog-offline/        offline configuration using real GOOG prices
-experiments/LOG.md            your lab notebook
+  agents/                   signal, cross-sectional, allocator, risk, execution, recorder, alerts, smoke test
+  signals/                  Signal / CrossSectionalSignal interfaces, built-ins, registry
+  research/                 providers (Claude Code, Ollama), roles, sandbox, orchestrator, validator worker
+  backtest.py               wires the agents into NautilusTrader's backtest engine
+  experiments.py            comparison, trials registry, noise floor, PBO, walk-forward, holdout ledger
+  stats.py                  PSR, DSR, PBO (CSCV), bootstrap CI
+  paper.py                  the same agents on Interactive Brokers' paper account
+  data.py  universe.py  costs.py  metrics.py  report.py  notify.py  safety.py  config.py  cli.py
+tests/                      pytest suite (offline; `pytest -m llm` adds a real model call)
+examples/goog-offline/      offline configuration on real GOOG prices
+experiments/LOG.md          your lab notebook
 ```
 
 ## Known limitations
 
-- **Survivorship bias**: the default universe is today's large, successful companies. Results on it look
-  better than a strategy would have done choosing among the stocks that existed back then.
-- **Yahoo Finance** data is free but unofficial. For serious work, import vendor data with
-  `lab data import file.csv --ticker X --adjusted` (Databento offers $125 of free credits).
-- Signals see one stock at a time: no cross-sectional strategies (e.g. "buy the top 3 momentum stocks") yet.
-- Daily bars only. Long-only, no leverage. Idle cash earns no interest; brief overdrafts from opening gaps
-  are allowed and reported (`min_cash`) but not charged interest.
-- IBKR's $1 minimum is charged per fill; an order filled in pieces is slightly overcharged.
-- NautilusTrader is pinned to `2.0.0rc7`: 2.0 is in release candidates and its API still changes between them.
-  Upgrade deliberately and rerun the tests.
+- **Free data is survivorship-biased** and unofficial; see [Data](#data).
+- Daily bars only; long-only; no leverage; idle cash earns no interest; brief overdrafts from opening gaps are
+  reported (`min_cash`), not charged.
+- IBKR's $1 minimum is charged per fill, so an order filled in pieces is slightly overcharged.
+- NautilusTrader is pinned to `2.0.0rc7` (2.0 is in release candidates); upgrade deliberately and rerun the tests.
+- The IB live path is built against the adapter's API and verified up to connecting; the RUNBOOK's smoke test
+  is the first end-to-end check.
 
 ## License
 
-LGPL-3.0-or-later, the same license family as NautilusTrader.
+LGPL-3.0-or-later, the same license family as NautilusTrader. For research and education; not investment advice.

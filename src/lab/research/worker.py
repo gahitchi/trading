@@ -21,8 +21,7 @@ from lab.signals.registry import SignalSpec
 
 
 def available_tickers(cfg) -> list[str]:
-    have = data.manifest(cfg)
-    return [t for t in cfg.universe if t in have]
+    return experiments.research_tickers(cfg)[0]
 
 
 def main(argv=None) -> int:
@@ -39,19 +38,26 @@ def main(argv=None) -> int:
 
     if mode == "train":
         period = cfg.period("train")
-        comp, results = experiments.compare(cfg, [spec], tickers, period, frames)
+        comp, _ = experiments.compare(cfg, [spec], tickers, period, frames)
         cand = comp.rows[1]
         edge = cand["sharpe_edge"]
         null = experiments.null_test(cfg, spec, tickers, period, r.null_samples, frames, observed_edge=edge)
         checks = {
             "sharpe_edge >= min_sharpe_edge": edge >= r.min_sharpe_edge,
             "p_value <= max_p_value": null["p_value"] <= r.max_p_value,
+            "deflated Sharpe >= min_dsr": cand["dsr"] >= r.min_dsr,
             "no signal errors": cand["signal_errors"] == 0,
             "traded at all": cand.get("fills", 0) > 0,
         }
-        out = {"period": "train", "tickers": tickers, "rows": comp.rows, "null": null,
-               "criteria": {"min_sharpe_edge": r.min_sharpe_edge, "max_p_value": r.max_p_value},
-               "checks": checks, "passed": all(checks.values())}
+        out = {
+            "period": "train",
+            "tickers": tickers,
+            "rows": comp.rows,
+            "null": null,
+            "criteria": {"min_sharpe_edge": r.min_sharpe_edge, "max_p_value": r.max_p_value, "min_dsr": r.min_dsr},
+            "checks": checks,
+            "passed": all(checks.values()),
+        }
         (hdir / "train.json").write_text(json.dumps(out, indent=2, default=str))
     elif mode == "test":
         period = cfg.period("test")

@@ -23,21 +23,35 @@ def test_orders_fill_at_next_open_never_same_close(goog_lab):
     # Decision at the close of 2024-01-02 (105) -> fill at 2024-01-03's open (110) + one tick of slippage.
     assert first.side == "BUY"
     assert first.price == pytest.approx(110.01)
-    assert pd.Timestamp(first.ts, tz="UTC").tz_convert("America/New_York").strftime("%Y-%m-%d %H:%M") == "2024-01-03 09:30"
+    assert (
+        pd.Timestamp(first.ts, tz="UTC").tz_convert("America/New_York").strftime("%Y-%m-%d %H:%M") == "2024-01-03 09:30"
+    )
 
 
 @pytest.mark.parametrize("sig", [BuyAndHold, SmaTrend, RsiReversion])
 def test_lab_ledger_matches_simulator_account(goog_lab, goog, sig):
-    r = backtest.run(goog_lab, backtest.equal_weight(sig, ["GOOG"]), {"GOOG": goog}, date(2006, 1, 1),
-                     date(2010, 12, 31), risk=NO_RISK)
+    r = backtest.run(
+        goog_lab,
+        backtest.equal_weight(sig, ["GOOG"]),
+        {"GOOG": goog},
+        date(2006, 1, 1),
+        date(2010, 12, 31),
+        risk=NO_RISK,
+    )
     assert len(r.fills) > 0
     assert r.ledger_vs_account == pytest.approx(0.0, abs=1e-6)
     assert r.signal_errors == 0 and r.rejections == 0
 
 
 def test_buy_and_hold_tracks_the_stock(goog_lab, goog):
-    r = backtest.run(goog_lab, backtest.equal_weight(BuyAndHold, ["GOOG"]), {"GOOG": goog}, date(2006, 1, 1),
-                     date(2010, 12, 31), risk=NO_RISK)
+    r = backtest.run(
+        goog_lab,
+        backtest.equal_weight(BuyAndHold, ["GOOG"]),
+        {"GOOG": goog},
+        date(2006, 1, 1),
+        date(2010, 12, 31),
+        risk=NO_RISK,
+    )
     w = goog.loc["2006-01-04":"2010-12-31"]
     stock = w.close.iloc[-1] / w.open.iloc[0] - 1
     assert r.metrics["total_return"] == pytest.approx(stock * 0.99, abs=0.03)  # 99% invested, costs
@@ -53,7 +67,7 @@ class Spy(Signal):
     seen: list = []
 
     def target(self, w):
-        Spy.seen.append((len(w), float(w.close[-1])))
+        Spy.seen.append((len(w), float(w.close[-1]), str(w.dates[-1])))
         return 1.0
 
 
@@ -63,8 +77,9 @@ def test_signals_see_exactly_lookback_past_bars(goog_lab):
     cfg = dataclasses.replace(goog_lab, warmup_start=date(2024, 1, 1))
     backtest.run(cfg, [backtest.Sleeve(Spy(), "X", 1.0)], {"X": df}, date(2024, 1, 2), None, risk=NO_RISK)
     closes = list(df.close)
-    assert [n for n, _ in Spy.seen] == [5] * 16
-    assert [c for _, c in Spy.seen] == closes[4:]  # the newest bar in the window is the one that just closed
+    assert [n for n, _, _ in Spy.seen] == [5] * 16
+    assert [c for _, c, _ in Spy.seen] == closes[4:]  # the newest bar in the window is the one that just closed
+    assert [d for _, _, d in Spy.seen] == [str(x.date()) for x in df.index[4:]]  # with its session date
 
 
 def test_window_is_read_only():
@@ -90,8 +105,14 @@ def test_circuit_breaker_flattens_and_halts(goog_lab):
     close = np.concatenate([np.full(10, 100.0), np.linspace(100, 50, 20), np.linspace(50, 120, 30)])
     df = pd.DataFrame({"open": close, "high": close + 1, "low": close - 1, "close": close, "volume": 1e7}, index=idx)
     cfg = dataclasses.replace(goog_lab, warmup_start=date(2024, 1, 1))
-    r = backtest.run(cfg, backtest.equal_weight(BuyAndHold, ["X"]), {"X": df}, date(2024, 1, 2), None,
-                     risk=RiskSettings(1.0, 1.0, 0.2))
+    r = backtest.run(
+        cfg,
+        backtest.equal_weight(BuyAndHold, ["X"]),
+        {"X": df},
+        date(2024, 1, 2),
+        None,
+        risk=RiskSettings(1.0, 1.0, 0.2),
+    )
     assert [e.kind for e in r.risk_events] == ["circuit_breaker"]
     assert r.gross.iloc[-1] == 0.0  # stayed flat through the recovery
     assert [f.side for f in r.fills] == ["BUY", "SELL"]

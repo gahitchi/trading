@@ -14,7 +14,10 @@ PROPOSAL_SCHEMA = {
         "title": {"type": "string"},
         "hypothesis": {"type": "string", "description": "one falsifiable statement"},
         "mechanism": {"type": "string", "description": "why this could work: the economic or behavioural cause"},
-        "signal_spec": {"type": "string", "description": "exact rules: inputs, formulas, entry/exit, parameter defaults"},
+        "signal_spec": {
+            "type": "string",
+            "description": "exact rules: inputs, formulas, entry/exit, parameter defaults",
+        },
         "prediction": {"type": "string", "description": "the training-period result that would support or refute it"},
         "differs_from_past": {"type": "string"},
     },
@@ -84,7 +87,8 @@ Hard rules (enforced by an automatic checker that rejects violations):
   lookback (int, 1..250, the number of bars target() needs), defaults (dict of parameters).
 - If lookback depends on parameters, set self.lookback in __init__ after calling super().__init__(**params).
 - target(self, w) receives a Window with numpy arrays w.open, w.high, w.low, w.close,
-  w.volume (oldest first, exactly `lookback` bars, the last one is the bar that just closed)
+  w.volume and w.dates (numpy datetime64[D] session dates, New York) (oldest first, exactly
+  `lookback` bars, the last one is the bar that just closed)
   and returns a float in [0, 1]. Read parameters from self.params.
 - self.last holds your previous return value; use it for entry/exit hysteresis.
 - Must be deterministic, never raise, and run in well under 5 ms per call. Guard divisions.
@@ -120,22 +124,30 @@ Verdicts: "accept" (sound), "revise" (fixable, list precise issues for the engin
 
 def researcher_prompt(universe: list[str], train: tuple[str, str], past: list[dict]) -> str:
     past_txt = json.dumps(past, indent=1) if past else "none yet"
-    return (f"Universe: {', '.join(universe)}\nTraining period: {train[0]} to {train[1]}\n\n"
-            f"Hypotheses already tested (training-period results only):\n{past_txt}\n\n"
-            "Propose the next hypothesis.")
+    return (
+        f"Universe: {', '.join(universe)}\nTraining period: {train[0]} to {train[1]}\n\n"
+        f"Hypotheses already tested (training-period results only):\n{past_txt}\n\n"
+        "Propose the next hypothesis."
+    )
 
 
 def engineer_prompt(proposal: dict, previous_code: str | None = None, feedback: str | None = None) -> str:
-    p = (f"Hypothesis id: {proposal['id']}\nTitle: {proposal['title']}\n"
-         f"Hypothesis: {proposal['hypothesis']}\nSignal spec:\n{proposal['signal_spec']}\n")
+    p = (
+        f"Hypothesis id: {proposal['id']}\nTitle: {proposal['title']}\n"
+        f"Hypothesis: {proposal['hypothesis']}\nSignal spec:\n{proposal['signal_spec']}\n"
+    )
     if previous_code and feedback:
-        p += (f"\nYour previous implementation:\n```python\n{previous_code}\n```\n"
-              f"It was sent back with this feedback:\n{feedback}\n\nReturn a corrected, complete module.")
+        p += (
+            f"\nYour previous implementation:\n```python\n{previous_code}\n```\n"
+            f"It was sent back with this feedback:\n{feedback}\n\nReturn a corrected, complete module."
+        )
     else:
         p += "\nWrite the complete module."
     return p
 
 
 def critic_prompt(proposal: dict, code: str, check_info: dict) -> str:
-    return (f"Hypothesis:\n{json.dumps(proposal, indent=1)}\n\nImplementation:\n```python\n{code}\n```\n\n"
-            f"Automatic behaviour check on 1,500 random-walk bars: {json.dumps(check_info)}\n\nReview it.")
+    return (
+        f"Hypothesis:\n{json.dumps(proposal, indent=1)}\n\nImplementation:\n```python\n{code}\n```\n\n"
+        f"Automatic behaviour check on 1,500 random-walk bars: {json.dumps(check_info)}\n\nReview it."
+    )

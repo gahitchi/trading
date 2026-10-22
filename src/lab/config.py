@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+import os
 import tomllib
 from dataclasses import asdict, dataclass, field
 from datetime import date
@@ -41,6 +43,12 @@ class RiskSettings:
 
 
 @dataclass(frozen=True)
+class PortfolioSettings:
+    target_vol: float
+    vol_window: int
+
+
+@dataclass(frozen=True)
 class PaperSettings:
     host: str
     port: int
@@ -50,6 +58,10 @@ class PaperSettings:
     capital: float
     rebalance_time: str
     signal_time: str
+    max_order_value: float
+    max_orders_per_day: int
+    max_daily_turnover: float
+    order_rate: str
 
 
 @dataclass(frozen=True)
@@ -63,6 +75,7 @@ class ResearchSettings:
     null_samples: int
     min_sharpe_edge: float
     max_p_value: float
+    min_dsr: float
 
 
 @dataclass(frozen=True)
@@ -77,6 +90,7 @@ class LabConfig:
     capital: float
     costs: CostSettings
     risk: RiskSettings
+    portfolio: PortfolioSettings
     paper: PaperSettings
     research: ResearchSettings
     raw: dict = field(repr=False, default_factory=dict)
@@ -148,7 +162,7 @@ def load_config(path: str | Path | None = None) -> LabConfig:
         start, end = per[name]
         periods[name] = Period(name, _date(start, name), _date(end, name) if end else None)
     names = ["train", "test", "holdout"]
-    for a, b in zip(names, names[1:]):
+    for a, b in itertools.pairwise(names):
         if periods[a].end is None or periods[a].end >= periods[b].start:
             raise ConfigError(f"periods overlap or are out of order: {a} must end before {b} starts")
     warmup = _date(per["warmup_start"], "warmup_start")
@@ -160,10 +174,16 @@ def load_config(path: str | Path | None = None) -> LabConfig:
         raise ConfigError("risk limits must be fractions in (0, 1] (long-only, no leverage)")
 
     research = ResearchSettings(
-        provider=str(rs["provider"]), model=str(rs["model"]), ollama_url=str(rs["ollama_url"]),
-        call_timeout_s=int(rs["call_timeout_s"]), max_llm_calls_per_cycle=int(rs["max_llm_calls_per_cycle"]),
-        max_fix_attempts=int(rs["max_fix_attempts"]), null_samples=int(rs["null_samples"]),
-        min_sharpe_edge=float(rs["min_sharpe_edge"]), max_p_value=float(rs["max_p_value"]),
+        provider=str(rs["provider"]),
+        model=str(rs["model"]),
+        ollama_url=str(rs["ollama_url"]),
+        call_timeout_s=int(rs["call_timeout_s"]),
+        max_llm_calls_per_cycle=int(rs["max_llm_calls_per_cycle"]),
+        max_fix_attempts=int(rs["max_fix_attempts"]),
+        null_samples=int(rs["null_samples"]),
+        min_sharpe_edge=float(rs["min_sharpe_edge"]),
+        max_p_value=float(rs["max_p_value"]),
+        min_dsr=float(rs.get("min_dsr", 0.95)),
     )
     if research.provider not in ("claude_code", "ollama"):
         raise ConfigError("research.provider must be 'claude_code' or 'ollama'")
@@ -188,11 +208,22 @@ def load_config(path: str | Path | None = None) -> LabConfig:
             cash_buffer=float(bt["cash_buffer"]),
         ),
         risk=risk,
+        portfolio=PortfolioSettings(
+            float(raw.get("portfolio", {}).get("target_vol", 0.0)), int(raw.get("portfolio", {}).get("vol_window", 63))
+        ),
         paper=PaperSettings(
-            host=str(pp["host"]), port=int(pp["port"]), client_id=int(pp["client_id"]),
-            account_id=str(pp["account_id"]), market_data=str(pp["market_data"]).upper(),
-            capital=float(pp["capital"]), rebalance_time=str(pp["rebalance_time"]),
+            host=os.environ.get("LAB_IB_HOST", str(pp["host"])),
+            port=int(os.environ.get("LAB_IB_PORT", pp["port"])),
+            client_id=int(os.environ.get("LAB_IB_CLIENT_ID", pp["client_id"])),
+            account_id=os.environ.get("LAB_PAPER_ACCOUNT", str(pp["account_id"])),
+            market_data=str(pp["market_data"]).upper(),
+            capital=float(pp["capital"]),
+            rebalance_time=str(pp["rebalance_time"]),
             signal_time=str(pp["signal_time"]),
+            max_order_value=float(pp["max_order_value"]),
+            max_orders_per_day=int(pp["max_orders_per_day"]),
+            max_daily_turnover=float(pp["max_daily_turnover"]),
+            order_rate=str(pp["order_rate"]),
         ),
         research=research,
         raw=raw,

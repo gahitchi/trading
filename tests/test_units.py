@@ -73,10 +73,16 @@ def test_metrics():
     assert m["total_return"] == pytest.approx(0.30) and m["max_drawdown"] == pytest.approx(0.25)
 
 
-@pytest.mark.parametrize("port,acct,msg", [
-    (4001, "DU1234567", "live port"), (7496, "DU1234567", "live port"), (4002, "", "account_id"),
-    (4002, "U1234567", "not an IB paper"), (5555, "DU1234567", "not a known paper port"),
-])
+@pytest.mark.parametrize(
+    "port,acct,msg",
+    [
+        (4001, "DU1234567", "live port"),
+        (7496, "DU1234567", "live port"),
+        (4002, "", "account_id"),
+        (4002, "U1234567", "not an IB paper"),
+        (5555, "DU1234567", "not a known paper port"),
+    ],
+)
 def test_paper_settings_guard(port, acct, msg):
     with pytest.raises(SafetyError, match=msg):
         check_paper_settings(port, acct)

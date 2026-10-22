@@ -9,8 +9,9 @@ from lab.config import CostSettings
 from lab.universe import USD
 
 
-def ibkr_fixed_commission(shares: float, price: float, *, per_share: float = 0.005,
-                          minimum: float = 1.0, max_pct: float = 0.01) -> float:
+def ibkr_fixed_commission(
+    shares: float, price: float, *, per_share: float = 0.005, minimum: float = 1.0, max_pct: float = 0.01
+) -> float:
     """IBKR Pro Fixed: $0.005/share, at least $1.00, at most 1% of trade value."""
     return min(max(shares * per_share, minimum), max_pct * shares * price)
 
@@ -28,8 +29,9 @@ class IbkrFixedFeeModel(FeeModel):
         self.max_pct = max_pct
 
     def get_commission(self, order, fill_quantity, fill_px, instrument):
-        fee = ibkr_fixed_commission(float(fill_quantity), float(fill_px), per_share=self.per_share,
-                                    minimum=self.minimum, max_pct=self.max_pct)
+        fee = ibkr_fixed_commission(
+            float(fill_quantity), float(fill_px), per_share=self.per_share, minimum=self.minimum, max_pct=self.max_pct
+        )
         return Money(round(fee, 2), USD)
 
 

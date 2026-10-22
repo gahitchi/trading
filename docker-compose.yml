@@ -1,0 +1,74 @@
+# trading-lab deployment: IB Gateway (paper) + the agents.
+#
+# First time:
+#   cp .env.example .env              # fill in TWS_USERID and LAB_PAPER_ACCOUNT
+#   mkdir -p secrets && printf '%s' 'your-ibkr-password' > secrets/tws_password && chmod 600 secrets/tws_password
+#   docker compose up -d ib-gateway                                  # log in to the paper account
+#   docker compose run --rm -e LAB_IB_CLIENT_ID=8 lab paper --smoke --test-order
+#   docker compose up -d                                             # start the agents
+#
+# Everyday:
+#   docker compose logs -f lab        docker compose ps (health)       docker compose exec lab lab kill
+
+name: trading-lab
+
+services:
+  ib-gateway:
+    # IB Gateway + IBC for automated login: https://github.com/gnzsnz/ib-gateway-docker
+    # Pinned for reproducibility; check that project for newer stable tags.
+    image: ghcr.io/gnzsnz/ib-gateway:10.50.1f
+    restart: always
+    environment:
+      TWS_USERID: ${TWS_USERID:?set TWS_USERID in .env}
+      TWS_PASSWORD_FILE: /run/secrets/tws_password
+      TRADING_MODE: paper            # the lab refuses live ports anyway; this keeps the gateway on paper
+      READ_ONLY_API: "no"
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      AUTO_RESTART_TIME: "11:45 PM"  # daily restart without a fresh 2FA prompt
+      EXISTING_SESSION_DETECTED_ACTION: primary
+      TIME_ZONE: America/New_York
+      TZ: America/New_York
+      JAVA_HEAP_SIZE: "1024"
+      VNC_SERVER_PASSWORD: ${VNC_SERVER_PASSWORD:-}  # set it to watch the gateway GUI via VNC on 127.0.0.1:5900
+    secrets:
+      - tws_password
+    ports:
+      - "127.0.0.1:4002:4004"   # paper API, for running `lab doctor` or the swarm from the host
+      - "127.0.0.1:5900:5900"   # VNC, only active when VNC_SERVER_PASSWORD is set
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/4004' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 5
+    logging: &logging
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
+
+  lab:
+    build: .
+    image: trading-lab:latest
+    restart: unless-stopped
+    depends_on:
+      ib-gateway:
+        condition: service_healthy
+    environment:
+      LAB_IB_HOST: ib-gateway
+      LAB_IB_PORT: "4004"           # paper relay inside the gateway container
+      LAB_IB_CLIENT_ID: "7"
+      LAB_PAPER_ACCOUNT: ${LAB_PAPER_ACCOUNT:?set LAB_PAPER_ACCOUNT (DU...) in .env}
+      LAB_TELEGRAM_TOKEN: ${LAB_TELEGRAM_TOKEN:-}
+      LAB_TELEGRAM_CHAT_ID: ${LAB_TELEGRAM_CHAT_ID:-}
+      TZ: America/New_York
+    command: paper --signals ${LAB_SIGNALS:-sma_trend} --tickers ${LAB_TICKERS:-SPY QQQ}
+    volumes:
+      - ./lab.toml:/lab/lab.toml:ro
+      - ./results:/lab/results          # ledger, journal, heartbeat, kill switch: survives restarts
+      - ./research:/lab/research:ro     # promoted hypotheses
+      - ./data:/lab/data:ro
+    logging: *logging
+
+secrets:
+  tws_password:
+    file: ./secrets/tws_password

@@ -46,3 +46,26 @@ $100,000, IBKR Pro Fixed commissions, next-open fills with one tick of slippage.
 
 **Conclusion.** The machinery works, and on one stock over a few years nothing survives. Next: real data for the
 full universe (`lab data fetch`), where samples are larger and noise floors tighter.
+
+---
+
+## E1: Professional statistics on the same sample (2026-10-22)
+
+**Setup.** `examples/goog-offline`, train 2005-07 .. 2009-12, same costs. New tools: trial registry +
+Deflated Sharpe Ratio of the active return, probability of backtest overfitting (CSCV), walk-forward analysis.
+
+**Results.**
+- `sma_trend(50,200)`: Sharpe edge +0.17 but **DSR 0.25** (needs 0.95), consistent with the noise floor (p ≈ 0.13).
+- `lab pbo sma_trend --grid fast=10,20,50 slow=100,150,200`: **PBO = 0.80**. The in-sample best configuration
+  averaged an out-of-sample active Sharpe of −0.34: choosing SMA parameters on GOOG is fitting noise.
+- `lab walk-forward` (2y in-sample → 1y out-of-sample): stitched out-of-sample active Sharpe +0.16 with a 95%
+  interval of −1.01 .. +1.39: no evidence either way.
+- Volatility targeting (`--target-vol 0.15`): buy-and-hold Sharpe 0.64 → 1.04, max drawdown 65% → 30%, consistent
+  with the volatility-managed-portfolio literature (Moreira & Muir).
+
+**Swarm.** `turn_of_month_window` (calendar effect) first failed because signals had no access to dates; after
+adding `w.dates`, `lab research retry` re-implemented it and it **failed training** on its merits (edge −0.21,
+p = 0.24). Retrying hypotheses that already met the data is refused.
+
+**Conclusion.** The stack now distinguishes "looks good" from "is real". Next: survivorship-free data for a
+broad universe, then the IBKR paper deployment (RUNBOOK.md).

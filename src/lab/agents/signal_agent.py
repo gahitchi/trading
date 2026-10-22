@@ -15,9 +15,27 @@ from lab.universe import bar_type
 NY = ZoneInfo("America/New_York")
 
 
+def _session_date(ts_ns: int):
+    """The New York calendar date of a bar, as numpy datetime64[D]."""
+    import numpy as np
+
+    return np.datetime64(datetime.fromtimestamp(ts_ns / 1e9, NY).date(), "D")
+
+
 class SignalAgentConfig(DataActorConfig):
-    def __init__(self, *, signal: Signal, sleeve: str, ticker: str, instrument_id, trade_start_ns: int = 0,
-                 live: bool = False, signal_time: str = "16:10", **_kwargs):
+    def __init__(
+        self,
+        *,
+        signal: Signal,
+        sleeve: str,
+        ticker: str,
+        instrument_id,
+        trade_start_ns: int = 0,
+        live: bool = False,
+        signal_time: str = "16:10",
+        active_windows: list | None = None,
+        **_kwargs,
+    ):
         super().__init__()
         self.signal = signal
         self.sleeve = sleeve
@@ -26,6 +44,8 @@ class SignalAgentConfig(DataActorConfig):
         self.trade_start_ns = trade_start_ns
         self.live = live
         self.signal_time = signal_time
+        # [(from_ns, until_ns or None), ...]: when this stock may be held. None = always.
+        self.active_windows = active_windows
 
 
 class SignalAgent(DataActor):
@@ -41,6 +61,7 @@ class SignalAgent(DataActor):
         self.last_ts = -1
         self.errors = 0
         self.published = 0
+        self.was_active = False
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -72,10 +93,19 @@ class SignalAgent(DataActor):
 
     def _process(self, bar, publish: bool):
         self.last_ts = bar.ts_event
-        self.rows.append((float(bar.open), float(bar.high), float(bar.low), float(bar.close), float(bar.volume)))
+        self.rows.append(
+            (
+                float(bar.open),
+                float(bar.high),
+                float(bar.low),
+                float(bar.close),
+                float(bar.volume),
+                _session_date(bar.ts_event),
+            )
+        )
         if len(self.rows) < self.signal.lookback:
             return
-        cols = list(zip(*self.rows))
+        cols = list(zip(*self.rows, strict=True))
         try:
             raw = self.signal.target(Window(*cols))
         except Exception as e:  # a buggy signal must never take the system down
@@ -84,10 +114,28 @@ class SignalAgent(DataActor):
             raw = 0.0
         t = clamp_target(raw)
         self.signal.last = t
-        if publish and bar.ts_event >= self.config.trade_start_ns:
-            self.published += 1
-            self.publish_message(T_SIGNAL, SignalUpdate(self.config.sleeve, self.config.ticker, t,
-                                                        float(bar.close), bar.ts_event))
+        if not publish or bar.ts_event < self.config.trade_start_ns:
+            return
+        if self._is_active(bar.ts_event):
+            self.was_active = True
+            self._publish(t, bar, active=True)
+        elif self.was_active:
+            # Left the universe (delisting or index exit): one last message to exit.
+            self.was_active = False
+            self._publish(0.0, bar, active=False)
+
+    def _is_active(self, ts: int) -> bool:
+        windows = self.config.active_windows
+        if windows is None:
+            return True
+        return any(a <= ts and (b is None or ts <= b) for a, b in windows)
+
+    def _publish(self, target: float, bar, active: bool):
+        self.published += 1
+        self.publish_message(
+            T_SIGNAL,
+            SignalUpdate(self.config.sleeve, self.config.ticker, target, float(bar.close), bar.ts_event, active),
+        )
 
     # ------------------------------------------------------------------ paper mode
 
@@ -104,8 +152,9 @@ class SignalAgent(DataActor):
             nxt += timedelta(days=1)
         while nxt.weekday() >= 5:
             nxt += timedelta(days=1)
-        self.clock.set_time_alert_ns(f"signal-{self.config.sleeve}-{nxt:%Y%m%d}", int(nxt.timestamp() * 1e9),
-                                     callback=self._on_signal_time)
+        self.clock.set_time_alert_ns(
+            f"signal-{self.config.sleeve}-{nxt:%Y%m%d}", int(nxt.timestamp() * 1e9), callback=self._on_signal_time
+        )
 
     def _on_signal_time(self, _event):
         self._request_history()

@@ -5,14 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pandas as pd
 
 from lab import data, experiments
 from lab.config import ConfigError, LabConfig, Period, load_config
-from lab.signals.registry import SignalNotFound, available_research, resolve
 from lab.signals.builtin import BUILTIN
+from lab.signals.registry import SignalNotFound, available_research, resolve
 
 
 def _period(cfg: LabConfig, a) -> Period:
@@ -40,11 +40,23 @@ def _params(sets: list[str]) -> dict[str, dict]:
 
 
 def _tickers(cfg: LabConfig, given: list[str] | None) -> list[str]:
-    tickers = [t.upper() for t in given] if given else list(cfg.universe)
-    have = data.manifest(cfg)
-    missing = [t for t in tickers if t not in have]
-    if missing:
+    if given:
+        tickers = [t.upper() for t in given]
+        missing = [t for t in tickers if t not in data.manifest(cfg)]
+        if missing:
+            raise SystemExit(f"no data for {missing}; run: lab data fetch {' '.join(missing)}")
+        return tickers
+    tickers, missing = experiments.research_tickers(cfg)
+    if data.membership(cfg) is not None:
+        if missing:
+            print(
+                f"note: {len(missing)} of {len(tickers) + len(missing)} universe members have no data and are left "
+                f"out ({', '.join(missing[:8])}{'...' if len(missing) > 8 else ''}); that reintroduces survivorship bias"
+            )
+    elif missing:
         raise SystemExit(f"no data for {missing}; run: lab data fetch {' '.join(missing)}")
+    if not tickers:
+        raise SystemExit("no data for any universe ticker; run: lab data fetch")
     return tickers
 
 
@@ -52,12 +64,22 @@ def _print_table(comp: experiments.Comparison) -> None:
     df = comp.table().copy()
     for c in ("total_return", "cagr", "max_drawdown", "avg_exposure"):
         if c in df:
-            df[c] = df[c].map(lambda v: f"{v:+.1%}" if c in ("total_return", "cagr") else f"{v:.0%}")
+            df[c] = df[c].map(lambda v, c=c: f"{v:+.1%}" if c in ("total_return", "cagr") else f"{v:.0%}")
+    if "dsr" in df:
+        df["dsr"] = df["dsr"].map(lambda v: "" if pd.isna(v) else f"{v:.2f}")
     for c in ("sharpe", "sharpe_edge"):
         if c in df:
-            df[c] = df[c].map(lambda v: f"{v:+.2f}" if c == "sharpe_edge" else f"{v:.2f}")
-    print(f"\n{comp.period} {comp.start} .. {comp.end} | {len(comp.tickers)} stocks: {', '.join(comp.tickers)}")
+            df[c] = df[c].map(lambda v, c=c: f"{v:+.2f}" if c == "sharpe_edge" else f"{v:.2f}")
+    shown = ", ".join(comp.tickers[:12]) + (" ..." if len(comp.tickers) > 12 else "")
+    print(f"\n{comp.period} {comp.start} .. {comp.end} | {len(comp.tickers)} stocks: {shown}")
     print(df.to_string(index=False))
+    print(
+        "sharpe_edge: Sharpe minus buy-and-hold's. dsr: Deflated Sharpe Ratio of the daily return difference, "
+        "counting every configuration tried on this data (>= 0.95 is significant)."
+    )
+    warning = data.quality_warning(comp.data_quality) if comp.data_quality else None
+    if warning:
+        print(f"DATA QUALITY: {warning}")
 
 
 # ----------------------------------------------------------------------------- data
@@ -70,7 +92,7 @@ def cmd_data_fetch(cfg, a):
     for t in tickers:
         try:
             df = data.fetch_yfinance(t, start)
-            e = data.save(cfg, t, df, source="yahoo_finance", adjusted=True)
+            e = data.save(cfg, t, df, source="yahoo_finance", adjusted=True, survivorship_free=False)
             print(f"{t:<6} {e['rows']:>5} days  {e['first']} .. {e['last']}")
         except data.DataError as err:
             failed.append(t)
@@ -80,13 +102,39 @@ def cmd_data_fetch(cfg, a):
 
 def cmd_data_import(cfg, a):
     df = data.import_csv(a.file, a.date_column)
-    e = data.save(cfg, a.ticker, df, source=f"csv:{a.file}", adjusted=a.adjusted, note=a.note or "")
+    e = data.save(
+        cfg,
+        a.ticker,
+        df,
+        source=a.source or f"csv:{a.file}",
+        adjusted=a.adjusted,
+        survivorship_free=a.survivorship_free,
+        note=a.note or "",
+    )
     print(f"{a.ticker.upper()}: {e['rows']} days {e['first']} .. {e['last']}")
 
 
+def cmd_data_membership(cfg, a):
+    df = data.save_membership(cfg, a.file)
+    print(
+        f"point-in-time universe: {df.ticker.nunique()} tickers, {len(df)} membership spells "
+        f"-> {data.membership_path(cfg).relative_to(cfg.root)}"
+    )
+    have = data.manifest(cfg)
+    missing = sorted(set(df.ticker) - set(have))
+    if missing:
+        print(f"no price data yet for {len(missing)}: {', '.join(missing[:10])}{'...' if len(missing) > 10 else ''}")
+
+
 def cmd_data_sample(cfg, a):
-    e = data.save(cfg, "GOOG", data.sample_goog(), source="backtesting.py sample (real GOOG prices)",
-                  adjusted=False, note="unadjusted; for offline pipeline checks")
+    e = data.save(
+        cfg,
+        "GOOG",
+        data.sample_goog(),
+        source="backtesting.py sample (real GOOG prices)",
+        adjusted=False,
+        note="unadjusted; for offline pipeline checks",
+    )
     print(f"GOOG: {e['rows']} days {e['first']} .. {e['last']} (real prices, offline sample)")
 
 
@@ -96,7 +144,9 @@ def cmd_data_list(cfg, a):
         print("no data yet: lab data fetch")
         return
     for t, e in sorted(m.items()):
-        print(f"{t:<6} {e['rows']:>5} days  {e['first']} .. {e['last']}  {e['source']}{'' if e['adjusted'] else ' (unadjusted)'}")
+        print(
+            f"{t:<6} {e['rows']:>5} days  {e['first']} .. {e['last']}  {e['source']}{'' if e['adjusted'] else ' (unadjusted)'}"
+        )
 
 
 # ----------------------------------------------------------------------------- experiments
@@ -110,9 +160,18 @@ def _specs(cfg, names, sets, require_tradable=False):
         raise SystemExit(str(e)) from e
 
 
+def _with_target_vol(cfg, a):
+    import dataclasses
+
+    if getattr(a, "target_vol", None) is None:
+        return cfg
+    return dataclasses.replace(cfg, portfolio=dataclasses.replace(cfg.portfolio, target_vol=a.target_vol))
+
+
 def cmd_backtest(cfg, a):
     if a.period == "holdout" and not (a.start or a.end):
         raise SystemExit("the holdout is guarded: use `lab holdout <signal>`")
+    cfg = _with_target_vol(cfg, a)
     specs = _specs(cfg, a.signals, a.set)
     tickers = _tickers(cfg, a.tickers)
     comp, results = experiments.compare(cfg, specs, tickers, _period(cfg, a))
@@ -121,7 +180,7 @@ def cmd_backtest(cfg, a):
         if r.signal_errors or r.rejections:
             print(f"  note: {r.label}: {r.signal_errors} signal errors, {r.rejections} rejected orders")
     out = experiments.save_run(cfg, "backtest", comp, results)
-    print(f"\nsaved: {out.relative_to(cfg.root)}")
+    print(f"\nsaved: {out.relative_to(cfg.root)}  (report: {(out / 'report.html').relative_to(cfg.root)})")
 
 
 def cmd_null(cfg, a):
@@ -135,12 +194,81 @@ def cmd_null(cfg, a):
     _print_table(comp)
     print(f"\nnoise floor: {a.samples} block-bootstrap resamples of the real data...")
     nt = experiments.null_test(cfg, spec, tickers, period, a.samples, frames, observed_edge=comp.rows[1]["sharpe_edge"])
-    print(f"observed Sharpe edge {nt['observed_sharpe_edge']:+.2f} | noise: mean {nt['null_mean']:+.2f}, "
-          f"sd {nt['null_std']:.2f}, 95th pct {nt['null_p95']:+.2f} | p = {nt['p_value']:.3f}")
+    print(
+        f"observed Sharpe edge {nt['observed_sharpe_edge']:+.2f} | noise: mean {nt['null_mean']:+.2f}, "
+        f"sd {nt['null_std']:.2f}, 95th pct {nt['null_p95']:+.2f} | p = {nt['p_value']:.3f}"
+    )
     verdict = "beats the noise floor" if nt["p_value"] <= cfg.research.max_p_value else "indistinguishable from noise"
     print(f"=> {verdict} (threshold p <= {cfg.research.max_p_value})")
     out = experiments.save_run(cfg, f"null-{spec.name}", comp, results, {"null_test": nt})
     print(f"saved: {out.relative_to(cfg.root)}")
+
+
+def _grid(items: list[str]) -> dict[str, list]:
+    """fast=20,50 slow=100,200 -> {"fast": [20, 50], "slow": [100, 200]}"""
+    out = {}
+    for it in items:
+        k, _, vals = it.partition("=")
+        if not vals:
+            raise SystemExit(f"bad --grid item {it!r}; use param=v1,v2,...")
+        out[k] = [json.loads(v) if v.replace(".", "", 1).lstrip("-").isdigit() else v for v in vals.split(",")]
+    return out
+
+
+def _grid_specs(cfg, a):
+    try:
+        return experiments.grid_specs(a.signal, _grid(a.grid), cfg.research_dir)
+    except (SignalNotFound, ValueError) as e:
+        raise SystemExit(str(e)) from e
+
+
+def cmd_walk_forward(cfg, a):
+    specs = _grid_specs(cfg, a)
+    tickers = _tickers(cfg, a.tickers)
+    start = date.fromisoformat(a.start) if a.start else cfg.period("train").start
+    end = date.fromisoformat(a.end) if a.end else cfg.period("train").end
+    if end >= cfg.period("holdout").start:
+        raise SystemExit("walk-forward may not reach into the holdout period")
+    print(
+        f"walk-forward: {len(specs)} configurations, {a.is_years}y in-sample -> {a.oos_years}y out-of-sample, "
+        f"{start} .. {end}"
+    )
+    w = experiments.walk_forward(cfg, specs, tickers, start, end, data.load_many(cfg, tickers), a.is_years, a.oos_years)
+    for s in w["windows"]:
+        print(
+            f"  IS {s['in_sample']}  chose {s['chosen']:<40} IS active Sharpe {s['is_active_sharpe']:+.2f} | "
+            f"OOS {s['out_of_sample']} active Sharpe {s['oos_active_sharpe']:+.2f}, "
+            f"return {s['oos_return']:+.1%} vs buy-and-hold {s['oos_buy_and_hold']:+.1%}"
+        )
+    lo, hi = w["oos_active_sharpe_ci"]
+    print(
+        f"\nstitched out-of-sample active Sharpe {w['oos_active_sharpe']:+.2f} (95% CI {lo:+.2f} .. {hi:+.2f}), "
+        f"PSR {w['oos_psr']:.2f}, efficiency (OOS/IS) {w['efficiency']:.2f}, "
+        f"{w['distinct_choices']} distinct configuration(s) chosen"
+    )
+    out = cfg.results_dir / f"{datetime.now(UTC):%Y%m%d-%H%M%S}-walkforward-{a.signal}.json"
+    cfg.results_dir.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(w, indent=2, default=str))
+    print(f"saved: {out.relative_to(cfg.root)}")
+
+
+def cmd_pbo(cfg, a):
+    specs = _grid_specs(cfg, a)
+    tickers = _tickers(cfg, a.tickers)
+    period = _period(cfg, a)
+    if period.name == "holdout":
+        raise SystemExit("the holdout is guarded: use `lab holdout <signal>`")
+    print(f"probability of backtest overfitting: {len(specs)} configurations, {a.splits} blocks, {period.name}")
+    p = experiments.pbo_study(cfg, specs, tickers, period, data.load_many(cfg, tickers), a.splits)
+    for label, sr in p["active_sharpe_by_config"].items():
+        print(f"  {label:<50} active Sharpe {sr:+.2f}")
+    verdict = "likely overfit" if p["pbo"] > 0.5 else ("doubtful" if p["pbo"] > 0.2 else "robust to selection")
+    print(
+        f"\nPBO = {p['pbo']:.2f} over {p['combinations']} splits ({verdict}); in-sample winner's out-of-sample "
+        f"Sharpe {p['oos_sharpe_of_is_winner_mean']:+.2f} vs in-sample {p['is_sharpe_of_is_winner_mean']:+.2f}; "
+        f"P(OOS loss) {p['prob_oos_loss']:.2f}"
+    )
+    return 0
 
 
 def cmd_holdout(cfg, a):
@@ -175,11 +303,16 @@ def cmd_llm_check(cfg, a):
     from lab.research.providers import LLMError
 
     p = _provider(cfg, a)
-    schema = {"type": "object", "properties": {"ok": {"type": "boolean"}, "sum": {"type": "integer"}},
-              "required": ["ok", "sum"], "additionalProperties": False}
+    schema = {
+        "type": "object",
+        "properties": {"ok": {"type": "boolean"}, "sum": {"type": "integer"}},
+        "required": ["ok", "sum"],
+        "additionalProperties": False,
+    }
     try:
-        out = p.complete_json(role="check", system="Answer exactly as asked.",
-                              prompt="Return ok=true and sum = 17 + 25.", schema=schema)
+        out = p.complete_json(
+            role="check", system="Answer exactly as asked.", prompt="Return ok=true and sum = 17 + 25.", schema=schema
+        )
     except LLMError as e:
         raise SystemExit(f"{p.name}/{p.model}: FAILED: {e}") from e
     good = out == {"ok": True, "sum": 42}
@@ -206,6 +339,18 @@ def cmd_research_run(cfg, a):
             print(f"result: {h.id} -> {h.status}")
     calls = orch.provider.calls
     print(f"\nmodel calls: {len(calls)} ({sum(c.seconds for c in calls):.0f}s). Notebook: research/NOTEBOOK.md")
+
+
+def cmd_research_retry(cfg, a):
+    from lab.research.orchestrator import Orchestrator
+    from lab.research.providers import LLMError
+
+    try:
+        orch = Orchestrator(cfg, _provider(cfg, a))
+        h = orch.retry(a.id)
+    except (LLMError, ValueError) as e:
+        raise SystemExit(str(e)) from e
+    print(f"result: {h.id} -> {h.status}")
 
 
 def cmd_research_list(cfg, a):
@@ -235,8 +380,9 @@ def cmd_research_show(cfg, a):
         obj = h.read(name)
         if obj:
             if name != "review.json":
-                obj = {k: v for k, v in obj.items() if k in ("passed", "checks", "sharpe_edge", "survived")} | \
-                      {"candidate": obj["rows"][1]}
+                obj = {k: v for k, v in obj.items() if k in ("passed", "checks", "sharpe_edge", "survived")} | {
+                    "candidate": obj["rows"][1]
+                }
             print(f"\n{name}:\n{json.dumps(obj, indent=2, default=str)[:3000]}")
     print(f"\ncode: {h.dir / 'signal.py'}")
 
@@ -258,29 +404,224 @@ def cmd_research_promote(cfg, a):
 
 
 def cmd_paper(cfg, a):
-    from lab.paper import build_node
+    from lab.notify import Notifier
+    from lab.paper import build_node, build_smoke_node
     from lab.safety import SafetyError
 
-    specs = _specs(cfg, a.signals, a.set, require_tradable=False)
-    for s in specs:
-        if s.path is not None:
-            resolve(s.name, cfg.research_dir, s.params, require_tradable=True)
     tickers = [t.upper() for t in (a.tickers or cfg.universe)]
     try:
-        node = build_node(cfg, specs, tickers)
-    except (SafetyError, ValueError) as e:
+        if a.smoke:
+            node, report = build_smoke_node(cfg, tickers, test_order=a.test_order)
+        else:
+            specs = _specs(cfg, a.signals, a.set)
+            for s in specs:
+                if s.path is not None:
+                    resolve(s.name, cfg.research_dir, s.params, require_tradable=True)
+            node = build_node(cfg, specs, tickers, adopt_broker=a.adopt_broker)
+    except (SafetyError, ValueError, SignalNotFound) as e:
         raise SystemExit(str(e)) from e
-    print(f"paper node ready: {len(specs)} signal(s) x {len(tickers)} stocks, account {cfg.paper.account_id} "
-          f"via {cfg.paper.host}:{cfg.paper.port}")
+    what = "smoke test" if a.smoke else f"{len(a.signals)} signal(s) x {len(tickers)} stocks"
+    print(f"paper node ready: {what}, account {cfg.paper.account_id} via {cfg.paper.host}:{cfg.paper.port}")
     if a.check_only:
         node.dispose()
         print("check only: configuration is valid; not connecting.")
-        return
+        return 0
+    notifier = Notifier()
+    if not a.smoke:
+        notifier.send(f"paper trading starting: {what}")
     print("connecting to Interactive Brokers... (Ctrl+C to stop)")
     try:
         node.run()
+    except KeyboardInterrupt:
+        print("stopping...")
     finally:
         node.dispose()
+        notifier.flush()
+    if a.smoke:
+        if not report.exists():
+            print("smoke test produced no report: the node did not get far enough (check the log above)")
+            return 1
+        r = json.loads(report.read_text())
+        for name, c in r["checks"].items():
+            print(f"  {'✓' if c['ok'] else '✗'} {name}: {c['detail']}")
+        print(f"smoke test {'PASSED' if r['passed'] else 'FAILED'} (report: {report.relative_to(cfg.root)})")
+        return 0 if r["passed"] else 1
+    return 0
+
+
+def cmd_paper_report(cfg, a):
+    from lab.paper import runtime_dir
+    from lab.paper_report import load_journal, summarize
+
+    journals = sorted(runtime_dir(cfg).glob("journal-*.jsonl"))
+    if not journals:
+        raise SystemExit("no paper-trading journal yet (results/paper/journal-*.jsonl)")
+    r = summarize(load_journal(journals))
+    if "last_equity" in r:
+        print(
+            f"{r['start']} .. {r['end']}: equity {r['first_equity']:,.2f} -> {r['last_equity']:,.2f} "
+            f"({r['total_return']:+.2%}), max drawdown {r['max_drawdown']:.1%}"
+        )
+    print(
+        f"fills: {r['fills']}, traded {r.get('traded_value', 0):,.0f} USD, commissions {r.get('commissions', 0):,.2f} USD"
+    )
+    if "shortfall_bps" in r:
+        sb = r["shortfall_bps"]
+        print(
+            f"implementation shortfall vs decision close: mean {sb['mean']:+.1f} bps, median {sb['median']:+.1f}, "
+            f"90th pct {sb['p90']:+.1f} over {sb['fills_measured']} fills (positive = cost)"
+        )
+    if r["risk_events"]:
+        print("risk events: " + ", ".join(f"{k} x{v}" for k, v in sorted(r["risk_events"].items())))
+    return 0
+
+
+def cmd_kill(cfg, a):
+    from lab.notify import Notifier
+    from lab.paper import kill_path
+    from lab.safety import set_kill_switch
+
+    state = set_kill_switch(kill_path(cfg), "flatten" if a.flatten else "halt", a.reason)
+    msg = (
+        "KILL SWITCH: no new orders; open orders are cancelled within a minute"
+        + ("; all positions exit at the next open" if a.flatten else "")
+        + f". Reason: {a.reason}"
+    )
+    print(msg)
+    Notifier().send_now(msg)
+    print(f"set {kill_path(cfg).relative_to(cfg.root)} at {state['at']}. Undo with: lab resume")
+
+
+def cmd_resume(cfg, a):
+    from lab.notify import Notifier
+    from lab.paper import kill_path
+    from lab.safety import clear_kill_switch
+
+    if clear_kill_switch(kill_path(cfg)):
+        print("kill switch cleared; trading resumes at the next rebalance")
+        Notifier().send_now("kill switch cleared; trading resumes at the next rebalance")
+    else:
+        print("kill switch was not set")
+
+
+def _heartbeat_age(cfg):
+    from lab.paper import heartbeat_path
+
+    p = heartbeat_path(cfg)
+    if not p.exists():
+        return None, None
+    hb = json.loads(p.read_text())
+    age = (datetime.now(UTC) - datetime.fromisoformat(hb["at"])).total_seconds()
+    return age, hb
+
+
+def cmd_health(cfg, a):
+    age, hb = _heartbeat_age(cfg)
+    if age is None:
+        print("unhealthy: no heartbeat yet")
+        return 1
+    ok = age <= a.max_age
+    print(f"{'healthy' if ok else 'unhealthy'}: last heartbeat {age:.0f}s ago; {json.dumps(hb)}")
+    return 0 if ok else 1
+
+
+def cmd_doctor(cfg, a):
+    import shutil
+    import socket
+
+    import nautilus_trader
+
+    from lab.notify import Notifier
+    from lab.paper import kill_path
+    from lab.safety import SafetyError, check_paper_settings, read_kill_switch
+
+    results = []
+
+    def check(name, status, detail):
+        results.append((name, status, detail))
+
+    check("python / nautilus", "ok", f"{sys.version.split()[0]} / nautilus_trader {nautilus_trader.__version__}")
+    m = data.manifest(cfg)
+    missing = [t for t in cfg.universe if t not in m]
+    stale = [t for t in cfg.universe if t in m and (date.today() - date.fromisoformat(m[t]["last"])).days > 7]
+    check(
+        "market data",
+        "fail" if missing else ("warn" if stale else "ok"),
+        f"missing {missing}"
+        if missing
+        else (f"older than a week: {stale} (lab data fetch)" if stale else f"{len(m)} tickers up to date"),
+    )
+    survivorship = all(m.get(t, {}).get("survivorship_free") for t in cfg.universe if t in m)
+    check(
+        "data quality",
+        "ok" if survivorship else "warn",
+        "survivorship-free" if survivorship else "not survivorship-free: results are biased upward (see README)",
+    )
+    p = cfg.paper
+    try:
+        check_paper_settings(p.port, p.account_id)
+        check("paper settings", "ok", f"{p.account_id} via {p.host}:{p.port}")
+    except SafetyError as e:
+        check("paper settings", "fail", str(e))
+    try:
+        with socket.create_connection((p.host, p.port), timeout=3):
+            check("IB API reachable", "ok", f"{p.host}:{p.port} accepts connections")
+    except OSError as e:
+        check("IB API reachable", "fail", f"{p.host}:{p.port}: {e} (is IB Gateway running and logged in?)")
+    kill = read_kill_switch(kill_path(cfg))
+    check(
+        "kill switch",
+        "warn" if kill else "ok",
+        f"SET ({kill['mode']}): {kill.get('reason', '')}" if kill else "not set",
+    )
+    age, _ = _heartbeat_age(cfg)
+    check(
+        "agents heartbeat",
+        "ok" if age is not None and age < 180 else "warn",
+        "no heartbeat (not running)" if age is None else f"last {age:.0f}s ago",
+    )
+    rs = cfg.research
+    if rs.provider == "claude_code":
+        check(
+            "research provider",
+            "ok" if shutil.which("claude") else "warn",
+            "claude CLI found" if shutil.which("claude") else "claude CLI not installed (research swarm unavailable)",
+        )
+    else:
+        try:
+            with socket.create_connection(tuple(rs.ollama_url.split("//")[-1].split(":")), timeout=3):
+                check("research provider", "ok", f"Ollama at {rs.ollama_url}")
+        except (OSError, ValueError) as e:
+            check("research provider", "warn", f"Ollama unreachable at {rs.ollama_url}: {e}")
+    n = Notifier()
+    check(
+        "alerts",
+        "ok" if n.enabled else "warn",
+        "Telegram configured" if n.enabled else "no LAB_TELEGRAM_TOKEN/LAB_TELEGRAM_CHAT_ID: alerts only in logs",
+    )
+    free_gb = shutil.disk_usage(cfg.root).free / 1e9
+    check("disk", "ok" if free_gb > 2 else "warn", f"{free_gb:.1f} GB free")
+
+    icon = {"ok": "✓", "warn": "!", "fail": "✗"}
+    for name, status, detail in results:
+        print(f"  {icon[status]} {name:<20} {detail}")
+    fails = [r for r in results if r[1] == "fail"]
+    print(
+        f"\n{'READY' if not fails else 'NOT READY'}: {len(fails)} failure(s), "
+        f"{sum(r[1] == 'warn' for r in results)} warning(s)"
+    )
+    return 1 if fails else 0
+
+
+def cmd_notify_test(cfg, a):
+    from lab.notify import Notifier
+
+    n = Notifier()
+    if not n.enabled:
+        raise SystemExit("set LAB_TELEGRAM_TOKEN and LAB_TELEGRAM_CHAT_ID first (see README)")
+    ok = n.send_now("test message from trading-lab")
+    print("sent" if ok else "FAILED (check the token and chat id)")
+    return 0 if ok else 1
 
 
 # ----------------------------------------------------------------------------- parser
@@ -301,9 +642,18 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--ticker", required=True)
     i.add_argument("--date-column")
     i.add_argument("--adjusted", action="store_true", help="prices are split/dividend adjusted")
+    i.add_argument(
+        "--survivorship-free",
+        action="store_true",
+        help="the dataset includes delisted stocks (pair with `lab data membership`)",
+    )
+    i.add_argument("--source", help="name of the data vendor, recorded with every result")
     i.add_argument("--note")
     i.set_defaults(fn=cmd_data_import)
     d.add_parser("sample", help="store the offline real-data sample (GOOG 2004-2013)").set_defaults(fn=cmd_data_sample)
+    mb = d.add_parser("membership", help="point-in-time universe: CSV of ticker,start,end membership spells")
+    mb.add_argument("file")
+    mb.set_defaults(fn=cmd_data_membership)
     d.add_parser("list", help="show stored data").set_defaults(fn=cmd_data_list)
 
     def period_args(x, default="train"):
@@ -315,6 +665,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     b = sub.add_parser("backtest", help="compare signals against buy-and-hold")
     b.add_argument("signals", nargs="*", default=["sma_trend", "rsi_reversion"])
+    b.add_argument(
+        "--target-vol", type=float, help="volatility target for every portfolio, e.g. 0.15 (also the control)"
+    )
     period_args(b)
     b.set_defaults(fn=cmd_backtest)
 
@@ -323,6 +676,23 @@ def build_parser() -> argparse.ArgumentParser:
     n.add_argument("--samples", type=int, default=30)
     period_args(n)
     n.set_defaults(fn=cmd_null)
+
+    wf = sub.add_parser("walk-forward", help="rolling in-sample optimization, out-of-sample evaluation")
+    wf.add_argument("signal")
+    wf.add_argument("--grid", nargs="+", required=True, help="parameter values, e.g. fast=20,50 slow=100,200")
+    wf.add_argument("--is-years", type=int, default=4)
+    wf.add_argument("--oos-years", type=int, default=1)
+    wf.add_argument("--start")
+    wf.add_argument("--end")
+    wf.add_argument("--tickers", nargs="+")
+    wf.set_defaults(fn=cmd_walk_forward)
+
+    pb = sub.add_parser("pbo", help="probability of backtest overfitting across a parameter grid")
+    pb.add_argument("signal")
+    pb.add_argument("--grid", nargs="+", required=True)
+    pb.add_argument("--splits", type=int, default=10)
+    period_args(pb)
+    pb.set_defaults(fn=cmd_pbo)
 
     h = sub.add_parser("holdout", help="the one-time final exam on the holdout period (logged)")
     h.add_argument("signal")
@@ -338,6 +708,11 @@ def build_parser() -> argparse.ArgumentParser:
     rr.add_argument("--model")
     rr.set_defaults(fn=cmd_research_run)
     r.add_parser("list", help="all hypotheses and their status").set_defaults(fn=cmd_research_list)
+    rt = r.add_parser("retry", help="re-implement a hypothesis that never reached validation")
+    rt.add_argument("id")
+    rt.add_argument("--provider", choices=["claude_code", "ollama"])
+    rt.add_argument("--model")
+    rt.set_defaults(fn=cmd_research_retry)
     rs = r.add_parser("show", help="details of one hypothesis")
     rs.add_argument("id")
     rs.set_defaults(fn=cmd_research_show)
@@ -356,7 +731,28 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--tickers", nargs="+")
     pp.add_argument("--set", action="append")
     pp.add_argument("--check-only", action="store_true", help="validate the setup without connecting")
+    pp.add_argument("--smoke", action="store_true", help="connect, verify account/instruments/data, no trading")
+    pp.add_argument(
+        "--test-order", action="store_true", help="with --smoke: place and cancel an unfillable 1-share limit order"
+    )
+    pp.add_argument(
+        "--adopt-broker", action="store_true", help="reset the agents' ledger to the broker's current positions"
+    )
     pp.set_defaults(fn=cmd_paper)
+
+    sub.add_parser(
+        "paper-report", help="paper results, costs and implementation shortfall from the journal"
+    ).set_defaults(fn=cmd_paper_report)
+    k = sub.add_parser("kill", help="kill switch: stop all new orders now")
+    k.add_argument("--flatten", action="store_true", help="also exit every position at the next open")
+    k.add_argument("--reason", default="manual")
+    k.set_defaults(fn=cmd_kill)
+    sub.add_parser("resume", help="clear the kill switch").set_defaults(fn=cmd_resume)
+    hl = sub.add_parser("health", help="exit 0 if the agents' heartbeat is fresh (for Docker)")
+    hl.add_argument("--max-age", type=int, default=180)
+    hl.set_defaults(fn=cmd_health)
+    sub.add_parser("doctor", help="pre-flight check of the whole deployment").set_defaults(fn=cmd_doctor)
+    sub.add_parser("notify-test", help="send a test alert").set_defaults(fn=cmd_notify_test)
 
     sub.add_parser("signals", help="list available signals").set_defaults(fn=None)
     return p

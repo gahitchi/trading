@@ -95,7 +95,22 @@ def manifest(cfg: LabConfig) -> dict:
     return json.loads(p.read_text()) if p.exists() else {}
 
 
-def save(cfg: LabConfig, ticker: str, df: pd.DataFrame, *, source: str, adjusted: bool, note: str = "") -> dict:
+def save(
+    cfg: LabConfig,
+    ticker: str,
+    df: pd.DataFrame,
+    *,
+    source: str,
+    adjusted: bool,
+    survivorship_free: bool = False,
+    note: str = "",
+) -> dict:
+    """Store a validated series with its provenance.
+
+    adjusted:           prices are back-adjusted for splits and dividends
+    survivorship_free:  the dataset this came from also contains stocks that were later
+                        delisted (so a universe built from it is not limited to survivors)
+    """
     ticker = ticker.upper()
     clean = validate(df, ticker)
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
@@ -103,6 +118,7 @@ def save(cfg: LabConfig, ticker: str, df: pd.DataFrame, *, source: str, adjusted
     entry = {
         "source": source,
         "adjusted": adjusted,
+        "survivorship_free": survivorship_free,
         "note": note,
         "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "first": str(clean.index[0].date()),
@@ -126,6 +142,72 @@ def load_many(cfg: LabConfig, tickers) -> dict[str, pd.DataFrame]:
     return {t: load(cfg, t) for t in tickers}
 
 
+def quality(cfg: LabConfig, tickers) -> dict:
+    """Summary of how trustworthy the data behind a result is."""
+    m = manifest(cfg)
+    entries = [m.get(t, {}) for t in tickers]
+    sources = sorted({e.get("source", "?") for e in entries})
+    pit = membership(cfg) is not None
+    return {
+        "sources": sources,
+        "adjusted": all(e.get("adjusted") for e in entries),
+        "survivorship_free": all(e.get("survivorship_free") for e in entries) and pit,
+        "point_in_time_universe": pit,
+    }
+
+
+def quality_warning(q: dict) -> str | None:
+    issues = []
+    if not q["survivorship_free"]:
+        issues.append(
+            "survivorship bias: the universe only contains stocks that survived, so results are "
+            "biased upward" + ("" if q["point_in_time_universe"] else " (no point-in-time membership file)")
+        )
+    if not q["adjusted"]:
+        issues.append("unadjusted prices: splits and dividends appear as price jumps")
+    return "; ".join(issues) or None
+
+
+# --------------------------------------------------------------------------- point-in-time universe
+
+
+def membership_path(cfg: LabConfig) -> Path:
+    return cfg.data_dir / "membership.csv"
+
+
+def save_membership(cfg: LabConfig, path: str | Path) -> pd.DataFrame:
+    """CSV with columns ticker, start, end (end empty = still a member). One row per
+    membership spell; a ticker may have several rows."""
+    df = pd.read_csv(path, dtype=str).rename(columns=str.lower)
+    missing = {"ticker", "start"} - set(df.columns)
+    if missing:
+        raise DataError(f"{path}: missing columns {sorted(missing)}")
+    if "end" not in df:
+        df["end"] = ""
+    df = df[["ticker", "start", "end"]].fillna("")
+    df["ticker"] = df["ticker"].str.strip().str.upper()
+    for col in ("start", "end"):
+        bad = df[col][(df[col] != "") & pd.to_datetime(df[col], errors="coerce").isna()]
+        if len(bad):
+            raise DataError(f"{path}: invalid {col} date {bad.iloc[0]!r}")
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    df.to_csv(membership_path(cfg), index=False)
+    return df
+
+
+def membership(cfg: LabConfig) -> dict[str, list[tuple[date, date | None]]] | None:
+    p = membership_path(cfg)
+    if not p.exists():
+        return None
+    df = pd.read_csv(p, dtype=str).fillna("")
+    out: dict[str, list] = {}
+    for _, r in df.iterrows():
+        out.setdefault(r["ticker"], []).append(
+            (date.fromisoformat(r["start"]), date.fromisoformat(r["end"]) if r["end"] else None)
+        )
+    return out
+
+
 # --------------------------------------------------------------------------- sources
 
 
@@ -139,8 +221,12 @@ def fetch_yfinance(ticker: str, start: date, end: date | None = None) -> pd.Data
 
     try:
         df = yf.Ticker(ticker).history(
-            start=start.isoformat(), end=end.isoformat() if end else None,
-            interval="1d", auto_adjust=True, actions=False, raise_errors=True,
+            start=start.isoformat(),
+            end=end.isoformat() if end else None,
+            interval="1d",
+            auto_adjust=True,
+            actions=False,
+            raise_errors=True,
         )
     except Exception as e:  # yfinance raises a variety of types
         raise DataError(f"{ticker}: Yahoo Finance download failed: {e}") from e
@@ -154,7 +240,9 @@ def import_csv(path: str | Path, date_column: str | None = None) -> pd.DataFrame
     Databento, Interactive Brokers, Stooq or a spreadsheet all work."""
     df = pd.read_csv(path)
     cols = {c.lower().strip(): c for c in df.columns}
-    dc = date_column or next((cols[c] for c in ("date", "datetime", "timestamp", "time", "ts_event") if c in cols), None)
+    dc = date_column or next(
+        (cols[c] for c in ("date", "datetime", "timestamp", "time", "ts_event") if c in cols), None
+    )
     if dc is None:
         raise DataError(f"{path}: no date column found (pass --date-column)")
     df.index = pd.to_datetime(df.pop(dc), utc=False)
@@ -174,13 +262,22 @@ def sample_goog() -> pd.DataFrame:
 # --------------------------------------------------------------------------- null models
 
 
-def gbm(n_days: int, seed: int, *, start: str = "2010-01-04", price: float = 100.0,
-        ann_vol: float = 0.25, ann_drift: float = 0.0) -> pd.DataFrame:
+def gbm(
+    n_days: int,
+    seed: int,
+    *,
+    start: str = "2010-01-04",
+    price: float = 100.0,
+    ann_vol: float = 0.25,
+    ann_drift: float = 0.0,
+) -> pd.DataFrame:
     """Random-walk daily bars (business days). No exploitable pattern by construction."""
     rng = np.random.default_rng(seed)
     dt = 1 / 252
     steps = 8  # intraday sub-steps for realistic highs/lows
-    lr = (ann_drift - 0.5 * ann_vol**2) * dt / steps + ann_vol * np.sqrt(dt / steps) * rng.standard_normal(n_days * steps)
+    lr = (ann_drift - 0.5 * ann_vol**2) * dt / steps + ann_vol * np.sqrt(dt / steps) * rng.standard_normal(
+        n_days * steps
+    )
     path = price * np.exp(np.concatenate([[0.0], np.cumsum(lr)]))
     seg = path[1:].reshape(n_days, steps)
     opens = path[:-1].reshape(n_days, steps)[:, 0]
