@@ -76,3 +76,19 @@ shocks and contemporaneous covariance. Misaligned calendars fail explicitly
 rather than presenting scientifically invalid significance results. A more
 general point-in-time bootstrap for staggered listings/halts is still needed;
 the automated research engine must not claim significance for those panels.
+
+## Health monitoring and readiness
+
+The heartbeat contains `paper_account_ok`, `reconciliation_issues`,
+`unresolved_orders`, `data_issues`, `safety_halt`, and `ready`.
+The `lab health` check now requires a timely heartbeat, a verified cached
+paper-account identity, no critical position-reconciliation failure, and no
+sticky risk/kill halt. An ordinary outstanding broker order is reported but
+is not, by itself, treated as a dead process. Trading readiness is a **separate**
+flag; it remains false while waiting for complete daily signals or outstanding
+fills.
+
+These checks are limited by the adapter's local broker cache: until a separate
+IBKR connection-level liveness and statement/fill reconciliation mechanism is
+implemented, `healthy` does not certify the broker connection or permit
+fully unattended operation.

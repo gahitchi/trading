@@ -10,12 +10,7 @@ def assess_heartbeat(hb: dict | None, age_seconds: float | None, max_age: float,
     issues = []
     if not isinstance(hb, dict):
         return ["heartbeat missing or unreadable"]
-    if (
-        age_seconds is None
-        or not math.isfinite(age_seconds)
-        or age_seconds < -10
-        or age_seconds > max_age
-    ):
+    if age_seconds is None or not math.isfinite(age_seconds) or age_seconds < -10 or age_seconds > max_age:
         issues.append("heartbeat stale or clock skew")
     if hb.get("paper_account_ok") is not True:
         issues.append("verified paper account not available")
@@ -27,8 +22,7 @@ def assess_heartbeat(hb: dict | None, age_seconds: float | None, max_age: float,
     if not isinstance(diffs, list):
         issues.append("broker reconciliation status unknown")
     elif any(
-        not isinstance(d, str)
-        or not d.startswith(("outstanding broker order ", "inflight broker order "))
+        not isinstance(d, str) or not d.startswith(("outstanding broker order ", "inflight broker order "))
         for d in diffs
     ):
         issues.append("unresolved broker position or cache mismatch")
