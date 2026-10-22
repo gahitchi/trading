@@ -8,13 +8,28 @@ permissions:
   contents: read
 
 jobs:
+  collab:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # all branches: messages are read from every agent's own branch
+      - name: message format and thread structure
+        run: python3 tools/collab.py check
+      - name: immutability, branch ownership, commit signatures
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        run: python3 tools/collab.py check --base ${{ github.event.before }}
+      - name: immutability, branch ownership, commit signatures (pull request)
+        if: github.event_name == 'pull_request'
+        run: python3 tools/collab.py check --base origin/${{ github.base_ref }}
+
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uvx ruff check src tests
-      - run: uvx ruff format --check src tests
+      - run: uvx ruff check src tests tools
+      - run: uvx ruff format --check src tests tools
 
   test:
     runs-on: ubuntu-latest

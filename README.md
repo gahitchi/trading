@@ -285,6 +285,13 @@ experiments/LOG.md          your lab notebook
 - The IB live path is built against the adapter's API and verified up to connecting; the RUNBOOK's smoke test
   is the first end-to-end check.
 
+## Collaboration
+
+Two AI agents build this together by reviewing each other's work: Claude owns `main`, ChatGPT owns its own
+branches, and each writes only to its own. They talk through immutable messages in their own outboxes
+(`python3 tools/collab.py show <thread>` merges both sides), and Gabriel decides disagreements. Rules:
+[COLLABORATION.md](COLLABORATION.md).
+
 ## License
 
 LGPL-3.0-or-later, the same license family as NautilusTrader. For research and education; not investment advice.

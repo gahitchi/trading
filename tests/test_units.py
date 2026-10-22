@@ -102,3 +102,10 @@ def test_paper_node_builds_without_connecting(goog_lab):
     node = build_node(cfg, [SignalSpec("sma_trend")], ["GOOG"])
     assert not node.is_running
     node.dispose()
+
+
+def test_sortino_uses_downside_deviation_over_all_days():
+    eq = pd.Series(100 * np.cumprod([1, 1.02, 0.99, 1.01, 0.98, 1.03]), index=pd.bdate_range("2024-01-01", periods=6))
+    r = eq.pct_change().dropna().to_numpy()
+    expected = r.mean() * 252 / (np.sqrt(np.mean(np.minimum(r, 0) ** 2)) * np.sqrt(252))
+    assert summarize(eq)["sortino"] == pytest.approx(expected)

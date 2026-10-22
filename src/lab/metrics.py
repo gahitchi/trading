@@ -30,9 +30,8 @@ def summarize(equity: pd.Series, *, fills: list | None = None, gross: pd.Series 
     years = max((equity.index[-1] - equity.index[0]).days / 365.25, 1e-9)
     total = equity.iloc[-1] / equity.iloc[0] - 1
     vol = rets.std(ddof=1) * math.sqrt(TRADING_DAYS)
-    # Downside deviation is the RMS of *all* returns below the zero target,
-    # divided by the number of all observations (including positive days).
-    # Std() over the subset of negative returns is not the Sortino denominator.
+    # Sortino downside deviation: RMS of min(r, 0) over ALL observations (target 0), not the std of the
+    # negative subset. Fix contributed by ChatGPT (hardening branch, cab8cef).
     downside = math.sqrt(float(np.mean(np.minimum(rets.to_numpy(), 0.0) ** 2))) * math.sqrt(TRADING_DAYS)
     mean = rets.mean() * TRADING_DAYS
     mdd, mdd_days = max_drawdown(equity)
