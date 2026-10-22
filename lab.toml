@@ -37,13 +37,30 @@ rebalance_band = 0.02         # resize a held position only if the change exceed
 cash_buffer = 0.01            # size buys on 99% of equity: next-open fills can gap above the close
 
 [risk]
-max_weight = 0.25       # max fraction of equity in one stock
-max_gross = 1.0         # long-only, no leverage
+# Fractions of equity. Weights are signed (negative = short). These defaults are long-only, unlevered.
+max_weight = 0.25       # max |weight| of one stock
+max_gross = 1.0         # max sum of |weights|; above 1 is leverage (capped by [margin] initial: 2.0 at Reg T)
+max_short_gross = 0.0   # max sum of short |weights|; 0 forbids shorting
+min_net = 0.0           # net exposure (longs - shorts) must stay within [min_net, max_net]
+max_net = 1.0
 max_drawdown = 0.35     # circuit breaker: flatten and halt if equity drops 35% from its peak
 
+[margin]
+# Requirements as fractions of position value: Reg T / FINRA minimums. IBKR's house rules can be stricter.
+initial_long = 0.50
+initial_short = 0.50
+maintenance_long = 0.25
+maintenance_short = 0.30
+cushion = 0.10          # deleverage once equity is within 10% of the maintenance requirement
+# Financing, charged daily in the ledger. ASSUMPTIONS where no point-in-time data exists; every run reports them.
+borrow_apr = 0.005      # stock-borrow fee for easy-to-borrow names; hard-to-borrow stocks cost far more
+debit_apr = 0.06        # interest on borrowed cash (IBKR: benchmark rate + spread). Set the current rate.
+
 [portfolio]
-target_vol = 0.0        # annualized volatility target (e.g. 0.15); 0 = off. Scales exposure down, never up
+target_vol = 0.0        # annualized volatility target (e.g. 0.15); 0 = off
 vol_window = 63         # trading days used to estimate volatility
+max_leverage = 1.0      # ceiling on the volatility-targeting scale: 1 scales down only, 1.5 may lever up to 1.5x
+leverage = 1.0          # fixed exposure multiplier when target_vol = 0
 
 [paper]
 host = "127.0.0.1"

@@ -261,7 +261,7 @@ def behaviour_check(path: Path, timeout_s: int = 90) -> CheckReport:
     if not info["deterministic"]:
         errs.append("not deterministic: same bars gave different targets")
     if info["invalid"]:
-        errs.append(f"{info['invalid']} targets were not finite numbers in [0, 1]")
+        errs.append(f"{info['invalid']} targets were not finite numbers in [-1, 1]")
     if info["ms_per_call"] > 5:
         errs.append(f"too slow: {info['ms_per_call']} ms per call (limit 5 ms)")
     if info["changes"] == 0:

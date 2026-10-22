@@ -49,29 +49,33 @@ NY = "America/New_York"
 
 
 class ReplayMarket:
-    """Recorded daily bars served as if the current replay day were today's completed session.
+    """Recorded daily bars, shifted in time so that replay day `first_day` falls on today.
 
-    Day `day` is dated today (New York) at `close_time`; earlier days fall on the preceding
-    calendar days at the same clock time. The agents' staleness checks therefore see fresh
-    data on every harness session, while prices are real history."""
+    Every bar moves by the same whole number of days, so the real calendar between sessions
+    (weekends, holidays) is preserved: financing accrues over the same days as in a backtest.
+    Later replay days therefore carry future dates; the agents only compare a bar's date with
+    today to skip a bar that is still forming, which a future-dated bar never is. Each bar is
+    stamped at `close_tod`, the compressed session's close time of day."""
 
     def __init__(self, frames: dict[str, pd.DataFrame], day: int):
         self.frames = frames
         self.day = day
-        self.close_ns: int = 0  # wall-clock timestamp of today's (replay day's) close, set per session
+        ref = max(frames.values(), key=len).index
+        today = pd.Timestamp.now(tz=NY).normalize().tz_localize(None)
+        self.offset = today - pd.Timestamp(ref[day]).normalize()
+        self.close_tod = pd.Timedelta(hours=16)  # set per session by the harness
 
-    def timestamps(self, n: int) -> list[int]:
-        """Timestamps for the first n replay days, the last of them at close_ns."""
-        step = 86_400 * 1_000_000_000
-        return [self.close_ns - (n - 1 - i) * step for i in range(n)]
+    def stamp(self, d) -> int:
+        return int((pd.Timestamp(d).normalize() + self.offset + self.close_tod).tz_localize(NY).value)
 
     def bars(self, ticker: str, bt, start_ns: int | None) -> list[Bar]:
-        df = self.frames[ticker].iloc[: self.day + 1]
-        stamps = self.timestamps(len(df))
+        df = self.frames[ticker]
+        df = df[df.index <= max(self.frames.values(), key=len).index[self.day]]
         out = []
         o, h, lo, c = (df[k].round(2).to_numpy() for k in ("open", "high", "low", "close"))
         v = df["volume"].to_numpy()
-        for i, ts in enumerate(stamps):
+        for i, d in enumerate(df.index):
+            ts = self.stamp(d)
             if start_ns is not None and ts < start_ns:
                 continue
             hi, low = max(h[i], o[i], c[i]), min(lo[i], o[i], c[i])
@@ -91,11 +95,11 @@ class ReplayMarket:
 
     def next_opens(self) -> dict[str, float]:
         """Opening prices of the session after the current replay day (the fills of today's orders)."""
-        out = {}
-        for t, df in self.frames.items():
-            if self.day + 1 < len(df):
-                out[t] = float(round(df["open"].iloc[self.day + 1], 2))
-        return out
+        ref = max(self.frames.values(), key=len).index
+        if self.day + 1 >= len(ref):
+            return {}
+        nxt = ref[self.day + 1]
+        return {t: float(round(df.loc[nxt, "open"], 2)) for t, df in self.frames.items() if nxt in df.index}
 
 
 class ReplayDataClient(DataClient):

@@ -3,7 +3,8 @@ The live-node harness: the real paper-trading node, the real agents, a simulated
 
 One harness session is one trading day, compressed into seconds on the wall clock:
 
-  T-60s  the replay day's bar is dated as today's completed session ("the close")
+  T-60s  "the close": the replay day's bar is stamped at this time of day (history is shifted by a
+         whole number of days so the first replay day is today and the real calendar gaps remain)
   T      the node starts: connects, reconciles with the broker, agents load history
   T+2s   signal time: agents request the day's bars and publish targets
   T+3.5s cross-sectional strategies rank the universe
@@ -61,6 +62,7 @@ class LiveHarness:
         first_day: int,
         broker_cash: float | None = None,
         allow_short: bool = False,
+        shortable: set[str] | None = None,
     ):
         self.cfg = replace(cfg, paper=replace(cfg.paper, account_id=PAPER_ACCOUNT, port=4002))
         self.specs = specs
@@ -80,6 +82,7 @@ class LiveHarness:
                 "max_pct": c.commission_max_pct,
             },
             "allow_short": allow_short,
+            "shortable": shortable,
         }
         self.sessions: list[SessionResult] = []
 
@@ -111,8 +114,8 @@ class LiveHarness:
         if now.hour == 0 and now.minute < 2:
             time.sleep(120)
             now = datetime.now(NY)
-        close = now - timedelta(seconds=60)
-        self.market.close_ns = int(close.replace(microsecond=0).timestamp() * 1e9)
+        close = (now - timedelta(seconds=60)).replace(microsecond=0)
+        self.market.close_tod = pd.Timedelta(hours=close.hour, minutes=close.minute, seconds=close.second)
 
         def at(sec: int) -> str:
             return (now + timedelta(seconds=sec)).strftime("%H:%M:%S")

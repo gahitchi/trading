@@ -20,6 +20,8 @@ class AllocatorAgentConfig(DataActorConfig):
         absolute_groups=(),
         target_vol: float = 0.0,
         vol_window: int = 63,
+        max_leverage: float = 1.0,
+        leverage: float = 1.0,
         **_kwargs,
     ):
         """sleeves: sleeve id ("signal:TICKER") -> (ticker, weight). Weights are fractions of equity.
@@ -33,10 +35,13 @@ class AllocatorAgentConfig(DataActorConfig):
         self.sleeves = sleeves
         self.normalize_active = normalize_active
         self.absolute_groups = set(absolute_groups)
-        # Volatility targeting: scale all weights by min(1, target_vol / ex-ante portfolio vol),
-        # estimated from the stocks' last `vol_window` daily returns. 0 = off. Never levers up.
+        # Volatility targeting: scale all weights by min(max_leverage, target_vol / ex-ante portfolio vol),
+        # estimated from the stocks' last `vol_window` daily returns (shorts included). 0 = off, and then
+        # the weights are multiplied by the fixed `leverage`. The RiskAgent's limits apply afterwards.
         self.target_vol = target_vol
         self.vol_window = vol_window
+        self.max_leverage = max_leverage
+        self.leverage = leverage
 
 
 class AllocatorAgent(DataActor):
@@ -44,7 +49,7 @@ class AllocatorAgent(DataActor):
         super().__init__(config)
         total = sum(w for _, w in config.sleeves.values())
         if total > 1.0 + 1e-9:
-            raise ValueError(f"sleeve weights sum to {total:.3f} > 1 (no leverage)")
+            raise ValueError(f"sleeve weights sum to {total:.3f} > 1 (leverage is set by the portfolio, not sleeves)")
         self.targets: dict[str, float] = {}
         self.active: set[str] = set()
         self.tickers = sorted({t for t, _ in config.sleeves.values()})
@@ -76,11 +81,14 @@ class AllocatorAgent(DataActor):
                     out[ticker] += w * self.targets.get(s, 0.0)
         if self.config.target_vol > 0:
             self.scale = self._vol_scale(out)
+        else:
+            self.scale = self.config.leverage
+        if self.scale != 1.0:
             out = {t: w * self.scale for t, w in out.items()}
         return out
 
     def _vol_scale(self, weights: dict[str, float]) -> float:
-        held = [t for t, w in weights.items() if w > 0 and len(self.closes[t]) > 20]
+        held = [t for t, w in weights.items() if w != 0 and len(self.closes[t]) > 20]
         if not held:
             return 1.0
         n = min(len(self.closes[t]) for t in held)
@@ -89,7 +97,7 @@ class AllocatorAgent(DataActor):
         cov = np.atleast_2d(np.cov(rets))
         w = np.array([weights[t] for t in held])
         vol = math.sqrt(max(float(w @ cov @ w), 0.0) * 252)
-        return 1.0 if vol <= 0 else min(1.0, self.config.target_vol / vol)
+        return 1.0 if vol <= 0 else min(self.config.max_leverage, self.config.target_vol / vol)
 
     def _on_signal(self, msg):
         if msg.sleeve not in self.config.sleeves:

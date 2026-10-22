@@ -42,6 +42,7 @@ class ApprovedTargets:
     ts: int
     halted: bool = False
     notes: tuple = field(default_factory=tuple)
+    reduce_only: bool = False  # margin call: positions may only shrink toward zero
 
 
 @dataclass(frozen=True)
@@ -49,8 +50,12 @@ class EquitySnapshot:
     ts: int
     equity: float
     cash: float
-    positions: dict  # ticker -> shares
-    gross: float  # invested value / equity
+    positions: dict  # ticker -> shares (negative = short)
+    gross: float  # (long value + short value) / equity
+    net: float = 0.0  # (long value - short value) / equity
+    long_value: float = 0.0
+    short_value: float = 0.0  # market value of shorted shares, >= 0
+    financing: float = 0.0  # borrow fees and debit interest accrued so far (already deducted from equity)
 
 
 @dataclass(frozen=True)

@@ -49,12 +49,14 @@ REVIEW_SCHEMA = {
 }
 
 ENVIRONMENT = """\
-The lab trades US stocks, long-only, from daily bars (split- and dividend-adjusted OHLCV).
+The lab trades US stocks from daily bars (split- and dividend-adjusted OHLCV).
 A signal decides once per day after the close and sees ONLY the past bars of ONE stock
-(at most 250 bars). It returns a target exposure between 0 (cash) and 1 (fully invested
-in that stock's share of the portfolio). Orders fill at the NEXT session's opening price,
-one tick of slippage, IBKR commissions ($0.005/share, $1 minimum). No shorting, no
-leverage, no cross-sectional data, no fundamentals, no news."""
+(at most 250 bars). It returns a target exposure between -1 (fully short) and 1 (fully
+invested) in that stock's share of the portfolio; 0 is cash. Shorts are only placed when
+the lab's risk limits allow them (otherwise a negative target means cash), and cost a
+stock-borrow fee. Leverage is decided by the portfolio and risk settings, never by the
+signal. Orders fill at the NEXT session's opening price, one tick of slippage, IBKR
+commissions ($0.005/share, $1 minimum). No cross-sectional data, no fundamentals, no news."""
 
 RESEARCHER_SYSTEM = f"""\
 You are the Researcher in a scientific trading lab. You propose ONE new, falsifiable
@@ -89,7 +91,7 @@ Hard rules (enforced by an automatic checker that rejects violations):
 - target(self, w) receives a Window with numpy arrays w.open, w.high, w.low, w.close,
   w.volume and w.dates (numpy datetime64[D] session dates, New York) (oldest first, exactly
   `lookback` bars, the last one is the bar that just closed)
-  and returns a float in [0, 1]. Read parameters from self.params.
+  and returns a float in [-1, 1] (negative = short). Read parameters from self.params.
 - self.last holds your previous return value; use it for entry/exit hysteresis.
 - Must be deterministic, never raise, and run in well under 5 ms per call. Guard divisions.
 - Implement the spec faithfully. Do not add filters or parameters that are not in the spec.

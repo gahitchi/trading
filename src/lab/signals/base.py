@@ -74,14 +74,17 @@ class Signal:
 
 
 def clamp_target(x) -> float:
-    """Coerce a signal's output into [0, 1]; anything invalid becomes 0 (fail flat)."""
+    """Coerce a signal's output into [-1, 1]; anything invalid becomes 0 (fail flat).
+
+    Negative = short. Whether a short is ever placed is decided by the risk limits
+    (lab.toml [risk] max_short_gross, 0 by default), not by the signal."""
     try:
         x = float(x)
     except (TypeError, ValueError):
         return 0.0
     if not math.isfinite(x):
         return 0.0
-    return min(1.0, max(0.0, x))
+    return min(1.0, max(-1.0, x))
 
 
 # ----------------------------------------------------------------- helpers for authors
@@ -111,7 +114,7 @@ class CrossSectionalSignal:
 
     Once per day it sees a Window for every stock currently in the universe that has at
     least `lookback` bars, and returns weights: fractions of this strategy's capital,
-    each >= 0, summing to at most 1. Stocks it leaves out get 0.
+    negative for a short, with |weights| summing to at most 1. Stocks it leaves out get 0.
     """
 
     name: str = "unnamed"
@@ -137,11 +140,12 @@ class CrossSectionalSignal:
 
 
 def clean_weights(raw) -> dict[str, float]:
-    """Coerce a cross-sectional output into valid long-only weights summing to <= 1."""
+    """Coerce a cross-sectional output into valid signed weights whose |weights| sum to <= 1
+    (the strategy's own capital; leverage is a portfolio decision, not the strategy's)."""
     out = {}
     for k, v in (raw or {}).items():
         x = clamp_target(v) if not isinstance(v, bool) else float(v)
-        if x > 0:
+        if x != 0:
             out[str(k)] = x
-    total = sum(out.values())
-    return {k: v / total for k, v in out.items()} if total > 1 else out
+    gross = sum(abs(v) for v in out.values())
+    return {k: v / gross for k, v in out.items()} if gross > 1 else out

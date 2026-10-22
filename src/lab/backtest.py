@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal
 
 import pandas as pd
 from nautilus_trader.backtest import BacktestEngine
@@ -62,6 +63,9 @@ class RunResult:
     ledger_vs_account: float  # lab cash ledger minus simulator account cash (should be ~0)
     min_cash: float
     signals: list = field(default_factory=list)
+    financing: float = 0.0  # borrow fees + debit interest accrued (ASSUMED rates, lab.toml [margin])
+    borrow_fees: float = 0.0
+    margin_account: bool = False
 
 
 def _ns(d: date) -> int:
@@ -127,6 +131,10 @@ def run(
         raise ValueError("no sleeves")
     risk = risk or cfg.risk
     capital = capital or cfg.capital
+    p = cfg.portfolio
+    # Shorts and leverage need a margin account (a cash account refuses short sales, as IBKR's would);
+    # a long-only, unlevered run keeps the cash account it always had.
+    margin_book = risk.max_short_gross > 0 or risk.max_gross > 1 or p.leverage > 1 or p.max_leverage > 1
     warm = pd.Timestamp(warmup_start or cfg.warmup_start)
     last = pd.Timestamp(end) if end else None
     tickers = sorted({s.ticker for s in sleeves} | {t for _, _, ts in cross_sectional for t in ts})
@@ -135,16 +143,21 @@ def run(
         BacktestEngineConfig(trader_id=TraderId("LAB-001"), logging=LoggerConfig(stdout_level=LogLevel.ERROR))
     )
     try:
+        venue_kw = (
+            {"default_leverage": Decimal(1) / Decimal(str(min(cfg.margin.initial_long, cfg.margin.initial_short)))}
+            if margin_book
+            else {"allow_cash_borrowing": True}  # overnight gaps can briefly overdraw, as in a margin account
+        )
         engine.add_venue(
             SIM,
             OmsType.NETTING,
-            AccountType.CASH,
+            AccountType.MARGIN if margin_book else AccountType.CASH,
             [Money(capital, USD)],
             base_currency=USD,
             fee_model=costs.fee_model(cfg.costs),
             fill_model=costs.fill_model(cfg.costs),
             latency_model=costs.latency_model(),
-            allow_cash_borrowing=True,  # overnight gaps can briefly overdraw, as in a margin account
+            **venue_kw,
         )
         iids = {}
         frames = {}
@@ -203,6 +216,8 @@ def run(
                     absolute_groups={sig.name for sig, _, _ in cross_sectional},
                     target_vol=target_vol,
                     vol_window=cfg.portfolio.vol_window,
+                    max_leverage=p.max_leverage,
+                    leverage=p.leverage,
                 )
             )
         )
@@ -212,6 +227,10 @@ def run(
                 max_weight=risk.max_weight,
                 max_gross=risk.max_gross,
                 max_drawdown=risk.max_drawdown,
+                max_short_gross=risk.max_short_gross,
+                min_net=risk.min_net,
+                max_net=risk.max_net,
+                margin=cfg.margin,
             )
         )
         engine.add_actor(risk_agent)
@@ -226,6 +245,7 @@ def run(
                 rebalance_band=cfg.costs.rebalance_band,
                 cash_buffer=cfg.costs.cash_buffer,
                 capital=capital,
+                margin=cfg.margin,
                 **(execution_overrides or {}),
             )
         )
@@ -259,6 +279,9 @@ def run(
             ledger_vs_account=execution.cash - execution.account_cash(),
             min_cash=execution.min_cash,
             signals=recorder.signals,
+            financing=execution.financing,
+            borrow_fees=execution.borrow_fees,
+            margin_account=margin_book,
         )
     finally:
         engine.dispose()

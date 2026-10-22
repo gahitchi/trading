@@ -216,6 +216,8 @@ def build_node(
                 absolute_groups=absolute,
                 target_vol=cfg.portfolio.target_vol,
                 vol_window=cfg.portfolio.vol_window,
+                max_leverage=cfg.portfolio.max_leverage,
+                leverage=cfg.portfolio.leverage,
             )
         )
     )
@@ -226,6 +228,10 @@ def build_node(
                 max_weight=cfg.risk.max_weight,
                 max_gross=cfg.risk.max_gross,
                 max_drawdown=cfg.risk.max_drawdown,
+                max_short_gross=cfg.risk.max_short_gross,
+                min_net=cfg.risk.min_net,
+                max_net=cfg.risk.max_net,
+                margin=cfg.margin,
                 state_path=str(rt / "risk.json"),
                 halt_path=str(halt_path(cfg)),
             )
@@ -250,6 +256,7 @@ def build_node(
                 rebalance_band=cfg.costs.rebalance_band,
                 cash_buffer=cfg.costs.cash_buffer,
                 capital=p.capital,
+                margin=cfg.margin,
                 rebalance_time=sc.rebalance_time,
                 weekdays_only=sc.weekdays_only,
                 max_order_value=p.max_order_value,

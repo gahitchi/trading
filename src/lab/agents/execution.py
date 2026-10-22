@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from nautilus_trader.model import ClientOrderId, OrderSide, TimeInForce
 from nautilus_trader.trading import Strategy, StrategyConfig
 
+from lab import margin as mg
 from lab.agents.messages import (
     T_APPROVED,
     T_EQUITY,
@@ -22,6 +23,7 @@ from lab.agents.messages import (
     RiskEvent,
 )
 from lab.agents.schedule import next_at
+from lab.config import MarginSettings
 from lab.halt import read_halt, set_halt
 from lab.safety import is_paper_account, read_kill_switch
 
@@ -29,6 +31,20 @@ NY = ZoneInfo("America/New_York")
 # Hard halts under which exits are still sent (everything else in a halt sends nothing at all).
 _REDUCE_ONLY_HALTS = {"circuit_breaker", "margin_call"}
 _KEEP_TRADE_IDS = 2000  # broker trade IDs remembered for de-duplication (far more than a few days of fills)
+
+
+def _opening(current: float, target: float) -> float:
+    """Shares of an order that add exposure (a new or larger long or short); the rest only reduces it."""
+    if current == 0 or current * target < 0:
+        return abs(target)
+    return max(0.0, abs(target) - abs(current))
+
+
+def _with_opening(current: float, target: float, opening: float) -> float:
+    """The target that keeps the order's direction but adds only `opening` shares of new exposure."""
+    side = math.copysign(1.0, target)
+    base = abs(current) if current * target > 0 else 0.0
+    return side * (base + opening)
 
 
 class ExecutionAgentConfig(StrategyConfig):
@@ -54,9 +70,10 @@ class ExecutionAgentConfig(StrategyConfig):
         heartbeat_path: str | None = None,
         adopt_broker_positions: bool = False,
         weekdays_only: bool = True,
+        margin: MarginSettings | None = None,
         **_kwargs,
     ):
-        """instruments: ticker -> InstrumentId.
+        """instruments: ticker -> InstrumentId. margin: financing rates accrued on short and levered books.
 
         max_order_value:    no single buy larger than this (USD)
         max_orders_per_day: hard cap on orders per rebalance day
@@ -82,6 +99,7 @@ class ExecutionAgentConfig(StrategyConfig):
         self.heartbeat_path = heartbeat_path
         self.adopt_broker_positions = adopt_broker_positions
         self.weekdays_only = weekdays_only
+        self.margin = margin or MarginSettings()
 
 
 class ExecutionAgent(Strategy):
@@ -106,6 +124,7 @@ class ExecutionAgent(Strategy):
         self.new_data = False
         self.alert_pending = False
         self.halted = False
+        self.reduce_only = False
         self.blocked_reason = ""
         self.rejections = 0
         self.orders_sent = 0
@@ -114,6 +133,11 @@ class ExecutionAgent(Strategy):
         # it believes it holds. Independent of anything else in the broker account.
         self.cash = config.capital
         self.commissions = 0.0
+        # Borrow fees and debit interest accrued (estimated with lab.toml [margin] rates), deducted from equity.
+        # Kept apart from cash so cash stays exactly what the broker's trades imply.
+        self.financing = 0.0
+        self.borrow_fees = 0.0
+        self.accrued_to = 0  # bar timestamp the financing has been accrued up to
         self.held: dict[str, float] = dict.fromkeys(config.instruments, 0.0)
         # Write-ahead order journal: every order is recorded here BEFORE it is sent, and stays
         # until the broker reports it closed. After a crash between order and fill, the fills are
@@ -126,6 +150,9 @@ class ExecutionAgent(Strategy):
             state = json.loads(Path(config.state_path).read_text())
             self.cash = float(state["cash"])
             self.commissions = float(state.get("commissions", 0.0))
+            self.financing = float(state.get("financing", 0.0))
+            self.borrow_fees = float(state.get("borrow_fees", 0.0))
+            self.accrued_to = int(state.get("accrued_to", 0))
             self.held.update({t: float(q) for t, q in state.get("positions", {}).items() if t in self.held})
             self.pending = dict(state.get("pending", {}))
             self.applied = list(state.get("applied_trades", []))
@@ -183,6 +210,7 @@ class ExecutionAgent(Strategy):
     def _on_approved(self, msg):
         self.weights.update(msg.weights)
         self.halted = msg.halted  # follows the RiskAgent: halted until its breaker is cleared
+        self.reduce_only = msg.reduce_only
 
     def _schedule(self, after: datetime):
         nxt = next_at(after, self.config.rebalance_time, weekdays_only=self.config.weekdays_only)
@@ -262,10 +290,21 @@ class ExecutionAgent(Strategy):
         return {k: v for k, v in d.items() if v}
 
     def account_cash(self) -> float:
-        """Cash according to the broker/simulator account (cross-check for the ledger)."""
+        """Cash according to the broker/simulator account (cross-check for the ledger).
+
+        A cash account's balance is its cash. A margin account's balance is capital plus realized P&L, so its
+        cash is that balance minus the cost basis (signed quantity x average open price) of the open positions."""
         acct = self.cache.account_for_venue(self.config.venue)
         bal = acct.balance_total() if acct is not None else None
-        return float(bal.as_double()) if bal is not None else float("nan")
+        if bal is None:
+            return float("nan")
+        cash = float(bal.as_double())
+        if "MARGIN" in str(getattr(acct, "account_type", "")):
+            for iid in self.config.instruments.values():
+                for pos in self.cache.positions_open(instrument_id=iid):
+                    avg = pos.avg_px_open() if callable(pos.avg_px_open) else pos.avg_px_open
+                    cash -= float(pos.signed_qty) * float(avg)
+        return cash
 
     def _broker_position(self, ticker: str) -> float:
         return float(self.portfolio.net_position(self.config.instruments[ticker]))
@@ -297,12 +336,43 @@ class ExecutionAgent(Strategy):
         self._save()
         self._risk_event("ledger_reset", f"adopted broker positions {adopted}; ledger cash now {self.cash:,.2f}")
 
+    def _book(self) -> tuple[float, float]:
+        long_value = sum(q * self.prices.get(t, 0.0) for t, q in self.held.items() if q > 0)
+        short_value = -sum(q * self.prices.get(t, 0.0) for t, q in self.held.items() if q < 0)
+        return long_value, short_value
+
+    def _accrue(self) -> None:
+        """Charge borrow fees and debit interest for the calendar days since the last accrual."""
+        ts = self.price_ts
+        if self.accrued_to and ts > self.accrued_to:
+            days = round((ts - self.accrued_to) / 86_400e9)
+            if days > 0:
+                _, short_value = self._book()
+                borrow, debit = mg.financing_cost(self.cash, short_value, days, self.config.margin)
+                self.borrow_fees += borrow
+                self.financing += borrow + debit
+        if ts and ts > self.accrued_to:
+            self.accrued_to = ts
+            self._save()  # persist every accrual: a restart must not re-accrue the span at a different book
+
     def snapshot(self) -> EquitySnapshot:
-        invested = sum(q * self.prices.get(t, 0.0) for t, q in self.held.items())
-        equity = self.cash + invested
+        self._accrue()
+        long_value, short_value = self._book()
+        equity = self.cash + long_value - short_value - self.financing
         self.min_cash = min(self.min_cash, self.cash)
-        gross = invested / equity if equity > 0 else 0.0
-        return EquitySnapshot(self.price_ts, equity, self.cash, dict(self.held), gross)
+        gross = (long_value + short_value) / equity if equity > 0 else 0.0
+        net = (long_value - short_value) / equity if equity > 0 else 0.0
+        return EquitySnapshot(
+            self.price_ts,
+            equity,
+            self.cash,
+            dict(self.held),
+            gross,
+            net=net,
+            long_value=long_value,
+            short_value=short_value,
+            financing=self.financing,
+        )
 
     def _save(self):
         if self.config.state_path:
@@ -314,6 +384,9 @@ class ExecutionAgent(Strategy):
                     {
                         "cash": self.cash,
                         "commissions": self.commissions,
+                        "financing": self.financing,
+                        "borrow_fees": self.borrow_fees,
+                        "accrued_to": self.accrued_to,
                         "positions": self._nonzero(self.held),
                         "pending": self.pending,
                         "applied_trades": self.applied[-_KEEP_TRADE_IDS:],
@@ -375,22 +448,32 @@ class ExecutionAgent(Strategy):
             self._risk_event("kill_switch", f"halted by kill switch ({kill.get('reason', '')}); no orders sent")
             return
 
+        reduce_only = self.reduce_only or (halt is not None and halt["kind"] == "margin_call")
         orders = []
         for ticker, iid in self.config.instruments.items():
             price = self.prices.get(ticker)
             if not price:
                 continue
-            # Under a breaker or margin halt the only orders allowed are those that reduce exposure to zero.
-            w = 0.0 if (self.halted or flatten or halt) else self.weights.get(ticker, 0.0)
-            target = math.floor(w * snap.equity * (1 - self.config.cash_buffer) / price) if w > 0 else 0
             current = self.held.get(ticker, 0.0)
+            # A breaker halt, the kill switch's flatten or a halted RiskAgent exit everything.
+            exit_all = self.halted or flatten or (halt is not None and not reduce_only)
+            w = 0.0 if exit_all else self.weights.get(ticker, 0.0)
+            target = math.trunc(w * snap.equity * (1 - self.config.cash_buffer) / price)  # signed, toward zero
+            if reduce_only:
+                # Margin call: exposure may only shrink, never flip or grow.
+                target = 0 if target * current <= 0 else math.copysign(min(abs(target), abs(current)), current)
             diff = target - current
             if diff == 0:
                 continue
             value = abs(diff) * price
             if target != 0 and value < self.config.min_trade_value:
                 continue
-            if target != 0 and current != 0 and value < self.config.rebalance_band * snap.equity:
+            if (
+                target != 0
+                and current != 0
+                and target * current > 0
+                and value < self.config.rebalance_band * snap.equity
+            ):
                 continue  # small drift: not worth the commission
             if self.cache.orders_open_count(instrument_id=iid) > 0:
                 continue
@@ -398,29 +481,32 @@ class ExecutionAgent(Strategy):
                 # An earlier order for this stock is not settled yet: never risk a duplicate.
                 self._risk_event("order_pending", f"{ticker}: previous order still unsettled; no new order today")
                 continue
-            orders.append((diff, iid, ticker, price))
+            orders.append((_opening(current, target), target, current, iid, ticker, price))
 
-        orders.sort(key=lambda o: o[0] > 0)  # sells first
+        orders.sort(key=lambda o: o[0] > 0)  # pure reductions first: they free margin and are never capped
         sent = 0
-        bought = 0.0
-        for diff, iid, ticker, price in orders:
-            if diff > 0 and diff * price > self.config.max_order_value:
-                diff = math.floor(self.config.max_order_value / price)
-                self._risk_event("order_capped", f"{ticker} buy capped at {self.config.max_order_value:,.0f} USD")
-                if diff <= 0:
-                    continue
+        opened = 0.0
+        for opening, target, current, iid, ticker, price in orders:
+            if opening > 0 and opening * price > self.config.max_order_value:
+                cap = math.floor(self.config.max_order_value / price)
+                target = _with_opening(current, target, cap)
+                opening = cap
+                self._risk_event(
+                    "order_capped", f"{ticker}: new exposure capped at {self.config.max_order_value:,.0f} USD"
+                )
             if sent >= self.config.max_orders_per_day:
                 self._risk_event("daily_cap", f"max {self.config.max_orders_per_day} orders/day reached; rest deferred")
                 break
-            if diff > 0 and (bought + diff * price) / snap.equity > self.config.max_daily_turnover:
+            if opening > 0 and (opened + opening * price) / snap.equity > self.config.max_daily_turnover:
                 self._risk_event(
-                    "daily_cap", f"daily buy cap {self.config.max_daily_turnover:.0%} of equity reached; rest deferred"
+                    "daily_cap",
+                    f"daily cap on new exposure {self.config.max_daily_turnover:.0%} of equity reached; rest deferred",
                 )
                 break
-            if self._submit(iid, ticker, diff):
+            diff = target - current
+            if diff != 0 and self._submit(iid, ticker, diff):
                 sent += 1
-                if diff > 0:
-                    bought += diff * price
+                opened += opening * price
 
     def _submit(self, iid, ticker: str, diff: float) -> bool:
         if self.config.live and not self._paper_guard():

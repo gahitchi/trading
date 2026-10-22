@@ -56,8 +56,10 @@ class SimBroker:
         slippage: bool = True,
         commission: dict | None = None,
         allow_short: bool = False,
+        shortable: set[str] | None = None,
     ):
         self.path = Path(path)
+        self.shortable = shortable  # None = every stock can be borrowed; otherwise only these
         self.commission = commission or {}
         self.slippage = slippage
         if self.path.exists():
@@ -167,12 +169,15 @@ class SimBroker:
             rec["status"], rec["reason"] = "REJECTED", "limit order without a price"
         elif order_type not in ("MARKET", "LIMIT"):
             rec["status"], rec["reason"] = "REJECTED", f"order type {order_type} not supported"
-        elif side == "SELL" and not self.state["allow_short"]:
+        elif side == "SELL":
             pending = sum(
                 o["qty"] - o["filled"] for o in self.open_orders() if o["ticker"] == ticker and o["side"] == "SELL"
             )
-            if qty + pending > self.position(ticker) + 1e-9:
+            opens_short = qty + pending > self.position(ticker) + 1e-9
+            if opens_short and not self.state["allow_short"]:
                 rec["status"], rec["reason"] = "REJECTED", "short sale not permitted in this account"
+            elif opens_short and self.shortable is not None and ticker not in self.shortable:
+                rec["status"], rec["reason"] = "REJECTED", "no shares available to borrow"
         self.state["orders"][client_order_id] = rec
         self.save()
         return rec

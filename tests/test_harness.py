@@ -263,3 +263,59 @@ def test_wrong_account_stays_halted_after_the_account_is_fixed(goog_lab, frames,
     assert _lab(h, "recover", "--reason", "gateway was logged into the wrong account; fixed") == 0
     h.session()
     assert h.broker().positions()
+
+
+# ---------------------------------------------------------------------------- long/short through the live node
+
+LS = SignalSpec("sma_trend", {"fast": 3, "slow": 10, "short": 1})
+
+
+def _ls_cfg(cfg):
+    from dataclasses import replace
+
+    return replace(cfg, risk=replace(cfg.risk, max_weight=0.5, max_short_gross=0.5, min_net=-0.5))
+
+
+def test_live_long_short_matches_the_backtest_including_financing(goog_lab, frames, tmp_path):
+    cfg = _ls_cfg(goog_lab)
+    days = 7
+    h = LiveHarness(cfg, [LS], frames, tmp_path / "harness", first_day=D0, allow_short=True)
+    for _ in range(days):
+        assert h.session().error is None
+    live = [(f.side, f.qty, f.px, f.commission) for s in h.sessions for f in s.fills]
+    goog = frames["GOOG"]
+    paper_caps = {  # the paper account's fat-finger and daily caps, which backtests do not apply by default
+        "max_order_value": cfg.paper.max_order_value,
+        "max_orders_per_day": cfg.paper.max_orders_per_day,
+        "max_daily_turnover": cfg.paper.max_daily_turnover,
+    }
+    bt = backtest.run(
+        cfg,
+        [backtest.Sleeve(LS.make(), "GOOG", 1.0)],
+        frames,
+        goog.index[D0].date(),
+        goog.index[D0 + days].date(),
+        capital=cfg.paper.capital,
+        execution_overrides=paper_caps,
+    )
+    assert live == [(f.side, f.qty, f.price, f.commission) for f in bt.fills]
+    path, pos = [], 0.0
+    for side, qty, _, _ in live:
+        pos += qty if side == "BUY" else -qty
+        path.append(pos)
+    assert min(path) < 0 < max(path)  # long, then short through zero, and back
+    ledger = h.ledger()
+    assert ledger["positions"] == h.broker().positions()
+    assert ledger["cash"] == pytest.approx(h.broker().cash, abs=0.005)
+    assert ledger["borrow_fees"] > 0 and ledger["financing"] == pytest.approx(bt.financing, abs=1e-6)
+
+
+def test_short_without_shares_to_borrow_is_refused_and_the_book_stays_consistent(goog_lab, frames, tmp_path):
+    cfg = _ls_cfg(goog_lab)
+    h = LiveHarness(cfg, [LS], frames, tmp_path / "harness", first_day=D0 + 4, allow_short=True, shortable=set())
+    for _ in range(3):
+        h.session()
+    reasons = [o["reason"] for o in h.broker().state["orders"].values() if o["status"] == "REJECTED"]
+    assert "no shares available to borrow" in reasons
+    assert min(h.broker().positions().values(), default=0) >= 0
+    _assert_books_agree(h)

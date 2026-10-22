@@ -153,11 +153,17 @@ def quality(cfg: LabConfig, tickers) -> dict:
     entries = [m.get(t, {}) for t in tickers]
     sources = sorted({e.get("source", "?") for e in entries})
     pit = membership(cfg) is not None
+    shorts = cfg.risk.max_short_gross > 0
+    levered = cfg.risk.max_gross > 1 or cfg.portfolio.leverage > 1 or cfg.portfolio.max_leverage > 1
     return {
         "sources": sources,
         "adjusted": all(e.get("adjusted") for e in entries),
         "survivorship_free": all(e.get("survivorship_free") for e in entries) and pit,
         "point_in_time_universe": pit,
+        "shorting": shorts,
+        "leverage": levered,
+        "assumed_borrow_apr": cfg.margin.borrow_apr if shorts else None,
+        "assumed_debit_apr": cfg.margin.debit_apr if (shorts or levered) else None,
     }
 
 
@@ -170,6 +176,15 @@ def quality_warning(q: dict) -> str | None:
         )
     if not q["adjusted"]:
         issues.append("unadjusted prices: splits and dividends appear as price jumps")
+        if q.get("shorting"):
+            issues.append("shorts on unadjusted prices profit from every dividend drop: use adjusted data")
+    if q.get("shorting"):
+        issues.append(
+            f"borrow fees ASSUMED at {q['assumed_borrow_apr']:.2%}/yr for every stock (no historical borrow data; "
+            "hard-to-borrow stocks cost far more)"
+        )
+    if q.get("assumed_debit_apr") is not None:
+        issues.append(f"interest on borrowed cash ASSUMED at {q['assumed_debit_apr']:.2%}/yr")
     return "; ".join(issues) or None
 
 

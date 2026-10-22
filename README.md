@@ -43,12 +43,13 @@ Two layers of cooperating agents:
 
 | Component | Verification |
 |---|---|
-| Backtest engine, agents, costs, next-open fills, ledger = simulator account | 70 automated tests, real GOOG prices |
+| Backtest engine, agents, costs, next-open fills, ledger = simulator account | automated tests, real GOOG prices |
+| Long/short, leverage, margin calls, borrow fees and debit interest | automated tests (`tests/test_long_short.py`) |
 | Kill switch, reconciliation, daily caps, delistings, point-in-time universe | automated tests through full backtests |
 | PSR / Deflated Sharpe / PBO / bootstrap CI | tests incl. calibration (false-discovery control, 95% coverage) |
 | Research swarm via Claude Code | real end-to-end cycles (propose → implement → review → validate → gate) |
 | Docker image and compose stack | GitHub Actions builds and runs the image on every push |
-| Paper node build, paper-only guards | automated tests (no connection) |
+| **The paper node itself** (same agents, start-up reconciliation, restarts, rejects, partial fills, hard halts) | **runs against a simulated IBKR paper broker (`lab.sim`, `tests/test_harness.py`); a week of trading, long-only and long/short, matches the backtest fill for fill** |
 | **IB Gateway connection, order routing** | **your first run: [RUNBOOK.md](RUNBOOK.md), `lab paper --smoke --test-order`** |
 | **Yahoo Finance download, Ollama provider** | **your first run: `lab data fetch`, `lab llm-check --provider ollama`** |
 
@@ -185,6 +186,19 @@ docker compose up -d                    # agents run daily; health, alerts, jour
 Daily cycle (New York time): 16:10 the signal agents fetch completed daily bars from IB; 16:15 the execution agent
 reconciles its ledger with IB and sends **market-on-open** orders; 09:30 they fill in the opening auction.
 
+### Long/short, leverage and margin
+
+Signals and cross-sectional strategies return signed targets (negative = short); `lab.toml` decides what is
+traded. The defaults are long-only and unlevered. To allow shorts and leverage, raise `[risk] max_short_gross`,
+`max_gross`, the net range `min_net`/`max_net`, and `[portfolio] max_leverage` (the ceiling for volatility
+targeting) or `leverage`. The broker's rules bound all of it: `[margin]` holds Reg T / FINRA requirements by
+default, so gross exposure can never be configured above 2x. The risk agent keeps the targets' initial margin
+inside equity with a cushion, deleverages by itself when equity nears the maintenance requirement, and turns a
+breach into a `margin_call` hard halt during which positions may only shrink. Borrow fees and interest on
+borrowed cash accrue daily in the ledger; their rates are assumptions (no free point-in-time borrow data), and
+every result says so. Built-ins: `sma_trend --set short=1` (trend long/short) and `momentum_ls` (dollar-neutral
+cross-sectional momentum).
+
 ## Safety
 
 - **Paper-only, three layers**: (1) before connecting, live ports (4001, 7496, Docker 4003) and non-`DU` account
@@ -227,8 +241,11 @@ experiments/LOG.md          your lab notebook
 ## Known limitations
 
 - **Free data is survivorship-biased** and unofficial; see [Data](#data).
-- Daily bars only; long-only; no leverage; idle cash earns no interest; brief overdrafts from opening gaps are
-  reported (`min_cash`), not charged.
+- Daily bars only; idle cash and short-sale proceeds earn no interest (conservative).
+- Borrow fees use one assumed rate for every stock: there is no free historical borrow data, so hard-to-borrow
+  names are underpriced in backtests. In paper trading IBKR charges the real fee; the ledger's estimate is
+  reported next to it. The simulated broker refuses shorts without borrowable shares but does not liquidate
+  positions itself: the agents' own deleveraging and margin-call halt are what is tested.
 - IBKR's $1 minimum is charged per fill, so an order filled in pieces is slightly overcharged.
 - NautilusTrader is pinned to `2.0.0rc7` (2.0 is in release candidates); upgrade deliberately and rerun the tests.
 - The IB live path is built against the adapter's API and verified up to connecting; the RUNBOOK's smoke test

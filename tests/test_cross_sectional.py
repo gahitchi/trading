@@ -29,10 +29,13 @@ def test_momentum_ranks_by_twelve_minus_one_return():
     assert w == {"A": 0.5, "B": 0.5}
 
 
-def test_clean_weights_enforces_long_only_and_budget():
+def test_clean_weights_keeps_signs_and_caps_gross_at_the_strategy_capital():
+    # Negative = short; whether it is traded is the risk limits' decision. |weights| sum to at most 1.
     assert clean_weights({"A": 0.8, "B": 0.6, "C": -1, "D": float("nan")}) == pytest.approx(
-        {"A": 0.8 / 1.4, "B": 0.6 / 1.4}
+        {"A": 0.8 / 2.4, "B": 0.6 / 2.4, "C": -1 / 2.4}
     )
+    assert clean_weights({"A": 0.3, "B": -0.2}) == {"A": 0.3, "B": -0.2}
+    assert clean_weights({"A": -3}) == {"A": -1.0}  # clamped to [-1, 1] first
     assert clean_weights(None) == {}
 
 

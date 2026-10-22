@@ -37,15 +37,36 @@ class CostSettings:
 
 @dataclass(frozen=True)
 class RiskSettings:
-    max_weight: float
-    max_gross: float
+    """Exposure limits as fractions of equity. Weights are signed: negative = short."""
+
+    max_weight: float  # per stock, |weight|
+    max_gross: float  # sum of |weights|; above 1 = leverage
     max_drawdown: float
+    max_short_gross: float = 0.0  # sum of short |weights|; 0 = long-only
+    min_net: float = 0.0  # net exposure (longs - shorts) range
+    max_net: float = 1.0
+
+
+@dataclass(frozen=True)
+class MarginSettings:
+    """Broker margin rules (Reg T / FINRA minimums by default; IBKR's house rules can be stricter) and the
+    financing assumptions used where no point-in-time data exists. Requirements are fractions of position value."""
+
+    initial_long: float = 0.50
+    initial_short: float = 0.50
+    maintenance_long: float = 0.25
+    maintenance_short: float = 0.30
+    cushion: float = 0.10  # stay this far above the requirement; deleverage before the broker would
+    borrow_apr: float = 0.005  # ASSUMED stock-borrow fee for easy-to-borrow names (no historical fee data)
+    debit_apr: float = 0.06  # ASSUMED interest on borrowed cash (IBKR: benchmark rate + spread; set the current one)
 
 
 @dataclass(frozen=True)
 class PortfolioSettings:
     target_vol: float
     vol_window: int
+    max_leverage: float = 1.0  # ceiling on the volatility-targeting scale (1 = scales down only)
+    leverage: float = 1.0  # fixed exposure multiplier when volatility targeting is off
 
 
 @dataclass(frozen=True)
@@ -90,6 +111,7 @@ class LabConfig:
     capital: float
     costs: CostSettings
     risk: RiskSettings
+    margin: MarginSettings
     portfolio: PortfolioSettings
     paper: PaperSettings
     research: ResearchSettings
@@ -132,6 +154,36 @@ def find_config(start: Path | None = None) -> Path:
     raise ConfigError("lab.toml not found in this directory or any parent")
 
 
+def _check_risk(r: RiskSettings, m: MarginSettings) -> None:
+    import math
+
+    vals = (r.max_weight, r.max_gross, r.max_drawdown, r.max_short_gross, r.min_net, r.max_net, *vars(m).values())
+    if not all(math.isfinite(v) for v in vals):
+        raise ConfigError("risk and margin settings must be finite numbers")
+    if not (0 < r.max_weight <= 1 and r.max_gross > 0 and 0 < r.max_drawdown < 1):
+        raise ConfigError("risk: need 0 < max_weight <= 1, max_gross > 0, 0 < max_drawdown < 1")
+    if not 0 <= r.max_short_gross <= r.max_gross:
+        raise ConfigError("risk: need 0 <= max_short_gross <= max_gross")
+    if not (-r.max_short_gross <= r.min_net <= r.max_net <= r.max_gross):
+        raise ConfigError("risk: need -max_short_gross <= min_net <= max_net <= max_gross")
+    if r.max_short_gross == 0 and r.min_net < 0:
+        raise ConfigError("risk: a negative min_net needs max_short_gross > 0")
+    for k in ("initial_long", "initial_short", "maintenance_long", "maintenance_short"):
+        if not 0 < getattr(m, k) <= 1:
+            raise ConfigError(f"margin.{k} must be in (0, 1]")
+    if m.maintenance_long > m.initial_long or m.maintenance_short > m.initial_short:
+        raise ConfigError("margin: maintenance requirements cannot exceed initial requirements")
+    if not (0 <= m.cushion < 1 and m.borrow_apr >= 0 and m.debit_apr >= 0):
+        raise ConfigError("margin: need 0 <= cushion < 1 and non-negative financing rates")
+    # The broker's initial requirement caps gross exposure: at Reg T's 50% that is 2x. No setting may promise more.
+    worst = max(m.initial_long, m.initial_short) * r.max_gross
+    if worst > 1 + 1e-9:
+        raise ConfigError(
+            f"risk.max_gross {r.max_gross} needs {worst:.0%} of equity as initial margin at the configured "
+            f"requirements (max {1 / max(m.initial_long, m.initial_short):.2f}x); the broker would refuse it"
+        )
+
+
 def load_config(path: str | Path | None = None) -> LabConfig:
     path = Path(path) if path else find_config()
     try:
@@ -169,9 +221,36 @@ def load_config(path: str | Path | None = None) -> LabConfig:
     if warmup >= periods["train"].start:
         raise ConfigError("warmup_start must be before the train period")
 
-    risk = RiskSettings(float(rk["max_weight"]), float(rk["max_gross"]), float(rk["max_drawdown"]))
-    if not (0 < risk.max_weight <= 1 and 0 < risk.max_gross <= 1 and 0 < risk.max_drawdown < 1):
-        raise ConfigError("risk limits must be fractions in (0, 1] (long-only, no leverage)")
+    risk = RiskSettings(
+        float(rk["max_weight"]),
+        float(rk["max_gross"]),
+        float(rk["max_drawdown"]),
+        max_short_gross=float(rk.get("max_short_gross", 0.0)),
+        min_net=float(rk.get("min_net", 0.0)),
+        max_net=float(rk.get("max_net", 1.0)),
+    )
+    mg = raw.get("margin", {})
+    try:
+        margin = MarginSettings(**{k: float(v) for k, v in mg.items()})
+    except (TypeError, ValueError) as e:
+        raise ConfigError(f"[margin]: {e}") from e
+    _check_risk(risk, margin)
+    pf = raw.get("portfolio", {})
+    portfolio = PortfolioSettings(
+        float(pf.get("target_vol", 0.0)),
+        int(pf.get("vol_window", 63)),
+        max_leverage=float(pf.get("max_leverage", 1.0)),
+        leverage=float(pf.get("leverage", 1.0)),
+    )
+    if not (portfolio.target_vol >= 0 and portfolio.vol_window >= 2):
+        raise ConfigError("portfolio: target_vol must be >= 0 and vol_window >= 2")
+    if not (0 < portfolio.leverage <= portfolio.max_leverage):
+        raise ConfigError("portfolio: need 0 < leverage <= max_leverage")
+    if portfolio.max_leverage > risk.max_gross:
+        raise ConfigError(
+            f"portfolio.max_leverage {portfolio.max_leverage} exceeds risk.max_gross {risk.max_gross}: "
+            "raise the gross limit deliberately or lower the leverage"
+        )
 
     research = ResearchSettings(
         provider=str(rs["provider"]),
@@ -208,9 +287,8 @@ def load_config(path: str | Path | None = None) -> LabConfig:
             cash_buffer=float(bt["cash_buffer"]),
         ),
         risk=risk,
-        portfolio=PortfolioSettings(
-            float(raw.get("portfolio", {}).get("target_vol", 0.0)), int(raw.get("portfolio", {}).get("vol_window", 63))
-        ),
+        margin=margin,
+        portfolio=portfolio,
         paper=PaperSettings(
             host=os.environ.get("LAB_IB_HOST", str(pp["host"])),
             port=int(os.environ.get("LAB_IB_PORT", pp["port"])),
