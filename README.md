@@ -228,8 +228,9 @@ experiments/LOG.md          your lab notebook
 
 ## Collaboration
 
-Two AI agents work on this repository: Claude maintains `main`, ChatGPT contributes through branches and reviews,
-and Gabriel decides disagreements. They talk in append-only threads under `collab/`; the rules are in
+Two AI agents build this together by reviewing each other's work: Claude owns `main`, ChatGPT owns its own
+branches, and each writes only to its own. They talk through immutable messages in their own outboxes
+(`python3 tools/collab.py show <thread>` merges both sides), and Gabriel decides disagreements. Rules:
 [COLLABORATION.md](COLLABORATION.md).
 
 ## License

@@ -1,4 +1,4 @@
-"""tools/collab.py: thread format, turn-taking, append-only enforcement, commit policy."""
+"""tools/collab.py: each agent writes only on its own branch; the tool merges the conversation."""
 
 import importlib.util
 import subprocess
@@ -9,104 +9,151 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 
 
-@pytest.fixture
-def collab(tmp_path, monkeypatch):
-    spec = importlib.util.spec_from_file_location("collab_tool", REPO / "tools" / "collab.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    monkeypatch.setattr(mod, "ROOT", tmp_path)
-    monkeypatch.setattr(mod, "THREADS", tmp_path / "collab" / "threads")
-    for cmd in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
-        subprocess.run(["git", *cmd], cwd=tmp_path, check=True)
-    return mod
-
-
 def git(root, *args):
     return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
 
 
-def test_conversation_turns_and_agreement(collab, tmp_path):
-    assert (
-        collab.main(
-            [
-                "new",
-                "--agent",
-                "claude",
-                "--kind",
-                "proposal",
-                "--title",
-                "Delisting returns",
-                "--body",
-                "- **F1 [blocking]** evidence here",
-            ]
-        )
-        == 0
-    )
-    t = collab.parse(collab.find("1").read_text())
-    assert collab.waiting_on(t) == "chatgpt"
-    assert collab.main(["post", "1", "--agent", "chatgpt", "--kind", "agree", "--body", "F1: accept"]) == 0
-    assert collab.waiting_on(collab.parse(collab.find("1").read_text())) == "claude"
-    # 'agreed' requires agree from both AI agents
-    assert collab.main(["status", "1", "--agent", "claude", "--set", "agreed"]) == 1
-    assert collab.main(["post", "1", "--agent", "claude", "--kind", "agree", "--body", "agreed"]) == 0
-    assert collab.main(["status", "1", "--agent", "claude", "--set", "agreed"]) == 0
-    t = collab.parse(collab.find("1").read_text())
-    assert t["meta"]["status"] == "agreed" and collab.waiting_on(t) is None
-    assert [m["kind"] for m in t["messages"]] == ["proposal", "agree", "agree", "status"]
+def load_tool():
+    spec = importlib.util.spec_from_file_location("collab_tool", REPO / "tools" / "collab.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
-@pytest.mark.parametrize(
-    "body,err",
-    [
-        ("### smuggled header", "reserved"),
-        ("   ", "empty"),
-    ],
-)
-def test_bad_bodies_rejected(collab, body, err, capsys):
-    assert collab.main(["new", "--agent", "claude", "--kind", "proposal", "--title", "x", "--body", body]) == 1
-    assert err in capsys.readouterr().err
+@pytest.fixture
+def repo(tmp_path, monkeypatch):
+    mod = load_tool()
+    monkeypatch.setattr(mod, "ROOT", tmp_path)
+    ticks = iter(range(10_000))
+    real_clock = mod.clock
 
+    def ticking():  # every message one second after the previous one
+        n = next(ticks)
+        monkeypatch.setenv("COLLAB_NOW", f"2026-10-22T14:{n // 60:02d}:{n % 60:02d}Z")
+        return real_clock()
 
-def test_format_errors_are_caught(collab, tmp_path):
-    collab.main(["new", "--agent", "claude", "--kind", "proposal", "--title", "x", "--body", "hello"])
-    p = collab.find("1")
-    p.write_text(p.read_text().replace("· proposal", "· shouting"))
-    assert collab.main(["check"]) == 1
-    p.write_text(
-        p.read_text().replace("· shouting", "· proposal").replace("- **", "").rstrip() + "\n- **F9 [urgent]** x\n"
-    )
-    assert collab.main(["check"]) == 1
-
-
-def test_append_only_against_git_history(collab, tmp_path):
-    collab.main(["new", "--agent", "claude", "--kind", "proposal", "--title", "x", "--body", "original words"])
-    git(tmp_path, "add", "-A")
-    git(tmp_path, "commit", "-qm", "c1")
-    base = git(tmp_path, "rev-parse", "HEAD").strip()
-    collab.main(["post", "1", "--agent", "chatgpt", "--kind", "reply", "--body", "a reply"])
-    assert collab.main(["check", "--base", base]) == 0  # appending is fine
-    p = collab.find("1")
-    p.write_text(p.read_text().replace("original words", "rewritten history"))
-    assert collab.main(["check", "--base", base]) == 1  # editing a posted message is not
-
-
-def test_chatgpt_commits_on_main_only_touch_collab(collab, tmp_path):
+    monkeypatch.setattr(mod, "clock", ticking)
+    git(tmp_path, "init", "-q", "-b", "main")
+    git(tmp_path, "config", "user.email", "t@t")
+    git(tmp_path, "config", "user.name", "t")
     (tmp_path / "README").write_text("x")
     git(tmp_path, "add", "-A")
     git(tmp_path, "commit", "-qm", "base")
-    base = git(tmp_path, "rev-parse", "HEAD").strip()
-    collab.main(["new", "--agent", "chatgpt", "--kind", "proposal", "--title", "x", "--body", "hi"])
-    git(tmp_path, "add", "-A")
-    git(tmp_path, "commit", "-qm", "collab: hi", "-m", "Agent: chatgpt")
-    assert collab.main(["check-commits", f"{base}..HEAD"]) == 0
-    (tmp_path / "src.py").write_text("x = 1")
-    git(tmp_path, "add", "-A")
-    git(tmp_path, "commit", "-qm", "sneaky code", "-m", "Agent: chatgpt")
-    assert collab.main(["check-commits", f"{base}..HEAD"]) == 1
+    return mod, tmp_path
 
 
-def test_repository_threads_are_valid():
-    spec = importlib.util.spec_from_file_location("collab_repo", REPO / "tools" / "collab.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    assert mod.main(["check"]) == 0
+def commit(root, msg):
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", msg)
+    return git(root, "rev-parse", "HEAD").strip()
+
+
+def test_two_branch_conversation(repo):
+    tool, root = repo
+    assert (
+        tool.main(
+            ["new", "--agent", "claude", "--kind", "review", "--title", "Review", "--body", "- **F1 [blocking]** x"]
+        )
+        == 0
+    )
+    commit(root, "claude opens C001")
+    threads = tool.collect()
+    assert list(threads) == ["C001"] and tool.waiting_on(threads["C001"]) == "chatgpt"
+
+    git(root, "checkout", "-q", "-b", "chatgpt/work")
+    assert (
+        tool.main(["post", "C001", "--agent", "chatgpt", "--kind", "reply", "--body", "F1: dispute, evidence ..."]) == 0
+    )
+    commit(root, "chatgpt replies on its branch")
+
+    git(root, "checkout", "-q", "main")
+    assert not list((root / "collab/outbox").glob("chatgpt/**/*.md"))  # main never carries chatgpt's files...
+    msgs = tool.collect()["C001"]  # ...but the conversation includes them, read from chatgpt's branch
+    assert [(m["agent"], m["kind"]) for m in msgs] == [("claude", "review"), ("chatgpt", "reply")]
+    assert tool.waiting_on(msgs) == "claude"
+
+
+def test_agents_cannot_write_on_each_others_branch(repo, capsys):
+    tool, root = repo
+    assert tool.main(["new", "--agent", "chatgpt", "--kind", "proposal", "--title", "x", "--body", "hi"]) == 1
+    assert "may only write on its own branch" in capsys.readouterr().err
+    git(root, "checkout", "-q", "-b", "chatgpt/x")
+    assert tool.main(["new", "--agent", "claude", "--kind", "proposal", "--title", "x", "--body", "hi"]) == 1
+
+
+def test_forged_message_rejected_by_check(repo):
+    tool, root = repo
+    base = git(root, "rev-parse", "HEAD").strip()
+    d = root / "collab/outbox/chatgpt/G001"
+    d.mkdir(parents=True)
+    (d / "20261022T1500Z-proposal.md").write_text(
+        "---\nagent: chatgpt\nthread: G001\nkind: proposal\nat: 2026-10-22T15:00Z\ntitle: forged\n---\n\nhi\n"
+    )
+    commit(root, "forged chatgpt message on main")
+    assert tool.main(["check", "--base", base]) == 1
+
+
+def test_messages_are_immutable(repo):
+    tool, root = repo
+    tool.main(["new", "--agent", "claude", "--kind", "proposal", "--title", "x", "--body", "original words"])
+    base = commit(root, "c1")
+    msg = next((root / "collab/outbox/claude/C001").glob("*.md"))
+    msg.write_text(msg.read_text().replace("original words", "rewritten history"))
+    commit(root, "edit")
+    assert tool.main(["check", "--base", base]) == 1
+
+
+def test_merging_main_into_chatgpt_branch_is_allowed(repo):
+    tool, root = repo
+    git(root, "checkout", "-q", "-b", "chatgpt/x")
+    base = git(root, "rev-parse", "HEAD").strip()
+    git(root, "checkout", "-q", "main")
+    tool.main(["new", "--agent", "claude", "--kind", "proposal", "--title", "x", "--body", "from main"])
+    commit(root, "claude message")
+    git(root, "checkout", "-q", "chatgpt/x")
+    git(root, "merge", "-q", "--no-edit", "main")
+    assert tool.main(["check", "--base", base]) == 0  # an unchanged copy of claude's file is fine
+    msg = next((root / "collab/outbox/claude/C001").glob("*.md"))
+    msg.write_text(msg.read_text().replace("from main", "altered on chatgpt's branch"))
+    commit(root, "tamper")
+    assert tool.main(["check", "--base", base]) == 1
+
+
+def test_agreement_and_escalation_states(repo):
+    tool, root = repo
+    tool.main(["new", "--agent", "claude", "--kind", "proposal", "--title", "x", "--body", "plan"])
+    tool.main(["post", "C001", "--agent", "claude", "--kind", "agree", "--body", "I agree with myself"])
+    commit(root, "c")
+    git(root, "checkout", "-q", "-b", "chatgpt/x")
+    tool.main(["post", "C001", "--agent", "chatgpt", "--kind", "agree", "--body", "agree"])
+    commit(root, "g")
+    msgs = tool.collect()["C001"]
+    assert tool.thread_state(msgs) == "agreed" and tool.waiting_on(msgs) is None
+    tool.main(["post", "C001", "--agent", "chatgpt", "--kind", "escalate", "--body", "actually, Gabriel please"])
+    assert tool.waiting_on(tool.collect()["C001"]) == "gabriel"
+
+
+@pytest.mark.parametrize("bad_tag", ["urgent", "critical"])
+def test_unknown_finding_tags_rejected(repo, bad_tag):
+    tool, _ = repo
+    assert (
+        tool.main(["new", "--agent", "claude", "--kind", "review", "--title", "x", "--body", f"- **F1 [{bad_tag}]** x"])
+        == 1
+    )
+
+
+def test_repository_conversations_are_valid():
+    assert load_tool().main(["check"]) == 0
+
+
+def test_commits_signed_by_the_other_agent_are_rejected(repo):
+    tool, root = repo
+    base = git(root, "rev-parse", "HEAD").strip()
+    (root / "code.py").write_text("x = 1")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "change", "-m", "Agent: claude")
+    assert tool.main(["check", "--base", base]) == 0
+    (root / "code.py").write_text("x = 2")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "sneaky change on main", "-m", "Agent: chatgpt")
+    assert tool.main(["check", "--base", base]) == 1

@@ -1,86 +1,100 @@
 # Collaboration protocol
 
-Two AI agents work on this repository for its owner. This file is the contract between them.
+Two AI agents build this product for its owner by reviewing each other's work, hard, and converging on what
+survives the review. This file is the contract between them.
 
-| Who | Role |
-|---|---|
-| **Gabriel** | Owner. Final decision on anything the agents disagree on. Relays turns between the agents. |
-| **Claude** | Maintainer of `main` and integrator: decides what lands on `main`, keeps it green. |
-| **ChatGPT** | Contributor and reviewer: develops on its own branches, reviews Claude's changes. |
+| Who | Owns | Role |
+|---|---|---|
+| **Gabriel** | everything | Owner. Decides disagreements. Starts each agent's turn. |
+| **Claude** | `main`, `claude/*` | Builds on `main`. Reviews ChatGPT's work. Integrates what survives review. |
+| **ChatGPT** | `chatgpt/*`, `hardening/*` | Builds on its branches. Reviews Claude's work. Proposes what should reach `main`. |
 
-Neither agent can wake the other. Gabriel starts each agent's turn ("check your inbox"); everything they need
-to know is in the repository, so a turn never depends on chat history.
+## 1. The one rule: each agent writes only to its own branches
 
-## 1. Channel: threads in `collab/threads/`
+- An agent never pushes to, rebases, or rewrites a branch it doesn't own, and never edits files on it.
+- Reading everything is encouraged: `git fetch origin` and review the other agent's branches and commits.
+- Every commit carries a trailer naming its author: `Agent: claude` or `Agent: chatgpt`. CI rejects commits on a
+  branch signed by the agent that doesn't own it.
+- Work moves between branches only by **integration**: the owner of the receiving branch merges or
+  cherry-picks it, credits the author, and says so in the conversation. ChatGPT may merge `main` into its
+  branches at any time to stay current.
 
-All communication between the agents happens in thread files, one Markdown file per topic, managed with
-`tools/collab.py` (Python standard library only):
+## 2. The channel: messages in each agent's own outbox
 
-```bash
-python3 tools/collab.py inbox chatgpt            # what is waiting for me?
-python3 tools/collab.py show 0001
-python3 tools/collab.py post 0001 --agent chatgpt --kind reply --body-file /tmp/reply.md
-python3 tools/collab.py new --agent chatgpt --kind proposal --title "..." --ref branch:chatgpt/x --body-file m.md
-python3 tools/collab.py check                    # always run before committing
+Each message is one file, committed on the author's own branch:
+
+```
+collab/outbox/<agent>/<thread>/<YYYYMMDDTHHMMSSZ>-<kind>.md    (+ attachments such as evidence files)
 ```
 
-Rules:
-- **Append-only.** Never edit or delete a posted message, yours or the other agent's. Corrections are new
-  messages. CI rejects edits (`check --base`).
-- **Messages go straight to `main`**, in commits that touch only `collab/` and carry the trailer
-  `Agent: chatgpt` or `Agent: claude`. Always `git pull --rebase` before pushing; if two messages race,
-  rebase and post again. CI rejects ChatGPT commits on `main` that touch anything outside `collab/`.
-- **Message kinds**: `proposal` (a change for `main`), `review`, `reply`, `question`, `agree`, `object`,
-  `status`, and `decision` (Gabriel only).
-- One topic per thread. A new topic gets a new thread that references the old one.
+`tools/collab.py` (standard library only) reads the outboxes of all branches, each only for the agent that owns
+that branch, and shows them as one conversation per thread:
 
-## 2. Findings
+```bash
+git fetch origin
+python3 tools/collab.py inbox chatgpt                 # what is waiting for me?
+python3 tools/collab.py show C001                     # full conversation, both branches merged
+python3 tools/collab.py post C001 --agent chatgpt --kind reply --body-file reply.md
+python3 tools/collab.py new --agent chatgpt --kind proposal --title "..." --body-file m.md
+python3 tools/collab.py check                         # before every commit
+```
 
-Reviews state findings with an ID and a tag, so replies can answer them one by one:
+- Thread IDs carry their opener: `C001` (Claude), `G001` (ChatGPT), `H001` (Gabriel).
+- Kinds: `proposal`, `review`, `question` (these open threads), `reply`, `agree`, `object`, `escalate`
+  (to Gabriel), `close`, and `decision` (Gabriel).
+- Messages are **immutable**: never edit or delete a posted file; correct yourself in a new message. CI checks.
+- The tool refuses to write as an agent on a branch that agent doesn't own.
+- Gabriel can write on any branch with `--agent gabriel`.
+
+## 3. Reviews: ruthless, specific, provable
+
+Both agents review all of the other's work, not just what is offered for review. Judge it as a demanding
+senior reviewer would: correctness first, then whether it should exist at all, then quality. Be blunt, and
+make every claim checkable.
 
 ```markdown
-- **F3 [blocking]** The critic gate rejects every hypothesis ... Evidence: `...command or test...`
+- **F3 [blocking]** The critic gate rejects every hypothesis ... Evidence: `command, test, file:line or measurement`
 - **F4 [advisory]** Consider ...
 - **F5 [question]** Is ... intended?
 ```
 
-- `blocking`: must be resolved before the change lands. Requires **evidence**: a command, a failing test, a
-  file and line, or a measurement. Opinions are `advisory`.
+- `blocking`: wrong results, unsafe behaviour, broken workflows, or work that should not land. Must carry
+  evidence another agent can reproduce. Without evidence, it is `advisory`.
+- `advisory`: design, quality, scope, taste.
+- Finding IDs run in order across the whole thread (F1, F2, ... whoever writes them).
 - Every blocking finding gets an answer by ID: `F3: accept`, `F3: fixed in <sha>`, or
-  `F3: dispute: <reason and counter-evidence>`.
-- Findings IDs are unique within a thread (F1, F2, ... in order of appearance, across both agents).
+  `F3: dispute: <reason and counter-evidence>`. Silence is not acceptance.
+- Credit what is good, in one line. Praise is not a substitute for findings.
 
-## 3. How code reaches `main`
+## 4. How work reaches `main`
 
-- **ChatGPT** develops on branches named `chatgpt/<topic>` (the existing `hardening/unattended-research-20261022`
-  is grandfathered). To propose work, open a `proposal` thread with: branch, commit SHA, what changed, why, and
-  the output of `pytest -q` and `ruff check src tests`.
-- **Claude** reviews in the thread and integrates what has no open blocking finding, by merge or cherry-pick,
-  crediting the author in the commit message. Claude may integrate part of a branch and say which part.
-- **Claude's own changes** to safety-critical code go through the same review: open a `proposal` thread before
-  or with the commit, and wait for ChatGPT's reply (or Gabriel's waiver) before building further on it.
-  Safety-critical means `src/lab/agents/`, `safety.py`, `paper.py`, `backtest.py`, `experiments.py`,
-  `stats.py`, `research/` gates and sandbox, `data.py` validation, and deployment files.
-- Everything on `main` must pass CI: lint, format, tests, the offline example and the Docker build.
+1. ChatGPT proposes: a `proposal` thread with the branch, commit SHA, what and why, and the output of
+   `pytest -q` and `ruff check src tests tools`.
+2. Claude reviews it there. Anything with an open blocking finding stays out.
+3. Claude integrates the rest (merge or cherry-pick, crediting ChatGPT), and posts what landed and what didn't.
+4. Claude's own changes are reviewed by ChatGPT the same way. Changes to safety-critical code
+   (`src/lab/agents/`, `safety.py`, `paper.py`, `backtest.py`, `experiments.py`, `stats.py`, `data.py`
+   validation, `research/` gates and sandbox, deployment files) are announced in a thread with the commit,
+   and Claude doesn't build further on them until ChatGPT has replied or Gabriel waives the review.
 
-## 4. Agreement and disagreement
+`main` must always pass CI: lint, format, tests, the offline example, the Docker build, and `collab.py check`.
 
-- A thread is **agreed** when both agents have posted `agree` (or Gabriel posts a `decision`). Record the
-  outcome in `collab/decisions.md` with the thread ID.
-- After **two rounds** of disagreement on a finding, set the thread to `needs-gabriel` and write a summary:
-  each position in at most five lines, with the evidence. Gabriel decides; the decision is final unless
-  new evidence appears.
-- Don't reopen agreed or decided topics without new evidence.
+## 5. Agreement and disagreement
 
-## 5. Coordination
+- A thread is **agreed** when the last message of each agent is `agree`; Claude records it in
+  `collab/decisions.md`.
+- After **two rounds** without agreement on a finding, either agent posts `escalate` with each position in at
+  most five lines and its evidence. Gabriel answers with `decision`; that stands unless new evidence appears.
+- Don't reopen agreed or decided points without new evidence.
 
-- Before starting work that touches shared code, add a line to `collab/STATUS.md` (who, what, files, branch).
-  Don't edit files another agent has claimed; ask in a thread.
-- Evidence over assertion: behaviour claims come with a reproducible command or test.
-- Critique the code, not the agent. Be concise. Credit good work explicitly.
+## 6. Turns
 
-## 6. Safety rules both agents keep
+Neither agent can contact the other. Gabriel starts a turn ("check your inbox"). A turn: fetch, read the inbox,
+read the other agent's new commits, reply to every waiting thread, do the agreed work on your own branch, post
+what you did, push. Everything needed is in the repository; nothing depends on chat history.
 
-- Paper accounts only. Never weaken the paper-only guards, the kill switch, or reconciliation.
-- Never commit secrets (`.env`, `secrets/`, account numbers, tokens).
-- Never relax a statistical gate to make a result pass; propose the change in a thread with evidence.
+## 7. Safety rules both agents keep
+
+- Paper accounts only. Never weaken the paper-only guards, kill switch or reconciliation.
+- Never commit secrets: `.env`, `secrets/`, account numbers, tokens.
+- Never relax a statistical gate to make a result pass; propose it in a thread with evidence.

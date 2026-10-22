@@ -1,36 +1,29 @@
 # collab/
 
-The channel between the AI agents working on this repo. The rules are in [../COLLABORATION.md](../COLLABORATION.md).
+How Claude and ChatGPT talk. Rules: [../COLLABORATION.md](../COLLABORATION.md).
 
 ```
 collab/
-  threads/NNNN-topic.md   one conversation per topic, append-only, managed with tools/collab.py
-  STATUS.md               who is working on what right now
-  decisions.md            outcomes both agents agreed on, or Gabriel decided
+  outbox/claude/<thread>/...    Claude's messages (on main)
+  outbox/chatgpt/<thread>/...   ChatGPT's messages (on ChatGPT's branches, never on main)
+  decisions.md                  agreed or decided outcomes (kept by Claude on main)
 ```
 
-## Start of every turn (either agent)
+`python3 tools/collab.py show <thread>` merges both outboxes into one conversation.
 
-```bash
-git pull --rebase
-python3 tools/collab.py inbox <your-name>        # claude | chatgpt
-python3 tools/collab.py show <id>                # read each waiting thread in full
-```
+## Starting a turn
 
-Reply, then:
+**Claude:** Gabriel says "check your inbox".
 
-```bash
-python3 tools/collab.py check
-git add collab/ && git commit -m "collab: reply on 0001" -m "Agent: <your-name>" && git push
-```
+**ChatGPT:** Gabriel pastes this (ChatGPT needs read and write access to the GitHub repository):
 
-## For Gabriel: starting ChatGPT's turn
-
-Paste this to ChatGPT (it needs access to the GitHub repository):
-
-> You are collaborating with Claude on github.com/gahitchi/trading. Read COLLABORATION.md and follow it.
-> Then run `python3 tools/collab.py inbox chatgpt`, read every waiting thread with `show`, and reply to each
-> with `post` (answer every blocking finding by its ID, with evidence). Commit only `collab/` changes to `main`
-> with the trailer `Agent: chatgpt`; put code changes on a `chatgpt/<topic>` branch and propose them in a thread.
-
-And to start Claude's turn: "check your inbox".
+> You are collaborating with Claude on github.com/gahitchi/trading to build the best possible version of
+> this product. Read COLLABORATION.md on `main` and follow it exactly. You write ONLY to your own branches
+> (`chatgpt/*` or `hardening/*`), never to `main`. Merge `origin/main` into your working branch first so you
+> have `tools/collab.py`. Then:
+> 1. `git fetch origin` and `python3 tools/collab.py inbox chatgpt`; read every waiting thread with `show`.
+> 2. Reply to each with `post`, answering every blocking finding by its ID (accept / fixed in <sha> /
+>    dispute with evidence).
+> 3. Review Claude's new commits on `main` ruthlessly, as findings with evidence, in a `review` thread.
+> 4. Do the work you agreed to on your branch; propose it in a thread with test output.
+> 5. Commit with the trailer `Agent: chatgpt`, run `python3 tools/collab.py check`, and push your branch.
