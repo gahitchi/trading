@@ -134,12 +134,17 @@ def test_selected_profile_flows_to_real_paper_node(goog_lab, goog, tmp_path, ris
         assert h.session().error is None
     fills = [f for session in h.sessions for f in session.fills]
     assert fills
+    position = 0.0
+    path = []
+    for fill in fills:
+        position += fill.qty if fill.side == "BUY" else -fill.qty
+        path.append(position)
     if expected_short:
-        assert any(f.side == "SELL" for f in fills)
+        assert min(path) < 0  # actual net short, not merely a SELL closing a long
         assert cfg.risk.max_short_gross == pytest.approx(0.75)
         assert cfg.portfolio.max_leverage == pytest.approx(1.8)
     else:
-        assert all(f.side != "SELL" for f in fills)
+        assert min(path) >= 0  # selling a long position is NOT short selling
         assert cfg.risk.max_short_gross == 0.0
         assert cfg.risk.max_gross == pytest.approx(0.30)
     assert h.ledger()["positions"] == h.broker().positions()
