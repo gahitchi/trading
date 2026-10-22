@@ -175,6 +175,7 @@ def build_node(
                 max_weight=cfg.risk.max_weight,
                 max_gross=cfg.risk.max_gross,
                 max_drawdown=cfg.risk.max_drawdown,
+                state_path=str(rt / "risk.json"),
             )
         )
     )
@@ -204,6 +205,7 @@ def build_node(
                 kill_path=str(kill_path(cfg)),
                 heartbeat_path=str(heartbeat_path(cfg)),
                 adopt_broker_positions=adopt_broker,
+                expected_sleeves=tuple(sleeves),
             )
         )
     )

@@ -21,6 +21,7 @@ from lab.agents.messages import (
     FillReport,
     RiskEvent,
 )
+from lab.persistence import atomic_json_write
 from lab.safety import is_paper_account, read_kill_switch
 
 NY = ZoneInfo("America/New_York")
@@ -46,6 +47,7 @@ class ExecutionAgentConfig(StrategyConfig):
         kill_path: str | None = None,
         heartbeat_path: str | None = None,
         adopt_broker_positions: bool = False,
+        expected_sleeves: tuple[str, ...] = (),
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId.
@@ -71,6 +73,7 @@ class ExecutionAgentConfig(StrategyConfig):
         self.kill_path = kill_path
         self.heartbeat_path = heartbeat_path
         self.adopt_broker_positions = adopt_broker_positions
+        self.expected_sleeves = tuple(expected_sleeves)
 
 
 class ExecutionAgent(Strategy):
@@ -99,16 +102,28 @@ class ExecutionAgent(Strategy):
         self.rejections = 0
         self.orders_sent = 0
         self.min_cash = math.inf
+        self.sleeve_timestamps: dict[str, int] = {}
+        self.approved_timestamp = 0
         # The lab's own ledger: capital - purchases + sales - commissions, and the shares
         # it believes it holds. Independent of anything else in the broker account.
         self.cash = config.capital
         self.commissions = 0.0
         self.held: dict[str, float] = dict.fromkeys(config.instruments, 0.0)
+        self.unresolved_orders: dict[str, dict] = {}
+        self.daily_usage = {"session": "", "orders": 0, "bought": 0.0}
         if config.state_path and Path(config.state_path).exists():
             state = json.loads(Path(config.state_path).read_text())
             self.cash = float(state["cash"])
             self.commissions = float(state.get("commissions", 0.0))
             self.held.update({t: float(q) for t, q in state.get("positions", {}).items() if t in self.held})
+            self.unresolved_orders = dict(state.get("unresolved_orders", {}))
+            self.daily_usage = dict(state.get("daily_usage", self.daily_usage))
+            if (
+                not isinstance(self.unresolved_orders, dict)
+                or not isinstance(self.daily_usage, dict)
+                or not {"session", "orders", "bought"} <= self.daily_usage.keys()
+            ):
+                raise ValueError("invalid persisted execution state; refusing to start")
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -128,6 +143,7 @@ class ExecutionAgent(Strategy):
             )
 
     def _on_signal(self, msg):
+        self.sleeve_timestamps[msg.sleeve] = msg.ts
         self.prices[msg.ticker] = msg.price
         self.price_ts = max(self.price_ts, msg.ts)
         self.new_data = True
@@ -135,6 +151,7 @@ class ExecutionAgent(Strategy):
             self._schedule(datetime.fromtimestamp(msg.ts / 1e9, NY))
 
     def _on_approved(self, msg):
+        self.approved_timestamp = max(self.approved_timestamp, msg.ts)
         self.weights.update(msg.weights)
         self.halted = self.halted or msg.halted
 
@@ -150,7 +167,7 @@ class ExecutionAgent(Strategy):
 
     def _on_alert(self, event):
         self.alert_pending = False
-        if self.new_data:
+        if self.new_data or self.config.live:
             self.new_data = False
             self.rebalance()
         self._schedule(datetime.fromtimestamp(event.ts_event / 1e9, NY))
@@ -211,8 +228,13 @@ class ExecutionAgent(Strategy):
                 v = positions[0].avg_px_open if positions else 0.0
                 avg = float(v() if callable(v) else v)
                 adopted[t] = (q, avg)
+        # An explicit operator recovery is only safe after all broker orders are terminal.
+        for iid in self.config.instruments.values():
+            if self.cache.orders_open_count(instrument_id=iid) > 0:
+                raise RuntimeError("cannot adopt positions while broker orders remain open")
         self.held = dict.fromkeys(self.config.instruments, 0.0)
         self.cash = self.config.capital
+        self.unresolved_orders.clear()
         for t, (q, avg) in adopted.items():
             self.held[t] = q
             self.cash -= q * avg
@@ -230,18 +252,17 @@ class ExecutionAgent(Strategy):
         if self.config.state_path:
             p = Path(self.config.state_path)
             p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix(".tmp")
-            tmp.write_text(
-                json.dumps(
-                    {
-                        "cash": self.cash,
-                        "commissions": self.commissions,
-                        "positions": self._nonzero(self.held),
-                        "updated": datetime.now(UTC).isoformat(timespec="seconds"),
-                    }
-                )
+            atomic_json_write(
+                p,
+                {
+                    "cash": self.cash,
+                    "commissions": self.commissions,
+                    "positions": self._nonzero(self.held),
+                    "unresolved_orders": self.unresolved_orders,
+                    "daily_usage": self.daily_usage,
+                    "updated": datetime.now(UTC).isoformat(timespec="seconds"),
+                },
             )
-            tmp.replace(p)  # atomic: a crash never leaves a half-written ledger
 
     def _kill(self) -> dict | None:
         return read_kill_switch(self.config.kill_path) if self.config.kill_path else None
@@ -256,7 +277,33 @@ class ExecutionAgent(Strategy):
 
     # ------------------------------------------------------------------ the daily decision
 
+    def _missing_session_signals(self, session):
+        """Require EVERY configured sleeve to report a bar for today's session."""
+        missing = [
+            sleeve
+            for sleeve in self.config.expected_sleeves
+            if sleeve not in self.sleeve_timestamps
+            or datetime.fromtimestamp(self.sleeve_timestamps[sleeve] / 1e9, NY).date() != session
+        ]
+        if self.config.expected_sleeves and (
+            not self.approved_timestamp
+            or datetime.fromtimestamp(self.approved_timestamp / 1e9, NY).date() != session
+        ):
+            missing.append("risk approval")
+        return missing
+
     def rebalance(self):
+        session = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY).date()
+        if self.config.live:
+            missing = self._missing_session_signals(session)
+            if missing:
+                self.blocked_reason = f"session {session}: missing/stale signals: {', '.join(missing)}"
+                self._risk_event("data_incomplete", self.blocked_reason)
+                return
+            if self.unresolved_orders:
+                self.blocked_reason = f"unresolved order intents: {list(self.unresolved_orders)}"
+                self._risk_event("unresolved_orders", self.blocked_reason + "; reconcile orders before resuming")
+                return
         snap = self.snapshot()
         self.publish_message(T_EQUITY, snap)  # RiskAgent may halt here; its reply arrives synchronously
         if not math.isfinite(snap.equity) or snap.equity <= 0:
@@ -301,28 +348,27 @@ class ExecutionAgent(Strategy):
             orders.append((diff, iid, ticker, price))
 
         orders.sort(key=lambda o: o[0] > 0)  # sells first
-        sent = 0
-        bought = 0.0
+        session_key = session.isoformat()
+        if self.daily_usage["session"] != session_key:
+            self.daily_usage = {"session": session_key, "orders": 0, "bought": 0.0}
+            self._save()
         for diff, iid, ticker, price in orders:
             if diff > 0 and diff * price > self.config.max_order_value:
                 diff = math.floor(self.config.max_order_value / price)
                 self._risk_event("order_capped", f"{ticker} buy capped at {self.config.max_order_value:,.0f} USD")
                 if diff <= 0:
                     continue
-            if sent >= self.config.max_orders_per_day:
+            if self.daily_usage["orders"] >= self.config.max_orders_per_day:
                 self._risk_event("daily_cap", f"max {self.config.max_orders_per_day} orders/day reached; rest deferred")
                 break
-            if diff > 0 and (bought + diff * price) / snap.equity > self.config.max_daily_turnover:
+            if diff > 0 and (self.daily_usage["bought"] + diff * price) / snap.equity > self.config.max_daily_turnover:
                 self._risk_event(
                     "daily_cap", f"daily buy cap {self.config.max_daily_turnover:.0%} of equity reached; rest deferred"
                 )
                 break
-            if self._submit(iid, ticker, diff):
-                sent += 1
-                if diff > 0:
-                    bought += diff * price
+            self._submit(iid, ticker, diff, price)
 
-    def _submit(self, iid, ticker: str, diff: float) -> bool:
+    def _submit(self, iid, ticker: str, diff: float, reference_price: float) -> bool:
         if self.config.live and not self._paper_guard():
             return False
         inst = self.cache.instrument(iid)
@@ -332,7 +378,24 @@ class ExecutionAgent(Strategy):
         side = OrderSide.BUY if diff > 0 else OrderSide.SELL
         tif = TimeInForce.AT_THE_OPEN if self.config.live else TimeInForce.GTC
         order = self.order_factory.market(iid, side, inst.make_qty(abs(diff)), time_in_force=tif)
-        self.submit_order(order)
+        # Write ahead of submission. A crash after recording but before broker ACK
+        # must block the next session rather than risk a duplicate order.
+        oid = str(order.client_order_id)
+        self.unresolved_orders[oid] = {
+            "ticker": ticker,
+            "side": str(side),
+            "quantity": abs(diff),
+            "filled": 0.0,
+        }
+        self.daily_usage["orders"] += 1
+        if diff > 0:
+            self.daily_usage["bought"] += diff * reference_price
+        self._save()
+        try:
+            self.submit_order(order)
+        except Exception as exc:
+            self._risk_event("submit_uncertain", f"{ticker} {oid}: {exc}; manual broker reconciliation required")
+            raise
         self.orders_sent += 1
         return True
 
@@ -357,16 +420,34 @@ class ExecutionAgent(Strategy):
         self.cash += -qty * px - fee if buy else qty * px - fee
         self.commissions += fee
         self.held[ticker] = self.held.get(ticker, 0.0) + (qty if buy else -qty)
+        oid = str(ev.client_order_id)
+        if oid in self.unresolved_orders:
+            pending = self.unresolved_orders[oid]
+            pending["filled"] += qty
+            if pending["filled"] >= pending["quantity"] - 1e-9:
+                del self.unresolved_orders[oid]
         self._save()
         self.publish_message(T_FILL, FillReport(ev.ts_event, ticker, "BUY" if buy else "SELL", qty, px, fee))
 
+    def _finish_order(self, ev):
+        oid = str(ev.client_order_id)
+        if oid in self.unresolved_orders:
+            del self.unresolved_orders[oid]
+            self._save()
+
+    def on_order_canceled(self, ev):
+        self._finish_order(ev)
+
     def on_order_rejected(self, ev):
+        self._finish_order(ev)
         self.rejections += 1
         self._risk_event("order_rejected", f"{ev.instrument_id}: {ev.reason}")
 
     def on_order_denied(self, ev):
+        self._finish_order(ev)
         self.rejections += 1
         self._risk_event("order_denied", f"{ev.instrument_id}: {ev.reason}")
 
     def on_order_expired(self, ev):
+        self._finish_order(ev)
         self._risk_event("order_expired", f"{ev.instrument_id}: order expired unfilled")

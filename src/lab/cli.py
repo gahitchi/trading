@@ -16,9 +16,14 @@ from lab.signals.registry import SignalNotFound, available_research, resolve
 
 
 def _period(cfg: LabConfig, a) -> Period:
+    if a.period == "holdout":
+        raise SystemExit("the holdout is guarded: use `lab holdout <signal>`")
     if a.start or a.end:
         start = date.fromisoformat(a.start) if a.start else cfg.period(a.period).start
         end = date.fromisoformat(a.end) if a.end else None
+        holdout_start = cfg.period("holdout").start
+        if end is None or end >= holdout_start:
+            raise SystemExit("custom research dates may not overlap the sealed holdout or be open-ended")
         return Period("custom", start, end)
     return cfg.period(a.period)
 
