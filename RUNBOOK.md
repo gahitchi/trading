@@ -38,7 +38,9 @@ mkdir -p secrets results data research
 printf '%s' 'your-paper-password' > secrets/tws_password && chmod 600 secrets/tws_password
 ```
 
-`lab.toml`, section `[paper]`: `capital` is how much of the paper account the agents may allocate;
+`lab.toml`, section `[paper]`: `capital` is how much of the paper account the agents may allocate (the
+account may hold more: before each rebalance the agents check that the account can carry their book, and halt
+if it cannot; set `dedicated_account = true` if the agents own the whole account, and then cash must match);
 `max_order_value`, `max_orders_per_day` and `max_daily_turnover` are hard limits; `[risk]` holds the position cap,
 gross cap and drawdown circuit breaker. `.env` and `secrets/` are git-ignored: never commit them.
 

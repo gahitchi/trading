@@ -94,7 +94,7 @@ Offline check on real prices: `cd examples/goog-offline && lab data sample && la
 | `lab research run / list / show / retry / promote` | the AI research swarm |
 | `lab llm-check`, `lab notify-test`, `lab doctor` | provider check, alert check, pre-flight check |
 | `lab paper [--smoke] [--test-order] [--check-only] [--adopt-broker]` | paper trading on Interactive Brokers |
-| `lab kill [--flatten]`, `lab resume`, `lab health` | kill switch, Docker health check |
+| `lab kill [--flatten]`, `lab resume`, `lab health [--ready]` | kill switch, liveness (Docker) / readiness |
 | `lab recover [--reason] [--adopt-broker]` | show or clear a hard halt (audited) |
 
 ## The scientific protocol
@@ -163,9 +163,15 @@ Each hypothesis lives in `research/hypotheses/<id>/`: `proposal.json`, `signal.p
 is the readable log. Model calls are capped per cycle and logged in `research/usage.jsonl`.
 
 Generated code must pass a static check (one `Signal` subclass; imports limited to `math`, `numpy` and the signal
-helpers; no file, network, process or introspection access) and a behaviour check in a separate,
-resource-limited process; validation runs in another separate process. These stop accidents and obvious
-escapes, not a determined attacker: read the code before you promote it.
+helpers; no file, network, process or introspection access), and it is **never imported by the lab**: every
+research signal, in checks, backtests and paper trading alike, runs in its own worker process
+(`lab.research.isolation`). The worker closes inherited file descriptors, limits itself to three (no files,
+no sockets), may write no file and start no process, has memory and CPU caps and drops root, all before it
+compiles the code; the lab exchanges only price windows and fixed-format numbers with it. It shares the
+kernel (it is not a container), so still read the code before you promote it.
+
+`lab research promote` records `approval.json`: the hash of the exact source you were shown, of its train and
+test evidence, and the approved parameters. Paper trading refuses the signal if any of them has changed.
 
 Statuses: `proposed` → `implemented` → `validated` → `candidate` → `promoted` (by you), or `broken`,
 `rejected_by_critic`, `failed_train`, `failed_test`, `error`. The AI swarm writes per-stock signals;
