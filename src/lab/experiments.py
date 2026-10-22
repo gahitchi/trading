@@ -339,11 +339,9 @@ def null_test(
     frames = frames or data.load_many(cfg, tickers)
     if not frames:
         raise data.DataError("null test requires price data")
-    reference = frames[tickers[0]].index
-    if any(not frames[t].index.equals(reference) for t in tickers):
-        raise data.DataError(
-            "null test requires a date-aligned panel: asynchronous bootstrap destroys cross-asset correlations"
-        )
+    # The union-calendar bootstrap resamples a single joint set of market
+    # intervals and preserves the listing/delisting availability masks.
+    # Staggered histories no longer make the statistical null impossible.
     if observed_edge is None:
         comp, _ = compare(cfg, [spec], tickers, period, frames)
         observed_edge = comp.rows[1]["sharpe_edge"] if len(comp.rows) > 1 else 0.0

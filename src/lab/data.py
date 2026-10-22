@@ -339,20 +339,75 @@ def block_bootstrap(df: pd.DataFrame, seed: int, block: int = 20) -> pd.DataFram
 
 
 def block_bootstrap_panel(frames: dict[str, pd.DataFrame], seed: int, block: int = 20) -> dict[str, pd.DataFrame]:
-    """Synchronously resample all assets so common market shocks are preserved.
+    """Joint calendar-block bootstrap with preserved instrument availability.
 
-    Asset-specific independent sampling destroys cross-sectional covariance and
-    produces invalid null statistics. If dates cannot be matched, reject the
-    inference rather than silently testing a fabricated market history.
+    Draw *one* source-calendar interval for every destination interval. A source
+    block is eligible only when it contains all observations required by the
+    destination block. Missing dates remain missing; no late-listing history or
+    post-delisting price is invented. All concurrently observed assets receive
+    shocks from the *same* sampled source market date.
+
+    This conditions the null on the observed availability mask. Sparse panels
+    may have very few eligible source blocks: report that limitation when
+    interpreting statistical significance; no historical market is generated.
     """
     if not frames:
         raise DataError("joint bootstrap requires at least one instrument")
-    first = next(iter(frames.values())).index
-    mismatched = [t for t, df in frames.items() if not df.index.equals(first)]
-    if mismatched:
-        raise DataError(
-            "joint block bootstrap requires identical sorted market-session indexes; "
-            f"unaligned assets: {', '.join(mismatched[:12])}. "
-            "Use an explicitly aligned point-in-time panel; do not bootstrap assets independently."
+    if type(block) is not int or block < 1:
+        raise DataError("joint bootstrap block size must be a positive integer")
+    ordered = {t: validate(frames[t], t) for t in sorted(frames)}
+    calendar = pd.DatetimeIndex(sorted(set().union(*(set(df.index) for df in ordered.values()))))
+    n = len(calendar)
+    if n < 2:
+        raise DataError("joint bootstrap requires at least two market sessions")
+    masks = {t: calendar.isin(df.index) for t, df in ordered.items()}
+    rng = np.random.default_rng(seed)
+    global_pick = np.empty(n, dtype=np.int64)
+    for start in range(0, n, block):
+        width = min(block, n - start)
+        eligible = np.ones(n - width + 1, dtype=bool)
+        # Masks are indexed on the UNION calendar, not row numbers within
+        # each ticker. Every target observation must have a source observation.
+        for mask in masks.values():
+            for offset in np.flatnonzero(mask[start : start + width]):
+                eligible &= mask[offset : offset + n - width + 1]
+        options = np.flatnonzero(eligible)
+        if not len(options):
+            raise DataError(f"no joint source block for union-calendar interval {start}:{start + width}")
+        donor_start = int(options[rng.integers(len(options))])
+        global_pick[start : start + width] = np.arange(donor_start, donor_start + width)
+
+    out = {}
+    for t, df in ordered.items():
+        mask = masks[t]
+        donor_dates = calendar[global_pick[mask]]
+        donor = df.loc[donor_dates]
+        opn, high, low, close, volume = (df[k].to_numpy(dtype=float) for k in COLUMNS)
+        previous_close = np.concatenate([[opn[0]], close[:-1]])
+        gap, day_move = opn / previous_close, close / opn
+        excursion_up = high / np.maximum(opn, close)
+        excursion_down = low / np.minimum(opn, close)
+        # Translate shared calendar donors into asset-specific source row
+        # indices without forward/backward filling non-trading sessions.
+        donor_rows = df.index.get_indexer(donor.index)
+        if (donor_rows < 0).any():
+            raise DataError(f"{t}: donor calendar lost a required instrument observation")
+        rebuilt_open = np.empty(len(df))
+        rebuilt_close = np.empty(len(df))
+        last = close[0]
+        for i, j in enumerate(donor_rows):
+            rebuilt_open[i] = last * gap[j]
+            rebuilt_close[i] = rebuilt_open[i] * day_move[j]
+            last = rebuilt_close[i]
+        resampled = pd.DataFrame(
+            {
+                "open": rebuilt_open,
+                "high": np.maximum(rebuilt_open, rebuilt_close) * excursion_up[donor_rows],
+                "low": np.minimum(rebuilt_open, rebuilt_close) * excursion_down[donor_rows],
+                "close": rebuilt_close,
+                "volume": volume[donor_rows],
+            },
+            index=df.index,
         )
-    return {t: block_bootstrap(df, seed, block) for t, df in frames.items()}
+        out[t] = validate(resampled, t)
+    return out
