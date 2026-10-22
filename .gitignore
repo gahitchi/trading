@@ -14,3 +14,6 @@ examples/*/research/
 # research swarm scratch space (hypotheses and NOTEBOOK.md ARE tracked: they are the scientific record)
 research/.agent_workspace/
 research/usage.jsonl
+
+# lockfile written by local `uv run`; the project installs with pip / `uv pip install -e`
+uv.lock
