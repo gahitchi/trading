@@ -226,6 +226,81 @@ def cmd_analyze(cfg, a):
         print(f"  Saved JSON: {a.output}")
 
 
+# ----------------------------------------------------------------------------- exploratory probabilistic research
+
+
+def cmd_forecast(cfg, a):
+    """Read-only historical forecast, strictly outside the protected holdout."""
+    from datetime import timedelta
+    from pathlib import Path
+
+    from lab.predictive_research import ForecastSpec, forecast_research
+
+    ticker = _tickers(cfg, [a.ticker])[0]
+    history = data.load_many_unmodified(cfg, [ticker])[ticker]
+    limit = cfg.period("holdout").start - timedelta(days=1)
+    if a.as_of:
+        try:
+            as_of = date.fromisoformat(a.as_of)
+        except ValueError as exc:
+            raise MarketAnalysisError("--as-of requires a YYYY-MM-DD exchange-session date") from exc
+        if as_of > limit:
+            raise MarketAnalysisError(f"forecast {as_of} overlaps the sealed holdout; cutoff must be <= {limit}")
+    else:
+        dates = history.index[history.index <= pd.Timestamp(limit)]
+        if dates.empty:
+            raise MarketAnalysisError("no historical bars before the sealed holdout")
+        as_of = dates[-1].date()
+    spec = ForecastSpec(
+        horizon=a.horizon,
+        min_train=a.min_train,
+        calibration=a.calibration,
+        test=a.test_sessions,
+        ridge_alpha=a.ridge_alpha,
+        coverage=a.coverage,
+        drift_z_limit=a.drift_z_limit,
+    )
+    report = forecast_research(
+        ticker, history, as_of=as_of, spec=spec, provenance=data.manifest(cfg).get(ticker)
+    )
+    warning = data.quality_warning(data.quality(cfg, [ticker]))
+    if warning:
+        report["warnings"].append("Data quality: " + warning)
+    if a.output:
+        output = Path(a.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with output.open("x", encoding="utf-8") as file:
+                file.write(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
+        except FileExistsError as exc:
+            raise MarketAnalysisError(f"output exists; refusing to overwrite {output}") from exc
+    if a.json:
+        print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+        return
+    forecast = report["as_of_forecast"]
+    oos = report["frozen_oos_test"]
+    regime = report["volatility_regime"]
+    print(f"{ticker} {as_of} | research-only {a.horizon}-session probabilistic forecast")
+    print(
+        f"  Predicted return {forecast['expected_return_fraction']:+.2%} "
+        f"| exploratory interval [{forecast['lower_return_fraction']:+.2%}, "
+        f"{forecast['upper_return_fraction']:+.2%}]"
+    )
+    print(
+        f"  Estimated probability positive {forecast['empirical_probability_positive']:.1%} "
+        f"| high-volatility state probability {regime['high_volatility_probability_filtered']:.1%}"
+    )
+    print(
+        f"  Frozen OOS MAE {oos['model_mae_log_return']:.5f} "
+        f"vs mean baseline {oos['train_mean_baseline_mae_log_return']:.5f}"
+        f" | empirical interval coverage {oos['observed_interval_coverage']:.1%}"
+    )
+    print(f"  Status {report['forecast_status']} | analysis ID {report['analysis_id']}")
+    print("  WARNING: Probabilities and intervals are not qualified trading signals.")
+    if a.output:
+        print(f"  Saved JSON: {a.output}")
+
+
 # ----------------------------------------------------------------------------- experiments
 
 
@@ -766,6 +841,20 @@ def build_parser() -> argparse.ArgumentParser:
     am.add_argument("--json", action="store_true", help="print full reproducible JSON report")
     am.add_argument("--output", help="write the JSON report to a new file (never overwrites)")
     am.set_defaults(fn=cmd_analyze)
+
+    fm = sub.add_parser("forecast", help="read-only, purged probabilistic market research (never trades)")
+    fm.add_argument("--ticker", required=True, help="one historical instrument")
+    fm.add_argument("--as-of", help="exchange session YYYY-MM-DD strictly before sealed holdout")
+    fm.add_argument("--horizon", type=int, default=1, help="forward close-to-close sessions (1-20)")
+    fm.add_argument("--min-train", type=int, default=252, help="minimum training labels")
+    fm.add_argument("--calibration", type=int, default=60, help="disjoint calibration labels")
+    fm.add_argument("--test-sessions", type=int, default=60, help="final frozen OOS labels")
+    fm.add_argument("--ridge-alpha", type=float, default=10.0, help="positive ridge regularization")
+    fm.add_argument("--coverage", type=float, default=0.90, help="nominal split-conformal interval coverage")
+    fm.add_argument("--drift-z-limit", type=float, default=5.0, help="abstain when feature z-distance exceeds")
+    fm.add_argument("--json", action="store_true", help="full reproducible JSON with uncertainty caveats")
+    fm.add_argument("--output", help="write a new JSON artifact; never overwrite existing evidence")
+    fm.set_defaults(fn=cmd_forecast)
 
     b = sub.add_parser("backtest", help="compare signals against buy-and-hold")
     b.add_argument("signals", nargs="*", default=["sma_trend", "rsi_reversion"])

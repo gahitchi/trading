@@ -34,6 +34,25 @@ Two layers of cooperating agents:
       └── training results only ─────┘                │ you: lab research promote
 ```
 
+## Probabilistic forecasting (research-only)
+
+The independent `lab forecast` command builds ten causal OHLCV features, trains a
+regularized ridge baseline with **purged chronological train/calibration/test
+windows**, evaluates against a simple historical-mean benchmark, and estimates
+an empirical prediction interval and volatility-state probabilities.
+
+```bash
+lab forecast --ticker GOOG --as-of 2010-12-30 --json
+lab forecast --ticker GOOG --as-of 2010-12-30 --horizon 5 --output results/forecast.json
+```
+
+Reports include a model/input SHA-256 fingerprint, observed test error, interval
+coverage, empirical probability/Brier score, and a feature-drift abstention
+signal. All forecasts remain **RESEARCH_ONLY_NOT_FOR_TRADING**; they are neither
+approved price predictions nor trading signals. Split-conformal calibration has
+no unconditional coverage guarantee for dependent market returns. See
+[forecast architecture and limitations](docs/architecture/probabilistic-forecasting.md).
+
 ## Market analysis (research-only)
 
 `lab analyze` computes point-in-time *descriptive* market diagnostics from validated historical

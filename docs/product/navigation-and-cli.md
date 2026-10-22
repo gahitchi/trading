@@ -7,6 +7,11 @@ produces exploratory historical market/risk reports with an immutable input
 fingerprint; unlike most planned commands below, `lab analyze` is available
 on the hardening branch. It does not deploy a strategy or approve an order.
 
+**Implemented on the hardening branch:** `lab forecast --ticker GOOG --as-of YYYY-MM-DD --json`
+provides an exploratory causal model, empirical interval, risk-regime
+probabilities, feature-drift abstention and a frozen OOS/baseline comparison.
+It is not a live forecast service and cannot submit orders.
+
 ## 1. Progressive disclosure
 
 The entry screen must separate:

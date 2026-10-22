@@ -1,6 +1,6 @@
 # Market intelligence and statistical analysis — technical design
 
-**Status:** first deterministic diagnostics implemented; advanced modeling stages are designed but **not implemented or validated for trading**. No part of this module authorizes an order.
+**Status:** descriptive analytics and the first **research-only probabilistic forecast/volatility-regime prototype** implemented. Not independently qualified or validated for trading. No module authorizes an order.
 
 ## Scope and technology selection
 
@@ -11,8 +11,8 @@ A professional analysis pipeline should distinguish **measured facts**, **statis
 | Ingestion | Point-in-time vendor snapshots, immutable hashes, exchange calendar, corporate actions, symbol master | Verified raw observations | Partial; current free data not institutional evidence |
 | Descriptive features | Versioned causal rolling features, strict data quality, reproducible as-of cutoff | Volatility, market breadth, momentum, liquidity proxy, drawdown and tails | First slice in `market_analysis.py` |
 | Dependence and risk | Shrunk PSD covariance, stressed correlations, robust downside/tail diagnostics, scenario replay | Risk diagnostic matrices and uncertainty | Fixed diagonal shrinkage plus historical VaR/ES only |
-| Regime inference | Hidden Markov/state-space alternatives, regime uncertainty, drift detectors, disaggregated macro/liquidity inputs | Probabilistic regime *estimates* with confidence and diagnostic plots | **Not implemented** |
-| Forecasts | Baseline GLMs / gradient-boosted models, carefully justified deep temporal models/transformers; no automatic model promotion | Forecast distribution with calibration by regime and horizon | **Not implemented** |
+| Regime inference | Filtered Markov volatility states, broader state-space models, drift detectors, macro/liquidity inputs | Training-estimated probabilities with uncertainty | **First empirical two-state Markov volatility filter in `predictive_research.py`; not validated as a market predictor** |
+| Forecasts | Regularized baselines, calibrated distributional forecasting; later boosted/deep models only if useful | Forward-return estimates, intervals, OOS evidence | **First causal ridge/empirical-residual prototype implemented, exploratory only** |
 | Validation | Walk-forward/purged-and-embargoed evaluation, nested selection, full trial ledger, realistic transaction/borrowing/cash | Reproducible independent evidence | Existing partial statistics and walk-forward; stronger isolation required |
 | Portfolio and execution | Factor-risk model, expected shortfall constraints, broker-side available-funds checks, verified fills, deterministic risk permits | Explicit approved allocation and traceable order intents | **Not integrated; paper deployment not cleared** |
 
@@ -75,3 +75,15 @@ holdout file isolation.
 - CI tests Python 3.13 and 3.14; this still does **not** prove the broker-connected application is deployable.
 
 **Do not wire exploratory diagnostics directly into `RiskAgent`, `ExecutionAgent` or auto-promotion**. The next contract should separate verified features, probabilistic forecasts, portfolio proposals and independent risk permits.
+
+
+## Probabilistic forecasting prototype
+
+See [probabilistic-forecasting.md](probabilistic-forecasting.md) for the
+versioned data/feature/label contracts, chronological purging, empirical
+volatility-regime filtering, calibration and abstention. The new `lab forecast`
+CLI uses only observed bars on or before a user-selected date strictly
+before the protected final holdout. Its output includes **one frozen
+historical OOS test** and a separately refitted as-of forecast; that OOS
+test is not an untouched externally sealed final evaluation and cannot
+justify self-promotion to trading.

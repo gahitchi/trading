@@ -44,6 +44,18 @@ Numerical/temporal tests are in `tests/test_market_analysis.py` and
 as-of-data caveat, uncertainty, and staged ML designs. This is
 **neither trained price prediction nor broker execution authorization**.
 
+## Probabilistic forecasting — isolated research prototype
+
+`src/lab/predictive_research.py` and `lab forecast` add causal rolling features,
+ridge return estimation, a held-out calibration residual distribution, purged
+chronological test set, empirical volatility-state filtering and feature drift
+abstention. Unit/CLI and offline GOOG smoke tests are included. Results are
+marked `RESEARCH_ONLY_NOT_FOR_TRADING` and are explicitly compared with
+a historical-mean baseline. This **does not** satisfy immutable point-in-time
+data, multi-regime robustness, repeated walk-forward validation, publication
+bias control, or integrated execution/recovery requirements; see
+[probabilistic-forecasting.md](probabilistic-forecasting.md).
+
 ## 1. Implementation order (dependency-aware)
 
 | Phase | Scope | Required proof |
