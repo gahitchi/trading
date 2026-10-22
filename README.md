@@ -34,6 +34,25 @@ Two layers of cooperating agents:
       └── training results only ─────┘                │ you: lab research promote
 ```
 
+## Capital markets and Forex (offline scenario research)
+
+The research layer can now audit **equities, ETFs, plain cash bonds and spot-FX
+currency conversions** with asset-specific Decimal price/quantity contracts,
+bid/ask spreads, freshness guards, cash-only funding and detailed
+cross-asset counterfactual stress reasoning. This is distinct from the US-equity
+paper execution system and **cannot send Forex/bond orders**.
+
+```bash
+lab capital-audit --manifest examples/multiasset-offline/portfolio.json --json
+```
+
+The example models a bond, shares and EUR/USD cash, then stresses rates,
+currency moves and equity declines through explicit sensitivity assumptions.
+The output includes before/after currency-trade previews, component-level P&L
+attribution, limit exceptions, factor traces and reproducible SHA-256 IDs.
+A tested scenario is a hypothesis, **not a verified forward risk forecast**.
+See [multi-asset and reasoning engineering design](docs/architecture/multiasset-reasoning.md).
+
 ## Probabilistic forecasting (research-only)
 
 The independent `lab forecast` command builds ten causal OHLCV features, trains a

@@ -20,6 +20,7 @@ Top-level navigation (UI sections, not existing commands):
 | **Market Intelligence** | Compare market breadth, rolling risk, dependence and historical regimes | as-of date, source/data hashes, volatility, downside/tails, covariance, uncertainty |
 | **Strategies** | Review approved/rejected versions and evidence | sealed strategy hash, holdout access history, uncertainty, risk/cost sensitivity |
 | **Portfolio** | Simulate proposed allocations and preview risk | managed holdings, targets, cash reservations, estimated fees, proposed order plan, constraints |
+| **Capital Markets & FX** | Audit currency-funded positions and stress hypothetical markets (offline only) | spot cash legs, rate/FX/equity scenario loss, provenance, contradictions |
 | **Paper Operations** | Observe current paper run and broker reconciliation | broker DU identity, orders/fills, confirmed balances, per-session decision, alerts |
 | **Incidents** | Halt, reconcile, acknowledge and resolve a fault | priority, causal chain, timeline, state machine, operator actions, completion proof |
 | **Settings & Audit** | Configure explicit scopes, alerts, backups and permissions | approvals, policy versions, immutable event history, deployment version and restore evidence |

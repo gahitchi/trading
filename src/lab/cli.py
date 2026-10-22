@@ -12,6 +12,7 @@ import pandas as pd
 from lab import data, experiments
 from lab.config import ConfigError, LabConfig, Period, load_config
 from lab.market_analysis import MarketAnalysisError
+from lab.multiasset import MultiAssetError
 from lab.signals.builtin import BUILTIN
 from lab.signals.registry import SignalNotFound, available_research, resolve
 
@@ -295,6 +296,57 @@ def cmd_forecast(cfg, a):
     )
     print(f"  Status {report['forecast_status']} | analysis ID {report['analysis_id']}")
     print("  WARNING: Probabilities and intervals are not qualified trading signals.")
+    if a.output:
+        print(f"  Saved JSON: {a.output}")
+
+
+# ----------------------------------------------------------------------------- offline capital-market and FX scenario research
+
+
+def cmd_capital_audit(cfg, a):
+    """Analyze a typed offline portfolio; no broker imports, calls or orders."""
+    from pathlib import Path
+
+    from lab.multiasset import MultiAssetError
+    from lab.multiasset_report import analyze_manifest, load_manifest
+
+    try:
+        report = analyze_manifest(load_manifest(a.manifest))
+    except (KeyError, TypeError, ValueError) as exc:
+        if isinstance(exc, MultiAssetError):
+            raise
+        raise MultiAssetError(f"invalid portfolio manifest: {exc}") from exc
+    if a.output:
+        output = Path(a.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with output.open("x", encoding="utf-8") as file:
+                file.write(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
+        except FileExistsError as exc:
+            raise MultiAssetError(f"output exists; refusing to overwrite {output}") from exc
+    if a.json:
+        print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+        return
+    print(f"Offline capital-markets audit | {report['as_of']} | {report['qualification']}")
+    print(f"  Classes: {', '.join(report['asset_classes'])} | currency: {report['reporting_currency']}")
+    print(f"  Baseline bid-side mark: {report['liquidation_mark_before']}")
+    print(f"  Spot preview mark: {report['liquidation_mark_after_spot_previews']}")
+    for key in ("stress_before", "stress_after_spot_previews"):
+        risk = report[key]
+        if risk is None:
+            print(f"  {key}: NO_SCENARIO_EVIDENCE")
+        else:
+            print(
+                f"  {key}: {risk['risk_status']} | worst case {risk['worst_case_name']}"
+                f" | loss {risk['worst_case_loss']}"
+            )
+            for item in risk["ranked_scenarios"]:
+                print(
+                    f"    {item['name']}: loss {item['loss_fraction']} "
+                    f"| breaches {', '.join(item['breached_limits']) or 'none'}"
+                )
+    print(f"  Analysis ID: {report['analysis_id']}")
+    print("  WARNING: User-defined scenarios are hypotheses, not risk guarantees or trade permits.")
     if a.output:
         print(f"  Saved JSON: {a.output}")
 
@@ -854,6 +906,12 @@ def build_parser() -> argparse.ArgumentParser:
     fm.add_argument("--output", help="write a new JSON artifact; never overwrite existing evidence")
     fm.set_defaults(fn=cmd_forecast)
 
+    ca = sub.add_parser("capital-audit", help="offline cash/FX/equity/bond stress audit (no trading)")
+    ca.add_argument("--manifest", required=True, help="validated JSON portfolio, FX quotes and scenarios")
+    ca.add_argument("--json", action="store_true", help="reproducible JSON evidence with factor attribution")
+    ca.add_argument("--output", help="write a new JSON artifact without overwriting")
+    ca.set_defaults(fn=cmd_capital_audit)
+
     b = sub.add_parser("backtest", help="compare signals against buy-and-hold")
     b.add_argument("signals", nargs="*", default=["sma_trend", "rsi_reversion"])
     b.add_argument(
@@ -966,7 +1024,7 @@ def main(argv=None) -> int:
         return 0
     try:
         return a.fn(cfg, a) or 0
-    except (data.DataError, ConfigError, MarketAnalysisError) as e:
+    except (data.DataError, ConfigError, MarketAnalysisError, MultiAssetError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

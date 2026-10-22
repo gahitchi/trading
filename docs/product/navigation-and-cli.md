@@ -12,6 +12,13 @@ provides an exploratory causal model, empirical interval, risk-regime
 probabilities, feature-drift abstention and a frozen OOS/baseline comparison.
 It is not a live forecast service and cannot submit orders.
 
+**Implemented offline research addition:** `lab capital-audit --manifest portfolio.json --json`
+checks a multi-asset cash/FX/share/bond portfolio and separately reports
+explicit scenario shocks, factor attribution and hypothetical risk policy
+breaches. It cannot execute Forex or security orders and it must not be
+interpreted as a deployment readiness indication. See
+[multiasset-reasoning.md](../architecture/multiasset-reasoning.md).
+
 ## 1. Progressive disclosure
 
 The entry screen must separate:

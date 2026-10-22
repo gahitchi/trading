@@ -56,6 +56,21 @@ data, multi-regime robustness, repeated walk-forward validation, publication
 bias control, or integrated execution/recovery requirements; see
 [probabilistic-forecasting.md](probabilistic-forecasting.md).
 
+## Multi-asset and complex scenario analysis — offline research slice
+
+Typed Decimal instruments for FX spot, listed shares, ETFs and plain bonds;
+side-aware FX conversion, cash-only spot legs, bond accrued-interest handling,
+multi-factor stress calculations, precise loss attribution and explicit
+counterfactual evidence are implemented behind `lab capital-audit`.
+The sample offline portfolio is covered by deterministic tests and CI.
+See [multiasset-reasoning.md](multiasset-reasoning.md) for data contracts,
+contradictions, limitations and staged market-specific deployment gates.
+
+**This is NOT a broker trading capability**, a calibrated scenario predictor
+or a substitute for independently verified market data and settlement.
+Derivatives, leverage, FX financing and bonds' full cash-flow analytics are
+not implemented. Paper order execution remains separately unqualified.
+
 ## 1. Implementation order (dependency-aware)
 
 | Phase | Scope | Required proof |

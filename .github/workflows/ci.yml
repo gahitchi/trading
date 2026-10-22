@@ -37,6 +37,8 @@ jobs:
           uv run --no-sync lab backtest
           uv run --no-sync lab analyze --tickers GOOG --as-of 2010-12-30 --lookback 252 --json > analysis.json
           uv run --no-sync python -c 'import json; r=json.load(open("analysis.json")); assert r["qualification"] == "EXPLORATORY_ONLY" and len(r["analysis_id"]) == 64'
+          uv run --no-sync lab capital-audit --manifest ../multiasset-offline/portfolio.json --json > capital.json
+          uv run --no-sync python -c 'import json; x=json.load(open("capital.json")); assert x["qualification"] == "RESEARCH_ONLY_NOT_FOR_TRADING" and x["stress_before"]["risk_status"] == "LIMIT_BREACH_IN_ASSUMED_SCENARIOS"'
           uv run --no-sync lab forecast --ticker GOOG --as-of 2010-12-30 --min-train 252 --calibration 60 --test-sessions 60 --json > forecast.json
           uv run --no-sync python -c 'import json; r=json.load(open("forecast.json")); assert r["qualification"] == "RESEARCH_ONLY_NOT_FOR_TRADING" and r["frozen_oos_test"]["test_count"] == 60'
           uv run --no-sync lab null-test sma_trend --samples 2 --workers 1

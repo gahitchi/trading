@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "as_of": "2026-10-22T14:00:00+00:00",
+  "max_age_seconds": 300,
+  "reporting_currency": "USD",
+  "instruments": [
+    {
+      "instrument_id": "SHARE.XNAS",
+      "asset_class": "EQUITY",
+      "quote_currency": "USD",
+      "quantity_step": "1",
+      "price_tick": "0.01",
+      "min_quantity": "1"
+    },
+    {
+      "instrument_id": "BOND-ISIN",
+      "asset_class": "BOND",
+      "quote_currency": "USD",
+      "quantity_step": "1000",
+      "price_tick": "0.01",
+      "min_quantity": "1000"
+    },
+    {
+      "instrument_id": "EUR.USD.SPOT",
+      "asset_class": "FX_SPOT",
+      "base_currency": "EUR",
+      "quote_currency": "USD",
+      "quantity_step": "1000",
+      "price_tick": "0.00001",
+      "min_quantity": "1000"
+    }
+  ],
+  "prices": [
+    {
+      "instrument_id": "SHARE.XNAS",
+      "bid": "100.00",
+      "ask": "100.10",
+      "timestamp": "2026-10-22T14:00:00+00:00"
+    },
+    {
+      "instrument_id": "BOND-ISIN",
+      "bid": "101.50",
+      "ask": "102.00",
+      "accrued_interest_per_100": "1.25",
+      "timestamp": "2026-10-22T14:00:00+00:00"
+    },
+    {
+      "instrument_id": "EUR.USD.SPOT",
+      "bid": "1.10000",
+      "ask": "1.10020",
+      "timestamp": "2026-10-22T14:00:00+00:00"
+    }
+  ],
+  "fx_quotes": [
+    {
+      "base": "EUR",
+      "quote": "USD",
+      "bid": "1.10000",
+      "ask": "1.10020",
+      "timestamp": "2026-10-22T14:00:00+00:00",
+      "source": "offline-manual-example"
+    }
+  ],
+  "cash": {
+    "USD": "10000",
+    "EUR": "2000"
+  },
+  "holdings": [
+    {
+      "instrument_id": "SHARE.XNAS",
+      "quantity": "10"
+    },
+    {
+      "instrument_id": "BOND-ISIN",
+      "quantity": "10000"
+    }
+  ],
+  "spot_previews": [
+    {
+      "instrument_id": "EUR.USD.SPOT",
+      "side": "BUY",
+      "base_quantity": "1000",
+      "commission_quote": "2"
+    }
+  ],
+  "factor_exposures": [
+    {
+      "instrument_id": "BOND-ISIN",
+      "factor": "rate_parallel",
+      "loading": "-5",
+      "source": "hypothetical duration scenario, not measured"
+    },
+    {
+      "instrument_id": "SHARE.XNAS",
+      "factor": "risk_off",
+      "loading": "1",
+      "source": "hypothetical equity beta, not calibrated"
+    },
+    {
+      "instrument_id": "FX:EUR/USD",
+      "factor": "usd_strength",
+      "loading": "-1",
+      "source": "assumed EUR/USD response, not calibrated"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "rates_100bp_up",
+      "factors": {
+        "rate_parallel": "0.01"
+      }
+    },
+    {
+      "name": "global_risk_off",
+      "factors": {
+        "risk_off": "-0.25",
+        "usd_strength": "0.05"
+      }
+    },
+    {
+      "name": "severe_combined",
+      "factors": {
+        "rate_parallel": "0.02",
+        "risk_off": "-0.40",
+        "usd_strength": "0.08"
+      }
+    }
+  ],
+  "stress_policy": {
+    "max_loss_fraction": "0.02",
+    "max_loss_amount": "1000"
+  }
+}
