@@ -73,9 +73,7 @@ def read_execution_state(raw: dict, known_tickers: set[str], *, live: bool = Fal
     }
 
 
-def apply_order_fill(
-    pending: dict, processed_fills: set[str], oid: str, trade_id: str, quantity: float
-) -> bool:
+def apply_order_fill(pending: dict, processed_fills: set[str], oid: str, trade_id: str, quantity: float) -> bool:
     """Returns False for a replayed fill; unknown/overfilling events are fatal."""
     key = f"{oid}:{trade_id}"
     if key in processed_fills:

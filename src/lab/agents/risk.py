@@ -9,7 +9,9 @@ from lab.persistence import StateError, atomic_json_write, read_risk_checkpoint,
 
 
 class RiskAgentConfig(DataActorConfig):
-    def __init__(self, *, max_weight: float, max_gross: float, max_drawdown: float, state_path: str | None = None, **_kwargs):
+    def __init__(
+        self, *, max_weight: float, max_gross: float, max_drawdown: float, state_path: str | None = None, **_kwargs
+    ):
         super().__init__()
         self.max_weight = max_weight
         self.max_gross = max_gross
@@ -48,7 +50,9 @@ class RiskAgent(DataActor):
         self.subscribe_topic(T_TARGETS, self._on_targets)
         self.subscribe_topic(T_EQUITY, self._on_equity)
         if self.state_error:
-            self.publish_message(T_RISK, RiskEvent(self.clock.timestamp_ns(), "risk_checkpoint_corrupt", self.state_error))
+            self.publish_message(
+                T_RISK, RiskEvent(self.clock.timestamp_ns(), "risk_checkpoint_corrupt", self.state_error)
+            )
 
     def _persist(self):
         if self.config.state_path and not self.state_error:
@@ -87,9 +91,7 @@ class RiskAgent(DataActor):
             dd = 1.0 - snap.equity / self.peak
             if dd >= self.config.max_drawdown:
                 self.halted = True
-                self.halt_reason = (
-                    f"drawdown {dd:.1%} >= limit {self.config.max_drawdown:.0%}: flattening and halting"
-                )
+                self.halt_reason = f"drawdown {dd:.1%} >= limit {self.config.max_drawdown:.0%}: flattening and halting"
         try:
             # Persist BEFORE the next approval/order can leave this process.
             self._persist()

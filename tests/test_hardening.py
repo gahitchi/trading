@@ -18,7 +18,7 @@ def test_risk_checkpoint_round_trip(tmp_path):
     assert state["reason"] == "drawdown limit"
 
 
-@pytest.mark.parametrize("content", ['{', '{"version":1,"peak":NaN,"halted":false}', '{"peak":100}'])
+@pytest.mark.parametrize("content", ["{", '{"version":1,"peak":NaN,"halted":false}', '{"peak":100}'])
 def test_corrupt_checkpoint_fails_closed(tmp_path, content):
     path = tmp_path / "risk.json"
     path.write_text(content)
@@ -31,7 +31,11 @@ def test_new_checkpoint_is_unhalted(tmp_path):
 
 
 def test_holdout_cannot_be_custom_period():
-    cfg = SimpleNamespace(period=lambda name: Period(name, __import__("datetime").date(2024, 1, 1), __import__("datetime").date(2025, 1, 1)))
+    cfg = SimpleNamespace(
+        period=lambda name: Period(
+            name, __import__("datetime").date(2024, 1, 1), __import__("datetime").date(2025, 1, 1)
+        )
+    )
     for args in [
         SimpleNamespace(period="holdout", start="2020-01-01", end="2020-12-01"),
         SimpleNamespace(period="train", start="2023-01-01", end=None),
