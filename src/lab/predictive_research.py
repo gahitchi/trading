@@ -8,6 +8,7 @@ across boundaries by the full forecast horizon.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import math
 from dataclasses import asdict, dataclass
@@ -135,7 +136,7 @@ def _markov_volatility_filter(training_returns: np.ndarray, observations: np.nda
     threshold = float(np.median(rolling))
     states = (rolling > threshold).astype(int)
     transitions = np.ones((2, 2), dtype=float)
-    for a, b in zip(states[:-1], states[1:], strict=False):
+    for a, b in itertools.pairwise(states):
         transitions[a, b] += 1
     transitions /= transitions.sum(axis=1, keepdims=True)
     paired = training_returns[width - 1 :]
