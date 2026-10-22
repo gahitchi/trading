@@ -89,7 +89,7 @@ def resolve_profile(cfg: LabConfig, name: str) -> tuple[LabConfig, dict]:
     )
     portfolio = replace(
         cfg.portfolio,
-        target_vol=min(old_vol, b.target_vol) if old_vol > 0 else b.target_vol,
+        target_vol=min(old_vol, b.target_vol) if old_vol > 0 else 0.0,
     )
     effective = replace(cfg, risk=risk, paper=paper, portfolio=portfolio)
     limits = {
@@ -102,9 +102,16 @@ def resolve_profile(cfg: LabConfig, name: str) -> tuple[LabConfig, dict]:
         "max_daily_turnover": paper.max_daily_turnover,
     }
     fingerprint = hashlib.sha256(json.dumps({"name": profile.value, "limits": limits}, sort_keys=True).encode()).hexdigest()
+    research_capabilities = {
+        "short_selling": profile in (RiskProfile.DYNAMIC, RiskProfile.AGGRESSIVE),
+        "margin_leverage": profile in (RiskProfile.DYNAMIC, RiskProfile.AGGRESSIVE),
+        "simulation_only_short": profile == RiskProfile.BALANCED,
+    }
     return effective, {
         "schema_version": 1,
         "profile": profile.value,
+        "research_capability_eligibility": research_capabilities,
+        "paper_execution_permissions": {"short_selling": False, "margin_leverage": False},
         "status": "PREVIEW_ONLY_NOT_AN_EXECUTION_PERMIT",
         "limits": limits,
         "profile_id": fingerprint,

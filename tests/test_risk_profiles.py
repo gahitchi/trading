@@ -1,5 +1,6 @@
 """Selected risk styles only narrow original hard limits; preview does not trade."""
 
+import itertools
 from dataclasses import dataclass, replace
 
 import pytest
@@ -48,7 +49,7 @@ def test_profiles_monotonically_expand_only_within_original_safety_caps():
         assert effective.paper.max_orders_per_day <= baseline.paper.max_orders_per_day
         assert effective.paper.max_daily_turnover <= baseline.paper.max_daily_turnover
         profiles.append(evidence["limits"])
-    for earlier, later in zip(profiles, profiles[1:], strict=False):
+    for earlier, later in itertools.pairwise(profiles):
         assert all(earlier[k] <= later[k] for k in earlier)
     assert profiles[0]["max_gross"] < profiles[-1]["max_gross"]
     assert baseline == Config()
@@ -93,3 +94,18 @@ def test_cli_selectable_preview_has_no_order_side_effects(capsys):
     assert args.fn is cmd_risk_profile
     cmd_risk_profile(Config(), args)
     assert '"profile": "cautious"' in capsys.readouterr().out
+
+
+def test_advanced_capabilities_require_separate_broker_authorization():
+    safe = ("calm", "cautious", "balanced")
+    for name in safe:
+        report = resolve_profile(Config(), name)[1]
+        assert not report["research_capability_eligibility"]["short_selling"]
+        assert not report["research_capability_eligibility"]["margin_leverage"]
+    for name in ("dynamic", "aggressive"):
+        report = resolve_profile(Config(), name)[1]
+        assert report["research_capability_eligibility"]["short_selling"]
+        assert report["research_capability_eligibility"]["margin_leverage"]
+    for name in RiskProfile:
+        report = resolve_profile(Config(), name.value)[1]
+        assert report["paper_execution_permissions"] == {"short_selling": False, "margin_leverage": False}

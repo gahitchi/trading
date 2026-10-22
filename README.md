@@ -34,13 +34,24 @@ Two layers of cooperating agents:
       └── training results only ─────┘                │ you: lab research promote
 ```
 
+## Advanced trading styles: short/margin scenario research
+
+Dynamic and Aggressive profiles can **qualify for separately approved**
+short-selling and margin/leverage research; these capabilities are **always
+disabled for broker execution**. A pure scenario engine in
+`src/lab/advanced_risk.py` models signed positions, locate/borrow-fee evidence,
+financing debt, long/short gross leverage, loss under severe short squeezes,
+and modeled initial/maintenance margin breaches, with explicit abstention on
+missing data. The model never submits orders and is **not an IBKR margin/locate
+calculator**. See [advanced risk profiles](docs/architecture/advanced-risk-profiles.md).
+
 ## Selectable risk budgets (preview-only)
 
 Use `lab risk-profile --profile calm --json` to inspect audited operator
 limits before choosing a trading style. Five profiles are available:
 `calm`, `cautious`, `balanced`, `dynamic` and `aggressive`.
 Each independently caps stock concentration, gross exposure, peak drawdown,
-annualized volatility target, maximum buy size, daily turnover and order count.
+any already-enabled annualized volatility target, maximum buy size, daily turnover and order count.
 The system always takes **the minimum of the configured hard cap and the
 profile cap**. Aggressive never enables leverage or bypasses broker safety,
 kill controls or reconciliation.

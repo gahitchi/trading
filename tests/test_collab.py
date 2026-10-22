@@ -111,7 +111,7 @@ def test_merging_main_into_chatgpt_branch_is_allowed(repo):
     tool.main(["new", "--agent", "claude", "--kind", "proposal", "--title", "x", "--body", "from main"])
     commit(root, "claude message")
     git(root, "checkout", "-q", "chatgpt/x")
-    git(root, "merge", "-q", "--no-edit", "main")
+    git(root, "merge", "-q", "--no-ff", "--no-edit", "main")
     assert tool.main(["check", "--base", base]) == 0  # an unchanged copy of claude's file is fine
     msg = next((root / "collab/outbox/claude/C001").glob("*.md"))
     msg.write_text(msg.read_text().replace("from main", "altered on chatgpt's branch"))
