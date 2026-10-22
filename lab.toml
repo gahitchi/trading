@@ -1,0 +1,63 @@
+# trading-lab configuration. Every run records a copy of the settings it used.
+
+[paths]
+data = "data"          # one validated Parquet file per ticker + manifest.json
+results = "results"    # backtest outputs, holdout ledger, paper-trading journal
+research = "research"  # the research swarm's blackboard: one folder per hypothesis
+
+# Ticker = primary listing venue (ISO 10383 MIC code).
+# Backtests trade every ticker through one simulated broker account; paper trading
+# uses these venues to match Interactive Brokers instruments.
+# XNAS = Nasdaq, XNYS = New York Stock Exchange, ARCX = NYSE Arca (most ETFs)
+[universe]
+SPY = "ARCX"
+QQQ = "XNAS"
+AAPL = "XNAS"
+MSFT = "XNAS"
+JPM = "XNYS"
+XOM = "XNYS"
+JNJ = "XNYS"
+KO = "XNYS"
+
+[periods]
+warmup_start = "2009-01-01"         # history used only to warm up indicators, never traded
+train = ["2010-01-01", "2018-12-31"]  # develop and optimize here
+test = ["2019-01-01", "2022-12-31"]   # check what survived training
+holdout = ["2023-01-01", ""]          # "" = up to the latest data. One run per hypothesis, logged.
+
+[backtest]
+capital = 100000.0
+commission_per_share = 0.005  # IBKR Pro Fixed pricing
+commission_min = 1.0          # per order
+commission_max_pct = 0.01     # cap: 1% of trade value
+slippage = true               # every fill one tick against you
+open_print_fraction = 0.01    # liquidity at the opening print, as a fraction of daily volume
+min_trade_value = 500.0       # never send an order smaller than this
+rebalance_band = 0.02         # resize a held position only if the change exceeds 2% of equity
+cash_buffer = 0.01            # size buys on 99% of equity: next-open fills can gap above the close
+
+[risk]
+max_weight = 0.25       # max fraction of equity in one stock
+max_gross = 1.0         # long-only, no leverage
+max_drawdown = 0.35     # circuit breaker: flatten and halt if equity drops 35% from its peak
+
+[paper]
+host = "127.0.0.1"
+port = 4002              # IB Gateway paper port (TWS paper: 7497). Live ports are refused.
+client_id = 7
+account_id = ""          # your IB paper account ID; paper accounts start with "DU"
+market_data = "DELAYED_FROZEN"  # REALTIME needs IB market data subscriptions
+capital = 100000.0       # how much of the paper account the agents may allocate
+rebalance_time = "16:15" # New York time; orders go out as market-on-open for the next session
+signal_time = "16:10"    # New York time; agents fetch the completed daily bars
+
+[research]
+provider = "claude_code"   # "claude_code" (your Claude subscription) or "ollama" (local, free)
+model = "sonnet"           # claude_code: haiku | sonnet | opus.  ollama: e.g. "qwen2.5-coder:7b"
+ollama_url = "http://127.0.0.1:11434"
+call_timeout_s = 600
+max_llm_calls_per_cycle = 10  # hard budget per research cycle
+max_fix_attempts = 3          # engineer retries when generated code fails checks
+null_samples = 30             # bootstrap resamples of real data for the noise-floor test
+min_sharpe_edge = 0.10        # train Sharpe must beat buy-and-hold by at least this
+max_p_value = 0.05            # and beat at least 95% of the noise-floor samples

@@ -1,13 +1,12 @@
 # Lab notebook
 
-One entry per experiment. Write the hypothesis and setup BEFORE running it.
-
-Template:
+Your own experiments. (The AI swarm writes its log to `research/NOTEBOOK.md`.)
+Write the hypothesis and prediction BEFORE running anything.
 
 ```
-## E<n> — <title> (<date>)
+## E<n>: <title> (<date>)
 Hypothesis:
-Setup:        strategy, params, pairs, timerange, data
+Setup:        command, signals, parameters, stocks, period
 Prediction:   what result would support / refute it
 Result:
 Conclusion:
@@ -16,38 +15,34 @@ Next:
 
 ---
 
-## E0 — Null test: the noise floor (2026-10-22)
+## E0: Pipeline verification on real prices (2026-10-22)
 
-**Hypothesis:** On random-walk markets (no exploitable pattern by construction),
-neither SmaCrossover nor RsiMeanReversion has an edge over BuyAndHold.
+**Purpose.** Check the whole system end to end on genuine market data before trusting it.
 
-**Setup:** 20 synthetic markets (GBM, zero drift, BTC vol 60%, ETH vol 75%),
-1h candles, 2024-01-15 → 2025-12-30, 0.1% fee per side, default parameters,
-1000 USDT wallet. `python tools/null_test.py --seeds 20`
+**Setup.** `examples/goog-offline`: real GOOG daily prices 2004-08-19 .. 2013-03-01 (unadjusted; no splits
+in the window). Train 2005-07-01 .. 2009-12-31, test 2010–2011, holdout 2012-01-01 .. 2013-03-01.
+$100,000, IBKR Pro Fixed commissions, next-open fills with one tick of slippage.
 
-**Prediction:** Average excess over BuyAndHold ≤ 0 (fees only hurt); wide spread.
+**Results (train).**
 
-**Result:**
+| Signal | Return | Sharpe | Max drawdown | Exposure | Fills |
+|---|---|---|---|---|---|
+| buy_and_hold (control) | +112.4% | 0.64 | 65% | 99% | 1 |
+| sma_trend (50/200) | +112.4% | 0.81 | 40% | 68% | 5 |
+| rsi_reversion (2, 10/70, 200) | +7.8% | 0.19 | 22% | 16% | 69 |
 
-| Strategy         | Mean    | Median  | Stdev  | Mean excess vs B&H | Seeds ahead of B&H |
-|------------------|---------|---------|--------|--------------------|--------------------|
-| BuyAndHold       | +40.0%  | −7.4%   | 138.8% | —                  | —                  |
-| SmaCrossover     | −4.3%   | −11.7%  | 68.5%  | −44.3%             | 35%                |
-| RsiMeanReversion | +3.6%   | −13.1%  | 68.4%  | −36.4%             | 50%                |
+- `null-test sma_trend` (30 bootstrap samples): Sharpe edge +0.17 vs noise mean −0.20, sd 0.26 → **p = 0.129,
+  indistinguishable from noise**, despite the much smaller drawdown.
+- `holdout sma_trend`: Sharpe 0.24 vs buy-and-hold 0.83 (edge −0.59). The training "edge" did not carry over.
+- Accounting check: the execution agent's cash ledger matched the simulator's account to the cent in every run.
 
-Single-run extremes on pure noise: RsiMeanReversion +222.1% (seed 9),
-SmaCrossover +197.2% (seed 16).
+**Research swarm, two real cycles (Claude Code, haiku).**
+1. `vol_managed_exposure`: volatility-managed exposure. Marked *broken*: the sandbox wrongly rejected
+   `super().__init__()` and `from __future__ import annotations` (fixed afterwards; the final code passes).
+   The Critic caught a genuine bug: the code went fully invested on invalid data instead of flat.
+2. `wk52_high_proximity`: hold while within 10% of the 52-week high (George & Hwang, 2004). **Passed training**
+   (Sharpe edge +0.31, p = 0.048), then **failed the test period** (edge −1.42). A textbook false positive,
+   caught by the out-of-sample gate.
 
-**Conclusion:** Supported. No edge on random data, as expected. The key lesson
-is the spread: a strategy can show +200% on a market with no patterns at all.
-A single backtest result on real data is not evidence; it must clearly exceed
-this noise floor (stdev ≈ 68% for these strategies over two years).
-
-Side observations:
-- BuyAndHold mean (+40%) vs median (−7%): random-walk returns are skewed; a few
-  huge winners pull the mean up while the typical outcome is a loss
-  (volatility drag).
-- On seed 1 (a −69% crash), both strategies "beat" B&H only because they sat in
-  cash during the crash. Beating B&H in one falling market is not skill.
-
-**Next:** E1, the same three strategies on real Binance data, train period only.
+**Conclusion.** The machinery works, and on one stock over a few years nothing survives. Next: real data for the
+full universe (`lab data fetch`), where samples are larger and noise floors tighter.

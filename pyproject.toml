@@ -1,0 +1,40 @@
+[project]
+name = "trading-lab"
+version = "0.2.0"
+description = "Research-only multi-agent trading lab on NautilusTrader: deterministic trading agents plus an AI research swarm"
+readme = "README.md"
+license = "LGPL-3.0-or-later"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    # Pinned exactly: 2.0 is in release candidates and its API still moves between RCs.
+    "nautilus_trader==2.0.0rc7",
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "pyarrow>=17",
+    "yfinance>=0.2.54",
+    "jsonschema>=4.23",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    # Ships a real daily price history (GOOG 2004-2013) used by the offline test suite.
+    "backtesting>=0.6",
+]
+
+[project.scripts]
+lab = "lab.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -m 'not llm'"
+markers = [
+    "llm: calls a real language model (slow, uses your plan's usage)",
+]

@@ -1,0 +1,112 @@
+"""SignalAgent: runs one Signal on one stock and publishes its target exposure."""
+
+from __future__ import annotations
+
+from collections import deque
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
+from nautilus_trader.common import DataActor, DataActorConfig
+
+from lab.agents.messages import T_SIGNAL, SignalUpdate
+from lab.signals.base import Signal, Window, clamp_target
+from lab.universe import bar_type
+
+NY = ZoneInfo("America/New_York")
+
+
+class SignalAgentConfig(DataActorConfig):
+    def __init__(self, *, signal: Signal, sleeve: str, ticker: str, instrument_id, trade_start_ns: int = 0,
+                 live: bool = False, signal_time: str = "16:10", **_kwargs):
+        super().__init__()
+        self.signal = signal
+        self.sleeve = sleeve
+        self.ticker = ticker
+        self.instrument_id = instrument_id
+        self.trade_start_ns = trade_start_ns
+        self.live = live
+        self.signal_time = signal_time
+
+
+class SignalAgent(DataActor):
+    """Backtest: fed by the replayed daily bars.
+    Paper: requests completed daily bars from the broker once per day after the close
+    (plus history at startup to warm up), so it never acts on a partial bar."""
+
+    def __init__(self, config: SignalAgentConfig):
+        super().__init__(config)
+        self.signal = config.signal
+        self.bar_type = bar_type(config.instrument_id)
+        self.rows = deque(maxlen=max(self.signal.lookback, 1))
+        self.last_ts = -1
+        self.errors = 0
+        self.published = 0
+
+    # ------------------------------------------------------------------ lifecycle
+
+    def on_start(self):
+        if self.config.live:
+            self._request_history()
+            self._schedule_daily_request()
+        else:
+            self.subscribe_bars(self.bar_type)
+
+    def on_bar(self, bar):
+        if bar.ts_event > self.last_ts:
+            self._process(bar, publish=True)
+
+    def on_historical_bars(self, bars):
+        now_ny = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY)
+        fresh = []
+        for b in sorted(bars, key=lambda b: b.ts_event):
+            if b.ts_event <= self.last_ts:
+                continue
+            day = datetime.fromtimestamp(b.ts_event / 1e9, NY).date()
+            if day == now_ny.date() and now_ny.time() < time(16, 0):
+                continue  # today's bar is still forming
+            fresh.append(b)
+        for i, b in enumerate(fresh):
+            self._process(b, publish=(i == len(fresh) - 1))
+
+    # ------------------------------------------------------------------ core
+
+    def _process(self, bar, publish: bool):
+        self.last_ts = bar.ts_event
+        self.rows.append((float(bar.open), float(bar.high), float(bar.low), float(bar.close), float(bar.volume)))
+        if len(self.rows) < self.signal.lookback:
+            return
+        cols = list(zip(*self.rows))
+        try:
+            raw = self.signal.target(Window(*cols))
+        except Exception as e:  # a buggy signal must never take the system down
+            self.errors += 1
+            self.log.error(f"{self.config.sleeve}: signal raised {type(e).__name__}: {e}; going flat")
+            raw = 0.0
+        t = clamp_target(raw)
+        self.signal.last = t
+        if publish and bar.ts_event >= self.config.trade_start_ns:
+            self.published += 1
+            self.publish_message(T_SIGNAL, SignalUpdate(self.config.sleeve, self.config.ticker, t,
+                                                        float(bar.close), bar.ts_event))
+
+    # ------------------------------------------------------------------ paper mode
+
+    def _request_history(self, *_):
+        days = int(self.signal.lookback * 1.6) + 15  # calendar days covering `lookback` sessions
+        start = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY) - timedelta(days=days)
+        self.request_bars(self.bar_type, start=start)
+
+    def _schedule_daily_request(self):
+        hh, mm = map(int, self.config.signal_time.split(":"))
+        now = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY)
+        nxt = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        if nxt <= now:
+            nxt += timedelta(days=1)
+        while nxt.weekday() >= 5:
+            nxt += timedelta(days=1)
+        self.clock.set_time_alert_ns(f"signal-{self.config.sleeve}-{nxt:%Y%m%d}", int(nxt.timestamp() * 1e9),
+                                     callback=self._on_signal_time)
+
+    def _on_signal_time(self, _event):
+        self._request_history()
+        self._schedule_daily_request()
