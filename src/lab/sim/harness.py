@@ -6,8 +6,8 @@ One harness session is one trading day, compressed into seconds on the wall cloc
   T-60s  the replay day's bar is dated as today's completed session ("the close")
   T      the node starts: connects, reconciles with the broker, agents load history
   T+2s   signal time: agents request the day's bars and publish targets
-  T+4s   cross-sectional strategies rank the universe
-  T+6s   rebalance time: the ExecutionAgent reconciles its ledger and sends market-on-open orders
+  T+3.5s cross-sectional strategies rank the universe
+  T+5s   rebalance time: the ExecutionAgent reconciles its ledger and sends market-on-open orders
   then   the next session's opening auction fills them, either while the node runs
          (deliver_open) or while it is down (the fills are reported at the next start)
 
@@ -117,13 +117,13 @@ class LiveHarness:
         def at(sec: int) -> str:
             return (now + timedelta(seconds=sec)).strftime("%H:%M:%S")
 
-        self._rebalance_at = now + timedelta(seconds=7)
+        self._rebalance_at = now + timedelta(seconds=5)
         return paper.Schedule(
-            signal_time=at(3),
-            rebalance_time=at(7),
+            signal_time=at(2),
+            rebalance_time=at(5),
             session_close=close.strftime("%H:%M:%S"),
             weekdays_only=False,
-            xs_eval_delay_s=2.0,
+            xs_eval_delay_s=1.5,
         )
 
     def fill_open_offline(self) -> list[Fill]:

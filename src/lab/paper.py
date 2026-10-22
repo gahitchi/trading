@@ -225,6 +225,9 @@ def build_node(
         ExecutionAgent(
             ExecutionAgentConfig(
                 order_id_tag="EXEC",
+                # Orders sent before a restart come back from reconciliation as "external"; claim
+                # them so their later fills reach this agent (it books only its own journaled orders).
+                external_order_instrument_ids=list(iids.values()),
                 instruments=iids,
                 venue=Venue(IB),
                 min_trade_value=cfg.costs.min_trade_value,

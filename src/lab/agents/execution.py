@@ -168,6 +168,8 @@ class ExecutionAgent(Strategy):
         self._schedule(datetime.fromtimestamp(event.ts_event / 1e9, NY))
 
     def _on_heartbeat(self, _event):
+        if self.pending:
+            self._recover_pending()  # safety net: settle journaled orders from the broker's latest state
         kill = self._kill()
         if kill:
             self._cancel_open_orders()
@@ -427,6 +429,14 @@ class ExecutionAgent(Strategy):
                 self._close_pending(coid)
 
     def on_order_filled(self, ev):
+        coid = str(ev.client_order_id)
+        if self.config.live and coid not in self.pending:
+            # Not an order this agent journaled (e.g. a trade placed by hand in the same paper
+            # account): it is not part of the lab's book, and reconciliation will flag the difference.
+            self._risk_event(
+                "foreign_fill", f"{ev.instrument_id}: fill of order {coid} not sent by the lab; not booked"
+            )
+            return
         self._apply_fill(ev)
         order = self.cache.order(ev.client_order_id)
         if order is not None and order.is_closed:
