@@ -97,3 +97,49 @@ def test_cli_reports_actual_effective_profile(goog_lab, capsys):
     assert report["portfolio"]["target_vol"] == goog_lab.portfolio.target_vol
     assert not report["broker_shortability_verified"]
     assert not report["real_money_authorized"]
+
+
+@pytest.mark.parametrize("risk_style,expected_short", [("calm", False), ("aggressive", True)])
+def test_selected_profile_flows_to_real_paper_node(goog_lab, goog, tmp_path, risk_style, expected_short):
+    """End-to-end: actual LiveNode with the signed core and a simulated paper broker."""
+    from lab.config import load_config
+    from lab.signals.registry import SignalSpec
+    from lab.sim.harness import LiveHarness
+
+    config_text = (goog_lab.root / "lab.toml").read_text()
+    config_text = config_text.replace('profile = "custom"', f'profile = "{risk_style}"')
+    if risk_style == "aggressive":
+        config_text = config_text.replace("max_weight = 0.25", "max_weight = 0.45")
+        config_text = config_text.replace("max_gross = 1.0", "max_gross = 1.8")
+        config_text = config_text.replace("max_short_gross = 0.0", "max_short_gross = 0.75")
+        config_text = config_text.replace("min_net = 0.0", "min_net = -0.75")
+        config_text = config_text.replace("max_net = 1.0", "max_net = 1.6")
+        config_text = config_text.replace("max_leverage = 1.0", "max_leverage = 1.8")
+    path = tmp_path / "selected" / "lab.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(config_text)
+    cfg = load_config(path)
+    assert cfg.risk.profile == risk_style
+    assert cfg.portfolio.target_vol == pytest.approx(0.06 if risk_style == "calm" else 0.28)
+    h = LiveHarness(
+        cfg,
+        [SignalSpec("sma_trend", {"fast": 3, "slow": 10, "short": 1})],
+        {"GOOG": goog},
+        tmp_path / f"harness-{risk_style}",
+        first_day=560,
+        allow_short=True,
+        shortable={"GOOG"},
+    )
+    for _ in range(3):
+        assert h.session().error is None
+    fills = [f for session in h.sessions for f in session.fills]
+    assert fills
+    if expected_short:
+        assert any(f.side == "SELL" for f in fills)
+        assert cfg.risk.max_short_gross == pytest.approx(0.75)
+        assert cfg.portfolio.max_leverage == pytest.approx(1.8)
+    else:
+        assert all(f.side != "SELL" for f in fills)
+        assert cfg.risk.max_short_gross == 0.0
+        assert cfg.risk.max_gross == pytest.approx(0.30)
+    assert h.ledger()["positions"] == h.broker().positions()
