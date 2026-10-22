@@ -4,7 +4,7 @@ version = "0.2.0"
 description = "Research-only multi-agent trading lab on NautilusTrader: deterministic trading agents plus an AI research swarm"
 readme = "README.md"
 license = "LGPL-3.0-or-later"
-requires-python = ">=3.12,<3.15"
+requires-python = ">=3.13,<3.15"  # nautilus_trader 2.0.0rc7 ships cp313/cp314 only
 dependencies = [
     # Pinned exactly: 2.0 is in release candidates and its API still moves between RCs.
     "nautilus_trader==2.0.0rc7",
@@ -43,7 +43,7 @@ markers = [
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py313"
 extend-exclude = ["research/hypotheses"]
 
 [tool.ruff.lint]

@@ -8,20 +8,39 @@ permissions:
   contents: read
 
 jobs:
+  collab:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: thread format
+        run: python3 tools/collab.py check
+      - name: threads are append-only, chatgpt commits on main touch only collab/
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        run: |
+          python3 tools/collab.py check --base ${{ github.event.before }}
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            python3 tools/collab.py check-commits ${{ github.event.before }}..${{ github.sha }}
+          fi
+      - name: threads are append-only (pull requests)
+        if: github.event_name == 'pull_request'
+        run: python3 tools/collab.py check --base origin/${{ github.base_ref }}
+
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uvx ruff check src tests
-      - run: uvx ruff format --check src tests
+      - run: uvx ruff check src tests tools
+      - run: uvx ruff format --check src tests tools
 
   test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.12", "3.13"]
+        python: ["3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

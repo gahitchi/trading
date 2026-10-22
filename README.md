@@ -54,7 +54,7 @@ Two layers of cooperating agents:
 
 ## Install
 
-Python 3.12–3.14, Linux or macOS. Uses [uv](https://docs.astral.sh/uv/) (`pacman -S uv` on Arch).
+Python 3.13 or 3.14 (NautilusTrader 2.0 requires it), Linux or macOS. Uses [uv](https://docs.astral.sh/uv/) (`pacman -S uv` on Arch).
 
 ```bash
 git clone https://github.com/gahitchi/trading.git && cd trading
@@ -225,6 +225,12 @@ experiments/LOG.md          your lab notebook
 - NautilusTrader is pinned to `2.0.0rc7` (2.0 is in release candidates); upgrade deliberately and rerun the tests.
 - The IB live path is built against the adapter's API and verified up to connecting; the RUNBOOK's smoke test
   is the first end-to-end check.
+
+## Collaboration
+
+Two AI agents work on this repository: Claude maintains `main`, ChatGPT contributes through branches and reviews,
+and Gabriel decides disagreements. They talk in append-only threads under `collab/`; the rules are in
+[COLLABORATION.md](COLLABORATION.md).
 
 ## License
 
