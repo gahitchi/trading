@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from nautilus_trader.common import DataActor, DataActorConfig
 
-from lab.persistence import StateError, atomic_json_write, read_risk_checkpoint, risk_checkpoint
-
 from lab.agents.messages import T_APPROVED, T_EQUITY, T_RISK, T_TARGETS, ApprovedTargets, RiskEvent
+from lab.persistence import StateError, atomic_json_write, read_risk_checkpoint, risk_checkpoint
 
 
 class RiskAgentConfig(DataActorConfig):
@@ -24,7 +23,7 @@ class RiskAgent(DataActor):
     - each stock is capped at max_weight of equity
     - total exposure is scaled down to max_gross
     - circuit breaker: once equity falls max_drawdown below its peak, everything is
-      flattened and the agent stays halted until restarted
+      flattened and the agent stays halted across restarts until operator recovery
     """
 
     def __init__(self, config: RiskAgentConfig):

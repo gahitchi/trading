@@ -1,14 +1,12 @@
 """Fail-closed checkpoint and sealed-holdout regression tests."""
 
-import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from lab.persistence import StateError, atomic_json_write, read_risk_checkpoint, risk_checkpoint
 from lab.cli import _period
 from lab.config import Period
+from lab.persistence import StateError, atomic_json_write, read_risk_checkpoint, risk_checkpoint
 
 
 def test_risk_checkpoint_round_trip(tmp_path):
