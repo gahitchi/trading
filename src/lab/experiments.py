@@ -364,7 +364,7 @@ def null_test(
     if max(fallback_fractions) > max_fallback:
         raise data.DataError(
             f"null test not qualified: fallback block fraction {max(fallback_fractions):.1%} "
-            f"exceeds calibrated limit {max_fallback:.0%}"
+            f"exceeds provisional policy limit {max_fallback:.0%}"
         )
     beat = sum(e >= observed_edge for e in edges)
     s = pd.Series(edges)
