@@ -14,8 +14,11 @@ def fake_market(seed=1, periods=950):
     close = np.exp(np.cumsum(returns)) * 100
     return pd.DataFrame(
         {
-            "open": close, "high": close * 1.01, "low": close * 0.99,
-            "close": close, "volume": np.full(periods, 1e6),
+            "open": close,
+            "high": close * 1.01,
+            "low": close * 0.99,
+            "close": close,
+            "volume": np.full(periods, 1e6),
         },
         index=pd.bdate_range("2021-01-01", periods=periods),
     )

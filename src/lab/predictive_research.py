@@ -20,9 +20,16 @@ import pandas as pd
 from lab.market_analysis import AnalysisSpec, MarketAnalysisError, _panel
 
 FEATURE_NAMES = (
-    "log_return_1d", "log_momentum_5d", "log_momentum_21d",
-    "log_momentum_63d", "realized_vol_20d", "downside_rms_20d",
-    "drawdown_63d", "volume_log_z_20d", "overnight_log_gap", "intraday_log_range",
+    "log_return_1d",
+    "log_momentum_5d",
+    "log_momentum_21d",
+    "log_momentum_63d",
+    "realized_vol_20d",
+    "downside_rms_20d",
+    "drawdown_63d",
+    "volume_log_z_20d",
+    "overnight_log_gap",
+    "intraday_log_range",
 )
 WARMUP = 63
 
@@ -142,8 +149,7 @@ def _markov_volatility_filter(training_returns: np.ndarray, observations: np.nda
     paired = training_returns[width - 1 :]
     sigmas = np.asarray(
         [
-            max(float(np.sqrt(np.mean(paired[states == k] ** 2))), 1e-6)
-            if np.any(states == k) else 1e-6
+            max(float(np.sqrt(np.mean(paired[states == k] ** 2))), 1e-6) if np.any(states == k) else 1e-6
             for k in range(2)
         ]
     )
@@ -166,7 +172,11 @@ def _markov_volatility_filter(training_returns: np.ndarray, observations: np.nda
 
 
 def forecast_research(
-    ticker: str, frame: pd.DataFrame, *, as_of: date, spec: ForecastSpec | None = None,
+    ticker: str,
+    frame: pd.DataFrame,
+    *,
+    as_of: date,
+    spec: ForecastSpec | None = None,
     provenance: dict | None = None,
 ) -> dict:
     """One purged chronological OOS test and an independently re-fitted as-of forecast."""
@@ -197,8 +207,10 @@ def forecast_research(
         raise MarketAnalysisError(f"insufficient leakage-purged history: need at least {minimum} sessions")
     model = _fit_ridge(x_labeled[:train_end], labels[:train_end], spec.ridge_alpha)
     q, calres = _calibration(
-        model, x_labeled[calibration_start:calibration_end],
-        labels[calibration_start:calibration_end], spec.coverage,
+        model,
+        x_labeled[calibration_start:calibration_end],
+        labels[calibration_start:calibration_end],
+        spec.coverage,
     )
     testpred = _predict(model, x_labeled[test_start:])
     testtrue = labels[test_start:]
@@ -218,8 +230,10 @@ def forecast_research(
         raise MarketAnalysisError("insufficient refit history")
     current_model = _fit_ridge(x_labeled[:recent_train_end], labels[:recent_train_end], spec.ridge_alpha)
     current_q, current_res = _calibration(
-        current_model, x_labeled[recent_cal_start:recent_cal_end],
-        labels[recent_cal_start:recent_cal_end], spec.coverage,
+        current_model,
+        x_labeled[recent_cal_start:recent_cal_end],
+        labels[recent_cal_start:recent_cal_end],
+        spec.coverage,
     )
     point = float(_predict(current_model, x_all[-1:])[0])
     prob = float(_prob_up(np.asarray([point]), current_res)[0])
@@ -233,17 +247,25 @@ def forecast_research(
         clean.to_csv(index=True, date_format="%Y-%m-%d", float_format="%.17g").encode()
     ).hexdigest()
     config = {
-        "version": 1, "ticker": ticker, "as_of": as_of.isoformat(),
-        "data_sha256": data_hash, "spec": asdict(spec),
+        "version": 1,
+        "ticker": ticker,
+        "as_of": as_of.isoformat(),
+        "data_sha256": data_hash,
+        "spec": asdict(spec),
         "source": provenance or {},
     }
     model_hash = hashlib.sha256(
         json.dumps(
             {
-                "features": FEATURE_NAMES, "coef": current_model["coef"].tolist(),
-                "center": current_model["mean"].tolist(), "scale": current_model["scale"].tolist(),
-                "intercept": current_model["intercept"], "train_end": recent_train_end,
-            }, sort_keys=True, allow_nan=False,
+                "features": FEATURE_NAMES,
+                "coef": current_model["coef"].tolist(),
+                "center": current_model["mean"].tolist(),
+                "scale": current_model["scale"].tolist(),
+                "intercept": current_model["intercept"],
+                "train_end": recent_train_end,
+            },
+            sort_keys=True,
+            allow_nan=False,
         ).encode()
     ).hexdigest()
     config["model_sha256"] = model_hash
@@ -259,8 +281,10 @@ def forecast_research(
         "frozen_oos_test": {
             "first_feature_session": str(dates[WARMUP + test_start].date()),
             "last_feature_session": str(dates[WARMUP + nlab - 1].date()),
-            "train_count": train_end, "calibration_count": spec.calibration,
-            "test_count": spec.test, "purge_sessions": spec.horizon,
+            "train_count": train_end,
+            "calibration_count": spec.calibration,
+            "test_count": spec.test,
+            "purge_sessions": spec.horizon,
             "model_mae_log_return": mae,
             "train_mean_baseline_mae_log_return": baseline_mae,
             "model_improves_baseline_mae": bool(mae < baseline_mae),

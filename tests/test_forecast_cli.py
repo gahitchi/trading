@@ -17,8 +17,11 @@ def prepare(monkeypatch):
     close = 100 * np.exp(0.001 * np.arange(len(idx)))
     frame = pd.DataFrame(
         {
-            "open": close, "high": close * 1.01, "low": close * 0.99,
-            "close": close, "volume": 1e6,
+            "open": close,
+            "high": close * 1.01,
+            "low": close * 0.99,
+            "close": close,
+            "volume": 1e6,
         },
         index=idx,
     )
@@ -33,9 +36,17 @@ def prepare(monkeypatch):
 
 def args(**overrides):
     values = {
-        "ticker": "X", "as_of": None, "horizon": 1, "min_train": 160,
-        "calibration": 45, "test_sessions": 45, "ridge_alpha": 10.0,
-        "coverage": 0.9, "drift_z_limit": 5.0, "output": None, "json": True,
+        "ticker": "X",
+        "as_of": None,
+        "horizon": 1,
+        "min_train": 160,
+        "calibration": 45,
+        "test_sessions": 45,
+        "ridge_alpha": 10.0,
+        "coverage": 0.9,
+        "drift_z_limit": 5.0,
+        "output": None,
+        "json": True,
     }
     values.update(overrides)
     return SimpleNamespace(**values)

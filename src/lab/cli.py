@@ -260,9 +260,7 @@ def cmd_forecast(cfg, a):
         coverage=a.coverage,
         drift_z_limit=a.drift_z_limit,
     )
-    report = forecast_research(
-        ticker, history, as_of=as_of, spec=spec, provenance=data.manifest(cfg).get(ticker)
-    )
+    report = forecast_research(ticker, history, as_of=as_of, spec=spec, provenance=data.manifest(cfg).get(ticker))
     warning = data.quality_warning(data.quality(cfg, [ticker]))
     if warning:
         report["warnings"].append("Data quality: " + warning)
