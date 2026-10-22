@@ -12,7 +12,11 @@
 | Dynamic | Higher | Eligible for **separate** research authorization | Eligible for **separate** research authorization | Disabled |
 | Aggressive | Highest within absolute caps | Eligible for **separate** research authorization | Eligible for **separate** research authorization | Disabled |
 
-The operator's tighter configurable limits always win. Profile selection **never** grants broker privileges or overrides an active safety halt. Current `lab risk-profile --profile <name>` returns a preview and fingerprint, not a deployment change. To become selectable for unattended **paper** orders, risk-profile activations must be persistently bound to account, approved strategy artifacts, versioned risk policy, and broker reconciliation evidence. No real-money account support is in scope.
+The operator's tighter configurable limits always win. Profile selection **never** grants broker privileges or overrides an active safety halt. Current `lab risk-profile --profile <name>` returns a preview and fingerprint, not a deployment change.
+
+The actual profile model now has explicit research limits for signed net exposure and short gross. Its gross ceilings are Calm **0.25×**, Cautious **0.40×**, Balanced **0.75×**, Dynamic **1.35×**, and Aggressive **1.80×**. Dynamic can have up to **0.30×** short gross and Aggressive **0.75×**, but only when the operator independently configures equally permissive hard limits. The checked-in default is `max_gross=1.0` and `max_short_gross=0.0`, hence neither margin nor short research is silently enabled.
+
+`[risk] profile` is the saved preference for `lab risk-profile` previews. **It is not wired to the paper broker.** When core signed accounting and qualification tests are integrated, the live execution path must consume one persisted effective profile, bind it to the account and approved strategy, and fail closed on mismatch. Profile target volatility is no longer silently disabled by the original zero/unspecified portfolio target in research previews. To become selectable for unattended **paper** orders, risk-profile activations must be persistently bound to account, approved strategy artifacts, versioned risk policy, and broker reconciliation evidence. No real-money account support is in scope.
 
 ## Expert short/leveraged portfolio reasoning
 
@@ -45,3 +49,16 @@ Research prototype `src/lab/advanced_risk.py` models a single reporting-currency
 - Shadow soak, supervised paper qualification, explicit human review and immutable versioned approval; no automatic profile escalation from profit.
 
 **Do not let a higher-risk profile turn uncertainty into authority.**
+
+
+## IBKR borrowing information that the adapter must distinguish
+
+Official sources: [IBKR short-securities availability](https://www.interactivebrokers.com/en/trading/short-securities-availability.php), [TWS streaming market data, generic tick 236](https://www.interactivebrokers.com/docs/tws-api/doc/md/streaming-data).
+
+- TWS generic tick **236** exposes shortability tier (tick 46) and estimated shares available (tick 89). It does **not** itself certify an executable locate for a particular order.
+- IBKR's Stock Loan/Borrow (SLB) facility separately displays indicative available quantity and borrow-fee rates, with historical indicative borrowing-rate data. Availability and rates can change; the broker still decides whether an individual order can short.
+- A short research position must provide an as-of timestamp, permanent instrument identity, availability source and explicit annualized fee. **Missing, stale, or non-point-in-time borrow history excludes that asset from a qualified historical short backtest.** It is not acceptable to replace missing hard-to-borrow costs with zero.
+- Daily research carry should charge short market value × supplied annual borrow fee × elapsed days / 365 and charge actual financing on account debit balances; collateral interest, short-sale proceeds, dividends and corporate actions need separate explicit cash flows. The broker's actual fees and house margin rules supersede indicative calculations.
+- Approval must use broker-confirmed account permissions, current locate/order validation where required, account-specific buying power and initial/maintenance requirements. An account name, risk profile or the 2× heuristic is not proof of margin eligibility. An unverified order is rejected or abstained from, never silently converted into a different side/quantity.
+
+**Gate remains closed:** `advanced_risk.py` is a deterministic research calculator; no verified borrow feed, qualified core position accounting, or broker-approved short/margin order path has been implemented.
