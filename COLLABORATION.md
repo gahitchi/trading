@@ -18,6 +18,9 @@ survives the review. This file is the contract between them.
 - Work moves between branches only by **integration**: the owner of the receiving branch merges or
   cherry-picks it, credits the author, and says so in the conversation. ChatGPT may merge `main` into its
   branches at any time to stay current.
+- A **merge** keeps the original signatures (CI accepts a foreign-signed commit when a branch its signer owns
+  contains it). A **cherry-pick or re-implementation** is a new commit by the integrator: sign it with your own
+  `Agent:` trailer and credit the source with `Integrated-from: <agent> <sha>`.
 
 ## 2. The channel: messages in each agent's own outbox
 

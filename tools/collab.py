@@ -146,8 +146,12 @@ def is_message(path: str) -> bool:
     return path.startswith(OUTBOX + "/") and path.endswith(".md") and len(PurePosixPath(path).parts) == 5
 
 
-def collect(include_worktree: bool = True) -> dict[str, list[dict]]:
-    """All messages from all branches, each read only from a branch its author owns. Keyed by thread."""
+def collect(include_worktree: bool = True, any_worktree_author: bool = False) -> dict[str, list[dict]]:
+    """All messages from all branches, each read only from a branch its author owns. Keyed by thread.
+
+    any_worktree_author: also take other agents' files present in the working tree (merged copies) at face
+    value. Only for structural checks: authorship of such files is verified separately by `check --base`.
+    """
     found: dict[str, dict] = {}
     refs = git("for-each-ref", "--format=%(refname:short)", "refs/remotes", "refs/heads").split()
     for ref in refs:
@@ -164,7 +168,8 @@ def collect(include_worktree: bool = True) -> dict[str, list[dict]]:
         if base.exists():
             for f in sorted(base.rglob("*.md")):
                 path = f.relative_to(root()).as_posix()
-                if is_message(path) and path_agent(path) in (owner, "gabriel") and path not in found:
+                allowed = any_worktree_author or path_agent(path) in (owner, "gabriel")
+                if is_message(path) and allowed and path not in found:
                     found[path] = parse_message(f.read_text(), path)
     threads: dict[str, list[dict]] = {}
     for msg in found.values():
@@ -322,6 +327,12 @@ def cmd_sync(a) -> int:
 # ----------------------------------------------------------------------------- validation
 
 
+def on_owned_branch(sha: str, agent: str) -> bool:
+    """True if a branch owned by `agent` (local or remote) contains commit `sha`."""
+    refs = git("for-each-ref", "--contains", sha, "--format=%(refname:short)", "refs/remotes", "refs/heads").split()
+    return any(owner_of(r.split("/", 1)[1] if r.startswith("origin/") else r) == agent for r in refs)
+
+
 def merged_from_owner(path: str, author: str) -> bool:
     """A file written by another agent is allowed on this branch only as an unchanged copy from
     a branch that agent owns (e.g. after merging main into a chatgpt branch)."""
@@ -351,7 +362,7 @@ def cmd_check(a) -> int:
             except CollabError as e:
                 errors.append(str(e))
     try:
-        threads = collect()
+        threads = collect(any_worktree_author=True)
     except CollabError as e:
         errors.append(str(e))
         threads = {}
@@ -377,8 +388,14 @@ def cmd_check(a) -> int:
         for sha in git("rev-list", "--no-merges", f"{a.base}..HEAD").split():
             signed = re.findall(r"^Agent:\s*(\S+)\s*$", git("log", "-1", "--format=%B", sha), flags=re.M | re.I)
             for agent in signed:
-                if agent.lower() not in (owner, "gabriel"):
-                    errors.append(f"commit {sha[:8]} is signed 'Agent: {agent}' on {owner}'s branch {branch!r}")
+                signer = agent.lower()
+                # A commit signed by the other agent is legitimate here only if it already lives on a
+                # branch that agent owns, i.e. it arrived by merging that branch (idea: ChatGPT, G001-F1).
+                if signer not in (owner, "gabriel") and not on_owned_branch(sha, signer):
+                    errors.append(
+                        f"commit {sha[:8]} is signed 'Agent: {agent}' on {owner}'s branch {branch!r}, "
+                        f"and no branch owned by {signer} contains it"
+                    )
     for e in errors:
         print(f"ERROR {e}")
     print(

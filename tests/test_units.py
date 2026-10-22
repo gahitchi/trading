@@ -109,3 +109,19 @@ def test_sortino_uses_downside_deviation_over_all_days():
     r = eq.pct_change().dropna().to_numpy()
     expected = r.mean() * 252 / (np.sqrt(np.mean(np.minimum(r, 0) ** 2)) * np.sqrt(252))
     assert summarize(eq)["sortino"] == pytest.approx(expected)
+
+
+def test_metrics_refuse_incomplete_curves():
+    """G001-F2 (ChatGPT): missing marks must not be dropped silently."""
+    eq = pd.Series([100, float("nan"), 60, 100], index=pd.bdate_range("2024-01-01", periods=4))
+    with pytest.raises(ValueError, match="non-finite"):
+        summarize(eq)
+
+
+def test_metrics_need_three_marks_and_stay_json_safe():
+    """G001-F4 (ChatGPT): two marks used to report NaN volatility, which is invalid JSON."""
+    import json
+
+    m = summarize(pd.Series([100.0, 101.0], index=pd.bdate_range("2024-01-01", periods=2)))
+    assert "volatility" not in m and m["insufficient"]
+    json.dumps(m, allow_nan=False)
