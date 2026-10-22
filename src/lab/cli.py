@@ -517,19 +517,32 @@ def _heartbeat_age(cfg):
     p = heartbeat_path(cfg)
     if not p.exists():
         return None, None
-    hb = json.loads(p.read_text())
-    age = (datetime.now(UTC) - datetime.fromisoformat(hb["at"])).total_seconds()
-    return age, hb
+    try:
+        hb = json.loads(p.read_text(encoding="utf-8"))
+        age = (datetime.now(UTC) - datetime.fromisoformat(hb["at"])).total_seconds()
+        return age, hb
+    except (ValueError, TypeError, KeyError, OSError):
+        return None, None
 
 
 def cmd_health(cfg, a):
+    from lab.health import assess_heartbeat
+    from lab.paper import runtime_dir
+    from lab.persistence import StateError, read_risk_checkpoint
+
     age, hb = _heartbeat_age(cfg)
-    if age is None:
-        print("unhealthy: no heartbeat yet")
+    try:
+        risk_halted = read_risk_checkpoint(runtime_dir(cfg) / "risk.json")["halted"]
+    except StateError:
+        risk_halted = True
+    issues = assess_heartbeat(hb, age, a.max_age, risk_halted=risk_halted)
+    if issues:
+        print(f"unhealthy: {', '.join(issues)}; heartbeat: {json.dumps(hb)}")
         return 1
-    ok = age <= a.max_age
-    print(f"{'healthy' if ok else 'unhealthy'}: last heartbeat {age:.0f}s ago; {json.dumps(hb)}")
-    return 0 if ok else 1
+    # There may be queued opening orders or a pending daily data snapshot; that
+    # makes the system not ready to place *new* orders, not disconnected.
+    print(f"healthy (order-ready={hb.get('ready') is True}): heartbeat age {age:.0f}s; {json.dumps(hb)}")
+    return 0
 
 
 def cmd_doctor(cfg, a):

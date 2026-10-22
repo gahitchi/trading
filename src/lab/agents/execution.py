@@ -209,21 +209,42 @@ class ExecutionAgent(Strategy):
         if kill:
             self._cancel_open_orders()
         if self.config.heartbeat_path:
+            accounts = [str(a.id) for a in self.cache.accounts()]
+            paper_ok = bool(accounts) and all(
+                is_paper_account(a) and a.endswith(self.config.paper_account) for a in accounts
+            )
+            reconciliation_issues = self.reconcile()
+            today = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY).date()
+            data_issues = self._missing_session_signals(today)
+            ready = bool(
+                paper_ok
+                and not kill
+                and not self.halted
+                and not self.safety_halt
+                and not self.unresolved_orders
+                and not reconciliation_issues
+                and not data_issues
+            )
             p = Path(self.config.heartbeat_path)
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(
-                json.dumps(
-                    {
-                        "at": datetime.now(UTC).isoformat(timespec="seconds"),
-                        "cash": round(self.cash, 2),
-                        "positions": self._nonzero(self.held),
-                        "kill_switch": kill["mode"] if kill else None,
-                        "halted": self.halted,
-                        "blocked": self.blocked_reason or None,
-                        "orders_sent": self.orders_sent,
-                        "accounts": [str(a.id) for a in self.cache.accounts()],
-                    }
-                )
+            atomic_json_write(
+                p,
+                {
+                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                    "cash": round(self.cash, 2),
+                    "positions": self._nonzero(self.held),
+                    "kill_switch": kill["mode"] if kill else None,
+                    "halted": self.halted,
+                    "safety_halt": self.safety_halt,
+                    "blocked": self.blocked_reason or None,
+                    "orders_sent": self.orders_sent,
+                    "accounts": accounts,
+                    "paper_account_ok": paper_ok,
+                    "unresolved_orders": len(self.unresolved_orders),
+                    "reconciliation_issues": reconciliation_issues,
+                    "data_issues": data_issues,
+                    "ready": ready,
+                },
             )
 
     # ------------------------------------------------------------------ state
