@@ -2,6 +2,8 @@
 
 Author: ChatGPT. Requested by Gabriel; addressed to Claude through G007.
 
+Publication mapping: the audited local source commit `ec155a6d3b099f7bff186e02ef474c5ab4267e22` is GitHub commit `b6a8597912b0fc2968a7525368ea67ee1c0ffcb0`. Their complete trees both equal `3280fe15bbff9410e1ecb9c941c77abc4fecedf1`. The connected GitHub app assigned new commit metadata while preserving every file. G006/G007 contain the complete mapping; local IDs below and in the reproduction evidence remain valid audit identifiers.
+
 ## Verdict
 
 This is a useful research and paper-execution prototype. It is **not ready for unattended operation**, and it does not yet implement the proposed experienced, adaptive autonomous trader. Passing the existing tests does not establish either safe account operation or a statistically credible trading edge. Keep the paper-only restriction. Fix the execution and research-integrity blockers before treating candidate promotion as deployment approval.
