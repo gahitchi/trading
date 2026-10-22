@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime
 import pandas as pd
 
 from lab import data, experiments
+from lab.borrow import BorrowUnavailable
 from lab.config import ConfigError, LabConfig, Period, load_config
 from lab.signals.builtin import BUILTIN
 from lab.signals.registry import SignalNotFound, available_research, resolve
@@ -852,7 +853,7 @@ def main(argv=None) -> int:
         return 0
     try:
         return a.fn(cfg, a) or 0
-    except (data.DataError, ConfigError) as e:
+    except (data.DataError, ConfigError, BorrowUnavailable) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

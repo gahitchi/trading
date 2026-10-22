@@ -162,7 +162,8 @@ def quality(cfg: LabConfig, tickers) -> dict:
         "point_in_time_universe": pit,
         "shorting": shorts,
         "leverage": levered,
-        "assumed_borrow_apr": cfg.margin.borrow_apr if shorts else None,
+        "borrow_model": "historical_close_book" if cfg.borrow.history is not None else "assumed",
+        "assumed_borrow_apr": cfg.margin.borrow_apr if shorts and cfg.borrow.history is None else None,
         "assumed_debit_apr": cfg.margin.debit_apr if (shorts or levered) else None,
     }
 
@@ -178,7 +179,12 @@ def quality_warning(q: dict) -> str | None:
         issues.append("unadjusted prices: splits and dividends appear as price jumps")
         if q.get("shorting"):
             issues.append("shorts on unadjusted prices profit from every dividend drop: use adjusted data")
-    if q.get("shorting"):
+    if q.get("shorting") and q.get("borrow_model") == "historical_close_book":
+        issues.append(
+            "historical borrow snapshots gate new shorts and supply per-day fees using prior closing books; "
+            "not a live locate, intraday inventory, recall/liquidation model or verified vendor provenance"
+        )
+    elif q.get("shorting"):
         issues.append(
             f"borrow fees ASSUMED at {q['assumed_borrow_apr']:.2%}/yr for every stock (no historical borrow data; "
             "hard-to-borrow stocks cost far more)"

@@ -7,7 +7,7 @@ from lab.agents.execution import ExecutionAgent
 
 def _marks(held, prices, times, latest, *, live=True):
     self = SimpleNamespace(
-        config=SimpleNamespace(live=live),
+        config=SimpleNamespace(live=live, borrow_book=None),
         held=held,
         prices=prices,
         price_stamps=times,

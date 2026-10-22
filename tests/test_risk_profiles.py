@@ -148,3 +148,39 @@ def test_selected_profile_flows_to_real_paper_node(goog_lab, goog, tmp_path, ris
         assert cfg.risk.max_short_gross == 0.0
         assert cfg.risk.max_gross == pytest.approx(0.30)
     assert h.ledger()["positions"] == h.broker().positions()
+
+
+def test_research_preserves_profile_caps_and_custom_signed_limits(goog_lab):
+    from lab.experiments import effective_risk
+
+    custom = replace(goog_lab, risk=_wide())
+    r = effective_risk(custom, 1)
+    assert r.max_short_gross == custom.risk.max_short_gross
+    assert r.min_net == custom.risk.min_net and r.max_net == custom.risk.max_net
+    assert r.max_weight == 1.0 and r.max_drawdown == 0.9999
+    for name in PROFILES:
+        risk, portfolio = apply_profile(_wide(), _portfolio(), name)
+        cfg = replace(goog_lab, risk=risk, portfolio=portfolio)
+        assert effective_risk(cfg, 1) == risk
+
+
+def test_normal_research_route_can_actually_short(goog_lab, goog):
+    from lab.config import Period
+    from lab.experiments import run_spec
+    from lab.signals.registry import SignalSpec
+
+    cfg = replace(goog_lab, risk=replace(_wide(), max_gross=1.0, max_net=1.0, max_short_gross=0.5, min_net=-0.5))
+    result = run_spec(
+        cfg,
+        SignalSpec("sma_trend", {"fast": 3, "slow": 10, "short": 1}),
+        ["GOOG"],
+        {"GOOG": goog},
+        Period("test", goog.index[300].date(), goog.index[500].date()),
+    )
+    position = 0.0
+    positions = []
+    for fill in result.fills:
+        position += fill.qty if fill.side == "BUY" else -fill.qty
+        positions.append(position)
+    assert min(positions) < 0 < max(positions)
+    assert result.borrow_fees > 0 and result.ledger_vs_account == pytest.approx(0.0, abs=1e-6)

@@ -94,3 +94,8 @@ null_samples = 30             # bootstrap resamples of real data for the noise-f
 min_sharpe_edge = 0.10        # train Sharpe must beat buy-and-hold by at least this
 max_p_value = 0.05            # and beat at least 95% of the noise-floor samples
 min_dsr = 0.95                # and its active return's Deflated Sharpe Ratio (all trials counted) >= this
+
+# Optional historical short eligibility/fees for research (not a paper-broker locate).
+# [borrow]
+# history = "data/borrow.csv"
+# max_age_days = 3

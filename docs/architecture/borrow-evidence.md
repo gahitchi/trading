@@ -1,7 +1,47 @@
 # Borrow availability and financing evidence
 
-**Research model, not a broker order permit.** `lab.borrow.BorrowBook` imports dated per-ticker share-availability and annual borrow-fee snapshots from CSV, rejects duplicate/invalid evidence, and answers `borrow_rate(ticker, day) -> (apr, provenance)` using no future snapshots. A missing, stale or unshortable observation raises `BorrowUnavailable`; qualified research must abstain from opening that short rather than assigning a zero borrowing fee.
+Historical borrow evidence now reaches the backtest execution agent through the normal
+`lab backtest`, comparison, walk-forward and null-test paths. It does not authorize a
+broker order or establish a strategy's statistical edge.
 
-For confirmed historical short positions, `BorrowBook.cost` returns daily accrual plus per-asset provenance. `lab.margin.financing_cost(..., verified_borrow_fee=...)` can accept the resulting total while preserving the old assumed rate when no proven feed is connected. **The actual backtest and paper execution agents have not yet been wired to this schedule.** Until they are, those agents report an *assumed* uniform stock-borrow fee and cannot claim short-history eligibility. Real Interactive Brokers share borrowing must be verified independently; historical snapshots cannot grant a live locate.
+Configure an operator-supplied history in `lab.toml`:
 
-Expected CSV columns are `ticker,as_of,available,apr,source` with ISO date, strict true/false flag and explicit annual fee. The default freshness limit is three calendar days, configurable for weekend/holiday data policy; audit the data vendor, corporate actions and short-sale restrictions before using this in a trading strategy.
+```toml
+[borrow]
+history = "data/borrow.csv" # relative to lab.toml; missing/malformed files fail the run
+max_age_days = 3           # calendar days, including weekends
+```
+
+CSV columns: `ticker,as_of,available,apr,source`. `as_of` is an ISO date, `available`
+is true/false, APR is an annual decimal (0.12 means 12%), and `source` names the
+provider. Records must represent information available by that date's close, not a
+later revision. Duplicate dates, absent fee quotes for available shares and placeholder
+sources are rejected. The code validates structure; it cannot authenticate vendor claims.
+
+- New or larger shorts need a nonfuture, sufficiently recent availability record and fee.
+  Without one, an attempted long-to-short flip closes the long without opening a short;
+  a larger short stays at its current size. Covers and long reductions need no new inventory.
+- Fees use the short quantities and marks at the previous close. That book accrues on each
+  calendar day from that date (inclusive) to the next recorded close (exclusive). Each day's
+  APR is looked up separately. Monday entries are not charged for the preceding weekend;
+  Monday rate changes are not applied to Friday. This is an explicit daily approximation,
+  not a reproduction of broker intraday billing. Accrual ends at the last equity snapshot.
+- An unavailable-inventory record can still supply an observed fee for an existing loan.
+  If any held-book fee is missing or stale, the entire backtest raises `BorrowUnavailable`;
+  no partial metrics or assumed zero/cheap fees are returned. A recall does not trigger a
+  modeled buy-in: forced recalls/liquidations remain unimplemented.
+- `summary.json` includes the parsed-history/freshness SHA-256 identity and every charged
+  day's ticker, source, observation date, rate, marked short value and fee. The config snapshot
+  includes the history path. A hash binds the input; it does not prove authenticity.
+
+Omitting `[borrow].history` preserves the explicitly labeled assumed uniform fee model for
+exploratory comparisons. Such results remain unqualified for historical borrow availability.
+Debit interest continues to use the configured assumed rate in either model. Real-broker
+short eligibility, quantity-specific locates, execution-time inventory, intraday fees, recalls
+and house margin are separate qualification work. `lab paper` does not consume this historical
+file; its financing remains estimated and its broker still has to accept each short.
+
+A named risk profile now retains all configured caps in research. `custom` retains the
+legacy research convention of removing the per-name cap and drawdown breaker, while
+preserving its configured gross/short/net limits. Research evidence must therefore always
+be interpreted alongside the saved effective settings.

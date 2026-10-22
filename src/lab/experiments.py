@@ -22,7 +22,7 @@ import json
 import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -37,17 +37,17 @@ BASELINE = SignalSpec("buy_and_hold")
 
 
 def effective_risk(cfg: LabConfig, n_tickers: int) -> RiskSettings:
-    """Risk settings for research runs, which measure the STRATEGY, not the risk policy:
+    """Named profiles are tested with their actual operating limits.
 
-    - No per-stock cap: a cap would trim the strategy's own weights (an equal-weight
-      control, or a top-3 ranking at 33% each) and the comparison would measure the cap.
-      Gross exposure stays capped at max_gross (no leverage).
-    - The drawdown circuit breaker is off: once tripped it would turn the buy-and-hold
-      control into "buy-and-hold until the first crash, then cash".
-    Both are always enforced in paper trading.
+    Custom keeps the legacy research convention of removing the per-name cap and
+    drawdown breaker. Its explicitly configured signed exposure limits still apply:
+    recreating RiskSettings with defaults would silently turn every short strategy
+    into a long-only one.
     """
     del n_tickers  # kept for API stability
-    return RiskSettings(1.0, cfg.risk.max_gross, 0.9999)
+    if cfg.risk.profile != "custom":
+        return cfg.risk
+    return replace(cfg.risk, max_weight=1.0, max_drawdown=0.9999)
 
 
 def run_spec(
@@ -197,6 +197,10 @@ def compare(
         m["signal_errors"] = r.signal_errors
         m["rejections"] = r.rejections
         m["risk_events"] = [e.kind for e in r.risk_events]
+        m["borrow_model"] = r.borrow_model
+        m["borrow_fingerprint"] = r.borrow_fingerprint
+        m["borrow_fees"] = r.borrow_fees
+        m["financing"] = r.financing
         if i > 0:
             act = actives[i - 1].to_numpy()
             d = stats.dsr(act, trials)
@@ -441,6 +445,16 @@ def save_run(cfg: LabConfig, name: str, comparison: Comparison, results: list, e
                 "extra": extra or {},
                 "config": cfg.snapshot(),
                 "data": {t: data.manifest(cfg).get(t) for t in comparison.tickers},
+                "borrow": [
+                    {
+                        "label": r.label,
+                        "model": r.borrow_model,
+                        "fingerprint": r.borrow_fingerprint,
+                        "fees": r.borrow_fees,
+                        "evidence": r.borrow_evidence,
+                    }
+                    for r in results
+                ],
             },
             indent=2,
             default=str,

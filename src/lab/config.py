@@ -101,6 +101,12 @@ class ResearchSettings:
 
 
 @dataclass(frozen=True)
+class BorrowSettings:
+    history: Path | None = None  # historical research only; never a paper-broker locate
+    max_age_days: int = 3
+
+
+@dataclass(frozen=True)
 class LabConfig:
     root: Path
     data_dir: Path
@@ -117,6 +123,7 @@ class LabConfig:
     paper: PaperSettings
     research: ResearchSettings
     raw: dict = field(repr=False, default_factory=dict)
+    borrow: BorrowSettings = field(default_factory=BorrowSettings)
 
     def period(self, name: str) -> Period:
         if name not in self.periods:
@@ -192,6 +199,13 @@ def load_config(path: str | Path | None = None) -> LabConfig:
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: {e}") from e
     root = path.parent.resolve()
+    br = raw.get("borrow", {})
+    if not isinstance(br, dict) or set(br) - {"history", "max_age_days"}:
+        raise ConfigError("borrow: expected history and max_age_days only")
+    history, age = br.get("history", ""), br.get("max_age_days", 3)
+    if not isinstance(history, str) or type(age) is not int or age < 0:
+        raise ConfigError("borrow: history must be a path string and max_age_days a nonnegative integer")
+    borrow = BorrowSettings(root / history if history else None, age)
 
     try:
         paths = raw["paths"]
@@ -313,4 +327,5 @@ def load_config(path: str | Path | None = None) -> LabConfig:
         ),
         research=research,
         raw=raw,
+        borrow=borrow,
     )
