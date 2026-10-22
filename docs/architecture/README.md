@@ -4,6 +4,8 @@
 **Target: reproducible, autonomous *research* and controlled IBKR `DU…` paper execution.** No live-money trading in scope.
 **Review policy:** any change to order submission, broker recovery, risk, or AI code execution must have an approved design, tests and operational rollback before implementation.
 
+**Product workflow:** [user journeys, operating modes, incidents and approvals](../product/user-workflow.md) · [CLI and UI navigation contract](../product/navigation-and-cli.md) · [research-to-release qualification checklist](../product/research-to-release-checklist.md). The UX proposals are not implemented commands.
+
 ## 1. System boundaries
 
 ```mermaid

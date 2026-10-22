@@ -4,6 +4,8 @@
 
 > **Deployment qualification:** This branch is an engineering/research candidate, **not yet cleared for unattended operation**, even in an IBKR paper account. Passing CI does not prove broker reconciliation, idempotent execution or emergency controls. Before proceeding, see the [system architecture and release gates](docs/architecture/README.md), [verification matrix](docs/architecture/verification-and-roadmap.md) and [broker recovery design](docs/architecture/execution-recovery.md). Do not connect unattended order submission until the P0 acceptance tests have been implemented and verified against the paper gateway.
 
+**Product design:** [User workflow and UX](docs/product/user-workflow.md) · [planned navigation and commands](docs/product/navigation-and-cli.md) · [research-to-release checklist](docs/product/research-to-release-checklist.md). These pages are proposals, not an implemented web dashboard.
+
 A research-grade, paper-only trading system for US stocks, built on
 [NautilusTrader](https://nautilustrader.io) (Rust core, event-driven, identical code in backtests and live trading).
 

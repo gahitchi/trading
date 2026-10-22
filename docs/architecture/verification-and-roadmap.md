@@ -12,9 +12,25 @@ Passing Python unit tests and Docker builds is necessary but not sufficient.
 roster hashes but **do not** perform exchange-calendar verification, upstream
 finality attestation, live session synchronization or broker order gating.
 
-This is **Slice 1 scaffolding**, not completion of CT-02/03/04. Integrating it
-into producers/allocator/execution must wait for the complete snapshot/risk
-contracts and independent broker-simulator tests.
+**Slice 2 implemented as an isolated, pure component:** `src/lab/session_snapshot.py`
+validates a frozen expected roster, rejects missing/stale/out-of-scope/conflicting
+bars and signals, deduplicates identical inputs, enforces an explicit UTC cutoff,
+and emits one deterministic content-addressed `SessionSnapshot`. Tests in
+`tests/test_session_snapshot.py` cover input permutations, invalid signals,
+mixed session dates, deadline expiry and immutable sealing.
+
+Neither slice is integrated with the live event bus, exchange calendar, provider
+finality, broker accounting, risk permits or order submission. **CT-02/03/04/30
+remain unmet for the integrated trading system.** A detached unit test does not
+establish end-to-end protection; implementation must not proceed to unattended
+paper deployment until the entire control path is validated.
+
+Product experience is specified separately in
+[the user workflow](../product/user-workflow.md),
+[navigation/CLI contract](../product/navigation-and-cli.md), and
+[operator approval checklist](../product/research-to-release-checklist.md).
+User-facing workflows depend on reliable state and auditable commands; the proposed
+commands are **not** available in the current CLI.
 
 ## 1. Implementation order (dependency-aware)
 
@@ -95,7 +111,7 @@ These test IDs are acceptance criteria to implement, **not** tests claimed to al
 
 **Slice 1:** typed `SessionKey`, exchange calendar adapter, immutable `ExpectedRoster` and `MarketBarFinalized` with fixtures and checks, *without* changing live behavior.
 
-**Slice 2:** `SessionSnapshotBuilder`: collect exact roster, validate completeness, reject duplicates/conflicts, seal one immutable snapshot; unit tests across dates/late bars.
+**Slice 2:** Pure `SessionSnapshotBuilder` completed, integration with trusted exchange calendar and live events **not completed**.
 
 **Slice 3:** strategy evaluation over sealed snapshot, atomic portfolio proposal including explicit zero positions, pure risk-policy evaluation binding a permit ID.
 
