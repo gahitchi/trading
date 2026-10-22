@@ -152,8 +152,8 @@ def test_config_and_saved_report_bind_fee_evidence(goog_lab):
     cfg.borrow.history.write_text("ticker,as_of,available,apr,source\n")
     frame = _flat()
     period = Period("test", frame.index[1].date(), frame.index[-1].date())
-    comp, results = experiments.compare(
-        cfg, [SignalSpec("buy_and_hold")], ["GOOG"], period, {"GOOG": frame}, register=False
+    comp, results = experiments.compare(  # synthetic 2021 bars sit inside the fixture's open-ended holdout
+        cfg, [SignalSpec("buy_and_hold")], ["GOOG"], period, {"GOOG": frame}, register=False, holdout_ok=True
     )
     out = experiments.save_run(cfg, "borrow-test", comp, results)
     report = json.loads((out / "summary.json").read_text())

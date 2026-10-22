@@ -39,8 +39,11 @@ class SmokeTest(Strategy):
     1. the broker reports exactly the configured paper account
     2. every instrument loaded from IB
     3. historical daily bars arrive for every instrument
-    4. (optional) a 1-share limit buy at half the last close is accepted by IB and then
-       cancelled. It cannot fill, so nothing is traded.
+    4. (optional, --test-order) a REAL paper order: a 1-share limit buy at half the last close,
+       cancelled as soon as IB accepts it. It normally does not fill, but it can (a gap down
+       through the limit, or a fill before the cancel lands: G007-F13, ChatGPT). If it fills, a
+       closing order is sent at once and the smoke test FAILS, naming both orders; should even
+       that not settle, the agents' start-up reconciliation finds the stray share and hard-halts.
     Writes a JSON report and shuts the node down.
     """
 
@@ -52,6 +55,7 @@ class SmokeTest(Strategy):
         self.checks: dict[str, dict] = {}
         self.order_events: list[str] = []
         self.test_order_id = None
+        self.close_order_id = None
         self.done = False
 
     def on_start(self):
@@ -114,7 +118,7 @@ class SmokeTest(Strategy):
                 iid, OrderSide.BUY, inst.make_qty(1), inst.make_price(px), time_in_force=TimeInForce.DAY
             )
             self.test_order_id = order.client_order_id
-            self.order_events.append(f"submitted BUY 1 {t} LIMIT {px} (half the last close: cannot fill)")
+            self.order_events.append(f"submitted BUY 1 {t} LIMIT {px} (half the last close; a real paper order)")
             self.submit_order(order)
             return  # continues in on_order_accepted / on_order_rejected
         self._finish()
@@ -136,9 +140,21 @@ class SmokeTest(Strategy):
             self._check("test order", False, "; ".join(self.order_events))
             self._finish()
 
-    def on_order_filled(self, ev):  # should be impossible at half the market price
-        self.order_events.append(f"UNEXPECTED FILL {ev.last_qty} @ {ev.last_px}")
-        self._check("test order", False, "; ".join(self.order_events))
+    def on_order_filled(self, ev):
+        if ev.client_order_id == self.test_order_id:
+            # Unlikely, not impossible. Undo it, and fail: the operator must look at the account.
+            self.order_events.append(f"UNEXPECTED FILL {ev.last_qty} @ {ev.last_px}")
+            close = self.order_factory.market(
+                ev.instrument_id, OrderSide.SELL, ev.last_qty, time_in_force=TimeInForce.DAY
+            )
+            self.close_order_id = close.client_order_id
+            self.submit_order(close)
+            self.order_events.append(f"closing order {close.client_order_id} sent (SELL {ev.last_qty} at market)")
+            self._check("test order", False, "; ".join(self.order_events) + "; check the paper account")
+        elif ev.client_order_id == self.close_order_id:
+            self.order_events.append(f"closing order filled {ev.last_qty} @ {ev.last_px}")
+            self._check("test order", False, "; ".join(self.order_events) + "; position closed, check the account")
+            self._finish()
 
     def _timeout(self, _event):
         if not self.done:

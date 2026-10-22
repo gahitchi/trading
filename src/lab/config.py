@@ -84,6 +84,11 @@ class PaperSettings:
     max_orders_per_day: int
     max_daily_turnover: float
     order_rate: str
+    # The lab's book is an ALLOCATION of the paper account (capital) unless dedicated_account: then it owns
+    # the account and its cash must match the broker's (small dividend/interest moves are booked, audited).
+    dedicated_account: bool = False
+    cash_tolerance: float = 1.0  # USD, plus 0.1% of equity
+    max_external_cash: float = 0.02  # dedicated: largest unexplained cash move booked automatically (of equity)
 
 
 @dataclass(frozen=True)
@@ -324,6 +329,9 @@ def load_config(path: str | Path | None = None) -> LabConfig:
             max_orders_per_day=int(pp["max_orders_per_day"]),
             max_daily_turnover=float(pp["max_daily_turnover"]),
             order_rate=str(pp["order_rate"]),
+            dedicated_account=bool(pp.get("dedicated_account", False)),
+            cash_tolerance=float(pp.get("cash_tolerance", 1.0)),
+            max_external_cash=float(pp.get("max_external_cash", 0.02)),
         ),
         research=research,
         raw=raw,

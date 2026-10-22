@@ -67,14 +67,21 @@ def set_kill_switch(path: Path, mode: str, reason: str) -> dict:
 
 def read_kill_switch(path: str | Path) -> dict | None:
     p = Path(path)
-    if not p.exists():
-        return None
     try:
-        state = json.loads(p.read_text() or "{}")
-    except json.JSONDecodeError:
-        state = {}
+        if not p.exists():
+            return None
+        raw = p.read_text()
+    except OSError as e:
+        return {"mode": "halt", "reason": f"cannot read kill file: {e}"}
+    try:
+        state = json.loads(raw or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        state = None
+    if not isinstance(state, dict):
+        # Any kill file stops trading, whatever it contains (G007-F11: a JSON list used to crash this reader).
+        return {"mode": "halt", "reason": f"unreadable kill file: {raw[:200]!r}"}
     if state.get("mode") not in ("halt", "flatten"):
-        state["mode"] = "halt"  # an unreadable kill file still stops trading
+        state["mode"] = "halt"
     return state
 
 

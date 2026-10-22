@@ -88,8 +88,10 @@ for each, lists any positions, then disconnects. Then the full order-path check:
 docker compose run --rm -e LAB_IB_CLIENT_ID=8 lab paper --smoke --test-order
 ```
 
-It places a 1-share limit buy at **half** the last close (it cannot fill), waits for IB to accept it, and
-cancels it. Expected:
+It places a **real** 1-share paper order, a limit buy at half the last close, waits for IB to accept it, and
+cancels it. It normally does not fill. If it does (a gap down through the limit, or a fill before the cancel
+lands), the smoke test sends a closing sell at once and FAILS, naming both orders: look at the paper account.
+Expected:
 
 ```
   ✓ paper account: broker reports ['IB-DU1234567'], expected DU1234567

@@ -60,12 +60,10 @@ def test_joint_bootstrap_rejects_invalid_block_size_and_missing_data():
         data.block_bootstrap_panel({"X": prices}, 7, block=0)
     with pytest.raises(data.DataError, match="at least"):
         data.block_bootstrap_panel({"X": prices.iloc[:1]}, 7)
-    # On main, validate() drops an incomplete bar instead of rejecting the series (ChatGPT's branch rejects it
-    # at ingestion, a separate change). Either way no bar is invented: the session stays missing.
     invalid = prices.copy()
     invalid.iloc[5, invalid.columns.get_loc("close")] = np.nan
-    out = data.block_bootstrap_panel({"X": invalid}, 7)["X"]
-    assert prices.index[5] not in out.index and np.isfinite(out.to_numpy()).all()
+    with pytest.raises(data.DataError, match="incomplete"):  # ChatGPT's original expectation (G007-F10)
+        data.block_bootstrap_panel({"X": invalid}, 7)
 
 
 def test_late_listing_does_not_change_established_assets_null():

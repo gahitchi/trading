@@ -132,7 +132,7 @@ def test_provider_errors_are_explanatory(tmp_path, monkeypatch):
 def test_holdout_ledger_allows_once(goog_lab):
     spec = SignalSpec("sma_trend")
     experiments.check_holdout_allowed(goog_lab, spec)
-    comp, _ = experiments.compare(goog_lab, [spec], ["GOOG"], goog_lab.period("holdout"))
+    comp, _ = experiments.compare(goog_lab, [spec], ["GOOG"], goog_lab.period("holdout"), holdout_ok=True)
     experiments.record_holdout(goog_lab, spec, comp)
     with pytest.raises(experiments.HoldoutUsed):
         experiments.check_holdout_allowed(goog_lab, spec)

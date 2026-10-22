@@ -133,9 +133,31 @@ def _trials_path(cfg: LabConfig) -> Path:
     return cfg.results_dir / "trials.jsonl"
 
 
+def config_fingerprint(cfg: LabConfig, n_tickers: int = 1) -> str:
+    """Identity of every setting that changes a backtest's result (G007-F8): the effective research risk
+    limits, margin and financing, portfolio construction, costs, capital, warm-up, and the identity of the
+    point-in-time universe and borrow history files. Paths, paper and research-gate settings are excluded."""
+
+    def file_digest(p) -> str | None:
+        return hashlib.sha256(Path(p).read_bytes()).hexdigest() if p and Path(p).exists() else None
+
+    ident = {
+        "risk": asdict(effective_risk(cfg, n_tickers)),
+        "margin": asdict(cfg.margin),
+        "portfolio": asdict(cfg.portfolio),
+        "costs": asdict(cfg.costs),
+        "capital": cfg.capital,
+        "warmup_start": str(cfg.warmup_start),
+        "membership": file_digest(data.membership_path(cfg)),
+        "borrow": file_digest(cfg.borrow.history),
+    }
+    return hashlib.sha256(json.dumps(ident, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
 def register_trial(cfg: LabConfig, key: str, spec: SignalSpec, label: str, active: pd.Series) -> None:
-    """Every configuration ever evaluated on a dataset is a trial; the Deflated Sharpe
-    Ratio charges for all of them. Re-running an identical configuration is not a new trial."""
+    """Every configuration ever evaluated on a dataset is a trial; the Deflated Sharpe Ratio charges for all
+    of them. A trial is the strategy (code + parameters) AND the settings that shape its result, so trying
+    the same strategy under another risk or cost setting counts again. Re-running an identical one does not."""
     sr, *_ = stats.moments(active.to_numpy())
     cfg.results_dir.mkdir(parents=True, exist_ok=True)
     with _trials_path(cfg).open("a") as f:
@@ -144,7 +166,7 @@ def register_trial(cfg: LabConfig, key: str, spec: SignalSpec, label: str, activ
                 {
                     "at": datetime.now(UTC).isoformat(timespec="seconds"),
                     "dataset": key,
-                    "fingerprint": spec_fingerprint(spec),
+                    "fingerprint": f"{spec_fingerprint(spec)}:{config_fingerprint(cfg)}",
                     "label": label,
                     "sharpe_daily": sr,
                 }
@@ -173,7 +195,9 @@ def compare(
     frames: dict | None = None,
     *,
     register: bool = True,
+    holdout_ok: bool = False,
 ) -> tuple[Comparison, list[backtest.RunResult]]:
+    guard_period(cfg, period, holdout_ok=holdout_ok)
     frames = frames or data.load_many(cfg, tickers)
     results = [run_spec(cfg, BASELINE, tickers, frames, period, "buy_and_hold (control)")]
     cand_specs = [s for s in specs if s != BASELINE]
@@ -248,6 +272,7 @@ def active_matrix(
 def pbo_study(
     cfg: LabConfig, specs: list[SignalSpec], tickers: list[str], period: Period, frames: dict, splits: int = 10
 ) -> dict:
+    guard_period(cfg, period)
     m = active_matrix(cfg, specs, tickers, period, frames)
     out = stats.pbo(m.to_numpy(), splits=splits)
     sr = {c: stats.moments(m[c].to_numpy())[0] * stats.math.sqrt(stats.DAYS) for c in m.columns}
@@ -268,6 +293,7 @@ def walk_forward(
     """Rolling optimization: pick the best configuration (active Sharpe) on each
     in-sample window, then trade it, unchanged, on the following out-of-sample window.
     The stitched out-of-sample record is what the optimization procedure really delivers."""
+    guard_period(cfg, Period("walk-forward", start, end))
     windows = []
     ws = pd.Timestamp(start)
     while True:
@@ -328,8 +354,13 @@ def _null_worker(args):
     from lab.config import load_config
 
     cfg = load_config(cfg_path)
+    # Resample only data available by the end of the evaluated period (G007-F6: drawing donors from the
+    # whole file let later test/holdout rows shape the training noise floor). Warm-up history before the
+    # period start is past data and stays in the donor pool.
+    end = pd.Timestamp(period.end) if period.end else None
+    past = {t: frames[t] if end is None else frames[t][frames[t].index <= end] for t in tickers}
     # One synchronized draw for the whole panel keeps the stocks' co-movement (ChatGPT, G002).
-    boot, diag = data.block_bootstrap_panel({t: frames[t] for t in tickers}, seed, return_diagnostics=True)
+    boot, diag = data.block_bootstrap_panel(past, seed, return_diagnostics=True)
     cand = run_spec(cfg, spec, tickers, boot, period).metrics
     base = run_spec(cfg, BASELINE, tickers, boot, period).metrics
     worst = max((v["fallback_fraction"] for v in diag["per_instrument"].values()), default=0.0)
@@ -346,6 +377,7 @@ def null_test(
     workers: int | None = None,
     observed_edge: float | None = None,
 ) -> dict:
+    guard_period(cfg, period)
     if cfg.borrow.history is not None and cfg.risk.max_short_gross > 0:
         raise data.DataError(
             "historical short-borrow null test is not qualified: prices and borrow availability/fees "
@@ -404,6 +436,22 @@ def spec_fingerprint(spec: SignalSpec) -> str:
 
 class HoldoutUsed(Exception):
     pass
+
+
+def overlaps_holdout(cfg: LabConfig, start: date, end: date | None) -> bool:
+    h = cfg.period("holdout")
+    return start <= (h.end or date.max) and (end or date.max) >= h.start
+
+
+def guard_period(cfg: LabConfig, period: Period, *, holdout_ok: bool = False) -> None:
+    """No experiment touches the holdout except `lab holdout`, which records the use (G007-F7: the guard
+    used to check the period's NAME, so explicit dates overlapping the holdout passed as 'custom')."""
+    if not holdout_ok and overlaps_holdout(cfg, period.start, period.end):
+        h = cfg.period("holdout")
+        raise HoldoutUsed(
+            f"{period.name} {period.start}..{period.end or 'latest'} overlaps the holdout "
+            f"({h.start}..{h.end or 'latest'}); only `lab holdout` may use it, and it records every use"
+        )
 
 
 def holdout_ledger(cfg: LabConfig) -> list:

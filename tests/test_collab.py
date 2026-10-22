@@ -42,10 +42,31 @@ def repo(tmp_path, monkeypatch):
     return mod, tmp_path
 
 
+def _owner(root):
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    return "chatgpt" if branch.startswith(("chatgpt/", "hardening/")) else "claude"
+
+
 def commit(root, msg):
+    """Commit signed by the branch's owner, as the protocol requires (G007-F14)."""
     git(root, "add", "-A")
-    git(root, "commit", "-qm", msg)
+    git(root, "commit", "-qm", msg, "-m", f"Agent: {_owner(root)}")
     return git(root, "rev-parse", "HEAD").strip()
+
+
+def merge(root, *args):
+    git(
+        root,
+        "merge",
+        "-q",
+        "--no-edit",
+        *args[:-1],
+        "-m",
+        f"merge {args[-1]}",
+        "-m",
+        f"Agent: {_owner(root)}",
+        args[-1],
+    )
 
 
 def test_two_branch_conversation(repo):
@@ -111,7 +132,7 @@ def test_merging_main_into_chatgpt_branch_is_allowed(repo):
     tool.main(["new", "--agent", "claude", "--kind", "proposal", "--title", "x", "--body", "from main"])
     commit(root, "claude message")
     git(root, "checkout", "-q", "chatgpt/x")
-    git(root, "merge", "-q", "--no-edit", "main")
+    merge(root, "main")
     assert tool.main(["check", "--base", base]) == 0  # an unchanged copy of claude's file is fine
     msg = next((root / "collab/outbox/claude/C001").glob("*.md"))
     msg.write_text(msg.read_text().replace("from main", "altered on chatgpt's branch"))
@@ -172,7 +193,7 @@ def test_merging_signed_commits_from_owner_branch_is_allowed(repo):
     (root / "work.py").write_text("x = 1")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "chatgpt work", "-m", "Agent: chatgpt")
-    git(root, "merge", "-q", "--no-ff", "--no-edit", "main")
+    merge(root, "--no-ff", "main")
     assert len(git(root, "rev-list", "--parents", "-1", "HEAD").split()) == 3  # a genuine two-parent merge
     assert tool.main(["check", "--base", base]) == 0
 
@@ -236,3 +257,26 @@ def test_shallow_checkout_without_the_openers_branch_is_not_an_error(repo):
     assert tool.main(["check"]) == 0
     git(root, "branch", "-qD", "chatgpt/work")  # as in a checkout of main alone
     assert tool.main(["check"]) == 0
+
+
+def test_every_new_commit_names_exactly_one_known_author(repo):
+    """G007-F14 (ChatGPT): a commit without an Agent trailer used to pass `check --base`."""
+    tool, root = repo
+    git(root, "checkout", "-qb", "chatgpt/audit")
+    base = git(root, "rev-parse", "HEAD").strip()
+    git(root, "commit", "--allow-empty", "-qm", "unsigned change")
+    assert tool.main(["check", "--base", base]) == 1
+    git(root, "reset", "-q", "--hard", base)
+    git(root, "commit", "--allow-empty", "-qm", "two authors", "-m", "Agent: chatgpt\nAgent: claude")
+    assert tool.main(["check", "--base", base]) == 1
+    git(root, "reset", "-q", "--hard", base)
+    git(root, "commit", "--allow-empty", "-qm", "unknown author", "-m", "Agent: someone")
+    assert tool.main(["check", "--base", base]) == 1
+    git(root, "reset", "-q", "--hard", base)
+    git(root, "commit", "--allow-empty", "-qm", "fine", "-m", "Agent: chatgpt")
+    assert tool.main(["check", "--base", base]) == 0
+    git(root, "checkout", "-qb", "chatgpt/side")
+    git(root, "commit", "--allow-empty", "-qm", "side", "-m", "Agent: chatgpt")
+    git(root, "checkout", "-q", "chatgpt/audit")
+    git(root, "merge", "-q", "--no-ff", "--no-edit", "chatgpt/side")  # an unsigned merge commit
+    assert tool.main(["check", "--base", base]) == 1

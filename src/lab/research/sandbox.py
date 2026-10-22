@@ -15,9 +15,7 @@ any generated code before you promote it to paper trading.
 from __future__ import annotations
 
 import ast
-import json
-import subprocess
-import sys
+import itertools
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -186,77 +184,70 @@ def static_check(source: str) -> CheckReport:
     return CheckReport(not errs, "static", sorted(set(errs)), info)
 
 
-_HARNESS = r"""
-import importlib.util, json, math, resource, sys, time
-resource.setrlimit(resource.RLIMIT_AS, (2 << 30, 2 << 30))
-resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
-import numpy as np
-from lab.signals.base import Signal, Window, clamp_target
+def _synthetic_bars(seed: int, n: int = 1500):
+    import numpy as np
 
-path = sys.argv[1]
-spec = importlib.util.spec_from_file_location("candidate_signal", path)
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-classes = [c for c in vars(mod).values() if isinstance(c, type) and issubclass(c, Signal) and c is not Signal]
-cls = classes[0]
-out = {"name": cls.name, "lookback": cls.lookback, "defaults": cls.defaults}
-
-def run(seed):
     rng = np.random.default_rng(seed)
-    n = 1500
     close = 100 * np.exp(np.cumsum(rng.normal(0.0002, 0.015, n)))
     opn = close * np.exp(rng.normal(0, 0.004, n))
     high = np.maximum(opn, close) * (1 + np.abs(rng.normal(0, 0.006, n)))
     low = np.minimum(opn, close) * (1 - np.abs(rng.normal(0, 0.006, n)))
     vol = rng.lognormal(14, 0.4, n)
-    dates = np.busday_offset(np.datetime64('2015-01-02'), np.arange(n), roll='forward')
-    s = cls()
-    lb = s.lookback
-    if not isinstance(lb, int) or not 1 <= lb <= 250:
-        raise ValueError(f"lookback must be an int in 1..250, got {lb!r}")
-    targets, invalid, t0 = [], 0, time.perf_counter()
-    for i in range(lb, n + 1):
-        w = Window(opn[i-lb:i], high[i-lb:i], low[i-lb:i], close[i-lb:i], vol[i-lb:i], dates[i-lb:i])
-        raw = s.target(w)
-        t = clamp_target(raw)
-        try:
-            if not math.isfinite(float(raw)) or float(raw) != t:
-                invalid += 1
-        except Exception:
-            invalid += 1
-        s.last = t
-        targets.append(t)
-    return targets, invalid, (time.perf_counter() - t0) / max(1, len(targets))
-
-a, inv, per_call = run(7)
-b, _, _ = run(7)
-out.update(
-    calls=len(a), invalid=inv, ms_per_call=round(per_call * 1000, 3), deterministic=(a == b),
-    mean_target=float(np.mean(a)), changes=int(sum(1 for x, y in zip(a, a[1:]) if x != y)),
-    distinct=sorted(set(round(x, 4) for x in a))[:10],
-)
-print(json.dumps(out))
-"""
+    dates = np.busday_offset(np.datetime64("2015-01-02"), np.arange(n), roll="forward")
+    return opn, high, low, close, vol, dates
 
 
 def behaviour_check(path: Path, timeout_s: int = 90) -> CheckReport:
-    proc = subprocess.run(
-        [sys.executable, "-s", "-c", _HARNESS, str(path)],
-        capture_output=True,
-        text=True,
-        timeout=timeout_s,
-        env={
-            "PATH": "/usr/bin:/bin",
-            "PYTHONPATH": str(Path(__file__).resolve().parents[2]),
-            "OMP_NUM_THREADS": "1",
-            "OPENBLAS_NUM_THREADS": "1",
-        },
-        cwd=path.parent,
-    )
-    if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout).strip().splitlines()[-6:]
-        return CheckReport(False, "behaviour", ["signal crashed:", *tail])
-    info = json.loads(proc.stdout.strip().splitlines()[-1])
+    """Drive the generated signal over 1,500 random bars, twice, inside its locked-down worker
+    (lab.research.isolation): exactly the code path that later backtests and trades it."""
+    import math
+    import time
+
+    import numpy as np
+
+    from lab.research.isolation import IsolatedSignal, IsolationError
+    from lab.signals.base import Window, clamp_target
+
+    started = time.monotonic()
+
+    def run(seed):
+        sig = IsolatedSignal(path.read_text(), {}, label_path=str(path))
+        try:
+            o, h, lo, c, v, d = _synthetic_bars(seed)
+            lb = sig.lookback
+            targets, invalid, t0 = [], 0, time.perf_counter()
+            for i in range(lb, len(c) + 1):
+                if time.monotonic() - started > timeout_s:
+                    raise IsolationError(f"behaviour check exceeded {timeout_s}s")
+                raw = sig.target(
+                    Window(o[i - lb : i], h[i - lb : i], lo[i - lb : i], c[i - lb : i], v[i - lb : i], d[i - lb : i])
+                )
+                t = clamp_target(raw)
+                if not math.isfinite(raw) or raw != t:
+                    invalid += 1
+                sig.last = t
+                targets.append(t)
+            return sig, targets, invalid, (time.perf_counter() - t0) / max(1, len(targets))
+        finally:
+            sig.close()
+
+    try:
+        sig, a, inv, per_call = run(7)
+        _, b, _, _ = run(7)
+    except IsolationError as e:
+        return CheckReport(False, "behaviour", ["signal crashed:", str(e)])
+    info = {
+        "name": sig.name,
+        "lookback": sig.lookback,
+        "defaults": sig.defaults,
+        "calls": len(a),
+        "invalid": inv,
+        "ms_per_call": round(per_call * 1000, 3),
+        "deterministic": a == b,
+        "mean_target": float(np.mean(a)),
+        "changes": int(sum(1 for x, y in itertools.pairwise(a) if x != y)),
+        "distinct": sorted({round(x, 4) for x in a})[:10],
+    }
     errs = []
     if not info["deterministic"]:
         errs.append("not deterministic: same bars gave different targets")

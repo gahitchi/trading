@@ -22,7 +22,7 @@ from lab.agents.messages import (
     FillReport,
     RiskEvent,
 )
-from lab.agents.schedule import next_at
+from lab.agents.schedule import MAX_BAR_AGE_DAYS, bar_freshness, market_now, next_at
 from lab.borrow import BorrowBook, BorrowUnavailable, HistoricalBorrowLedger
 from lab.config import MarginSettings
 from lab.halt import read_halt, set_halt
@@ -73,6 +73,11 @@ class ExecutionAgentConfig(StrategyConfig):
         weekdays_only: bool = True,
         margin: MarginSettings | None = None,
         borrow_book: BorrowBook | None = None,
+        dedicated_account: bool = False,
+        market_offset_days: float = 0.0,
+        max_bar_age_days: float = MAX_BAR_AGE_DAYS,
+        cash_tolerance: float = 1.0,
+        max_external_cash: float = 0.02,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. margin: financing rates accrued on short and levered books.
@@ -102,6 +107,11 @@ class ExecutionAgentConfig(StrategyConfig):
         self.adopt_broker_positions = adopt_broker_positions
         self.weekdays_only = weekdays_only
         self.margin = margin or MarginSettings()
+        self.dedicated_account = dedicated_account
+        self.market_offset_days = market_offset_days  # harness only (agents/schedule.market_now)
+        self.max_bar_age_days = max_bar_age_days
+        self.cash_tolerance = cash_tolerance
+        self.max_external_cash = max_external_cash
         if live and borrow_book is not None:
             raise ValueError("historical borrow evidence cannot authorize live paper-broker orders")
         if state_path and borrow_book is not None:
@@ -145,6 +155,8 @@ class ExecutionAgent(Strategy):
         # Kept apart from cash so cash stays exactly what the broker's trades imply.
         self.financing = 0.0
         self.borrow_fees = 0.0
+        self.external_cash = 0.0  # dedicated account: cash moves booked from the broker (dividends, interest)
+        self.synced_cash = False  # dedicated account: ledger cash has matched the broker's at least once
         self.accrued_to = 0  # bar timestamp the financing has been accrued up to
         self.borrow_ledger = HistoricalBorrowLedger(config.borrow_book) if config.borrow_book is not None else None
         self.borrow_error: str | None = None
@@ -154,6 +166,8 @@ class ExecutionAgent(Strategy):
         # recovered from the broker's reports at start-up (_recover_pending) instead of leaving the
         # ledger behind the broker. Fills are applied once per broker trade ID.
         self.pending: dict[str, dict] = {}
+        self.orphans: dict[str, float] = {}
+        self.ledger_account: str | None = None  # the broker account this ledger belongs to
         self.applied: list[str] = []
         self._applied_set: set[str] = set()
         if config.state_path and Path(config.state_path).exists():
@@ -161,9 +175,14 @@ class ExecutionAgent(Strategy):
             self.cash = float(state["cash"])
             self.commissions = float(state.get("commissions", 0.0))
             self.financing = float(state.get("financing", 0.0))
+            self.external_cash = float(state.get("external_cash", 0.0))
+            self.synced_cash = bool(state.get("synced_cash", False))
             self.borrow_fees = float(state.get("borrow_fees", 0.0))
             self.accrued_to = int(state.get("accrued_to", 0))
             self.held.update({t: float(q) for t, q in state.get("positions", {}).items() if t in self.held})
+            # Positions in stocks no longer configured are never dropped silently (G007-F15): start-up halts.
+            self.orphans = {t: float(q) for t, q in state.get("positions", {}).items() if t not in self.held and q}
+            self.ledger_account = state.get("account")
             self.pending = dict(state.get("pending", {}))
             self.applied = list(state.get("applied_trades", []))
             self._applied_set = set(self.applied)
@@ -176,9 +195,10 @@ class ExecutionAgent(Strategy):
         if self.config.live:
             now = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY)
             previous = self._read_heartbeat()
-            self._recover_pending()
             if self.config.adopt_broker_positions:
                 self._adopt_broker_positions()
+            self._consume_adopt()
+            self._recover_pending()
             self._schedule(now)
             self.clock.set_timer("heartbeat", timedelta(seconds=60), callback=self._on_heartbeat)
             self._on_heartbeat(None)
@@ -198,6 +218,19 @@ class ExecutionAgent(Strategy):
             account = self._account_id()
             if account is not None and not self._paper_guard():
                 return
+            if account is not None and self.ledger_account not in (None, account):
+                self._hard_halt(
+                    "reconciliation_mismatch",
+                    f"this ledger belongs to account {self.ledger_account}, the broker reports {account}",
+                )
+            elif account is not None and self.ledger_account is None:
+                self.ledger_account = account
+                self._save()
+            if self.orphans:
+                self._hard_halt(
+                    "reconciliation_mismatch",
+                    f"the ledger holds {self.orphans} in stocks that are not in this node's universe",
+                )
             halt = self._halt()
             if halt:
                 self._risk_event(
@@ -244,6 +277,7 @@ class ExecutionAgent(Strategy):
         self._schedule(datetime.fromtimestamp(event.ts_event / 1e9, NY))
 
     def _on_heartbeat(self, _event):
+        self._consume_adopt()
         if self.pending:
             self._recover_pending()  # safety net: settle journaled orders from the broker's latest state
         if self._kill():
@@ -340,12 +374,25 @@ class ExecutionAgent(Strategy):
                 avg = float(v() if callable(v) else v)
                 adopted[t] = (q, avg)
         self.held = dict.fromkeys(self.config.instruments, 0.0)
-        self.cash = self.config.capital
-        for t, (q, avg) in adopted.items():
+        for t, (q, _) in adopted.items():
             self.held[t] = q
-            self.cash -= q * avg
+        if self.config.dedicated_account and math.isfinite(self._broker_cash()):
+            # The lab owns the account: its cash is the broker's, not a reconstruction (G007-F1).
+            self.cash = self._broker_cash()
+            self.synced_cash = True
+            basis = "broker cash"
+        else:
+            # An allocation: capital minus the cost of the adopted positions; the funding check then verifies
+            # that the account can carry it.
+            self.cash = self.config.capital - sum(q * avg for q, avg in adopted.values())
+            basis = "capital minus cost basis"
+        self.pending = {}
+        self.orphans = {}  # the operator decided: the broker's book for this universe is the truth
+        self.ledger_account = self._account_id() or self.ledger_account
         self._save()
-        self._risk_event("ledger_reset", f"adopted broker positions {adopted}; ledger cash now {self.cash:,.2f}")
+        self._risk_event(
+            "ledger_reset", f"adopted broker positions {adopted}; ledger cash now {self.cash:,.2f} ({basis})"
+        )
 
     def _book(self) -> tuple[float, float]:
         long_value = sum(q * self.prices.get(t, 0.0) for t, q in self.held.items() if q > 0)
@@ -401,9 +448,12 @@ class ExecutionAgent(Strategy):
                         "cash": self.cash,
                         "commissions": self.commissions,
                         "financing": self.financing,
+                        "external_cash": self.external_cash,
+                        "synced_cash": self.synced_cash,
                         "borrow_fees": self.borrow_fees,
                         "accrued_to": self.accrued_to,
-                        "positions": self._nonzero(self.held),
+                        "positions": {**self.orphans, **self._nonzero(self.held)},
+                        "account": self.ledger_account,
                         "pending": self.pending,
                         "applied_trades": self.applied[-_KEEP_TRADE_IDS:],
                         "updated": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -426,52 +476,42 @@ class ExecutionAgent(Strategy):
     # ------------------------------------------------------------------ the daily decision
 
     def _unsafe_held_marks(self) -> list[str]:
-        """No new opening trade is safe if the held book cannot be marked consistently."""
+        """What makes the book unmarkable (live, and historical-borrow research): nothing may be sized then.
+
+        Every held stock needs a positive, finite price from the same session as the newest price (G004-F5,
+        ChatGPT), and that newest price must itself be current against the market clock, neither older than
+        the bar-age limit nor from the future (G007-F2): two equally stale prices must not "agree"."""
         if not self.config.live and self.config.borrow_book is None:
             return []
-        stale = []
-        for ticker, qty in self.held.items():
-            if not qty:
-                continue
-            mark = self.prices.get(ticker)
-            ts = self.price_stamps.get(ticker)
-            if mark is None or not math.isfinite(mark) or mark <= 0 or not self.price_ts or ts != self.price_ts:
-                stale.append(ticker)
-        return stale
+        held = [t for t, q in self.held.items() if q]
+        if not self.price_ts:
+            return ["<no prices yet>"] if held else []
+        if self.config.live:
+            stale = bar_freshness(
+                self.price_ts, market_now(self.clock, self.config.market_offset_days), self.config.max_bar_age_days
+            )
+            if stale:
+                return [f"<newest price: {stale}>"]
+        session = datetime.fromtimestamp(self.price_ts / 1e9, NY).date()
+        bad = []
+        for ticker in held:
+            mark, ts = self.prices.get(ticker), self.price_stamps.get(ticker)
+            if (
+                mark is None
+                or not math.isfinite(mark)
+                or mark <= 0
+                or ts is None
+                or datetime.fromtimestamp(ts / 1e9, NY).date() != session
+            ):
+                bad.append(ticker)
+        return bad
 
     def rebalance(self):
         if self.borrow_error:
             return  # backtest.run refuses to return metrics for this invalid run
-        unsafe = self._unsafe_held_marks()
-        if unsafe:
-            self.blocked_reason = f"missing/stale marks for held positions: {', '.join(sorted(unsafe))}"
-            if self.borrow_ledger is not None:
-                self.borrow_error = self.blocked_reason
-            self._risk_event("stale_data", self.blocked_reason + "; no new orders until all held marks are current")
-            return
-        try:
-            snap = self.snapshot()
-        except BorrowUnavailable as exc:
-            self.borrow_error = str(exc)
-            self._risk_event("borrow_history_invalid", self.borrow_error)
-            return
-        self.publish_message(T_EQUITY, snap)  # RiskAgent may halt here; its reply arrives synchronously
-        if not math.isfinite(snap.equity) or snap.equity <= 0:
-            self._risk_event("blocked", f"cannot size orders: equity={snap.equity}")
-            return
+        self._consume_adopt()
 
-        if self.config.adopt_path and Path(self.config.adopt_path).exists():
-            # The operator chose the broker's positions as the truth (lab recover --adopt-broker).
-            self._adopt_broker_positions()
-            Path(self.config.adopt_path).unlink()
-            snap = self.snapshot()
-
-        halt = self._halt()
-        if halt and halt["kind"] not in _REDUCE_ONLY_HALTS:
-            self.blocked_reason = f"hard halt: {halt['kind']}"
-            self._risk_event("hard_halt", f"{halt['kind']} since {halt.get('at')}: no orders (lab recover clears it)")
-            return
-
+        # Positions first: they need no prices, and nothing may trade on a book that disagrees with the broker.
         diffs = self.reconcile()
         if diffs:
             self.blocked_reason = "ledger and broker disagree: " + "; ".join(diffs)
@@ -483,13 +523,49 @@ class ExecutionAgent(Strategy):
             if self.config.live:
                 self._hard_halt("reconciliation_mismatch", self.blocked_reason)
             return
-        self.blocked_reason = ""
 
+        unsafe = self._unsafe_held_marks()
+        snap = None
+        if not unsafe:
+            try:
+                snap = self.snapshot()
+            except BorrowUnavailable as exc:
+                self.borrow_error = str(exc)
+                self._risk_event("borrow_history_invalid", self.borrow_error)
+                return
+            self.publish_message(T_EQUITY, snap)  # RiskAgent may halt here; its reply arrives synchronously
+            if self.config.live and not self._check_funding(snap):
+                return
+        elif self.borrow_ledger is not None:
+            self.borrow_error = f"missing/stale marks for held positions: {', '.join(sorted(unsafe))}"
+
+        halt = self._halt()
+        if halt and halt["kind"] not in _REDUCE_ONLY_HALTS:
+            self.blocked_reason = f"hard halt: {halt['kind']}"
+            self._risk_event("hard_halt", f"{halt['kind']} since {halt.get('at')}: no orders (lab recover clears it)")
+            return
         kill = self._kill()
         flatten = bool(kill and kill.get("mode") == "flatten")
         if kill and not flatten:
             self._cancel_open_orders()
             self._risk_event("kill_switch", f"halted by kill switch ({kill.get('reason', '')}); no orders sent")
+            return
+
+        equity_ok = snap is not None and math.isfinite(snap.equity) and snap.equity > 0
+        if snap is not None and not equity_ok and any(self.held.values()):
+            detail = f"equity {snap.equity:,.2f}: nothing can be sized; every position is exited by quantity"
+            self._risk_event("liquidation", detail)
+            if self.config.live:
+                self._hard_halt("margin_call", detail)
+        breaker = halt is not None and halt["kind"] == "circuit_breaker"
+        liquidate = flatten or self.halted or breaker or (snap is not None and not equity_ok)
+        if unsafe and not liquidate:
+            self.blocked_reason = f"missing/stale marks for held positions: {', '.join(sorted(unsafe))}"
+            self._risk_event("stale_data", self.blocked_reason + "; no orders until all held marks are current")
+            return
+        self.blocked_reason = ""
+        if liquidate:
+            self._liquidate()
             return
 
         reduce_only = self.reduce_only or (halt is not None and halt["kind"] == "margin_call")
@@ -551,7 +627,7 @@ class ExecutionAgent(Strategy):
                 self._risk_event(
                     "order_capped", f"{ticker}: new exposure capped at {self.config.max_order_value:,.0f} USD"
                 )
-            if sent >= self.config.max_orders_per_day:
+            if opening > 0 and sent >= self.config.max_orders_per_day:
                 self._risk_event("daily_cap", f"max {self.config.max_orders_per_day} orders/day reached; rest deferred")
                 break
             if opening > 0 and (opened + opening * price) / snap.equity > self.config.max_daily_turnover:
@@ -565,6 +641,84 @@ class ExecutionAgent(Strategy):
                 sent += 1
                 opened += opening * price
 
+    def _consume_adopt(self) -> bool:
+        """Apply an operator's `lab recover --adopt-broker` request (the broker's book is the truth). It runs
+        before the journal is settled, so a disposed unknown order cannot re-halt the system."""
+        if self.config.adopt_path and Path(self.config.adopt_path).exists():
+            self._adopt_broker_positions()
+            Path(self.config.adopt_path).unlink()
+            return True
+        return False
+
+    def _liquidate(self):
+        """Exit every held position by quantity: no equity, price, cap or band can block an exit."""
+        for ticker, iid in self.config.instruments.items():
+            current = self.held.get(ticker, 0.0)
+            if not current:
+                continue
+            if self.cache.orders_open_count(instrument_id=iid) > 0 or any(
+                p["ticker"] == ticker for p in self.pending.values()
+            ):
+                # An exit (or an earlier order) is already working: a second one could reverse the position.
+                continue
+            self._submit(iid, ticker, -current)
+
+    def _broker_cash(self) -> float:
+        """Cash the broker reports. Live: the account's reported balance. Backtest: the simulated margin
+        account's cash identity (account_cash)."""
+        if not self.config.live:
+            return self.account_cash()
+        acct = self.cache.account_for_venue(self.config.venue)
+        bal = acct.balance_total() if acct is not None else None
+        return float(bal.as_double()) if bal is not None else float("nan")
+
+    def _check_funding(self, snap) -> bool:
+        """The broker account must be able to carry the lab's book (G007-F1). Returns False to stop trading.
+
+        allocation (default): the lab trades `capital` of a possibly larger paper account, so cash need not
+            match; the broker's net liquidation value must cover the lab's equity.
+        dedicated: the lab owns the account. Small unexplained cash changes (dividends, interest) are booked
+            into the ledger with an audit event; anything larger is a hard halt.
+        """
+        c = self.config
+        cash = self._broker_cash()
+        if not math.isfinite(cash):
+            self._hard_halt("cash_mismatch", "the broker reported no usable cash balance")
+            return False
+        marks = {t: self.prices.get(t, 0.0) for t in c.instruments}
+        broker_nlv = cash + sum(self._broker_position(t) * marks[t] for t in c.instruments)
+        tol = c.cash_tolerance + 0.001 * abs(snap.equity)
+        if c.dedicated_account:
+            unexplained = cash - self.cash
+            if abs(unexplained) <= c.cash_tolerance:  # the lab owns the cash: anything beyond cents is explained
+                if not self.synced_cash:
+                    self.synced_cash = True
+                    self._save()
+                return True
+            if abs(unexplained) <= c.max_external_cash * abs(snap.equity) and self.synced_cash:
+                self.cash += unexplained
+                self.external_cash += unexplained
+                self._save()
+                self._risk_event(
+                    "external_cash",
+                    f"broker cash moved {unexplained:+,.2f} USD beyond the lab's trades (dividend, interest, fee or "
+                    "transfer); booked into the ledger",
+                )
+                return True
+            self._hard_halt(
+                "cash_mismatch",
+                f"dedicated account: broker cash {cash:,.2f} vs ledger {self.cash:,.2f} ({unexplained:+,.2f})",
+            )
+            return False
+        if broker_nlv < snap.equity - tol:
+            self._hard_halt(
+                "cash_mismatch",
+                f"the account cannot fund the lab's book: broker net liquidation {broker_nlv:,.2f} USD < "
+                f"ledger equity {snap.equity:,.2f} USD",
+            )
+            return False
+        return True
+
     def _submit(self, iid, ticker: str, diff: float) -> bool:
         if self.config.live and not self._paper_guard():
             return False
@@ -575,7 +729,12 @@ class ExecutionAgent(Strategy):
         side = OrderSide.BUY if diff > 0 else OrderSide.SELL
         tif = TimeInForce.AT_THE_OPEN if self.config.live else TimeInForce.GTC
         order = self.order_factory.market(iid, side, inst.make_qty(abs(diff)), time_in_force=tif)
-        self.pending[str(order.client_order_id)] = {
+        coid = str(order.client_order_id)
+        if coid in self.pending:
+            # Never reuse an identifier the broker may already know: it would be refused, or worse, matched.
+            self._risk_event("blocked", f"{ticker}: client order ID {coid} already journaled; order not sent")
+            return False
+        self.pending[coid] = {
             "ticker": ticker,
             "side": "BUY" if diff > 0 else "SELL",
             "qty": abs(diff),

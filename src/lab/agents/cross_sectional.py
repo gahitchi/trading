@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from nautilus_trader.common import DataActor, DataActorConfig
 
 from lab.agents.messages import T_SIGNAL, SignalUpdate
-from lab.agents.schedule import next_at, now_ny, parse_clock
+from lab.agents.schedule import FUTURE_TOLERANCE, MAX_BAR_AGE_DAYS, market_now, next_at, now_ny, parse_clock
 from lab.signals.base import CrossSectionalSignal, Window, clean_weights
 from lab.universe import bar_type
 
@@ -36,6 +36,8 @@ class CrossSectionalAgentConfig(DataActorConfig):
         weekdays_only: bool = True,
         eval_delay_s: float = 120.0,
         session_close: str = "16:00",
+        market_offset_days: float = 0.0,
+        max_bar_age_days: float = MAX_BAR_AGE_DAYS,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. active_windows: ticker -> [(from_ns, until_ns)] or None."""
@@ -49,6 +51,8 @@ class CrossSectionalAgentConfig(DataActorConfig):
         self.weekdays_only = weekdays_only
         self.eval_delay_s = eval_delay_s  # seconds between requesting bars and ranking them
         self.session_close = session_close
+        self.market_offset_days = market_offset_days
+        self.max_bar_age_days = max_bar_age_days
 
 
 class CrossSectionalAgent(DataActor):
@@ -90,11 +94,13 @@ class CrossSectionalAgent(DataActor):
             self.clock.set_time_alert_ns(f"xs-{at:%Y%m%d}", int(at.timestamp() * 1e9), callback=self._evaluate)
 
     def on_historical_bars(self, bars):
-        now = now_ny(self.clock)
+        now = market_now(self.clock, self.config.market_offset_days)
         close = parse_clock(self.config.session_close)
         for b in sorted(bars, key=lambda b: b.ts_event):
-            day = datetime.fromtimestamp(b.ts_event / 1e9, NY).date()
-            if day == now.date() and now.time() < close:
+            t = datetime.fromtimestamp(b.ts_event / 1e9, NY)
+            if t > now + FUTURE_TOLERANCE:
+                continue  # stamped after now: never used
+            if t.date() == now.date() and now.time() < close:
                 continue  # today's bar is still forming
             self._add(b)
 
@@ -125,8 +131,10 @@ class CrossSectionalAgent(DataActor):
 
     def _evaluate(self, event):
         self.pending = False
-        ts = event.ts_event
-        today = {t for t, b in self.last_bar.items() if ts - b.ts_event < 4 * 86_400 * 1_000_000_000}
+        ts = event.ts_event + int(self.config.market_offset_days * 86_400e9)
+        # Only stocks whose latest bar is current: not older than the age limit, and never from the future.
+        limit, ahead = self.config.max_bar_age_days * 86_400e9, FUTURE_TOLERANCE.total_seconds() * 1e9
+        today = {t for t, b in self.last_bar.items() if -ahead <= ts - b.ts_event <= limit}
         eligible = {
             t: Window(*zip(*self.rows[t], strict=True))
             for t in today
@@ -165,7 +173,7 @@ class CrossSectionalAgent(DataActor):
 
     def _request_history(self, *_):
         days = int(self.signal.lookback * 1.6) + 15
-        start = now_ny(self.clock) - timedelta(days=days)
+        start = market_now(self.clock, self.config.market_offset_days) - timedelta(days=days)
         for iid in self.config.instruments.values():
             self.request_bars(bar_type(iid), start=start)
 

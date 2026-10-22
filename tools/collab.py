@@ -397,8 +397,17 @@ def cmd_check(a) -> int:
                     f"it may not add files written as {author!r} (unless merged unchanged from {author}'s branch)"
                 )
     if a.base and owner:
-        for sha in git("rev-list", "--no-merges", f"{a.base}..HEAD").split():
+        known = (*AI_AGENTS, "gabriel")
+        for sha in git("rev-list", f"{a.base}..HEAD").split():
             signed = re.findall(r"^Agent:\s*(\S+)\s*$", git("log", "-1", "--format=%B", sha), flags=re.M | re.I)
+            # Every new commit, merges included, names exactly one known author (G007-F14, ChatGPT: a commit
+            # without a trailer used to pass). Attribution metadata, not a cryptographic signature.
+            if len(signed) != 1 or signed[0].lower() not in known:
+                errors.append(
+                    f"commit {sha[:8]} must carry exactly one 'Agent: <{'|'.join(known)}>' trailer "
+                    f"(found {signed or 'none'})"
+                )
+                continue
             for agent in signed:
                 signer = agent.lower()
                 # A commit signed by the other agent is legitimate here only if it already lives on a

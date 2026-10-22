@@ -8,8 +8,16 @@ from zoneinfo import ZoneInfo
 
 from nautilus_trader.common import DataActor, DataActorConfig
 
-from lab.agents.messages import T_SIGNAL, SignalUpdate
-from lab.agents.schedule import next_at, now_ny, parse_clock
+from lab.agents.messages import T_RISK, T_SIGNAL, RiskEvent, SignalUpdate
+from lab.agents.schedule import (
+    FUTURE_TOLERANCE,
+    MAX_BAR_AGE_DAYS,
+    bar_freshness,
+    market_now,
+    next_at,
+    now_ny,
+    parse_clock,
+)
 from lab.signals.base import Signal, Window, clamp_target
 from lab.universe import bar_type
 
@@ -37,6 +45,8 @@ class SignalAgentConfig(DataActorConfig):
         active_windows: list | None = None,
         session_close: str = "16:00",
         weekdays_only: bool = True,
+        market_offset_days: float = 0.0,
+        max_bar_age_days: float = MAX_BAR_AGE_DAYS,
         **_kwargs,
     ):
         """signal_time / session_close: New York clock times, HH:MM or HH:MM:SS (see agents/schedule.py)."""
@@ -50,6 +60,8 @@ class SignalAgentConfig(DataActorConfig):
         self.signal_time = signal_time
         self.session_close = session_close
         self.weekdays_only = weekdays_only
+        self.market_offset_days = market_offset_days  # harness only (agents/schedule.market_now)
+        self.max_bar_age_days = max_bar_age_days
         # [(from_ns, until_ns or None), ...]: when this stock may be held. None = always.
         self.active_windows = active_windows
 
@@ -83,18 +95,27 @@ class SignalAgent(DataActor):
             self._process(bar, publish=True)
 
     def on_historical_bars(self, bars):
-        now = now_ny(self.clock)
+        now = market_now(self.clock, self.config.market_offset_days)
         close = parse_clock(self.config.session_close)
-        fresh = []
+        fresh, future = [], 0
         for b in sorted(bars, key=lambda b: b.ts_event):
             if b.ts_event <= self.last_ts:
                 continue
-            day = datetime.fromtimestamp(b.ts_event / 1e9, NY).date()
-            if day == now.date() and now.time() < close:
+            t = datetime.fromtimestamp(b.ts_event / 1e9, NY)
+            if t > now + FUTURE_TOLERANCE:
+                future += 1  # never act on (or even learn from) a bar stamped after now
+                continue
+            if t.date() == now.date() and now.time() < close:
                 continue  # today's bar is still forming
             fresh.append(b)
+        if future:
+            self.errors += 1
+            self._event("future_bar", f"{self.config.ticker}: {future} bar(s) dated after now ignored")
+        stale = bar_freshness(fresh[-1].ts_event, now, self.config.max_bar_age_days) if fresh else None
+        if stale:
+            self._event("stale_data", f"{self.config.ticker}: {stale}; history kept, no target published")
         for i, b in enumerate(fresh):
-            self._process(b, publish=(i == len(fresh) - 1))
+            self._process(b, publish=(i == len(fresh) - 1 and stale is None))
 
     # ------------------------------------------------------------------ core
 
@@ -148,8 +169,12 @@ class SignalAgent(DataActor):
 
     def _request_history(self, *_):
         days = int(self.signal.lookback * 1.6) + 15  # calendar days covering `lookback` sessions
-        start = now_ny(self.clock) - timedelta(days=days)
+        start = market_now(self.clock, self.config.market_offset_days) - timedelta(days=days)
         self.request_bars(self.bar_type, start=start)
+
+    def _event(self, kind: str, detail: str):
+        self.log.warning(detail)
+        self.publish_message(T_RISK, RiskEvent(self.clock.timestamp_ns(), kind, detail))
 
     def _schedule_daily_request(self):
         nxt = next_at(now_ny(self.clock), self.config.signal_time, weekdays_only=self.config.weekdays_only)

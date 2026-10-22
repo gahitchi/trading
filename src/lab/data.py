@@ -42,8 +42,13 @@ class DataError(Exception):
 # --------------------------------------------------------------------------- validation
 
 
-def validate(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
-    """Normalize and check a daily OHLCV frame. Returns a clean copy or raises DataError."""
+def validate(df: pd.DataFrame, ticker: str, *, drop_incomplete: bool = False) -> pd.DataFrame:
+    """Normalize and check a daily OHLCV frame. Returns a clean copy or raises DataError.
+
+    Non-finite prices or volumes are always an error. A bar missing an open, high, low or close is an
+    error too, unless drop_incomplete (vendor imports only, see save()): then it is dropped and its date
+    recorded in out.attrs["dropped_incomplete"], which save() writes to the manifest, so the gap is never
+    silent (G007-F10). Missing sessions stay missing; no bar is ever invented."""
     if df is None or len(df) == 0:
         raise DataError(f"{ticker}: no rows")
     out = df.copy()
@@ -64,8 +69,16 @@ def validate(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
         raise DataError(f"{ticker}: duplicate dates, e.g. {[str(d.date()) for d in dups]}")
 
     out = out.apply(pd.to_numeric, errors="coerce")
+    ohlc = ["open", "high", "low", "close"]
+    infinite = np.isinf(out[[*ohlc, "volume"]].to_numpy(dtype=float)).any(axis=1)
+    if infinite.any():
+        raise DataError(f"{ticker}: non-finite value on {out.index[infinite][0].date()}")
     out["volume"] = out["volume"].fillna(0.0)
-    out = out.dropna(subset=["open", "high", "low", "close"])
+    incomplete = out[ohlc].isna().any(axis=1)
+    dropped = [str(d.date()) for d in out.index[incomplete]]
+    if dropped and not drop_incomplete:
+        raise DataError(f"{ticker}: {len(dropped)} incomplete bar(s) (missing open/high/low/close), e.g. {dropped[:5]}")
+    out = out[~incomplete]
     if len(out) == 0:
         raise DataError(f"{ticker}: no complete OHLC rows")
     prices = out[["open", "high", "low", "close"]]
@@ -85,6 +98,7 @@ def validate(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
         raise DataError(f"{ticker}: high/low inconsistent with open/close on {d.date()} ({worst:.2%})")
     out["high"] = np.maximum(out["high"], body_hi)
     out["low"] = np.minimum(out["low"], body_lo)
+    out.attrs["dropped_incomplete"] = dropped
     return out
 
 
@@ -117,7 +131,8 @@ def save(
                         delisted (so a universe built from it is not limited to survivors)
     """
     ticker = ticker.upper()
-    clean = validate(df, ticker)
+    clean = validate(df, ticker, drop_incomplete=True)
+    dropped = clean.attrs.get("dropped_incomplete", [])
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     clean.to_parquet(cfg.data_dir / f"{ticker}.parquet")
     entry = {
@@ -129,6 +144,7 @@ def save(
         "first": str(clean.index[0].date()),
         "last": str(clean.index[-1].date()),
         "rows": len(clean),
+        "dropped_incomplete": dropped,  # vendor bars missing a price, removed at import (never silently)
     }
     m = manifest(cfg)
     m[ticker] = entry
@@ -157,6 +173,7 @@ def quality(cfg: LabConfig, tickers) -> dict:
     levered = cfg.risk.max_gross > 1 or cfg.portfolio.leverage > 1 or cfg.portfolio.max_leverage > 1
     return {
         "sources": sources,
+        "dropped_incomplete": sum(len(e.get("dropped_incomplete", [])) for e in entries),
         "adjusted": all(e.get("adjusted") for e in entries),
         "survivorship_free": all(e.get("survivorship_free") for e in entries) and pit,
         "point_in_time_universe": pit,
@@ -175,6 +192,8 @@ def quality_warning(q: dict) -> str | None:
             "survivorship bias: the universe only contains stocks that survived, so results are "
             "biased upward" + ("" if q["point_in_time_universe"] else " (no point-in-time membership file)")
         )
+    if q.get("dropped_incomplete"):
+        issues.append(f"{q['dropped_incomplete']} vendor bar(s) missing a price were removed at import (see manifest)")
     if not q["adjusted"]:
         issues.append("unadjusted prices: splits and dividends appear as price jumps")
         if q.get("shorting"):

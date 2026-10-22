@@ -69,6 +69,31 @@ def heartbeat_path(cfg: LabConfig) -> Path:
     return runtime_dir(cfg) / "heartbeat.json"
 
 
+class RuntimeLocked(Exception):
+    pass
+
+
+def acquire_runtime_lock(cfg: LabConfig):
+    """One paper node per runtime directory (G007-F15): two writers of one ledger would corrupt it. An OS lock,
+    released automatically when the process exits, even after a crash. Returns the open lock file; keep it."""
+    import fcntl
+    import os
+
+    rt = runtime_dir(cfg)
+    rt.mkdir(parents=True, exist_ok=True)
+    fh = open(rt / "LOCK", "a+")  # noqa: SIM115 - held for the life of the process
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as e:
+        fh.close()
+        raise RuntimeLocked(f"another paper node is running on {rt} (it holds {rt / 'LOCK'})") from e
+    fh.seek(0)
+    fh.truncate()
+    fh.write(f"{os.getpid()}\n")
+    fh.flush()
+    return fh
+
+
 def halt_path(cfg: LabConfig) -> Path:
     return runtime_dir(cfg) / "HALT"
 
@@ -91,6 +116,7 @@ class Schedule:
     session_close: str = "16:00"
     weekdays_only: bool = True
     xs_eval_delay_s: float = 120.0
+    market_offset_days: float = 0.0  # harness only: the replayed day's distance from today (schedule.market_now)
 
     @classmethod
     def from_config(cls, cfg: LabConfig) -> Schedule:
@@ -182,6 +208,7 @@ def build_node(
                         session_close=sc.session_close,
                         weekdays_only=sc.weekdays_only,
                         eval_delay_s=sc.xs_eval_delay_s,
+                        market_offset_days=sc.market_offset_days,
                     )
                 )
             )
@@ -204,6 +231,7 @@ def build_node(
                         signal_time=sc.signal_time,
                         session_close=sc.session_close,
                         weekdays_only=sc.weekdays_only,
+                        market_offset_days=sc.market_offset_days,
                     )
                 )
             )
@@ -247,6 +275,9 @@ def build_node(
         ExecutionAgent(
             ExecutionAgentConfig(
                 order_id_tag="EXEC",
+                # Random (UUID) client order IDs: unique however fast the node restarts (G004-F4). The default
+                # IDs embed the second they were made plus a counter that restarts at 1 with the process.
+                use_uuid_client_order_ids=True,
                 # Orders sent before a restart come back from reconciliation as "external"; claim
                 # them so their later fills reach this agent (it books only its own journaled orders).
                 external_order_instrument_ids=list(iids.values()),
@@ -257,8 +288,12 @@ def build_node(
                 cash_buffer=cfg.costs.cash_buffer,
                 capital=p.capital,
                 margin=cfg.margin,
+                dedicated_account=p.dedicated_account,
+                cash_tolerance=p.cash_tolerance,
+                max_external_cash=p.max_external_cash,
                 rebalance_time=sc.rebalance_time,
                 weekdays_only=sc.weekdays_only,
+                market_offset_days=sc.market_offset_days,
                 max_order_value=p.max_order_value,
                 max_orders_per_day=p.max_orders_per_day,
                 max_daily_turnover=p.max_daily_turnover,

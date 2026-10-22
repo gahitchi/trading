@@ -20,8 +20,13 @@ def _period(cfg: LabConfig, a) -> Period:
     if a.start or a.end:
         start = date.fromisoformat(a.start) if a.start else cfg.period(a.period).start
         end = date.fromisoformat(a.end) if a.end else None
-        return Period("custom", start, end)
-    return cfg.period(a.period)
+        period = Period("custom", start, end)
+    else:
+        period = cfg.period(a.period)
+    if experiments.overlaps_holdout(cfg, period.start, period.end):
+        # Judged by the dates, not the name (G007-F7): explicit dates cannot route around the guard.
+        raise SystemExit("the holdout is guarded: these dates overlap it; use `lab holdout <signal>`")
+    return period
 
 
 def _params(sets: list[str]) -> dict[str, dict]:
@@ -163,10 +168,24 @@ def _specs(cfg, names, sets, require_tradable=False):
 
 def _with_target_vol(cfg, a):
     import dataclasses
+    import math
 
-    if getattr(a, "target_vol", None) is None:
+    from lab.risk_profiles import PROFILES
+
+    tv = getattr(a, "target_vol", None)
+    if tv is None:
         return cfg
-    return dataclasses.replace(cfg, portfolio=dataclasses.replace(cfg.portfolio, target_vol=a.target_vol))
+    if not math.isfinite(tv) or tv < 0:
+        raise SystemExit("--target-vol must be a finite number >= 0")
+    # A selected profile's volatility budget is a ceiling, on every route (G007-F9, found by ChatGPT in its
+    # own profile work): an override may tighten it, never raise it.
+    cap = PROFILES[cfg.risk.profile].target_vol if cfg.risk.profile in PROFILES else None
+    if cap is not None and (tv == 0 or tv > cap):
+        raise SystemExit(
+            f"--target-vol {tv:g} exceeds the {cfg.risk.profile} profile's volatility budget {cap:g} "
+            "(0 would switch it off); choose another profile or a value <= the budget"
+        )
+    return dataclasses.replace(cfg, portfolio=dataclasses.replace(cfg.portfolio, target_vol=tv))
 
 
 def cmd_backtest(cfg, a):
@@ -279,7 +298,7 @@ def cmd_holdout(cfg, a):
         experiments.check_holdout_allowed(cfg, spec, a.again or "")
     except experiments.HoldoutUsed as e:
         raise SystemExit(str(e)) from e
-    comp, results = experiments.compare(cfg, [spec], tickers, cfg.period("holdout"))
+    comp, results = experiments.compare(cfg, [spec], tickers, cfg.period("holdout"), holdout_ok=True)
     experiments.record_holdout(cfg, spec, comp, a.again or "")
     _print_table(comp)
     out = experiments.save_run(cfg, f"holdout-{spec.name}", comp, results)
@@ -389,15 +408,21 @@ def cmd_research_show(cfg, a):
 
 
 def cmd_research_promote(cfg, a):
+    from lab.research.approval import ApprovalError, write_approval
     from lab.research.orchestrator import Hypothesis
 
     h = Hypothesis(cfg.research_dir, a.id)
     if h.status != "candidate":
         raise SystemExit(f"{a.id} is {h.status!r}; only candidates (passed train AND test) can be promoted")
-    print((h.dir / "signal.py").read_text())
+    source = (h.dir / "signal.py").read_bytes()  # what is shown is exactly what is approved and hashed
+    print(source.decode("utf-8"))
     if not a.yes and input("Read the code above. Promote it to paper trading? [y/N] ").strip().lower() != "y":
         raise SystemExit("not promoted")
-    h.set_status("promoted", "human approval")
+    try:
+        rec = write_approval(h.dir, source, {}, cfg.snapshot())
+    except ApprovalError as e:
+        raise SystemExit(str(e)) from e
+    h.set_status("promoted", f"human approval; source sha256 {rec['source_sha256'][:16]}")
     print(f"{a.id} promoted; it can now be used with: lab paper --signals {a.id}")
 
 
@@ -408,8 +433,11 @@ def cmd_risk_profile(cfg, a):
     """Read-only audit of the effective profile already wired into paper/backtest."""
     from dataclasses import asdict
 
+    from lab.risk_profiles import profile_bindings
+
     report = {
         "profile": cfg.risk.profile,
+        "bound_by_operator_limits": profile_bindings(cfg),
         "status": "ACTIVE_CONFIGURATION_PAPER_ONLY",
         "risk": asdict(cfg.risk),
         "portfolio": asdict(cfg.portfolio),
@@ -425,6 +453,8 @@ def cmd_risk_profile(cfg, a):
                 print(f"  risk.{k}: {v}")
         for k, v in report["portfolio"].items():
             print(f"  portfolio.{k}: {v}")
+        for note in report["bound_by_operator_limits"]:
+            print(f"  NOTE {note}")
         print("borrow locate and broker permissions require independent verification")
     return 0
 
@@ -432,9 +462,12 @@ def cmd_risk_profile(cfg, a):
 # ----------------------------------------------------------------------------- paper
 
 
+_HELD_LOCKS: list = []  # runtime locks: closing (or garbage-collecting) one would release it
+
+
 def cmd_paper(cfg, a):
     from lab.notify import Notifier
-    from lab.paper import build_node, build_smoke_node
+    from lab.paper import RuntimeLocked, acquire_runtime_lock, build_node, build_smoke_node
     from lab.safety import SafetyError
 
     tickers = [t.upper() for t in (a.tickers or cfg.universe)]
@@ -442,12 +475,15 @@ def cmd_paper(cfg, a):
         if a.smoke:
             node, report = build_smoke_node(cfg, tickers, test_order=a.test_order)
         else:
-            specs = _specs(cfg, a.signals, a.set)
-            for s in specs:
-                if s.path is not None:
-                    resolve(s.name, cfg.research_dir, s.params, require_tradable=True)
+            # Research signals trade only as the approved artifact: the verified spec carries the approved
+            # source digest, and the node starts from it (G007-F5).
+            specs = [
+                resolve(s.name, cfg.research_dir, s.params, require_tradable=True) if s.path is not None else s
+                for s in _specs(cfg, a.signals, a.set)
+            ]
+            _HELD_LOCKS.append(acquire_runtime_lock(cfg))  # referenced, so held until this process exits
             node = build_node(cfg, specs, tickers, adopt_broker=a.adopt_broker)
-    except (SafetyError, ValueError, SignalNotFound) as e:
+    except (SafetyError, ValueError, SignalNotFound, RuntimeLocked) as e:
         raise SystemExit(str(e)) from e
     what = "smoke test" if a.smoke else f"{len(a.signals)} signal(s) x {len(tickers)} stocks"
     print(f"paper node ready: {what}, account {cfg.paper.account_id} via {cfg.paper.host}:{cfg.paper.port}")
@@ -580,18 +616,46 @@ def _heartbeat_age(cfg):
     if not p.exists():
         return None, None
     hb = json.loads(p.read_text())
-    age = (datetime.now(UTC) - datetime.fromisoformat(hb["at"])).total_seconds()
+    if not isinstance(hb, dict):
+        raise ValueError("heartbeat is not a JSON object")
+    at = datetime.fromisoformat(hb["at"])
+    if at.tzinfo is None:
+        raise ValueError("heartbeat time has no time zone")
+    age = (datetime.now(UTC) - at).total_seconds()
     return age, hb
 
 
 def cmd_health(cfg, a):
-    age, hb = _heartbeat_age(cfg)
+    """Exit 0: alive (and, with --ready, able to trade). 1: not alive. 2: alive but not ready (--ready).
+
+    Alive: a well-formed heartbeat, recent, not from the future, from a node that has not stopped (G007-F12:
+    a fresh heartbeat written at a clean stop used to count as healthy). A halted node is alive by design:
+    restarting it would not help, so Docker's health check uses liveness only."""
+    try:
+        age, hb = _heartbeat_age(cfg)
+    except (ValueError, KeyError, TypeError) as e:
+        print(f"unhealthy: unreadable heartbeat ({e})")
+        return 1
     if age is None:
         print("unhealthy: no heartbeat yet")
         return 1
-    ok = age <= a.max_age
-    print(f"{'healthy' if ok else 'unhealthy'}: last heartbeat {age:.0f}s ago; {json.dumps(hb)}")
-    return 0 if ok else 1
+    problems = []
+    if age < -60:
+        problems.append(f"heartbeat is {-age:.0f}s in the future")
+    elif age > a.max_age:
+        problems.append(f"last heartbeat {age:.0f}s ago")
+    if hb.get("running") is not True:
+        problems.append("the node reported a stop")
+    if problems:
+        print("unhealthy: " + "; ".join(problems) + f"; {json.dumps(hb)}")
+        return 1
+    if getattr(a, "ready", False):
+        blockers = [f"{k}={hb[k]}" for k in ("hard_halt", "kill_switch", "blocked") if hb.get(k)]
+        if blockers:
+            print("alive, not ready: " + ", ".join(blockers))
+            return 2
+    print(f"healthy: last heartbeat {age:.0f}s ago; {json.dumps(hb)}")
+    return 0
 
 
 def cmd_doctor(cfg, a):
@@ -643,11 +707,17 @@ def cmd_doctor(cfg, a):
         "warn" if kill else "ok",
         f"SET ({kill['mode']}): {kill.get('reason', '')}" if kill else "not set",
     )
-    age, _ = _heartbeat_age(cfg)
+    try:
+        age, hb = _heartbeat_age(cfg)
+    except (ValueError, KeyError, TypeError) as e:
+        age, hb = None, {"error": str(e)}
+    running = bool(hb and hb.get("running"))
     check(
         "agents heartbeat",
-        "ok" if age is not None and age < 180 else "warn",
-        "no heartbeat (not running)" if age is None else f"last {age:.0f}s ago",
+        "ok" if age is not None and 0 <= age < 180 and running else "warn",
+        "no heartbeat (not running)"
+        if age is None
+        else f"last {age:.0f}s ago{'' if running else ', node reported a stop'}",
     )
     rs = cfg.research
     if rs.provider == "claude_code":
@@ -829,6 +899,7 @@ def build_parser() -> argparse.ArgumentParser:
     rc.set_defaults(fn=cmd_recover)
     hl = sub.add_parser("health", help="exit 0 if the agents' heartbeat is fresh (for Docker)")
     hl.add_argument("--max-age", type=int, default=180)
+    hl.add_argument("--ready", action="store_true", help="also require no hard halt, kill switch or block (exit 2)")
     hl.set_defaults(fn=cmd_health)
     sub.add_parser("doctor", help="pre-flight check of the whole deployment").set_defaults(fn=cmd_doctor)
     sub.add_parser("notify-test", help="send a test alert").set_defaults(fn=cmd_notify_test)
@@ -851,9 +922,14 @@ def main(argv=None) -> int:
         for name in available_research(cfg.research_dir):
             print(f"{name:<16} research")
         return 0
+    if a.cmd in ("paper", "backtest", "null-test", "pbo", "walk-forward", "holdout"):
+        from lab.risk_profiles import profile_bindings
+
+        for note in profile_bindings(cfg):
+            print(f"note: {note}", file=sys.stderr)
     try:
         return a.fn(cfg, a) or 0
-    except (data.DataError, ConfigError, BorrowUnavailable) as e:
+    except (data.DataError, ConfigError, BorrowUnavailable, experiments.HoldoutUsed) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

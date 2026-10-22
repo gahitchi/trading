@@ -27,7 +27,9 @@ HARD_KINDS = {
     "circuit_breaker": "equity fell below the drawdown limit from its peak",
     "paper_guard": "the broker reported an account other than the configured paper account",
     "reconciliation_mismatch": "the ledger and the broker disagree and fill recovery could not explain it",
-    "margin_call": "margin stayed below maintenance after deleveraging",
+    "margin_call": "equity fell below the maintenance requirement (or to zero): positions may only shrink",
+    "cash_mismatch": "the broker account's cash cannot support the lab's ledger",
+    "invalid_control_file": "a control file could not be read as a halt record; trading stays stopped",
 }
 
 
@@ -36,16 +38,33 @@ def _now() -> str:
 
 
 def read_halt(path: str | Path) -> dict | None:
+    """The active hard halt, or None. Anything present but not a well-formed halt record (bad JSON, a list,
+    a number, an unknown kind, unreadable bytes) is itself a hard halt: fail closed, never crash (G007-F11)."""
     p = Path(path)
-    if not p.exists():
-        return None
     try:
-        state = json.loads(p.read_text() or "{}")
-    except json.JSONDecodeError:
-        state = {}
-    if state.get("kind") not in HARD_KINDS:
-        # An unreadable or unknown halt file still halts: fail closed.
-        state = {"kind": "reconciliation_mismatch", "reason": f"unreadable halt file {p}", "at": _now(), **state}
+        if not p.exists():
+            return None
+        raw = p.read_text()
+    except OSError as e:
+        return {"kind": "invalid_control_file", "reason": f"cannot read {p}: {e}", "at": _now(), "history": []}
+    try:
+        state = json.loads(raw or "{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        state = None
+    if (
+        not isinstance(state, dict)
+        or state.get("kind") not in HARD_KINDS
+        or not isinstance(state.get("reason", ""), str)
+    ):
+        return {
+            "kind": "invalid_control_file",
+            "reason": f"{p} is not a valid halt record: {raw[:200]!r}",
+            "at": _now(),
+            "history": [],
+        }
+    state.setdefault("history", [])
+    if not isinstance(state["history"], list):
+        state["history"] = []
     return state
 
 

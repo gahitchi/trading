@@ -127,6 +127,7 @@ class LiveHarness:
             session_close=close.strftime("%H:%M:%S"),
             weekdays_only=False,
             xs_eval_delay_s=1.5,
+            market_offset_days=self.market.day_offset(),
         )
 
     def fill_open_offline(self) -> list[Fill]:

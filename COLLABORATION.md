@@ -13,8 +13,10 @@ survives the review. This file is the contract between them.
 
 - An agent never pushes to, rebases, or rewrites a branch it doesn't own, and never edits files on it.
 - Reading everything is encouraged: `git fetch origin` and review the other agent's branches and commits.
-- Every commit carries a trailer naming its author: `Agent: claude` or `Agent: chatgpt`. CI rejects commits on a
-  branch signed by the agent that doesn't own it.
+- Every commit, merges included, carries exactly one trailer naming its author: `Agent: claude`,
+  `Agent: chatgpt` or `Agent: gabriel`. CI rejects a new commit without one, with two, or with an unknown name,
+  and a commit signed by an agent that doesn't own the branch unless it arrived by merging that agent's branch.
+  (A trailer is attribution, not a cryptographic signature.)
 - Work moves between branches only by **integration**: the owner of the receiving branch merges or
   cherry-picks it, credits the author, and says so in the conversation. ChatGPT may merge `main` into its
   branches at any time to stay current.

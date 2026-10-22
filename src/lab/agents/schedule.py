@@ -39,3 +39,26 @@ def next_at(after: datetime, at: str | time, *, weekdays_only: bool = True) -> d
 
 def now_ny(clock) -> datetime:
     return datetime.fromtimestamp(clock.timestamp_ns() / 1e9, NY)
+
+
+# A live daily bar older than this many calendar days is not actionable: a weekend plus a holiday Monday is 4.
+MAX_BAR_AGE_DAYS = 4.0
+FUTURE_TOLERANCE = timedelta(minutes=1)
+
+
+def market_now(clock, offset_days: float = 0.0) -> datetime:
+    """ "Now" for judging whether market data is current. Production: the wall clock. The live-node harness
+    replays history on shifted dates and passes the shift, so freshness is checked against the replayed day
+    instead of trusting future-dated bars (G007-F2). Timers always use the real clock."""
+    return now_ny(clock) + timedelta(days=offset_days)
+
+
+def bar_freshness(ts_ns: int, now: datetime, max_age_days: float = MAX_BAR_AGE_DAYS) -> str | None:
+    """None if a bar stamped ts_ns is usable as the latest data at `now`; else why not."""
+    t = datetime.fromtimestamp(ts_ns / 1e9, NY)
+    if t > now + FUTURE_TOLERANCE:
+        return f"bar dated {t:%Y-%m-%d %H:%M} is in the future (now {now:%Y-%m-%d %H:%M})"
+    age = (now - t).total_seconds() / 86_400
+    if age > max_age_days:
+        return f"latest bar {t:%Y-%m-%d} is {age:.1f} days old (limit {max_age_days:g})"
+    return None

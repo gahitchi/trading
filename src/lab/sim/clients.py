@@ -65,6 +65,13 @@ class ReplayMarket:
         self.offset = today - pd.Timestamp(ref[day]).normalize()
         self.close_tod = pd.Timedelta(hours=16)  # set per session by the harness
 
+    def day_offset(self) -> float:
+        """Days between today and the date the current replay day is stamped with: the agents' market clock
+        is moved by this much, so they judge freshness against the replayed session, not the wall clock."""
+        ref = max(self.frames.values(), key=len).index
+        today = pd.Timestamp.now(tz=NY).normalize().tz_localize(None)
+        return float(((pd.Timestamp(ref[self.day]).normalize() + self.offset) - today).days)
+
     def stamp(self, d) -> int:
         return int((pd.Timestamp(d).normalize() + self.offset + self.close_tod).tz_localize(NY).value)
 
