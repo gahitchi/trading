@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy to config.private.json (gitignored) and replace both secrets. Generate them with: openssl rand -hex 32",
+  "api_server": {
+    "enabled": true,
+    "listen_ip_address": "127.0.0.1",
+    "listen_port": 8080,
+    "verbosity": "error",
+    "enable_openapi": false,
+    "jwt_secret_key": "REPLACE_WITH_openssl_rand_hex_32",
+    "ws_token": "REPLACE_WITH_openssl_rand_hex_32",
+    "CORS_origins": [],
+    "username": "lab",
+    "password": "REPLACE_WITH_A_REAL_PASSWORD"
+  }
+}

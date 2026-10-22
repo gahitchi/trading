@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+config.private.json
+user_data/data/
+user_data/backtest_results/
+user_data/hyperopt_results/
+user_data/logs/
+user_data/plot/
+user_data/null_test_results.csv
+user_data/strategies/*.json
+*.sqlite
+*.sqlite-*
