@@ -177,7 +177,5 @@ class SessionSnapshotBuilder:
         if self.state is not SnapshotState.COLLECTING or now <= self.deadline_utc:
             return False
         self.state = SnapshotState.MISSED
-        self.incident = (
-            f"cutoff expired: missing bars {self.missing_bars}; missing signals {self.missing_sleeves}"
-        )
+        self.incident = f"cutoff expired: missing bars {self.missing_bars}; missing signals {self.missing_sleeves}"
         return True
