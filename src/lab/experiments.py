@@ -3,8 +3,8 @@ Scientific procedures built on the backtester:
 
 - compare():    each signal as an equal-weight portfolio vs the buy-and-hold control
 - null_test():  the noise floor. Repeats the comparison on block-bootstrapped copies
-                of the real data (real return distribution, no long-range pattern)
-                and reports how often pure noise produced an edge at least as large
+                of the real data (real return distribution, no long-range pattern),
+                drawn jointly so the stocks keep moving together, and reports how often pure noise produced an edge at least as large
                 as the real one (a p-value)
 - holdout ledger: the holdout period may be used once per hypothesis; every use is
                 recorded, and repeats need an explicit, logged reason
@@ -315,15 +315,20 @@ def walk_forward(
 # ------------------------------------------------------------------------- noise floor
 
 
+NULL_MAX_FALLBACK = 0.25
+
+
 def _null_worker(args):
     cfg_path, spec, tickers, frames, period, seed = args
     from lab.config import load_config
 
     cfg = load_config(cfg_path)
-    boot = {t: data.block_bootstrap(frames[t], seed * 1000 + i) for i, t in enumerate(tickers)}
+    # One synchronized draw for the whole panel keeps the stocks' co-movement (ChatGPT, G002).
+    boot, diag = data.block_bootstrap_panel({t: frames[t] for t in tickers}, seed, return_diagnostics=True)
     cand = run_spec(cfg, spec, tickers, boot, period).metrics
     base = run_spec(cfg, BASELINE, tickers, boot, period).metrics
-    return cand.get("sharpe", 0) - base.get("sharpe", 0)
+    worst = max((v["fallback_fraction"] for v in diag["per_instrument"].values()), default=0.0)
+    return cand.get("sharpe", 0) - base.get("sharpe", 0), diag["fallback_fraction"], worst
 
 
 def null_test(
@@ -343,10 +348,20 @@ def null_test(
     jobs = [(str(cfg.root / "lab.toml"), spec, tickers, frames, period, s) for s in range(1, samples + 1)]
     workers = workers or max(1, min(samples, (os.cpu_count() or 2) - 1))
     if workers == 1:
-        edges = [_null_worker(j) for j in jobs]
+        measured = [_null_worker(j) for j in jobs]
     else:
         with ProcessPoolExecutor(workers) as pool:
-            edges = list(pool.map(_null_worker, jobs))
+            measured = list(pool.map(_null_worker, jobs))
+    edges = [m[0] for m in measured]
+    pooled = [m[1] for m in measured]
+    # Where a stock has no data at the shared donor dates it falls back to its own history, losing its
+    # co-movement for that block. Too much of that and the null no longer describes a synchronized market.
+    # The limit is provisional, not a calibrated type-I error rate (ChatGPT, G002).
+    if max(pooled) > NULL_MAX_FALLBACK:
+        raise data.DataError(
+            f"null test not qualified: {max(pooled):.1%} of blocks fell back to per-stock history "
+            f"(provisional limit {NULL_MAX_FALLBACK:.0%})"
+        )
     beat = sum(e >= observed_edge for e in edges)
     s = pd.Series(edges)
     return {
@@ -357,6 +372,11 @@ def null_test(
         "null_std": float(s.std(ddof=1)) if samples > 1 else 0.0,
         "null_p95": float(s.quantile(0.95)),
         "null_edges": [round(e, 4) for e in edges],
+        "fallback_fraction_mean": float(np.mean(pooled)),
+        "fallback_fraction_max": max(pooled),
+        # The pooled share can stay low while one late listing loses most of its co-movement.
+        "fallback_fraction_worst_stock": max(m[2] for m in measured),
+        "fallback_fraction_limit": NULL_MAX_FALLBACK,
     }
 
 

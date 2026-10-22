@@ -11,6 +11,11 @@ Also provides the two NULL MODELS used by the noise-floor test:
                        distribution (fat tails, short-term volatility clustering)
                        but destroys longer-range predictability. A strategy that
                        can't beat these samples has not shown an edge.
+  - block_bootstrap_panel(): the same for a whole universe, with one shared draw of
+                       market dates so the stocks keep their co-movement; a stock
+                       missing at a shared date falls back to its own history
+                       for that block, and the share of such blocks is reported
+                       (ChatGPT, G002).
 """
 
 from __future__ import annotations
@@ -318,3 +323,106 @@ def block_bootstrap(df: pd.DataFrame, seed: int, block: int = 20) -> pd.DataFram
     out_h = np.maximum(out_o, out_c) * up[pick]
     out_l = np.minimum(out_o, out_c) * dn[pick]
     return pd.DataFrame({"open": out_o, "high": out_h, "low": out_l, "close": out_c, "volume": v[pick]}, index=d.index)
+
+
+def block_bootstrap_panel(
+    frames: dict[str, pd.DataFrame], seed: int, block: int = 20, *, return_diagnostics: bool = False
+) -> dict[str, pd.DataFrame] | tuple[dict[str, pd.DataFrame], dict]:
+    """Sample a common market-date path without conditioning it on late listings.
+
+    An instrument uses the common donor only if all required source sessions exist.
+    Otherwise *that instrument alone* draws a valid interval from its own history.
+    Availability masks are exact: no invented prelisting/postdelisting bars and no
+    backfills. Diagnose where fallback sacrifices cross-asset dependence.
+    """
+    if not frames:
+        raise DataError("joint bootstrap requires at least one instrument")
+    if type(block) is not int or block < 1:
+        raise DataError("joint bootstrap block size must be a positive integer")
+    ordered = {t: validate(frames[t], t) for t in sorted(frames)}
+    calendar = pd.DatetimeIndex(sorted(set().union(*(set(df.index) for df in ordered.values()))))
+    n = len(calendar)
+    if n < 2:
+        raise DataError("joint bootstrap requires at least two market sessions")
+    masks = {t: calendar.isin(df.index) for t, df in ordered.items()}
+    rng = np.random.default_rng(seed)
+
+    # CRITICAL: sample this before inspecting ANY ticker mask. Otherwise one
+    # newly listed instrument narrows older instruments' return distribution.
+    global_pick = np.empty(n, dtype=np.int64)
+    for start in range(0, n, block):
+        width = min(block, n - start)
+        donor_start = int(rng.integers(0, n - width + 1))
+        global_pick[start : start + width] = np.arange(donor_start, donor_start + width)
+
+    out = {}
+    per_instrument = {}
+    fallback_total = participating_total = 0
+    for t, df in ordered.items():
+        mask = masks[t]
+        pick = global_pick.copy()
+        fallback_blocks = participating_blocks = 0
+        for start in range(0, n, block):
+            width = min(block, n - start)
+            offsets = np.flatnonzero(mask[start : start + width])
+            if not len(offsets):
+                continue
+            participating_blocks += 1
+            # Co-movement is preserved wherever the common donor exists.
+            if mask[pick[start + offsets]].all():
+                continue
+            # Require this asset's *own* available sessions, never the mask
+            # of another ticker. The destination interval itself is eligible.
+            eligible = np.ones(n - width + 1, dtype=bool)
+            for offset in offsets:
+                eligible &= mask[offset : offset + n - width + 1]
+            options = np.flatnonzero(eligible)
+            if not len(options):
+                raise DataError(f"{t}: no valid donor for interval {start}:{start + width}")
+            donor_start = int(options[rng.integers(len(options))])
+            pick[start + offsets] = donor_start + offsets
+            fallback_blocks += 1
+
+        donor_dates = calendar[pick[mask]]
+        donor_rows = df.index.get_indexer(donor_dates)
+        if (donor_rows < 0).any():
+            raise DataError(f"{t}: donor calendar lost a required instrument observation")
+        opn, high, low, close, volume = (df[k].to_numpy(dtype=float) for k in COLUMNS)
+        previous_close = np.concatenate([[opn[0]], close[:-1]])
+        gap, day_move = opn / previous_close, close / opn
+        excursion_up = high / np.maximum(opn, close)
+        excursion_down = low / np.minimum(opn, close)
+        rebuilt_open = np.empty(len(df))
+        rebuilt_close = np.empty(len(df))
+        last = close[0]
+        for i, j in enumerate(donor_rows):
+            rebuilt_open[i] = last * gap[j]
+            rebuilt_close[i] = rebuilt_open[i] * day_move[j]
+            last = rebuilt_close[i]
+        resampled = pd.DataFrame(
+            {
+                "open": rebuilt_open,
+                "high": np.maximum(rebuilt_open, rebuilt_close) * excursion_up[donor_rows],
+                "low": np.minimum(rebuilt_open, rebuilt_close) * excursion_down[donor_rows],
+                "close": rebuilt_close,
+                "volume": volume[donor_rows],
+            },
+            index=df.index,
+        )
+        out[t] = validate(resampled, t)
+        fallback_total += fallback_blocks
+        participating_total += participating_blocks
+        per_instrument[t] = {
+            "fallback_blocks": fallback_blocks,
+            "participating_blocks": participating_blocks,
+            "fallback_fraction": fallback_blocks / participating_blocks if participating_blocks else 0.0,
+        }
+
+    diagnostics = {
+        "method": "shared_calendar_with_per_instrument_fallback",
+        "fallback_blocks": fallback_total,
+        "participating_blocks": participating_total,
+        "fallback_fraction": fallback_total / participating_total if participating_total else 0.0,
+        "per_instrument": per_instrument,
+    }
+    return (out, diagnostics) if return_diagnostics else out

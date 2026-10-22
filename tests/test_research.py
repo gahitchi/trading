@@ -5,7 +5,7 @@ import textwrap
 
 import pytest
 
-from lab import experiments
+from lab import data, experiments
 from lab.cli import main as lab_main
 from lab.research.providers import ClaudeCodeProvider, LLMError, OllamaProvider, Provider
 from lab.research.sandbox import check_file, static_check
@@ -145,6 +145,24 @@ def test_null_test_reports_a_valid_p_value(goog_lab):
         goog_lab, SignalSpec("sma_trend"), ["GOOG"], goog_lab.period("train"), samples=4, workers=1
     )
     assert 1 / 5 <= nt["p_value"] <= 1 and len(nt["null_edges"]) == 4
+    assert nt["fallback_fraction_max"] == 0.0 and nt["fallback_fraction_limit"] == experiments.NULL_MAX_FALLBACK
+
+
+def test_null_test_refuses_when_too_much_comovement_is_lost(goog_lab, monkeypatch):
+    goog = data.load(goog_lab, "GOOG")
+    frames = {"GOOG": goog, "LATE": goog.iloc[200:700]}  # lists late, delists early: forces fallback blocks
+    monkeypatch.setattr(experiments, "NULL_MAX_FALLBACK", 0.01)
+    with pytest.raises(data.DataError, match="not qualified"):
+        experiments.null_test(
+            goog_lab,
+            SignalSpec("sma_trend"),
+            ["GOOG", "LATE"],
+            goog_lab.period("train"),
+            samples=2,
+            frames=frames,
+            workers=1,
+            observed_edge=0.0,
+        )
 
 
 def test_cli_end_to_end(goog_lab, capsys):
