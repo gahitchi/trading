@@ -11,6 +11,8 @@ stricter house rules, so the agents keep a cushion above them and deleverage fir
 
 from __future__ import annotations
 
+import math
+
 from lab.config import MarginSettings
 
 DAY = 1 / 365
@@ -50,14 +52,10 @@ def financing_cost(
     """
     if verified_borrow_fee is not None and (
         not isinstance(verified_borrow_fee, (int, float))
-        or not __import__("math").isfinite(verified_borrow_fee)
+        or not math.isfinite(verified_borrow_fee)
         or verified_borrow_fee < 0
     ):
         raise ValueError("verified_borrow_fee must be finite and nonnegative")
-    borrow = (
-        verified_borrow_fee
-        if verified_borrow_fee is not None
-        else short_value * m.borrow_apr * days * DAY
-    )
+    borrow = verified_borrow_fee if verified_borrow_fee is not None else short_value * m.borrow_apr * days * DAY
     debit = borrowed_cash(cash, short_value) * m.debit_apr * days * DAY
     return borrow, debit

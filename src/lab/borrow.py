@@ -101,9 +101,7 @@ class BorrowBook:
         quotes = []
         with Path(path).open(newline="") as f:
             reader = csv.DictReader(f)
-            if not reader.fieldnames or not {"ticker", "as_of", "available", "apr", "source"} <= set(
-                reader.fieldnames
-            ):
+            if not reader.fieldnames or not {"ticker", "as_of", "available", "apr", "source"} <= set(reader.fieldnames):
                 raise ValueError("borrow CSV must include ticker, as_of, available, apr, source")
             for row in reader:
                 flag = row["available"].strip().lower()
