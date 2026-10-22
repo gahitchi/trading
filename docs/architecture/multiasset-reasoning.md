@@ -30,7 +30,7 @@ The stress engine is an explicit factor-exposure graph:
 - Several factors can combine additively into one declared asset price shock. Equity/bond marks and FX bid/ask curves are repriced; bond shocks affect the clean price, while accrued interest remains separately declared.
 - A direct price shock and an active factor-derived shock for the same target are **contradictory evidence** and terminate evaluation. Unknown factors, duplicate scenario names, impossible bounded shocks and missing price feeds also fail closed.
 - Each scenario produces a complete bid-side portfolio mark, total P&L, cash/security-level P&L attribution, traceable factor contributions, largest losing component, and breaches of user-declared absolute/fractional **stress-test limits**.
-- Scenarios are ranked by worst modeled loss. Mathematical component attribution must add to the reported P&L exactly; unexplained residual is a fatal error.
+- Scenarios are ranked by worst modeled loss. Component attribution is checked against reported P&L to a strict Decimal computational-rounding tolerance of 1e-12 reporting-currency units; the residual is explicitly reported. Larger unexplained differences terminate evaluation.
 
 This is deterministic *counterfactual analysis*, not an autonomous investment recommender, a trained causal graph, a calibrated probability distribution or a validated risk forecast. A scenario limit non-breach is **not** a claim of portfolio safety; merely the declared hypothetical events were evaluated without crossing those declared limits.
 

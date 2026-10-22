@@ -116,3 +116,19 @@ def test_scenario_engine_imports_no_broker_tools():
     for module in (multiasset, multiasset_report, stress_reasoning):
         for forbidden in ("submit_order", "InteractiveBrokersClient", "BrokerClient"):
             assert forbidden not in vars(module)
+
+
+def test_fx_cross_currency_rounding_does_not_create_a_false_accounting_incident():
+    manifest = source()
+    manifest["reporting_currency"] = "EUR"
+    manifest["cash"] = {"EUR": "100", "USD": "110"}
+    manifest["holdings"] = [{"instrument_id": "SHARE.XNAS", "quantity": "2"}]
+    manifest["spot_previews"] = []
+    manifest["scenarios"] = [{"name": "usd_shift", "factors": {"usd_strength": "0.02"}}]
+    manifest["stress_policy"] = {"max_loss_fraction": "0.9"}
+    report = analyze_manifest(manifest)
+    scenario = report["stress_before"]["ranked_scenarios"][0]
+    assert abs(Decimal(scenario["rounding_residual"])) <= Decimal("1e-12")
+    assert abs(
+        Decimal(scenario["pnl"]) - sum((Decimal(x) for x in scenario["component_pnl"].values()), Decimal(0))
+    ) <= Decimal("1e-12")

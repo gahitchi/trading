@@ -26,6 +26,7 @@ from lab.multiasset import (
 MAX_SCENARIOS = 64
 MAX_FACTORS = 32
 MAX_EXPOSURES = 512
+ROUNDING_TOLERANCE = Decimal("1e-12")
 
 
 def _fraction(raw, name: str, *, lower: Decimal = Decimal("-0.9999"), upper: Decimal = Decimal("10")) -> Decimal:
@@ -142,7 +143,7 @@ def evaluate_stress(
         cash=cash, holdings=holdings, instruments=instruments, prices=prices, fx=fx,
         reporting_currency=reporting_currency, now=as_of, age=max_age,
     )
-    if sum(prev_components.values(), Decimal(0)) != before:
+    if abs(sum(prev_components.values(), Decimal(0)) - before) > ROUNDING_TOLERANCE:
         raise MultiAssetError("internal baseline component accounting mismatch")
     factor_map = _validate_factor_exposures(factor_exposures, instruments, fx_quotes)
     available = {x for group in factor_map.values() for x in group}
@@ -215,7 +216,8 @@ def evaluate_stress(
             key: after_components[key] - prev_components[key] for key in sorted(prev_components)
         }
         pnl = after - before
-        if sum(delta_by_component.values(), Decimal(0)) != pnl:
+        rounding_residual = pnl - sum(delta_by_component.values(), Decimal(0))
+        if abs(rounding_residual) > ROUNDING_TOLERANCE:
             raise MultiAssetError(f"scenario {name}: accounting attribution mismatch")
         loss = before - after
         frac = loss / before
@@ -228,6 +230,7 @@ def evaluate_stress(
             "name": name,
             "scenario_value": str(after),
             "pnl": str(pnl),
+            "rounding_residual": str(rounding_residual),
             "loss_fraction": str(frac),
             "breached_limits": breached,
             "component_pnl": {k: str(v) for k, v in delta_by_component.items()},
