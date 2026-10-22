@@ -144,6 +144,7 @@ def load(cfg: LabConfig, ticker: str) -> pd.DataFrame:
 def load_many(cfg: LabConfig, tickers) -> dict[str, pd.DataFrame]:
     return {t: load(cfg, t) for t in tickers}
 
+
 def load_many_unmodified(cfg: LabConfig, tickers) -> dict[str, pd.DataFrame]:
     """Return the stored Parquet rows unchanged for strict as-of diagnostics.
 
@@ -157,7 +158,6 @@ def load_many_unmodified(cfg: LabConfig, tickers) -> dict[str, pd.DataFrame]:
             raise DataError(f"no stored price history for {ticker}")
         result[ticker] = pd.read_parquet(p)
     return result
-
 
 
 def quality(cfg: LabConfig, tickers) -> dict:
