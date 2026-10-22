@@ -30,7 +30,10 @@ def summarize(equity: pd.Series, *, fills: list | None = None, gross: pd.Series 
     years = max((equity.index[-1] - equity.index[0]).days / 365.25, 1e-9)
     total = equity.iloc[-1] / equity.iloc[0] - 1
     vol = rets.std(ddof=1) * math.sqrt(TRADING_DAYS)
-    downside = rets[rets < 0].std(ddof=1) * math.sqrt(TRADING_DAYS) if (rets < 0).sum() > 1 else np.nan
+    # Downside deviation is the RMS of *all* returns below the zero target,
+    # divided by the number of all observations (including positive days).
+    # Std() over the subset of negative returns is not the Sortino denominator.
+    downside = math.sqrt(float(np.mean(np.minimum(rets.to_numpy(), 0.0) ** 2))) * math.sqrt(TRADING_DAYS)
     mean = rets.mean() * TRADING_DAYS
     mdd, mdd_days = max_drawdown(equity)
     cagr = (1 + total) ** (1 / years) - 1 if total > -1 else -1.0

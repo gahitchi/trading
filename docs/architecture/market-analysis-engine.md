@@ -42,6 +42,18 @@ Fixed 0.15 covariance shrinkage stabilizes noisy off-diagonal correlations but i
 
 Historical OHLCV rows cut at date T do **not** prove that an adjusted vendor value was known on date T. Revision-time and corporate-action-adjustment metadata must be captured at ingestion. The analysis ID attests only to the current byte-level input view, not legal ownership or historical knowledge of those prices.
 
+### Ingestion behavior (second integrity improvement)
+
+`data.validate` now rejects nonfinite/missing OHLCV values instead of silently
+dropping bars or replacing missing volume with zero. `lab analyze` reads the
+stored Parquet rows without additional cleaning, then applies strict as-of
+validation. **Existing datasets originally ingested with the older lossy
+validator must be re-imported from their upstream source**; that history
+cannot be reconstructed from already-modified Parquet. Provider correction
+history and sealed holdout access are still not guaranteed at the storage
+boundary. An in-memory post-cutoff filter is a leakage guard, not true
+holdout file isolation.
+
 ## Next work: evidence-first ML
 
 1. **Trusted data foundation:** point-in-time exchange instruments, final bars, timestamped provider revisions, calendar and corporate actions, metadata contracts and immutable staged datasets. Correct survivorship and delisting returns.

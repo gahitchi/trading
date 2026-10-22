@@ -59,10 +59,13 @@ def validate(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
         raise DataError(f"{ticker}: duplicate dates, e.g. {[str(d.date()) for d in dups]}")
 
     out = out.apply(pd.to_numeric, errors="coerce")
-    out["volume"] = out["volume"].fillna(0.0)
-    out = out.dropna(subset=["open", "high", "low", "close"])
-    if len(out) == 0:
-        raise DataError(f"{ticker}: no complete OHLC rows")
+    # Never convert unknown volume to zero or silently delete missing price
+    # sessions. Either operation changes the inference problem and may conceal
+    # market outages, delisting events or vendor errors.
+    valid_rows = np.isfinite(out.to_numpy(dtype=float)).all(axis=1)
+    if not valid_rows.all():
+        bad = out.index[np.flatnonzero(~valid_rows)[0]]
+        raise DataError(f"{ticker}: missing/nonfinite OHLCV on {bad.date()} (quarantine, do not impute)")
     prices = out[["open", "high", "low", "close"]]
     if (prices <= 0).any().any():
         bad = out.index[(prices <= 0).any(axis=1)][0]
@@ -140,6 +143,21 @@ def load(cfg: LabConfig, ticker: str) -> pd.DataFrame:
 
 def load_many(cfg: LabConfig, tickers) -> dict[str, pd.DataFrame]:
     return {t: load(cfg, t) for t in tickers}
+
+def load_many_unmodified(cfg: LabConfig, tickers) -> dict[str, pd.DataFrame]:
+    """Return the stored Parquet rows unchanged for strict as-of diagnostics.
+
+    The saved files were already normalized at ingestion. This is *not* vendor
+    raw-data recovery, source-finality verification or a holdout access boundary.
+    """
+    result = {}
+    for ticker in tickers:
+        p = cfg.data_dir / f"{ticker.upper()}.parquet"
+        if not p.exists():
+            raise DataError(f"no stored price history for {ticker}")
+        result[ticker] = pd.read_parquet(p)
+    return result
+
 
 
 def quality(cfg: LabConfig, tickers) -> dict:

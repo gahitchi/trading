@@ -43,7 +43,7 @@ def _setup(monkeypatch):
     )
     cfg = SimpleNamespace(period=lambda name: SimpleNamespace(start=date(2025, 1, 1)))
     monkeypatch.setattr(cli, "_tickers", lambda cfg, given: ["X"])
-    monkeypatch.setattr(cli.data, "load_many", lambda cfg, given: {"X": frame})
+    monkeypatch.setattr(cli.data, "load_many_unmodified", lambda cfg, given: {"X": frame})
     monkeypatch.setattr(cli.data, "manifest", lambda cfg: {"X": {"source": "offline-fixture"}})
     monkeypatch.setattr(cli.data, "quality", lambda cfg, tickers: {"valid": True})
     monkeypatch.setattr(cli.data, "quality_warning", lambda quality: None)

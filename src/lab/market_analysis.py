@@ -11,7 +11,7 @@ import hashlib
 import json
 import math
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, datetime
 
 import numpy as np
 import pandas as pd
@@ -50,7 +50,7 @@ class AnalysisSpec:
 
 
 def _panel(frames: dict[str, pd.DataFrame], as_of: date, spec: AnalysisSpec) -> dict[str, pd.DataFrame]:
-    if type(as_of) is not date:
+    if not isinstance(as_of, date) or isinstance(as_of, datetime):
         raise MarketAnalysisError("as_of must be an explicit exchange-session date")
     if not frames:
         raise MarketAnalysisError("analyze requires at least one instrument")

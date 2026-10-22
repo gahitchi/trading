@@ -167,7 +167,7 @@ def cmd_analyze(cfg, a):
     from lab.market_analysis import AnalysisSpec, MarketAnalysisError, analyze_market
 
     tickers = _tickers(cfg, a.tickers)
-    history = data.load_many(cfg, tickers)
+    history = data.load_many_unmodified(cfg, tickers)
     max_research_date = cfg.period("holdout").start - timedelta(days=1)
     if a.as_of:
         try:
@@ -195,10 +195,12 @@ def cmd_analyze(cfg, a):
     result["spec"] = asdict(spec)
     if a.output:
         output = Path(a.output)
-        if output.exists():
-            raise MarketAnalysisError(f"output exists; refusing to overwrite {output}")
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n")
+        try:
+            with output.open("x", encoding="utf-8") as stream:
+                stream.write(json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + "\n")
+        except FileExistsError as exc:
+            raise MarketAnalysisError(f"output exists; refusing to overwrite {output}") from exc
     if a.json:
         print(json.dumps(result, indent=2, sort_keys=True, allow_nan=False))
         return

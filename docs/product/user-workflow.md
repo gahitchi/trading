@@ -17,6 +17,7 @@ Top-level navigation (UI sections, not existing commands):
 | **Overview** | Know whether research/trading is running safely and what needs attention | system mode, research activity, broker connectivity, data session, incidents, pending decisions |
 | **Research** | Create, schedule, inspect and compare AI/human hypotheses | hypothesis rationale, experiments, failed attempts, data/code versions, compute budget |
 | **Data** | Validate and version historical and live session data | provenance, completeness, market calendar, adjusted/raw, point-in-time constituent coverage |
+| **Market Intelligence** | Compare market breadth, rolling risk, dependence and historical regimes | as-of date, source/data hashes, volatility, downside/tails, covariance, uncertainty |
 | **Strategies** | Review approved/rejected versions and evidence | sealed strategy hash, holdout access history, uncertainty, risk/cost sensitivity |
 | **Portfolio** | Simulate proposed allocations and preview risk | managed holdings, targets, cash reservations, estimated fees, proposed order plan, constraints |
 | **Paper Operations** | Observe current paper run and broker reconciliation | broker DU identity, orders/fills, confirmed balances, per-session decision, alerts |
@@ -72,6 +73,19 @@ Create project
 **System output:** `project_id`, exact immutable configuration hash, dataset version, **trial ledger** (including failed and abandoned ideas), progress, resource spend and report location. AI may propose/run tests in the isolated research plane but cannot approve its own strategy or request hidden holdout access.
 
 **User experience:** compare candidates on matched baselines and confidence intervals; filter by cost sensitivity, walk-forward stability and number of trials. Show negative evidence as prominently as positive evidence. Return clear `INCONCLUSIVE` if assumptions fail.
+
+### Market Intelligence workspace
+
+A historical diagnostic page uses the exact `lab analyze` report schema.
+Show as-of session and dataset quality before displaying numbers. Group analysis
+into market breadth, per-asset momentum/risk, historical tail loss, liquidity
+proxies and covariance/correlation matrices. Heatmaps are always accompanied
+by numerical values and explanations for null/undefined relationships.
+
+A separate future **Forecasts** view may display probability distributions
+and model calibration only after a versioned forecast model and independent
+validation exist. Never display descriptive labels as predictions, or allow
+`EXPLORATORY_ONLY` analysis to supply an order permit.
 
 ### B. Strategy review and approval
 
