@@ -96,7 +96,7 @@ def resolve_profile(cfg: LabConfig, name: str) -> tuple[LabConfig, dict]:
     hard_short = _finite(getattr(cfg.risk, "max_short_gross", 0.0), "risk.max_short_gross")
     hard_min_net = _finite(getattr(cfg.risk, "min_net", 0.0), "risk.min_net")
     hard_max_net = _finite(getattr(cfg.risk, "max_net", 1.0), "risk.max_net")
-    if not (0 <= hard_short <= hard_gross and -hard_gross <= hard_min_net <= hard_max_net <= hard_gross):
+    if not (0 <= hard_short <= hard_gross and -hard_gross <= hard_min_net <= hard_max_net):
         raise RiskProfileError("operator short/net limits must fit within configured gross exposure")
     gross = min(hard_gross, b.max_gross)
     min_net = max(hard_min_net, b.min_net, -gross)

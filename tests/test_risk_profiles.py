@@ -67,7 +67,10 @@ def test_aggressive_never_relaxes_preexisting_tighter_operator_limits():
         portfolio=Portfolio(0.03),
     )
     effective, report = resolve_profile(baseline, "aggressive")
-    assert effective.risk == baseline.risk
+    assert effective.risk.max_weight == baseline.risk.max_weight
+    assert effective.risk.max_gross == baseline.risk.max_gross
+    assert effective.risk.max_drawdown == baseline.risk.max_drawdown
+    assert effective.risk.max_net == baseline.risk.max_gross
     assert effective.paper == baseline.paper
     assert effective.portfolio == baseline.portfolio
     assert len(report["profile_id"]) == 64

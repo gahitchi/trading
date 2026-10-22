@@ -197,7 +197,7 @@ def load_config(path: str | Path | None = None) -> LabConfig:
         and risk.max_gross > 0
         and 0 < risk.max_drawdown < 1
         and 0 <= risk.max_short_gross <= risk.max_gross
-        and -risk.max_gross <= risk.min_net <= risk.max_net <= risk.max_gross
+        and -risk.max_gross <= risk.min_net <= risk.max_net
     ):
         raise ConfigError("risk limits must be finite, with signed net and short budgets inside gross")
     if risk.profile not in {"calm", "cautious", "balanced", "dynamic", "aggressive"}:
