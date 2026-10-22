@@ -82,9 +82,7 @@ def test_late_listing_does_not_change_established_assets_null():
 def test_fallback_diagnostics_and_explicit_significance_limit():
     established = _prices(100 * np.exp(np.cumsum(np.random.default_rng(2).normal(0, 0.01, 240))))
     late = established.iloc[-35:]
-    result, info = data.block_bootstrap_panel(
-        {"CORE": established, "LATE": late}, 19, return_diagnostics=True
-    )
+    result, info = data.block_bootstrap_panel({"CORE": established, "LATE": late}, 19, return_diagnostics=True)
     assert result["LATE"].index.equals(late.index)
     assert info["per_instrument"]["CORE"]["fallback_blocks"] == 0
     assert info["per_instrument"]["LATE"]["fallback_blocks"] > 0

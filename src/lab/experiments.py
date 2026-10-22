@@ -320,9 +320,7 @@ def _null_worker(args):
     from lab.config import load_config
 
     cfg = load_config(cfg_path)
-    boot, diagnostics = data.block_bootstrap_panel(
-        {t: frames[t] for t in tickers}, seed, return_diagnostics=True
-    )
+    boot, diagnostics = data.block_bootstrap_panel({t: frames[t] for t in tickers}, seed, return_diagnostics=True)
     cand = run_spec(cfg, spec, tickers, boot, period).metrics
     base = run_spec(cfg, BASELINE, tickers, boot, period).metrics
     return cand.get("sharpe", 0) - base.get("sharpe", 0), diagnostics["fallback_fraction"]
