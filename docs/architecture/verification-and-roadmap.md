@@ -3,6 +3,19 @@
 **Current verdict: NOT CLEARED for unattended paper execution.**
 Passing Python unit tests and Docker builds is necessary but not sufficient.
 
+## Implemented design slice (isolated, no broker integration)
+
+`src/lab/contracts.py` provides immutable, validated, domain-level
+`SessionKey`, `ExpectedRoster`, `MarketBarFinalized`, and
+`SignalEvaluated` types. The matching pure unit/negative tests are in
+`tests/test_contracts.py`. These provide schema validation and deterministic
+roster hashes but **do not** perform exchange-calendar verification, upstream
+finality attestation, live session synchronization or broker order gating.
+
+This is **Slice 1 scaffolding**, not completion of CT-02/03/04. Integrating it
+into producers/allocator/execution must wait for the complete snapshot/risk
+contracts and independent broker-simulator tests.
+
 ## 1. Implementation order (dependency-aware)
 
 | Phase | Scope | Required proof |
