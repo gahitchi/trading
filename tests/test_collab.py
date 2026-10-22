@@ -220,3 +220,19 @@ def test_structure_check_works_without_remote_refs(repo):
     git(root, "commit", "-qm", "g", "-m", "Agent: chatgpt")
     git(root, "branch", "-q", "-D", "main")  # simulate a checkout with only this branch
     assert tool.main(["check"]) == 0
+
+
+def test_shallow_checkout_without_the_openers_branch_is_not_an_error(repo):
+    """CI's test job checks out main alone: threads ChatGPT opened on its branch show only Claude's replies."""
+    tool, root = repo
+    git(root, "checkout", "-qb", "chatgpt/work")
+    assert tool.main(["new", "--agent", "chatgpt", "--kind", "proposal", "--title", "t", "--body", "x"]) == 0
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "open", "-m", "Agent: chatgpt")
+    git(root, "checkout", "-q", "main")
+    assert tool.main(["post", "G001", "--agent", "claude", "--kind", "reply", "--body", "seen"]) == 0
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "reply", "-m", "Agent: claude")
+    assert tool.main(["check"]) == 0
+    git(root, "branch", "-qD", "chatgpt/work")  # as in a checkout of main alone
+    assert tool.main(["check"]) == 0

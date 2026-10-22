@@ -366,8 +366,20 @@ def cmd_check(a) -> int:
     except CollabError as e:
         errors.append(str(e))
         threads = {}
+    # A shallow checkout of one branch cannot see threads the other agent opened on its own branch: there,
+    # the visible messages start with a reply. That is an incomplete view, not an invalid thread.
+    visible = {
+        owner_of(r.split("/", 1)[1] if r.startswith("origin/") else r)
+        for r in git("for-each-ref", "--format=%(refname:short)", "refs/remotes", "refs/heads").split()
+    }
+    visible.add(owner)
+    unseen = []
     for tid, msgs in threads.items():
         first = msgs[0]
+        opener = next((agent for agent, prefix in PREFIX.items() if prefix == tid[0]), None)
+        if opener not in visible and opener != first["agent"]:
+            unseen.append(tid)
+            continue
         if first["kind"] not in OPENING_KINDS or not first["title"]:
             errors.append(f"{tid}: the first message must be one of {OPENING_KINDS} and carry a title")
         if PREFIX[first["agent"]] != tid[0]:
@@ -398,6 +410,8 @@ def cmd_check(a) -> int:
                     )
     for e in errors:
         print(f"ERROR {e}")
+    if unseen:
+        print(f"note: opening not visible for {', '.join(unseen)} (the opener's branch is not fetched here)")
     print(
         f"branch {branch} (owner: {owner or 'none'}): {local} file(s) in this outbox tree, "
         f"{len(threads)} thread(s) across branches, {len(errors)} error(s)"
