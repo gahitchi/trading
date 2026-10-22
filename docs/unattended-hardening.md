@@ -67,3 +67,12 @@ sessions to simulate an exit. No forward-inferred liquidation is allowed.
 This does not repair unmodeled delisting returns, bankruptcy recovery,
 survivorship-biased tickers, broker halted markets or corporate-action errors.
 Treat missing data as an error, not a profitable trading instruction.
+
+## Synchronized null tests
+
+When multiple instruments share a common daily session index, the bootstrap
+now uses the same resampled day-blocks for all assets, retaining common market
+shocks and contemporaneous covariance. Misaligned calendars fail explicitly
+rather than presenting scientifically invalid significance results. A more
+general point-in-time bootstrap for staggered listings/halts is still needed;
+the automated research engine must not claim significance for those panels.

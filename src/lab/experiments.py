@@ -320,7 +320,7 @@ def _null_worker(args):
     from lab.config import load_config
 
     cfg = load_config(cfg_path)
-    boot = {t: data.block_bootstrap(frames[t], seed * 1000 + i) for i, t in enumerate(tickers)}
+    boot = data.block_bootstrap_panel({t: frames[t] for t in tickers}, seed)
     cand = run_spec(cfg, spec, tickers, boot, period).metrics
     base = run_spec(cfg, BASELINE, tickers, boot, period).metrics
     return cand.get("sharpe", 0) - base.get("sharpe", 0)
@@ -337,6 +337,13 @@ def null_test(
     observed_edge: float | None = None,
 ) -> dict:
     frames = frames or data.load_many(cfg, tickers)
+    if not frames:
+        raise data.DataError("null test requires price data")
+    reference = frames[tickers[0]].index
+    if any(not frames[t].index.equals(reference) for t in tickers):
+        raise data.DataError(
+            "null test requires a date-aligned panel: asynchronous bootstrap destroys cross-asset correlations"
+        )
     if observed_edge is None:
         comp, _ = compare(cfg, [spec], tickers, period, frames)
         observed_edge = comp.rows[1]["sharpe_edge"] if len(comp.rows) > 1 else 0.0

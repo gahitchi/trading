@@ -318,3 +318,23 @@ def block_bootstrap(df: pd.DataFrame, seed: int, block: int = 20) -> pd.DataFram
     out_h = np.maximum(out_o, out_c) * up[pick]
     out_l = np.minimum(out_o, out_c) * dn[pick]
     return pd.DataFrame({"open": out_o, "high": out_h, "low": out_l, "close": out_c, "volume": v[pick]}, index=d.index)
+
+
+def block_bootstrap_panel(frames: dict[str, pd.DataFrame], seed: int, block: int = 20) -> dict[str, pd.DataFrame]:
+    """Synchronously resample all assets so common market shocks are preserved.
+
+    Asset-specific independent sampling destroys cross-sectional covariance and
+    produces invalid null statistics. If dates cannot be matched, reject the
+    inference rather than silently testing a fabricated market history.
+    """
+    if not frames:
+        raise DataError("joint bootstrap requires at least one instrument")
+    first = next(iter(frames.values())).index
+    mismatched = [t for t, df in frames.items() if not df.index.equals(first)]
+    if mismatched:
+        raise DataError(
+            "joint block bootstrap requires identical sorted market-session indexes; "
+            f"unaligned assets: {', '.join(mismatched[:12])}. "
+            "Use an explicitly aligned point-in-time panel; do not bootstrap assets independently."
+        )
+    return {t: block_bootstrap(df, seed, block) for t, df in frames.items()}
