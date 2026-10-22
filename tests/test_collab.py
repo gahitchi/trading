@@ -112,6 +112,8 @@ def test_merging_main_into_chatgpt_branch_is_allowed(repo):
     commit(root, "claude message")
     git(root, "checkout", "-q", "chatgpt/x")
     git(root, "merge", "-q", "--no-ff", "--no-edit", "main")
+    git(root, "branch", "-D", "main")  # CI can lack the other agent's refs
+    assert tool.main(["check"]) == 0
     assert tool.main(["check", "--base", base]) == 0  # an unchanged copy of claude's file is fine
     msg = next((root / "collab/outbox/claude/C001").glob("*.md"))
     msg.write_text(msg.read_text().replace("from main", "altered on chatgpt's branch"))
@@ -167,7 +169,7 @@ def test_merge_with_signed_claude_commits_is_allowed_but_forgery_fails(repo):
     (root / "claude.py").write_text("data = 1")
     commit(root, "Claude work\n\nAgent: claude")
     git(root, "checkout", "-q", "chatgpt/work")
-    git(root, "merge", "-q", "--no-edit", "main")
+    git(root, "merge", "-q", "--no-ff", "--no-edit", "main")
     assert tool.main(["check", "--base", base]) == 0
     (root / "forgery.py").write_text("data = 2")
     commit(root, "not Claude\n\nAgent: claude")

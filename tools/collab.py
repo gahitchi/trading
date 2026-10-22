@@ -158,6 +158,19 @@ def collect(include_worktree: bool = True) -> dict[str, list[dict]]:
         for path in git("ls-tree", "-r", "--name-only", ref, "--", OUTBOX, check=False).splitlines():
             if is_message(path) and path_agent(path) in (owner, "gabriel") and path not in found:
                 found[path] = parse_message(git("show", f"{ref}:{path}"), path)
+    # GitHub Actions may check out only the submitted branch, omitting refs to
+    # the other agent. The second parent of an actual merge retains the
+    # original foreign outbox snapshot. Read it as *history*, never as a
+    # writable outbox. Without this fallback pytest/CI mistakes a C001 reply
+    # for the opener when origin/main is not fetched as a ref.
+    local_owner = owner_of(current_branch())
+    for row in git("rev-list", "--merges", "--parents", "HEAD").splitlines():
+        parents = row.split()[2:]
+        for parent in parents:
+            for path in git("ls-tree", "-r", "--name-only", parent, "--", OUTBOX, check=False).splitlines():
+                author = path_agent(path)
+                if is_message(path) and author in AGENTS and author != local_owner and path not in found:
+                    found[path] = parse_message(git("show", f"{parent}:{path}"), path)
     if include_worktree:
         owner = owner_of(current_branch())
         base = root() / OUTBOX
@@ -332,6 +345,10 @@ def merged_from_owner(path: str, author: str) -> bool:
         branch = ref.split("/", 1)[1] if ref.startswith("origin/") else ref
         if owner_of(branch) == author and git("rev-parse", f"{ref}:{path}", check=False).strip() == here:
             return True
+    for row in git("rev-list", "--merges", "--parents", "HEAD").splitlines():
+        for parent in row.split()[2:]:
+            if git("rev-parse", f"{parent}:{path}", check=False).strip() == here:
+                return True
     return False
 
 
