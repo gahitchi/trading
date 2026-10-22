@@ -120,6 +120,7 @@ class ExecutionAgent(Strategy):
         super().__init__(config)
         self.weights: dict[str, float] = {}
         self.prices: dict[str, float] = {}
+        self.price_stamps: dict[str, int] = {}
         self.price_ts = 0
         self.new_data = False
         self.alert_pending = False
@@ -202,6 +203,7 @@ class ExecutionAgent(Strategy):
 
     def _on_signal(self, msg):
         self.prices[msg.ticker] = msg.price
+        self.price_stamps[msg.ticker] = msg.ts
         self.price_ts = max(self.price_ts, msg.ts)
         self.new_data = True
         if not self.alert_pending:
@@ -409,7 +411,32 @@ class ExecutionAgent(Strategy):
 
     # ------------------------------------------------------------------ the daily decision
 
+    def _unsafe_held_marks(self) -> list[str]:
+        """No new opening trade is safe if the held book cannot be marked consistently."""
+        if not self.config.live:
+            return []
+        stale = []
+        for ticker, qty in self.held.items():
+            if not qty:
+                continue
+            mark = self.prices.get(ticker)
+            ts = self.price_stamps.get(ticker)
+            if (
+                mark is None
+                or not math.isfinite(mark)
+                or mark <= 0
+                or not self.price_ts
+                or ts != self.price_ts
+            ):
+                stale.append(ticker)
+        return stale
+
     def rebalance(self):
+        unsafe = self._unsafe_held_marks()
+        if unsafe:
+            self.blocked_reason = f"missing/stale marks for held positions: {', '.join(sorted(unsafe))}"
+            self._risk_event("stale_data", self.blocked_reason + "; no new orders until all held marks are current")
+            return
         snap = self.snapshot()
         self.publish_message(T_EQUITY, snap)  # RiskAgent may halt here; its reply arrives synchronously
         if not math.isfinite(snap.equity) or snap.equity <= 0:
