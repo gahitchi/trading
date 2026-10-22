@@ -34,6 +34,21 @@ Two layers of cooperating agents:
       └── training results only ─────┘                │ you: lab research promote
 ```
 
+## Selectable risk budgets (preview-only)
+
+Use `lab risk-profile --profile calm --json` to inspect audited operator
+limits before choosing a trading style. Five profiles are available:
+`calm`, `cautious`, `balanced`, `dynamic` and `aggressive`.
+Each independently caps stock concentration, gross exposure, peak drawdown,
+annualized volatility target, maximum buy size, daily turnover and order count.
+The system always takes **the minimum of the configured hard cap and the
+profile cap**. Aggressive never enables leverage or bypasses broker safety,
+kill controls or reconciliation.
+
+This command is deliberately **preview-only** until paper order recovery,
+profile persistence across restarts, and broker-node integration are tested.
+It never changes the live node or places orders.
+
 ## Capital markets and Forex (offline scenario research)
 
 The research layer can now audit **equities, ETFs, plain cash bonds and spot-FX

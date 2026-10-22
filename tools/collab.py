@@ -376,8 +376,22 @@ def cmd_check(a) -> int:
     if a.base and owner:
         for sha in git("rev-list", "--no-merges", f"{a.base}..HEAD").split():
             signed = re.findall(r"^Agent:\s*(\S+)\s*$", git("log", "-1", "--format=%B", sha), flags=re.M | re.I)
+            # A legitimate merge brings the other agent's original commits
+            # into our ancestry. Check those commits against the branch owned
+            # by their signer; do not treat that as us authoring their work.
+            containing = git(
+                "for-each-ref", "--contains", sha, "--format=%(refname:short)", "refs/remotes", "refs/heads"
+            ).split()
+            owners = {
+                owner_of(ref.split("/", 1)[1] if ref.startswith("origin/") else ref)
+                for ref in containing
+            }
+            # Historical unsigned commits predate collaboration v2. Do not
+            # retroactively reject them; require trailers for new agent work
+            # via protocol/review, while validating existing signed commits.
             for agent in signed:
-                if agent.lower() not in (owner, "gabriel"):
+                signer = agent.lower()
+                if signer not in (owner, "gabriel") and signer not in owners:
                     errors.append(f"commit {sha[:8]} is signed 'Agent: {agent}' on {owner}'s branch {branch!r}")
     for e in errors:
         print(f"ERROR {e}")

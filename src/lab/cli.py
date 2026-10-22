@@ -13,6 +13,7 @@ from lab import data, experiments
 from lab.config import ConfigError, LabConfig, Period, load_config
 from lab.market_analysis import MarketAnalysisError
 from lab.multiasset import MultiAssetError
+from lab.risk_profiles import RiskProfileError
 from lab.signals.builtin import BUILTIN
 from lab.signals.registry import SignalNotFound, available_research, resolve
 
@@ -604,6 +605,24 @@ def cmd_research_promote(cfg, a):
     print(f"{a.id} promoted; it can now be used with: lab paper --signals {a.id}")
 
 
+# ----------------------------------------------------------------------------- operator risk profiles
+
+
+def cmd_risk_profile(cfg, a):
+    """Preview operator-selected risk budgets without broker side effects."""
+    from lab.risk_profiles import resolve_profile
+
+    _, report = resolve_profile(cfg, a.profile)
+    if a.json:
+        print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+        return
+    print(f"Risk profile: {report['profile']} (PREVIEW ONLY, never an order permit)")
+    for key, value in report["limits"].items():
+        print(f"  {key}: {value}")
+    print(f"  Audit fingerprint: {report['profile_id']}")
+    print(f"  {report['warning']}")
+
+
 # ----------------------------------------------------------------------------- paper
 
 
@@ -976,6 +995,11 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--model")
     c.set_defaults(fn=cmd_llm_check)
 
+    rp_view = sub.add_parser("risk-profile", help="preview calm-to-aggressive hard-capped risk budgets")
+    rp_view.add_argument("--profile", choices=["calm", "cautious", "balanced", "dynamic", "aggressive"], required=True)
+    rp_view.add_argument("--json", action="store_true")
+    rp_view.set_defaults(fn=cmd_risk_profile)
+
     pp = sub.add_parser("paper", help="paper trade on Interactive Brokers (paper accounts only)")
     pp.add_argument("--signals", nargs="+", default=["sma_trend"])
     pp.add_argument("--tickers", nargs="+")
@@ -1024,7 +1048,7 @@ def main(argv=None) -> int:
         return 0
     try:
         return a.fn(cfg, a) or 0
-    except (data.DataError, ConfigError, MarketAnalysisError, MultiAssetError) as e:
+    except (data.DataError, ConfigError, MarketAnalysisError, MultiAssetError, RiskProfileError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

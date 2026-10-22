@@ -157,3 +157,18 @@ def test_commits_signed_by_the_other_agent_are_rejected(repo):
     git(root, "add", "-A")
     git(root, "commit", "-qm", "sneaky change on main", "-m", "Agent: chatgpt")
     assert tool.main(["check", "--base", base]) == 1
+
+
+def test_merge_with_signed_claude_commits_is_allowed_but_forgery_fails(repo):
+    tool, root = repo
+    git(root, "checkout", "-q", "-b", "chatgpt/work")
+    base = git(root, "rev-parse", "HEAD").strip()
+    git(root, "checkout", "-q", "main")
+    (root / "claude.py").write_text("data = 1")
+    commit(root, "Claude work\n\nAgent: claude")
+    git(root, "checkout", "-q", "chatgpt/work")
+    git(root, "merge", "-q", "--no-edit", "main")
+    assert tool.main(["check", "--base", base]) == 0
+    (root / "forgery.py").write_text("data = 2")
+    commit(root, "not Claude\n\nAgent: claude")
+    assert tool.main(["check", "--base", base]) == 1
