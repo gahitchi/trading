@@ -121,12 +121,15 @@ def test_invalid_bar_rejected(change):
 def test_signal_status_is_distinct_from_missing_or_error():
     assert signal().target == Decimal("0.5")
     assert signal(disposition=SignalDisposition.FLAT, target=Decimal("0")).target == 0
-    assert signal(
-        disposition=SignalDisposition.ERROR,
-        target=None,
-        input_sha256=None,
-        reason="missing vendor close",
-    ).target is None
+    assert (
+        signal(
+            disposition=SignalDisposition.ERROR,
+            target=None,
+            input_sha256=None,
+            reason="missing vendor close",
+        ).target
+        is None
+    )
 
 
 @pytest.mark.parametrize(
