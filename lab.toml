@@ -37,8 +37,12 @@ rebalance_band = 0.02         # resize a held position only if the change exceed
 cash_buffer = 0.01            # size buys on 99% of equity: next-open fills can gap above the close
 
 [risk]
-max_weight = 0.25       # max fraction of equity in one stock
-max_gross = 1.0         # long-only, no leverage
+profile = "balanced"    # risk-profile preview; NOT an execution permission
+max_weight = 0.25       # absolute operator per-name cap
+max_gross = 1.0         # operator hard cap; raise explicitly for margin research only
+max_short_gross = 0.0   # zero forbids shorts even in dynamic/aggressive research profiles
+min_net = 0.0           # nonnegative net exposure unless explicitly authorized for research
+max_net = 1.0
 max_drawdown = 0.35     # circuit breaker: flatten and halt if equity drops 35% from its peak
 
 [portfolio]

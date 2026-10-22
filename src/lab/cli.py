@@ -612,7 +612,7 @@ def cmd_risk_profile(cfg, a):
     """Preview operator-selected risk budgets without broker side effects."""
     from lab.risk_profiles import resolve_profile
 
-    _, report = resolve_profile(cfg, a.profile)
+    _, report = resolve_profile(cfg, a.profile or cfg.risk.profile)
     if a.json:
         print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
         return
@@ -996,7 +996,7 @@ def build_parser() -> argparse.ArgumentParser:
     c.set_defaults(fn=cmd_llm_check)
 
     rp_view = sub.add_parser("risk-profile", help="preview calm-to-aggressive hard-capped risk budgets")
-    rp_view.add_argument("--profile", choices=["calm", "cautious", "balanced", "dynamic", "aggressive"], required=True)
+    rp_view.add_argument("--profile", choices=["calm", "cautious", "balanced", "dynamic", "aggressive"])
     rp_view.add_argument("--json", action="store_true")
     rp_view.set_defaults(fn=cmd_risk_profile)
 

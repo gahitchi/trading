@@ -40,6 +40,10 @@ class RiskSettings:
     max_weight: float
     max_gross: float
     max_drawdown: float
+    max_short_gross: float = 0.0
+    min_net: float = 0.0
+    max_net: float = 1.0
+    profile: str = "balanced"
 
 
 @dataclass(frozen=True)
@@ -169,9 +173,35 @@ def load_config(path: str | Path | None = None) -> LabConfig:
     if warmup >= periods["train"].start:
         raise ConfigError("warmup_start must be before the train period")
 
-    risk = RiskSettings(float(rk["max_weight"]), float(rk["max_gross"]), float(rk["max_drawdown"]))
-    if not (0 < risk.max_weight <= 1 and 0 < risk.max_gross <= 1 and 0 < risk.max_drawdown < 1):
-        raise ConfigError("risk limits must be fractions in (0, 1] (long-only, no leverage)")
+    risk = RiskSettings(
+        max_weight=float(rk["max_weight"]),
+        max_gross=float(rk["max_gross"]),
+        max_drawdown=float(rk["max_drawdown"]),
+        max_short_gross=float(rk.get("max_short_gross", 0.0)),
+        min_net=float(rk.get("min_net", 0.0)),
+        max_net=float(rk.get("max_net", 1.0)),
+        profile=str(rk.get("profile", "balanced")),
+    )
+    from math import isfinite
+
+    vals = (
+        risk.max_weight,
+        risk.max_gross,
+        risk.max_drawdown,
+        risk.max_short_gross,
+        risk.min_net,
+        risk.max_net,
+    )
+    if not all(isfinite(x) for x in vals) or not (
+        0 < risk.max_weight <= 1
+        and risk.max_gross > 0
+        and 0 < risk.max_drawdown < 1
+        and 0 <= risk.max_short_gross <= risk.max_gross
+        and -risk.max_gross <= risk.min_net <= risk.max_net <= risk.max_gross
+    ):
+        raise ConfigError("risk limits must be finite, with signed net and short budgets inside gross")
+    if risk.profile not in {"calm", "cautious", "balanced", "dynamic", "aggressive"}:
+        raise ConfigError("risk.profile must be calm, cautious, balanced, dynamic or aggressive")
 
     research = ResearchSettings(
         provider=str(rs["provider"]),

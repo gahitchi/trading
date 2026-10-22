@@ -13,6 +13,10 @@ class Risk:
     max_weight: float = 0.25
     max_gross: float = 1.0
     max_drawdown: float = 0.35
+    max_short_gross: float = 0.0
+    min_net: float = 0.0
+    max_net: float = 1.0
+    profile: str = "balanced"
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,7 @@ def test_profiles_monotonically_expand_only_within_original_safety_caps():
         effective, evidence = resolve_profile(baseline, profile.value)
         assert evidence["hard_caps_relaxed"] is False
         assert evidence["status"] == "PREVIEW_ONLY_NOT_AN_EXECUTION_PERMIT"
+        assert evidence["paper_execution_permissions"] == {"short_selling": False, "margin_leverage": False}
         assert effective.risk.max_gross <= 1.0
         assert effective.risk.max_weight <= baseline.risk.max_weight
         assert effective.risk.max_drawdown <= baseline.risk.max_drawdown
@@ -109,3 +114,49 @@ def test_advanced_capabilities_require_separate_broker_authorization():
     for name in RiskProfile:
         report = resolve_profile(Config(), name.value)[1]
         assert report["paper_execution_permissions"] == {"short_selling": False, "margin_leverage": False}
+
+
+def test_explicit_higher_operator_caps_enable_signed_profile_preview_only():
+    wide = Config(
+        risk=Risk(
+            max_weight=0.5,
+            max_gross=1.9,
+            max_drawdown=0.4,
+            max_short_gross=0.9,
+            min_net=-1.0,
+            max_net=1.9,
+        ),
+    )
+    _, safe = resolve_profile(wide, "calm")
+    _, dynamic = resolve_profile(wide, "dynamic")
+    _, aggressive = resolve_profile(wide, "aggressive")
+    assert safe["limits"]["max_gross"] == 0.25
+    assert safe["limits"]["max_short_gross"] == 0
+    assert dynamic["limits"]["max_gross"] == 1.35
+    assert dynamic["limits"]["max_short_gross"] == 0.30
+    assert dynamic["limits"]["min_net"] == -0.35
+    assert aggressive["limits"]["max_gross"] == 1.8
+    assert aggressive["limits"]["max_short_gross"] == 0.75
+    assert aggressive["limits"]["min_net"] == -0.75
+    for report in (safe, dynamic, aggressive):
+        assert report["paper_execution_permissions"] == {"short_selling": False, "margin_leverage": False}
+    assert dynamic["requires_margin_core_qualification"]
+    assert aggressive["profile_id"] != dynamic["profile_id"]
+
+
+def test_profile_does_not_relax_mandatory_operator_short_limits():
+    baseline = Config(
+        risk=Risk(max_gross=1.1, max_short_gross=0.12, min_net=-0.05, max_net=0.8),
+    )
+    effective, _ = resolve_profile(baseline, "aggressive")
+    assert effective.risk.max_gross == 1.1
+    assert effective.risk.max_short_gross == 0.12
+    assert effective.risk.min_net == -0.05
+    assert effective.risk.max_net == 0.8
+
+
+def test_impossible_signed_operator_envelope_fails_closed():
+    with pytest.raises(RiskProfileError, match="operator short/net"):
+        resolve_profile(Config(risk=replace(Risk(), max_short_gross=2)), "aggressive")
+    with pytest.raises(RiskProfileError, match="operator short/net"):
+        resolve_profile(Config(risk=replace(Risk(), min_net=0.7, max_net=0.2)), "calm")
