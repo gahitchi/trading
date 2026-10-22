@@ -45,6 +45,7 @@ class RiskSettings:
     max_short_gross: float = 0.0  # sum of short |weights|; 0 = long-only
     min_net: float = 0.0  # net exposure (longs - shorts) range
     max_net: float = 1.0
+    profile: str = "custom"  # custom preserves pre-profile settings
 
 
 @dataclass(frozen=True)
@@ -228,6 +229,7 @@ def load_config(path: str | Path | None = None) -> LabConfig:
         max_short_gross=float(rk.get("max_short_gross", 0.0)),
         min_net=float(rk.get("min_net", 0.0)),
         max_net=float(rk.get("max_net", 1.0)),
+        profile=str(rk.get("profile", "custom")),
     )
     mg = raw.get("margin", {})
     try:
@@ -251,6 +253,12 @@ def load_config(path: str | Path | None = None) -> LabConfig:
             f"portfolio.max_leverage {portfolio.max_leverage} exceeds risk.max_gross {risk.max_gross}: "
             "raise the gross limit deliberately or lower the leverage"
         )
+    # Apply operator-selected risk units once, before constructing the node,
+    # so backtests and paper trading use the same effective limits.
+    from lab.risk_profiles import apply_profile
+
+    risk, portfolio = apply_profile(risk, portfolio, risk.profile)
+    _check_risk(risk, margin)
 
     research = ResearchSettings(
         provider=str(rs["provider"]),
