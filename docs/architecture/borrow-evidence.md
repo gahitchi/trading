@@ -1,7 +1,8 @@
 # Borrow availability and financing evidence
 
 Historical borrow evidence now reaches the backtest execution agent through the normal
-`lab backtest`, comparison, walk-forward and null-test paths. It does not authorize a
+`lab backtest`, comparison and walk-forward paths. The short-borrow null test fails closed
+until prices, fees and availability have a jointly qualified resampling model. It does not authorize a
 broker order or establish a strategy's statistical edge.
 
 Configure an operator-supplied history in `lab.toml`:
@@ -20,7 +21,8 @@ sources are rejected. The code validates structure; it cannot authenticate vendo
 
 - New or larger shorts need a nonfuture, sufficiently recent availability record and fee.
   Without one, an attempted long-to-short flip closes the long without opening a short;
-  a larger short stays at its current size. Covers and long reductions need no new inventory.
+  a larger short stays at its current size. Any denied short freezes all new exposure for
+  that rebalance, so a long hedge cannot be opened alone. Covers and long reductions need no new inventory.
 - Fees use the short quantities and marks at the previous close. That book accrues on each
   calendar day from that date (inclusive) to the next recorded close (exclusive). Each day's
   APR is looked up separately. Monday entries are not charged for the preceding weekend;

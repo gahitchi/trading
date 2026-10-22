@@ -494,6 +494,7 @@ class ExecutionAgent(Strategy):
 
         reduce_only = self.reduce_only or (halt is not None and halt["kind"] == "margin_call")
         orders = []
+        borrow_blocked = False
         for ticker, iid in self.config.instruments.items():
             price = self.prices.get(ticker)
             if not price:
@@ -511,6 +512,7 @@ class ExecutionAgent(Strategy):
                     ticker, current, target, datetime.fromtimestamp(self.price_ts / 1e9, NY).date()
                 )
                 if reason:
+                    borrow_blocked = True
                     self._risk_event("borrow_unavailable", reason + "; new short exposure blocked")
             diff = target - current
             if diff == 0:
@@ -537,6 +539,11 @@ class ExecutionAgent(Strategy):
         sent = 0
         opened = 0.0
         for opening, target, current, iid, ticker, price in orders:
+            if borrow_blocked and opening > 0:
+                # Do not open the long hedge of an unavailable short (or any other
+                # new exposure from the now-incomplete approved portfolio).
+                target = _with_opening(current, target, 0)
+                opening = 0
             if opening > 0 and opening * price > self.config.max_order_value:
                 cap = math.floor(self.config.max_order_value / price)
                 target = _with_opening(current, target, cap)

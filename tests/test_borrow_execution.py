@@ -178,3 +178,24 @@ def test_historical_run_rejects_stale_marks_in_held_short_book(goog_lab):
             frame.index[1].date(),
             None,
         )
+
+
+def test_unavailable_short_cannot_leave_new_long_hedge_open(goog_lab):
+    cfg = _cfg(goog_lab, "")
+    cfg = replace(cfg, risk=replace(cfg.risk, min_net=0, max_net=0))
+    frame = _flat()
+    result = backtest.run(
+        cfg,
+        [backtest.Sleeve(Constant(x=1), "AAPL", 0.5), backtest.Sleeve(Constant(x=-1), "GOOG", 0.5)],
+        {"GOOG": frame, "AAPL": frame},
+        frame.index[1].date(),
+        None,
+    )
+    assert result.fills == []
+    assert any(e.kind == "borrow_unavailable" for e in result.risk_events)
+
+
+def test_historical_short_null_fails_closed_until_joint_sampling_is_qualified(goog_lab):
+    cfg = _cfg(goog_lab, "")
+    with pytest.raises(data.DataError, match="jointly validated sampler"):
+        experiments.null_test(cfg, SignalSpec("sma_trend"), ["GOOG"], cfg.period("train"), samples=2)

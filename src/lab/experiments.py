@@ -346,6 +346,11 @@ def null_test(
     workers: int | None = None,
     observed_edge: float | None = None,
 ) -> dict:
+    if cfg.borrow.history is not None and cfg.risk.max_short_gross > 0:
+        raise data.DataError(
+            "historical short-borrow null test is not qualified: prices and borrow availability/fees "
+            "need a jointly validated sampler; refusing to attach the original loan book to shuffled prices"
+        )
     frames = frames or data.load_many(cfg, tickers)
     if observed_edge is None:
         comp, _ = compare(cfg, [spec], tickers, period, frames)
