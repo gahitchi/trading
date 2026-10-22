@@ -129,8 +129,7 @@ def analyze_manifest(manifest: dict) -> dict:
             if quote is None or (mark.bid, mark.ask, mark.timestamp) != (quote.bid, quote.ask, quote.timestamp):
                 raise MultiAssetError("spot FX executable mark disagrees with currency conversion feed")
     positions = [
-        Holding(row["instrument_id"], _amount(row["quantity"], "holding quantity"))
-        for row in manifest["holdings"]
+        Holding(row["instrument_id"], _amount(row["quantity"], "holding quantity")) for row in manifest["holdings"]
     ]
     cash = {ccy: _amount(value, f"cash {ccy}") for ccy, value in manifest["cash"].items()}
     before = portfolio_liquidation_value(
@@ -151,7 +150,8 @@ def analyze_manifest(manifest: dict) -> dict:
         if asset is None or price is None:
             raise MultiAssetError("unknown spot FX instrument/mark for preview")
         updated = cash_after_spot_trade(
-            updated, asset,
+            updated,
+            asset,
             side=action["side"],
             base_quantity=_amount(action["base_quantity"], "base_quantity"),
             market=price,

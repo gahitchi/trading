@@ -92,13 +92,21 @@ def _validate_factor_exposures(exposures: list[dict], instruments: dict[str, Ins
     return mapping
 
 
-def _scenario_shock(key: str, factor_values: dict[str, Decimal], exposure_map: dict, direct: dict) -> tuple[Decimal, list]:
+def _scenario_shock(
+    key: str, factor_values: dict[str, Decimal], exposure_map: dict, direct: dict
+) -> tuple[Decimal, list]:
     exposure = exposure_map.get(key, {})
     if key in direct and any(factor_values.get(f, 0) != 0 for f in exposure):
         raise MultiAssetError(f"{key}: both direct and factor-derived shocks, ambiguous precedence")
     breakdown = [
-        {"factor": name, "shock": str(factor_values[name]), "loading": str(load), "contribution": str(factor_values[name] * load)}
-        for name, load in sorted(exposure.items()) if name in factor_values
+        {
+            "factor": name,
+            "shock": str(factor_values[name]),
+            "loading": str(load),
+            "contribution": str(factor_values[name] * load),
+        }
+        for name, load in sorted(exposure.items())
+        if name in factor_values
     ]
     net = sum((factor_values[name] * load for name, load in exposure.items() if name in factor_values), Decimal(0))
     if key in direct:
@@ -134,14 +142,26 @@ def evaluate_stress(
     seen = set()
     fx = FXRates(fx_quotes)
     before = portfolio_liquidation_value(
-        cash=cash, holdings=holdings, instruments=instruments, prices=prices,
-        fx=fx, reporting_currency=reporting_currency, as_of=as_of, max_age=max_age,
+        cash=cash,
+        holdings=holdings,
+        instruments=instruments,
+        prices=prices,
+        fx=fx,
+        reporting_currency=reporting_currency,
+        as_of=as_of,
+        max_age=max_age,
     )
     if before <= 0:
         raise MultiAssetError("scenario percentage risk requires strictly positive baseline portfolio value")
     prev_components = _components(
-        cash=cash, holdings=holdings, instruments=instruments, prices=prices, fx=fx,
-        reporting_currency=reporting_currency, now=as_of, age=max_age,
+        cash=cash,
+        holdings=holdings,
+        instruments=instruments,
+        prices=prices,
+        fx=fx,
+        reporting_currency=reporting_currency,
+        now=as_of,
+        age=max_age,
     )
     if abs(sum(prev_components.values(), Decimal(0)) - before) > ROUNDING_TOLERANCE:
         raise MultiAssetError("internal baseline component accounting mismatch")
@@ -150,11 +170,15 @@ def evaluate_stress(
     universe = set(instruments)
     fx_set = {f"FX:{q.base}/{q.quote}" for q in fx_quotes}
     results = []
-    limit_fraction = None if max_loss_fraction is None else _fraction(
-        max_loss_fraction, "max_loss_fraction", lower=Decimal("0"), upper=Decimal("1")
+    limit_fraction = (
+        None
+        if max_loss_fraction is None
+        else _fraction(max_loss_fraction, "max_loss_fraction", lower=Decimal("0"), upper=Decimal("1"))
     )
-    limit_amount = None if max_loss_amount is None else _fraction(
-        max_loss_amount, "max_loss_amount", lower=Decimal("0"), upper=Decimal("1000000000000000000")
+    limit_amount = (
+        None
+        if max_loss_amount is None
+        else _fraction(max_loss_amount, "max_loss_amount", lower=Decimal("0"), upper=Decimal("1000000000000000000"))
     )
     for row in scenarios:
         if not isinstance(row, dict):
@@ -171,10 +195,14 @@ def evaluate_stress(
             raise MultiAssetError("too many scenario factors")
         factors = {key: _fraction(raw, key) for key, raw in factors_raw.items()}
         if set(factors) - available:
-            raise MultiAssetError(f"scenario {name}: factor lacks sensitivity evidence: {sorted(set(factors) - available)}")
+            raise MultiAssetError(
+                f"scenario {name}: factor lacks sensitivity evidence: {sorted(set(factors) - available)}"
+            )
         direct = {key: _fraction(raw, key) for key, raw in direct_raw.items()}
         if set(direct) - (universe | fx_set):
-            raise MultiAssetError(f"scenario {name}: unknown shock targets: {sorted(set(direct) - (universe | fx_set))}")
+            raise MultiAssetError(
+                f"scenario {name}: unknown shock targets: {sorted(set(direct) - (universe | fx_set))}"
+            )
         if any(key in instruments and instruments[key].asset_class == AssetClass.FX_SPOT for key in direct):
             raise MultiAssetError("FX spot shocks must target FX:BASE/QUOTE, never a duplicated security")
         projected_prices = {}
@@ -191,7 +219,10 @@ def evaluate_stress(
             bid = (market.bid * factor / inst.price_tick).to_integral_value(rounding=ROUND_FLOOR) * inst.price_tick
             ask = (market.ask * factor / inst.price_tick).to_integral_value(rounding=ROUND_CEILING) * inst.price_tick
             projected_prices[ticker] = MarketPrice(
-                ticker, bid, ask, market.timestamp,
+                ticker,
+                bid,
+                ask,
+                market.timestamp,
                 market.accrued_interest_per_100 if inst.asset_class == AssetClass.BOND else Decimal(0),
             )
             details[ticker] = {"net_return_shock": str(shock), "factor_contributions": contrib}
@@ -205,16 +236,26 @@ def evaluate_stress(
             details[key] = {"net_return_shock": str(shock), "factor_contributions": contrib}
         changed_fx = FXRates(projected_fx)
         after = portfolio_liquidation_value(
-            cash=cash, holdings=holdings, instruments=instruments, prices=projected_prices,
-            fx=changed_fx, reporting_currency=reporting_currency, as_of=as_of, max_age=max_age,
+            cash=cash,
+            holdings=holdings,
+            instruments=instruments,
+            prices=projected_prices,
+            fx=changed_fx,
+            reporting_currency=reporting_currency,
+            as_of=as_of,
+            max_age=max_age,
         )
         after_components = _components(
-            cash=cash, holdings=holdings, instruments=instruments, prices=projected_prices,
-            fx=changed_fx, reporting_currency=reporting_currency, now=as_of, age=max_age,
+            cash=cash,
+            holdings=holdings,
+            instruments=instruments,
+            prices=projected_prices,
+            fx=changed_fx,
+            reporting_currency=reporting_currency,
+            now=as_of,
+            age=max_age,
         )
-        delta_by_component = {
-            key: after_components[key] - prev_components[key] for key in sorted(prev_components)
-        }
+        delta_by_component = {key: after_components[key] - prev_components[key] for key in sorted(prev_components)}
         pnl = after - before
         rounding_residual = pnl - sum(delta_by_component.values(), Decimal(0))
         if abs(rounding_residual) > ROUNDING_TOLERANCE:
@@ -234,7 +275,9 @@ def evaluate_stress(
             "loss_fraction": str(frac),
             "breached_limits": breached,
             "component_pnl": {k: str(v) for k, v in delta_by_component.items()},
-            "dominant_loss_component": min(delta_by_component, key=delta_by_component.get) if delta_by_component else None,
+            "dominant_loss_component": min(delta_by_component, key=delta_by_component.get)
+            if delta_by_component
+            else None,
             "factor_trace": details,
         }
         results.append((loss, result))

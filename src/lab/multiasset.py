@@ -307,8 +307,6 @@ def portfolio_liquidation_value(
         divisor = Decimal(100) if inst.asset_class == AssetClass.BOND else Decimal(1)
         if inst.asset_class != AssetClass.BOND and price.accrued_interest_per_100:
             raise MultiAssetError("accrued interest belongs only to bond instruments")
-        gross = holding.quantity * (
-            price.bid + (price.accrued_interest_per_100 if divisor == 100 else 0)
-        ) / divisor
+        gross = holding.quantity * (price.bid + (price.accrued_interest_per_100 if divisor == 100 else 0)) / divisor
         amount += fx.convert(gross, inst.quote_currency, reporting_currency, as_of=now, max_age=max_age)
     return amount

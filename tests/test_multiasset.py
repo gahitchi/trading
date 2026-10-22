@@ -36,7 +36,14 @@ def quotes():
 
 
 def asset(iid="SHARE.XNAS", kind=AssetClass.EQUITY):
-    return Instrument(iid, kind, "USD", D("1") if kind != AssetClass.BOND else D("1000"), D("0.01"), D("1") if kind != AssetClass.BOND else D("1000"))
+    return Instrument(
+        iid,
+        kind,
+        "USD",
+        D("1") if kind != AssetClass.BOND else D("1000"),
+        D("0.01"),
+        D("1") if kind != AssetClass.BOND else D("1000"),
+    )
 
 
 def test_direct_and_inverse_fx_conversions_use_correct_spread_side():
@@ -80,10 +87,21 @@ def test_spot_fx_buy_and_sell_create_currency_legs_not_a_security_holding():
     inst = eurusd()
     book = {"EUR": D("2000"), "USD": D("5000")}
     quote = MarketPrice(inst.instrument_id, D("1.10000"), D("1.10020"), T)
-    after_buy = cash_after_spot_trade(book, inst, side="BUY", base_quantity=D("1000"), market=quote, commission_quote=D("2"), as_of=T, max_age=AGE)
+    after_buy = cash_after_spot_trade(
+        book, inst, side="BUY", base_quantity=D("1000"), market=quote, commission_quote=D("2"), as_of=T, max_age=AGE
+    )
     assert after_buy == {"EUR": D("3000"), "USD": D("3897.80000")}
     assert book == {"EUR": D("2000"), "USD": D("5000")}
-    after_sell = cash_after_spot_trade(after_buy, inst, side="SELL", base_quantity=D("1000"), market=quote, commission_quote=D("2"), as_of=T, max_age=AGE)
+    after_sell = cash_after_spot_trade(
+        after_buy,
+        inst,
+        side="SELL",
+        base_quantity=D("1000"),
+        market=quote,
+        commission_quote=D("2"),
+        as_of=T,
+        max_age=AGE,
+    )
     assert after_sell["EUR"] == D("2000")
     assert after_sell["USD"] == D("4995.80000")
 
@@ -91,7 +109,15 @@ def test_spot_fx_buy_and_sell_create_currency_legs_not_a_security_holding():
 def test_fx_cash_only_funding_and_quote_freshness_fail_closed():
     inst = eurusd()
     quote = MarketPrice(inst.instrument_id, D("1.10000"), D("1.10020"), T)
-    params = dict(instrument=inst, side="BUY", base_quantity=D("1000"), market=quote, commission_quote=D("0"), as_of=T, max_age=AGE)
+    params = dict(
+        instrument=inst,
+        side="BUY",
+        base_quantity=D("1000"),
+        market=quote,
+        commission_quote=D("0"),
+        as_of=T,
+        max_age=AGE,
+    )
     with pytest.raises(MultiAssetError, match="insufficient"):
         cash_after_spot_trade({"USD": D("100")}, **params)
     with pytest.raises(MultiAssetError, match="stale"):
@@ -110,19 +136,28 @@ def test_bonds_include_accrued_interest_and_equities_use_bid_for_sale_value():
         "SHARE.XNAS": MarketPrice("SHARE.XNAS", D("50"), D("50.5"), T),
     }
     total = portfolio_liquidation_value(
-        cash={"USD": D("100")}, holdings=[Holding("BOND-ISIN", D("10000")), Holding("SHARE.XNAS", D("2"))],
-        instruments={"BOND-ISIN": bond, "SHARE.XNAS": equity}, prices=prices, fx=FXRates([]),
-        reporting_currency="USD", as_of=T, max_age=AGE,
+        cash={"USD": D("100")},
+        holdings=[Holding("BOND-ISIN", D("10000")), Holding("SHARE.XNAS", D("2"))],
+        instruments={"BOND-ISIN": bond, "SHARE.XNAS": equity},
+        prices=prices,
+        fx=FXRates([]),
+        reporting_currency="USD",
+        as_of=T,
+        max_age=AGE,
     )
     assert total == D("10475")  # 100 + 10000*(101.5+1.25)/100 + 2*50
 
 
 def test_cross_currency_equity_cash_and_fx_portfolio_valutation():
     value = portfolio_liquidation_value(
-        cash={"EUR": D("100"), "USD": D("110")}, holdings=[Holding("SHARE.XNAS", D("2"))],
+        cash={"EUR": D("100"), "USD": D("110")},
+        holdings=[Holding("SHARE.XNAS", D("2"))],
         instruments={"SHARE.XNAS": asset()},
         prices={"SHARE.XNAS": MarketPrice("SHARE.XNAS", D("50"), D("50.5"), T)},
-        fx=quotes(), reporting_currency="EUR", as_of=T, max_age=AGE,
+        fx=quotes(),
+        reporting_currency="EUR",
+        as_of=T,
+        max_age=AGE,
     )
     # Converting each balance/position separately can differ at the last
     # Decimal context digit from converting their rounded aggregate.
@@ -132,9 +167,13 @@ def test_cross_currency_equity_cash_and_fx_portfolio_valutation():
 def test_missing_pricing_short_positions_duplicate_holding_and_fx_security_rejected():
     stock = asset()
     kwargs = dict(
-        cash={}, instruments={"SHARE.XNAS": stock},
+        cash={},
+        instruments={"SHARE.XNAS": stock},
         prices={"SHARE.XNAS": MarketPrice("SHARE.XNAS", D("10"), D("11"), T)},
-        fx=FXRates([]), reporting_currency="USD", as_of=T, max_age=AGE,
+        fx=FXRates([]),
+        reporting_currency="USD",
+        as_of=T,
+        max_age=AGE,
     )
     with pytest.raises(MultiAssetError, match="short securities"):
         portfolio_liquidation_value(holdings=[Holding("SHARE.XNAS", D("-1"))], **kwargs)
@@ -142,10 +181,14 @@ def test_missing_pricing_short_positions_duplicate_holding_and_fx_security_rejec
         portfolio_liquidation_value(holdings=[Holding("SHARE.XNAS", D("1")), Holding("SHARE.XNAS", D("1"))], **kwargs)
     with pytest.raises(MultiAssetError, match="spot FX"):
         portfolio_liquidation_value(
-            cash={}, holdings=[Holding("EUR.USD.SPOT", D("1000"))],
+            cash={},
+            holdings=[Holding("EUR.USD.SPOT", D("1000"))],
             instruments={"EUR.USD.SPOT": eurusd()},
             prices={"EUR.USD.SPOT": MarketPrice("EUR.USD.SPOT", D("1.1000"), D("1.1002"), T)},
-            fx=quotes(), reporting_currency="USD", as_of=T, max_age=AGE,
+            fx=quotes(),
+            reporting_currency="USD",
+            as_of=T,
+            max_age=AGE,
         )
 
 
