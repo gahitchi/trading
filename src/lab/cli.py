@@ -198,7 +198,9 @@ def cmd_null(cfg, a):
     comp, results = experiments.compare(cfg, [spec], tickers, period, frames)
     _print_table(comp)
     print(f"\nnoise floor: {a.samples} block-bootstrap resamples of the real data...")
-    nt = experiments.null_test(cfg, spec, tickers, period, a.samples, frames, observed_edge=comp.rows[1]["sharpe_edge"])
+    nt = experiments.null_test(
+        cfg, spec, tickers, period, a.samples, frames, workers=a.workers, observed_edge=comp.rows[1]["sharpe_edge"]
+    )
     print(
         f"observed Sharpe edge {nt['observed_sharpe_edge']:+.2f} | noise: mean {nt['null_mean']:+.2f}, "
         f"sd {nt['null_std']:.2f}, 95th pct {nt['null_p95']:+.2f} | p = {nt['p_value']:.3f}"
@@ -679,6 +681,7 @@ def build_parser() -> argparse.ArgumentParser:
     n = sub.add_parser("null-test", help="test a signal against the bootstrap noise floor")
     n.add_argument("signal")
     n.add_argument("--samples", type=int, default=30)
+    n.add_argument("--workers", type=int, default=None, help="parallel null-test workers (default: at most 4)")
     period_args(n)
     n.set_defaults(fn=cmd_null)
 

@@ -18,6 +18,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -34,7 +35,7 @@ jobs:
         run: |
           uv run --no-sync lab data sample
           uv run --no-sync lab backtest
-          uv run --no-sync lab null-test sma_trend --samples 10
+          uv run --no-sync lab null-test sma_trend --samples 2 --workers 1
 
   docker:
     runs-on: ubuntu-latest

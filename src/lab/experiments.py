@@ -347,8 +347,12 @@ def null_test(
     if observed_edge is None:
         comp, _ = compare(cfg, [spec], tickers, period, frames)
         observed_edge = comp.rows[1]["sharpe_edge"] if len(comp.rows) > 1 else 0.0
+    if samples < 2:
+        raise ValueError("null test requires at least two samples for a nondegenerate distribution")
+    if workers is not None and workers < 1:
+        raise ValueError("workers must be positive")
     jobs = [(str(cfg.root / "lab.toml"), spec, tickers, frames, period, s) for s in range(1, samples + 1)]
-    workers = workers or max(1, min(samples, (os.cpu_count() or 2) - 1))
+    workers = workers if workers is not None else max(1, min(samples, 4, (os.cpu_count() or 2) - 1))
     if workers == 1:
         edges = [_null_worker(j) for j in jobs]
     else:
