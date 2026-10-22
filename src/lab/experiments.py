@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass
@@ -350,7 +351,9 @@ def null_test(
     if workers == 1:
         measured = [_null_worker(j) for j in jobs]
     else:
-        with ProcessPoolExecutor(workers) as pool:
+        # spawn, never fork: forking a process whose NautilusTrader runtime already started native threads can
+        # deadlock (Python 3.13's Linux default is fork; it hung CI's offline example).
+        with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn")) as pool:
             measured = list(pool.map(_null_worker, jobs))
     edges = [m[0] for m in measured]
     pooled = [m[1] for m in measured]
