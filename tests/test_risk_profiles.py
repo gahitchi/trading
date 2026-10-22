@@ -81,3 +81,19 @@ def test_risk_profile_is_applied_by_real_config_loader(goog_lab, tmp_path):
     assert loaded.risk.max_short_gross == 0
     assert loaded.portfolio.target_vol == pytest.approx(0.06)
     assert loaded.portfolio.max_leverage <= 0.30
+
+
+def test_cli_reports_actual_effective_profile(goog_lab, capsys):
+    from lab.cli import build_parser, cmd_risk_profile
+
+    args = build_parser().parse_args(["risk-profile", "--json"])
+    assert args.fn is cmd_risk_profile
+    assert cmd_risk_profile(goog_lab, args) == 0
+    import json
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["profile"] == "custom"
+    assert report["risk"]["max_gross"] == goog_lab.risk.max_gross
+    assert report["portfolio"]["target_vol"] == goog_lab.portfolio.target_vol
+    assert not report["broker_shortability_verified"]
+    assert not report["real_money_authorized"]

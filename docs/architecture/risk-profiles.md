@@ -17,3 +17,5 @@ The profile target volatility is a risk-budget target, **not a forecast or guara
 The operator's existing `max_gross`, `max_short_gross`, `max_weight`, `max_drawdown`, `min_net`, `max_net` and portfolio leverage cap are never relaxed. In the checked-in configuration, gross stays at 1× and shorts remain forbidden even under Aggressive. To research leveraged/short portfolios, explicitly configure higher *hard limits*, verify simulated broker permissions, and obtain point-in-time borrow inventory and fees. **Do not interpret a risk profile as proof of borrow availability or real-money authorization.**
 
 The live-node harness must verify any activated short strategies against a simulated broker with an explicit `shortable` set. Real IBKR routing, live borrow availability and account house margins remain unverified until actual paper smoke testing. The system does not automatically change profiles when a model recommends more risk.
+
+Inspect the effective (not hypothetical) limits with `lab risk-profile --json`; this reports the configuration used by real agents and does not submit orders.
