@@ -67,6 +67,7 @@ class SignalAgentConfig(DataActorConfig):
         max_bar_age_days: float = MAX_BAR_AGE_DAYS,
         bar_spec: str = "1-DAY",
         session: Session | None = None,
+        ib_timestamps: bool = False,
         **_kwargs,
     ):
         """signal_time / session_close: New York clock times, HH:MM or HH:MM:SS (see agents/schedule.py).
@@ -86,6 +87,7 @@ class SignalAgentConfig(DataActorConfig):
         self.max_bar_age_days = max_bar_age_days
         self.bar_spec = bar_spec
         self.session = session
+        self.ib_timestamps = ib_timestamps
         # [(from_ns, until_ns or None), ...]: when this stock may be held. None = always.
         self.active_windows = active_windows
 
@@ -119,6 +121,10 @@ class SignalAgent(DataActor):
             self._process(bar, publish=True)
 
     def on_historical_bars(self, bars):
+        if self.config.ib_timestamps:
+            from lab.agents.broker_bars import normalize_ib_bar
+
+            bars = [normalize_ib_bar(b, self.config.session) for b in bars]
         now = market_now(self.clock, self.config.market_offset_days)
         close = parse_clock(self.config.session_close)
         fresh, future = [], 0

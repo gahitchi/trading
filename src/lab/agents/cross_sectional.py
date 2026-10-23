@@ -41,6 +41,7 @@ class CrossSectionalAgentConfig(DataActorConfig):
         max_bar_age_days: float = MAX_BAR_AGE_DAYS,
         bar_spec: str = "1-DAY",
         session=None,
+        ib_timestamps: bool = False,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. active_windows: ticker -> [(from_ns, until_ns)] or None."""
@@ -58,6 +59,7 @@ class CrossSectionalAgentConfig(DataActorConfig):
         self.max_bar_age_days = max_bar_age_days
         self.bar_spec = bar_spec  # the trading speed, as in SignalAgentConfig
         self.session = session  # agents.schedule.Session, or None (daily)
+        self.ib_timestamps = ib_timestamps
 
 
 class CrossSectionalAgent(DataActor):
@@ -105,6 +107,10 @@ class CrossSectionalAgent(DataActor):
             self.clock.set_time_alert_ns(f"xs-{at:%Y%m%d}", int(at.timestamp() * 1e9), callback=self._evaluate)
 
     def on_historical_bars(self, bars):
+        if self.config.ib_timestamps:
+            from lab.agents.broker_bars import normalize_ib_bar
+
+            bars = [normalize_ib_bar(b, self.config.session) for b in bars]
         now = market_now(self.clock, self.config.market_offset_days)
         close = parse_clock(self.config.session_close)
         for b in sorted(bars, key=lambda b: b.ts_event):

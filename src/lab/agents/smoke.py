@@ -1,4 +1,4 @@
-"""SmokeTest: verifies a live deployment end to end without trading."""
+"""SmokeTest: checks paper connectivity; optional test-order mode submits a real paper trade."""
 
 from __future__ import annotations
 

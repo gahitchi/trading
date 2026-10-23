@@ -230,6 +230,17 @@ def build_node(
     if session is None and needs_quick:
         raise ValueError(f"{', '.join(needs_quick)}: intraday technique(s); set [trading] speed to 1h, 15m or 5m")
     check_pacing(cfg, specs, tickers)
+    from lab.research.approval import ApprovalError, deployment_context, verify_approval
+
+    for spec in specs:
+        if spec.path is not None:
+            digest = verify_approval(
+                Path(spec.path).parent,
+                spec.params,
+                context=deployment_context(cfg.snapshot(), live=True, tickers=tickers),
+            )
+            if spec.sha256 != digest:
+                raise ApprovalError("paper node requires an approved, digest-bound research SignalSpec")
     node, iids = _base_node(cfg, tickers, clients)
     p = cfg.paper
     rt = runtime_dir(cfg)
@@ -243,6 +254,7 @@ def build_node(
         if session is not None
         else {"max_bar_age_days": MAX_BAR_AGE_DAYS, "weekdays_only": sc.weekdays_only}
     )
+    speed_kw["ib_timestamps"] = clients is None
 
     per_strategy = 1.0 / len(specs)
     sleeves, absolute = {}, set()

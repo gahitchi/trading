@@ -557,6 +557,7 @@ _HELD_LOCKS: list = []  # runtime locks: closing (or garbage-collecting) one wou
 def cmd_paper(cfg, a):
     from lab.notify import Notifier
     from lab.paper import RuntimeLocked, acquire_runtime_lock, build_node, build_smoke_node
+    from lab.research.approval import ApprovalError
     from lab.safety import SafetyError
 
     tickers = [t.upper() for t in (a.tickers or cfg.universe)]
@@ -572,7 +573,7 @@ def cmd_paper(cfg, a):
             ]
             _HELD_LOCKS.append(acquire_runtime_lock(cfg))  # referenced, so held until this process exits
             node = build_node(cfg, specs, tickers, adopt_broker=a.adopt_broker)
-    except (SafetyError, ValueError, SignalNotFound, RuntimeLocked) as e:
+    except (SafetyError, ValueError, SignalNotFound, RuntimeLocked, ApprovalError) as e:
         raise SystemExit(str(e)) from e
     what = "smoke test" if a.smoke else f"{len(a.signals)} signal(s) x {len(tickers)} stocks"
     print(f"paper node ready: {what}, account {cfg.paper.account_id} via {cfg.paper.host}:{cfg.paper.port}")

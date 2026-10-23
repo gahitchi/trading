@@ -64,6 +64,10 @@ class BorrowBook:
         """Return (APR, verifiable provenance) or fail closed; never use future data."""
         return self._rate(ticker, day, require_available=True)
 
+    def rate_held(self, ticker: str, day: date) -> tuple[float, dict]:
+        """Observed fee for an existing short; unavailable new inventory does not erase its fee."""
+        return self._rate(ticker, day, require_available=False)
+
     def _rate(self, ticker: str, day: date, *, require_available: bool) -> tuple[float, dict]:
         if type(day) is not date:
             raise ValueError("day must be a date")
@@ -177,7 +181,7 @@ class HistoricalBorrowLedger:
         while d is not None and d < day:
             for ticker, value in sorted(self.shorts.items()):
                 # A denial of new inventory does not make an existing loan free.
-                apr, proof = self.book._rate(ticker, d, require_available=False)
+                apr, proof = self.book.rate_held(ticker, d)
                 charge = value * apr / 365
                 fee += charge
                 evidence.append({**proof, "day": d.isoformat(), "apr": apr, "short_value": value, "fee": charge})

@@ -157,6 +157,8 @@ def config_fingerprint(cfg: LabConfig, n_tickers: int = 1) -> str:
         "warmup_start": str(cfg.warmup_start),
         "membership": file_digest(data.membership_path(cfg)),
         "borrow": file_digest(cfg.borrow.history),
+        "borrow_max_age_days": cfg.borrow.max_age_days,
+        "trading": asdict(cfg.trading),
     }
     return hashlib.sha256(json.dumps(ident, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
@@ -206,6 +208,7 @@ def compare(
     speed: str = "daily",
 ) -> tuple[Comparison, list[backtest.RunResult]]:
     sp = intraday.speed(speed)
+    cfg = replace(cfg, trading=replace(cfg.trading, speed=speed))
     if sp.daily:
         guard_period(cfg, period, holdout_ok=holdout_ok)
         frames = frames or data.load_many(cfg, tickers)
@@ -481,8 +484,9 @@ def intraday_split(cfg: LabConfig, frames: dict) -> tuple[Period, Period]:
 
     Free intraday history (Yahoo: ~60 days of 15m/5m, ~2 years of 1h) lies entirely inside the daily holdout,
     so intraday research cannot use the daily split: it reserves its own most recent sessions instead. The
-    split rolls forward as more sessions are stored (`lab data fetch --speed` keeps what it fetched before);
-    every holdout use is recorded in the same ledger, with its speed."""
+    initial boundary is persisted across speeds and universes. Fetching more data must never turn a
+    previously reserved session into training. Prior holdout ledger entries are respected on migration.
+    A new prospective research protocol is required to release more training data."""
     sessions = None
     for f in frames.values():
         days = set(pd.DatetimeIndex(f.index).normalize())
@@ -492,8 +496,30 @@ def intraday_split(cfg: LabConfig, frames: dict) -> tuple[Period, Period]:
         raise ValueError(f"intraday research needs at least 2 sessions stored for every stock (have {len(sessions)})")
     k = max(1, int(np.ceil(len(sessions) * cfg.trading.intraday_holdout)))
     k = min(k, len(sessions) - 1)
-    research = Period("intraday", sessions[0].date(), sessions[-k - 1].date())
-    holdout = Period("intraday_holdout", sessions[-k].date(), None)
+    boundary = sessions[-k].date()
+    path = cfg.results_dir / "intraday_partition.json"
+    cfg.results_dir.mkdir(parents=True, exist_ok=True)
+    prior = [date.fromisoformat(e["period"][0]) for e in holdout_ledger(cfg) if e.get("speed", "daily") != "daily"]
+    if prior:
+        boundary = min(boundary, *prior)
+    if not path.exists():
+        try:
+            with path.open("x") as f:
+                json.dump({"version": 1, "holdout_start": str(boundary)}, f)
+        except FileExistsError:
+            pass  # another process reserved it; read that boundary below
+    try:
+        record = json.loads(path.read_text())
+        if record["version"] != 1:
+            raise ValueError("unknown partition version")
+        boundary = min(date.fromisoformat(record["holdout_start"]), *(prior or [date.max]))
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise HoldoutUsed(f"unreadable intraday partition; restore its recorded boundary: {exc}") from exc
+    research_days = [s for s in sessions if s.date() < boundary]
+    if not research_days:
+        raise HoldoutUsed(f"all available intraday sessions are reserved holdout data from {boundary}")
+    research = Period("intraday", research_days[0].date(), research_days[-1].date())
+    holdout = Period("intraday_holdout", boundary, None)
     return research, holdout
 
 

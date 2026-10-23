@@ -9,11 +9,13 @@ AI-written code. Each research signal gets a worker that:
   1. imports only numpy and lab.signals.base (trusted code), with an empty environment
   2. locks itself down BEFORE it sees the generated source:
        - closes every inherited file descriptor except its two pipes and stderr, and sets
-         RLIMIT_NOFILE to 3, so no file or socket can be opened (open/socket fail with EMFILE)
+         RLIMIT_NOFILE to 3 as an additional resource cap
        - RLIMIT_FSIZE 0 (no file may be written), RLIMIT_NPROC 0 (no new processes),
          RLIMIT_AS and RLIMIT_CPU caps
-       - drops root to nobody if started as root (the Docker image runs unprivileged anyway),
-         so none of these limits can be raised again
+       - drops root to nobody when the host grants that capability (Docker runs unprivileged);
+         the mandatory syscall filter also forbids changing credentials or raising limits
+       - installs a default-deny Linux seccomp syscall filter (lab.research.syscalls);
+         file/network/process operations remain forbidden even if a descriptor is closed
   3. compiles the source, instantiates the one Signal subclass, then answers target() calls
 
 The parent sends price windows down a pipe and reads back only a fixed-format reply (a status
@@ -23,7 +25,8 @@ signal raises, which the SignalAgent turns into "go flat".
 
 Not a container: the worker shares the kernel and can read memory already in its own process
 (nothing secret is there: it is started with an empty environment). Network namespaces would
-need privileges the lab does not have; the descriptor limit is what stops sockets.
+need privileges the lab does not have; the syscall filter blocks sockets and path operations.
+Linux and libseccomp are required; failure to install the filter refuses the signal.
 """
 
 from __future__ import annotations
@@ -60,6 +63,7 @@ sys.path.insert(0, sys.argv[1])
 import math
 import numpy as np
 from lab.signals.base import Signal, Window, clamp_target, rsi, sma
+from lab.research.syscalls import install
 
 def _read(n):
     buf = b""
@@ -80,14 +84,21 @@ setup = json.loads(_read(n))
 # ---- lock down before touching the generated source -------------------------------------
 os.closerange(3, 65536)
 if os.geteuid() == 0:
-    os.setgroups([])
-    os.setgid(65534)
-    os.setuid(65534)
+    try:
+        os.setgroups([])
+        os.setgid(65534)
+        os.setuid(65534)
+    except PermissionError:
+        # Some container runtimes expose UID 0 without SETUID/SETGID capability.
+        # The mandatory syscall filter below is still the security boundary and
+        # forbids privilege changes, filesystem access and process creation.
+        pass
 for lim, val in ((resource.RLIMIT_NOFILE, 3), (resource.RLIMIT_FSIZE, 0), (resource.RLIMIT_NPROC, 0),
                  (resource.RLIMIT_AS, 1 << 30), (resource.RLIMIT_CPU, 900)):
     resource.setrlimit(lim, (val, val))
 
 try:
+    install()
     ns = {"__name__": "candidate_signal", "__builtins__": __builtins__}
     exec(compile(setup["source"], "signal.py", "exec"), ns)
     classes = [c for c in ns.values() if isinstance(c, type) and issubclass(c, Signal) and c is not Signal]
@@ -129,7 +140,9 @@ class IsolatedSignal(Signal):
             env={"OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1"},
             cwd="/",
             close_fds=True,
+            bufsize=0,
         )
+        os.set_blocking(self._proc.stdin.fileno(), False)
         self._path = label_path
         payload = json.dumps({"source": source, "params": params or {}}).encode()
         self._send(struct.pack("<I", len(payload)) + payload)
@@ -155,10 +168,21 @@ class IsolatedSignal(Signal):
 
     # ------------------------------------------------------------------ pipe
 
-    def _send(self, data: bytes) -> None:
+    def _send(self, data: bytes, timeout: float = STARTUP_TIMEOUT_S) -> None:
         try:
-            self._proc.stdin.write(data)
-            self._proc.stdin.flush()
+            fd = self._proc.stdin.fileno()
+            deadline = time.monotonic() + timeout
+            remaining = memoryview(data)
+            while remaining:
+                left = deadline - time.monotonic()
+                if left <= 0 or not select.select([], [fd], [], left)[1]:
+                    self.close()
+                    raise IsolationError(f"{self._path or 'research signal'}: worker write timed out")
+                try:
+                    count = os.write(fd, remaining)
+                    remaining = remaining[count:]
+                except BlockingIOError:
+                    continue
         except (BrokenPipeError, ValueError, OSError) as e:
             self.close()
             raise IsolationError(f"{self._path or 'research signal'}: worker is gone") from e
@@ -194,6 +218,8 @@ class IsolatedSignal(Signal):
         if self._proc is None:
             raise IsolationError(f"{self._path or 'research signal'}: worker is closed")
         rows = len(w.close)
+        if rows > 250 or any(len(a) != rows for a in (w.open, w.high, w.low, w.volume, w.minute, w.dates)):
+            raise IsolationError("window must contain at most 250 aligned rows")
         has_dates = not np.isnat(w.dates).all() if rows else False
         parts = [_HDR.pack(rows, int(has_dates), float(self.last))]
         parts += [
@@ -201,7 +227,7 @@ class IsolatedSignal(Signal):
         ]
         if has_dates:
             parts.append(np.ascontiguousarray(w.dates.astype("datetime64[D]").astype("<i8")).tobytes())
-        self._send(b"".join(parts))
+        self._send(b"".join(parts), CALL_TIMEOUT_S)
         status, value, msg = self._recv(CALL_TIMEOUT_S)
         self.calls += 1
         if status != 0:
@@ -213,6 +239,10 @@ class IsolatedSignal(Signal):
         if proc is not None and proc.poll() is None:
             proc.kill()
             proc.wait(timeout=5)
+        if proc is not None:
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
 
     def __del__(self):
         with contextlib.suppress(Exception):  # interpreter shutdown

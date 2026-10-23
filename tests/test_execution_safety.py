@@ -131,7 +131,7 @@ def test_dedicated_account_that_never_matched_needs_an_operator(goog_lab, goog, 
 # ---------------------------------------------------------------------------- G004-F1: an order nobody reports
 
 
-def test_unreported_journaled_order_halts_and_the_audited_adopt_resumes(goog_lab, goog, tmp_path):
+def test_unreported_journaled_order_cannot_be_erased_by_adoption(goog_lab, goog, tmp_path):
     h = LiveHarness(goog_lab, [SignalSpec("buy_and_hold")], {"GOOG": goog}, tmp_path / "h", first_day=D0)
     ledger = h.runtime / "ledger.json"
     ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -150,8 +150,8 @@ def test_unreported_journaled_order_halts_and_the_audited_adopt_resumes(goog_lab
     assert h.ledger()["pending"]  # the intent is kept, so a late fill would still be attributable
     assert _lab(h, "recover", "--reason", "IBKR shows no such order; it never left", "--adopt-broker") == 0
     h.session()
-    assert read_halt(h.runtime / "HALT") is None and h.ledger()["pending"] == {}
-    assert h.broker().positions()  # trading resumed
+    assert read_halt(h.runtime / "HALT")["kind"] == "reconciliation_mismatch"
+    assert h.ledger()["pending"] and not h.broker().positions()
 
 
 # ---------------------------------------------------------------------------- F15: who owns the state

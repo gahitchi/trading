@@ -181,13 +181,17 @@ is the readable log. Model calls are capped per cycle and logged in `research/us
 Generated code must pass a static check (one `Signal` subclass; imports limited to `math`, `numpy` and the signal
 helpers; no file, network, process or introspection access), and it is **never imported by the lab**: every
 research signal, in checks, backtests and paper trading alike, runs in its own worker process
-(`lab.research.isolation`). The worker closes inherited file descriptors, limits itself to three (no files,
-no sockets), may write no file and start no process, has memory and CPU caps and drops root, all before it
-compiles the code; the lab exchanges only price windows and fixed-format numbers with it. It shares the
-kernel (it is not a container), so still read the code before you promote it.
+(`lab.research.isolation`). Before compiling source, the worker installs a default-deny Linux seccomp
+filter that blocks filesystem, network, process creation and privilege-changing syscalls. It also closes
+inherited descriptors, caps memory/CPU/files/descriptors, and drops root when the host permits it. Linux
+with `libseccomp.so.2` is required; installation failure refuses the signal. IPC reads and writes have
+deadlines. It shares the kernel (it is not a VM), so still read the code before you promote it.
 
 `lab research promote` records `approval.json`: the hash of the exact source you were shown, of its train and
-test evidence, and the approved parameters. Paper trading refuses the signal if any of them has changed.
+test evidence, and the approved parameters. Both validation runs must already bind that source, parameters
+and configuration; changing code before promotion cannot reuse old evidence. Paper trading refuses changes
+to risk, portfolio, costs, margin, trading speed, capital or the validated universe. Existing unbound
+candidates must be revalidated, then promoted again. The research swarm currently requires daily speed.
 
 Statuses: `proposed` → `implemented` → `validated` → `candidate` → `promoted` (by you), or `broken`,
 `rejected_by_critic`, `failed_train`, `failed_test`, `error`. The AI swarm writes per-stock signals;
@@ -240,9 +244,12 @@ the broker's maximum, so the profile decides). `lab risk-profile` prints what is
 only when the delayed feed would have it (rounded up to whole bars) and orders fill at the next opening print; live,
 new exposure goes out as a limit order 1% (`limit_collar`) through the last price, cancelled and re-priced if still
 working a bar later, and exits as market orders. `flat_at_close = true` (default) exits everything in the session's
-last interval, so a quick book carries no overnight gap or financing. Order and turnover caps count every
-rebalance of the day. Intraday research has its own holdout, the last 20% of stored sessions
-(`intraday_holdout`), because free intraday history falls entirely inside the daily holdout. The research swarm
+last interval, using a timer independent of market-data arrival. Rejected orders, outages and exchange
+closures can still prevent an exit; being flat overnight is an objective, not a guarantee. Order and turnover caps count every
+rebalance of the day. Intraday research initially reserves the last 20% of stored sessions
+(`intraday_holdout`) and persists that boundary in `results/intraday_partition.json`; later downloads do
+not move reserved sessions into training. This is a separate protocol because free intraday history falls
+inside the daily holdout, not proof of independence from prior daily research. The research swarm
 works on daily bars. IBKR paces historical-data requests (60 per 10 minutes), so the node refuses setups that would
 exceed about 50: at 5m that is 25 stock-strategy pairs.
 
@@ -259,7 +266,9 @@ exceed about 50: at 5m that is 25 stock-strategy pairs.
   ledger/broker difference) survive restarts until `lab recover --reason ...` clears them (RUNBOOK §9).
 - **Reconciliation**: every order is journaled before it is sent; fills that happen while the agents are down are
   booked from IB's reports at start-up, once per trade ID. Before every rebalance the ledger must match IB's
-  positions, or it is a hard halt (`lab recover --adopt-broker` takes IB's positions deliberately).
+  positions, or it is a hard halt. `lab recover --adopt-broker` can take IB's positions only after all
+  pending orders have terminal reports. It cannot erase unknown order intents; a broker snapshot alone
+  does not prove that a late fill is impossible.
 - **Tested against a simulated IB paper broker**: the paper node itself, not a copy, runs in `tests/test_harness.py`
   (lab.sim), including a week of trading that must match the backtest fill for fill.
 - **Limits**: per-order notional cap, orders per day, daily buy turnover, NautilusTrader's order-rate limit, risk
