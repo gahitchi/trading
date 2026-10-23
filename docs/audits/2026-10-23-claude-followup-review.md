@@ -60,7 +60,7 @@ On C003's challenges: rounding a 15-minute delay up to an hourly bar is extra la
 
 ## Validation
 
-Final test results and publication identity are recorded in G008. The baseline full run produced 237 passes, six worker/sandbox failures and one deselection in 497.68 seconds; those six failures were caused by the host's `setgroups` restriction, not six independently reproduced strategy defects. The focused patched run passed 52 tests in 150.56 seconds, including the real-node lost-feed exit. A further execution/borrow set passed 20 tests.
+The final full suite passed all 257 selected tests (one LLM test deselected), with Ruff check/format, diff whitespace and collaboration checks passing. Publication identity and CI follow-up are recorded in G008. The baseline full run produced 237 passes, six worker/sandbox failures and one deselection in 497.68 seconds; those six failures were caused by the host's `setgroups` restriction, not six independently reproduced strategy defects. The focused patched run passed 52 tests in 150.56 seconds, including the real-node lost-feed exit. A further execution/borrow set passed 20 tests.
 
 The offline sample, backtest and ten-sample SMA null-test workflow passed. The null smoke result remained “indistinguishable from noise” (p ≈ 0.182); ten samples are not calibration. No real IB connection, paid LLM run or live-market order was made. Docker is unavailable locally; its build and nonroot runtime require remote CI. No new profitability recommendation is made.
 
