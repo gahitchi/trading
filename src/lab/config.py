@@ -106,6 +106,17 @@ class ResearchSettings:
 
 
 @dataclass(frozen=True)
+class TradingSettings:
+    """How fast the agents trade ([trading] in lab.toml; lab/intraday.py)."""
+
+    speed: str = "daily"  # daily | 1h | 15m | 5m; quick speeds need the dynamic or aggressive profile
+    flat_at_close: bool = True  # quick speeds: exit everything before the close, hold nothing overnight
+    data_delay_min: int = 15  # minutes the live data lags (IBKR paper without a subscription: 15; real-time: 0)
+    limit_collar: float = 0.01  # quick speeds, live: marketable limit at last price +/- this fraction
+    intraday_holdout: float = 0.2  # quick speeds: the last 20% of the stored sessions are the holdout
+
+
+@dataclass(frozen=True)
 class LimitSettings:
     """Absolute ceilings for every named risk profile ([limits] in lab.toml). Defaults: the broker's maximum
     (gross 1 / initial margin, i.e. 2x at Reg T, shorts up to that). The custom profile uses [risk] instead."""
@@ -144,6 +155,7 @@ class LabConfig:
     raw: dict = field(repr=False, default_factory=dict)
     borrow: BorrowSettings = field(default_factory=BorrowSettings)
     limits: LimitSettings | None = None
+    trading: TradingSettings = field(default_factory=TradingSettings)
 
     def period(self, name: str) -> Period:
         if name not in self.periods:
@@ -180,6 +192,32 @@ def find_config(start: Path | None = None) -> Path:
         if (d / "lab.toml").is_file():
             return d / "lab.toml"
     raise ConfigError("lab.toml not found in this directory or any parent")
+
+
+def _trading(raw: dict, profile: str) -> TradingSettings:
+    if not isinstance(raw, dict):
+        raise ConfigError("[trading] must be a table")
+    known = {"speed", "flat_at_close", "data_delay_min", "limit_collar", "intraday_holdout"}
+    if set(raw) - known:
+        raise ConfigError(f"[trading]: unknown keys {sorted(set(raw) - known)}")
+    t = TradingSettings(
+        speed=str(raw.get("speed", "daily")),
+        flat_at_close=bool(raw.get("flat_at_close", True)),
+        data_delay_min=int(raw.get("data_delay_min", 15)),
+        limit_collar=float(raw.get("limit_collar", 0.01)),
+        intraday_holdout=float(raw.get("intraday_holdout", 0.2)),
+    )
+    from lab.intraday import check_speed_allowed
+
+    try:
+        check_speed_allowed(t.speed, profile)
+    except ValueError as e:
+        raise ConfigError(f"[trading] {e}") from e
+    if not (0 <= t.data_delay_min <= 60 and 0 < t.limit_collar <= 0.1 and 0 < t.intraday_holdout < 1):
+        raise ConfigError(
+            "[trading]: need 0 <= data_delay_min <= 60, 0 < limit_collar <= 0.1, 0 < intraday_holdout < 1"
+        )
+    return t
 
 
 def _limits(raw: dict, m: MarginSettings) -> LimitSettings:
@@ -343,6 +381,7 @@ def load_config(path: str | Path | None = None) -> LabConfig:
             ceiling, replace(portfolio, max_leverage=limits.max_leverage, leverage=1.0), risk.profile
         )
     _check_risk(risk, margin)
+    trading = _trading(raw.get("trading", {}), risk.profile)
 
     research = ResearchSettings(
         provider=str(rs["provider"]),
@@ -402,4 +441,5 @@ def load_config(path: str | Path | None = None) -> LabConfig:
         raw=raw,
         borrow=borrow,
         limits=limits,
+        trading=trading,
     )

@@ -42,13 +42,14 @@ class DataError(Exception):
 # --------------------------------------------------------------------------- validation
 
 
-def validate(df: pd.DataFrame, ticker: str, *, drop_incomplete: bool = False) -> pd.DataFrame:
+def validate(df: pd.DataFrame, ticker: str, *, drop_incomplete: bool = False, keep_time: bool = False) -> pd.DataFrame:
     """Normalize and check a daily OHLCV frame. Returns a clean copy or raises DataError.
 
     Non-finite prices or volumes are always an error. A bar missing an open, high, low or close is an
     error too, unless drop_incomplete (vendor imports only, see save()): then it is dropped and its date
     recorded in out.attrs["dropped_incomplete"], which save() writes to the manifest, so the gap is never
-    silent (G007-F10). Missing sessions stay missing; no bar is ever invented."""
+    silent (G007-F10). Missing sessions stay missing; no bar is ever invented.
+    keep_time: intraday bars (lab.intraday): the time of day is kept instead of normalizing to the date."""
     if df is None or len(df) == 0:
         raise DataError(f"{ticker}: no rows")
     out = df.copy()
@@ -61,12 +62,12 @@ def validate(df: pd.DataFrame, ticker: str, *, drop_incomplete: bool = False) ->
     idx = pd.DatetimeIndex(pd.to_datetime(out.index))
     if idx.tz is not None:
         idx = idx.tz_convert("America/New_York").tz_localize(None)
-    out.index = idx.normalize()
-    out.index.name = "date"
+    out.index = idx if keep_time else idx.normalize()
+    out.index.name = "start" if keep_time else "date"
     out = out.sort_index()
     if out.index.has_duplicates:
         dups = out.index[out.index.duplicated()].unique()[:3]
-        raise DataError(f"{ticker}: duplicate dates, e.g. {[str(d.date()) for d in dups]}")
+        raise DataError(f"{ticker}: duplicate bars, e.g. {[str(d) for d in dups]}")
 
     out = out.apply(pd.to_numeric, errors="coerce")
     ohlc = ["open", "high", "low", "close"]
@@ -75,7 +76,7 @@ def validate(df: pd.DataFrame, ticker: str, *, drop_incomplete: bool = False) ->
         raise DataError(f"{ticker}: non-finite value on {out.index[infinite][0].date()}")
     out["volume"] = out["volume"].fillna(0.0)
     incomplete = out[ohlc].isna().any(axis=1)
-    dropped = [str(d.date()) for d in out.index[incomplete]]
+    dropped = [str(d) if keep_time else str(d.date()) for d in out.index[incomplete]]
     if dropped and not drop_incomplete:
         raise DataError(f"{ticker}: {len(dropped)} incomplete bar(s) (missing open/high/low/close), e.g. {dropped[:5]}")
     out = out[~incomplete]
@@ -280,9 +281,10 @@ def fetch_yfinance(ticker: str, start: date, end: date | None = None) -> pd.Data
     return df.rename(columns=str.lower)[COLUMNS]
 
 
-def import_csv(path: str | Path, date_column: str | None = None) -> pd.DataFrame:
+def import_csv(path: str | Path, date_column: str | None = None, *, keep_time: bool = False) -> pd.DataFrame:
     """CSV with a date column and open/high/low/close/volume (any case). Exports from
-    Databento, Interactive Brokers, Stooq or a spreadsheet all work."""
+    Databento, Interactive Brokers, Stooq or a spreadsheet all work. With keep_time (intraday bars), timestamps
+    with a UTC offset are converted to New York time; naive ones are taken as New York time already."""
     df = pd.read_csv(path)
     cols = {c.lower().strip(): c for c in df.columns}
     dc = date_column or next(
@@ -290,7 +292,12 @@ def import_csv(path: str | Path, date_column: str | None = None) -> pd.DataFrame
     )
     if dc is None:
         raise DataError(f"{path}: no date column found (pass --date-column)")
-    df.index = pd.to_datetime(df.pop(dc), utc=False)
+    raw = df.pop(dc).astype(str)
+    if keep_time and raw.str.contains(r"(?:[+-]\d\d:?\d\d|Z)$").any():
+        idx = pd.DatetimeIndex(pd.to_datetime(raw, utc=True)).tz_convert("America/New_York").tz_localize(None)
+    else:
+        idx = pd.DatetimeIndex(pd.to_datetime(raw, utc=False))
+    df.index = idx
     return df
 
 

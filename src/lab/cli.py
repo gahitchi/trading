@@ -93,6 +93,8 @@ def _print_table(comp: experiments.Comparison) -> None:
 
 def cmd_data_fetch(cfg, a):
     tickers = [t.upper() for t in a.tickers] or list(cfg.universe)
+    if a.speed != "daily":
+        return _fetch_intraday(cfg, tickers, a.speed)
     start = date.fromisoformat(a.start) if a.start else cfg.warmup_start
     failed = []
     for t in tickers:
@@ -106,7 +108,34 @@ def cmd_data_fetch(cfg, a):
     return 1 if failed else 0
 
 
+def _fetch_intraday(cfg, tickers, name):
+    from lab import intraday
+
+    sp = intraday.speed(name)
+    failed = []
+    for t in tickers:
+        try:
+            e = intraday.save(cfg, t, intraday.fetch_yfinance(t, sp), sp, source="yahoo_finance", adjusted=True)
+            dropped = f", {len(e['dropped_incomplete'])} incomplete bar(s) dropped" if e["dropped_incomplete"] else ""
+            print(
+                f"{t:<6} {e['rows']:>6} {sp.name} bars, {e['sessions']} sessions  {e['first']} .. {e['last']}{dropped}"
+            )
+        except data.DataError as err:
+            failed.append(t)
+            print(f"{t:<6} FAILED: {err}")
+    print(f"note: Yahoo serves about {sp.yahoo_period} of {sp.name} bars; intraday research rests on far less history")
+    return 1 if failed else 0
+
+
 def cmd_data_import(cfg, a):
+    if a.speed != "daily":
+        from lab import intraday
+
+        sp = intraday.speed(a.speed)
+        df = data.import_csv(a.file, a.date_column, keep_time=True)
+        e = intraday.save(cfg, a.ticker, df, sp, source=a.source or f"csv:{a.file}", adjusted=a.adjusted)
+        print(f"{a.ticker.upper()}: {e['rows']} {sp.name} bars, {e['sessions']} sessions {e['first']} .. {e['last']}")
+        return None
     df = data.import_csv(a.file, a.date_column)
     e = data.save(
         cfg,
@@ -145,14 +174,22 @@ def cmd_data_sample(cfg, a):
 
 
 def cmd_data_list(cfg, a):
+    from lab import intraday
+
     m = data.manifest(cfg)
-    if not m:
+    quick = {n: intraday.manifest(cfg, sp) for n, sp in intraday.SPEEDS.items() if not sp.daily}
+    if not m and not any(quick.values()):
         print("no data yet: lab data fetch")
         return
     for t, e in sorted(m.items()):
         print(
             f"{t:<6} {e['rows']:>5} days  {e['first']} .. {e['last']}  {e['source']}{'' if e['adjusted'] else ' (unadjusted)'}"
         )
+    for name, man in quick.items():
+        for t, e in sorted(man.items()):
+            print(
+                f"{t:<6} {e['rows']:>6} {name} bars, {e['sessions']} sessions  {e['first']} .. {e['last']}  {e['source']}"
+            )
 
 
 # ----------------------------------------------------------------------------- experiments
@@ -775,11 +812,23 @@ def build_parser() -> argparse.ArgumentParser:
     f = d.add_parser("fetch", help="download daily bars from Yahoo Finance (free)")
     f.add_argument("tickers", nargs="*")
     f.add_argument("--start")
+    f.add_argument(
+        "--speed",
+        default="daily",
+        choices=["daily", "1h", "15m", "5m"],
+        help="bar size; intraday history is short (Yahoo: ~2 years of 1h, ~60 days of 15m/5m)",
+    )
     f.set_defaults(fn=cmd_data_fetch)
     i = d.add_parser("import", help="import a CSV (date, open, high, low, close, volume)")
     i.add_argument("file")
     i.add_argument("--ticker", required=True)
     i.add_argument("--date-column")
+    i.add_argument(
+        "--speed",
+        default="daily",
+        choices=["daily", "1h", "15m", "5m"],
+        help="intraday CSVs: timestamps are bar STARTS in New York time, regular hours only",
+    )
     i.add_argument("--adjusted", action="store_true", help="prices are split/dividend adjusted")
     i.add_argument(
         "--survivorship-free",

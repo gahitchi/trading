@@ -73,7 +73,10 @@ class ReplayMarket:
         return float(((pd.Timestamp(ref[self.day]).normalize() + self.offset) - today).days)
 
     def stamp(self, d) -> int:
-        return int((pd.Timestamp(d).normalize() + self.offset + self.close_tod).tz_localize(NY).value)
+        # The compressed schedule stamps bars at the wall clock's time of day, which can fall in a DST change
+        # (01:00-02:00 on the first Sunday of November is ambiguous, 02:00-03:00 in March does not exist).
+        local = pd.Timestamp(d).normalize() + self.offset + self.close_tod
+        return int(local.tz_localize(NY, ambiguous=True, nonexistent="shift_forward").value)
 
     def bars(self, ticker: str, bt, start_ns: int | None) -> list[Bar]:
         df = self.frames[ticker]
