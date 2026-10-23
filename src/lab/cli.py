@@ -225,12 +225,56 @@ def _with_target_vol(cfg, a):
     return dataclasses.replace(cfg, portfolio=dataclasses.replace(cfg.portfolio, target_vol=tv))
 
 
+INTRADAY_DEFAULTS = ["orb", "intraday_momentum", "vwap_reversion"]
+
+
+def _speed(cfg, a) -> str:
+    from lab import intraday
+
+    name = getattr(a, "speed", None) or cfg.trading.speed
+    try:
+        intraday.check_speed_allowed(name, cfg.risk.profile)
+    except ValueError as e:
+        raise SystemExit(f"{e}; set [risk] profile in lab.toml") from e
+    return name
+
+
+def _intraday_period(cfg, a, tickers, name):
+    """The intraday research period (everything before the intraday holdout), or explicit dates inside it."""
+    from lab import intraday
+
+    frames = intraday.load_many(cfg, tickers, intraday.speed(name))
+    research, _ = experiments.intraday_split(cfg, frames)
+    if a.start or a.end:
+        start = date.fromisoformat(a.start) if a.start else research.start
+        end = date.fromisoformat(a.end) if a.end else research.end
+        return Period("custom", start, end), frames
+    return research, frames
+
+
 def cmd_backtest(cfg, a):
     if a.period == "holdout" and not (a.start or a.end):
         raise SystemExit("the holdout is guarded: use `lab holdout <signal>`")
     cfg = _with_target_vol(cfg, a)
-    specs = _specs(cfg, a.signals, a.set)
+    speed = _speed(cfg, a)
+    specs = _specs(cfg, a.signals or (INTRADAY_DEFAULTS if speed != "daily" else ["sma_trend", "rsi_reversion"]), a.set)
     tickers = _tickers(cfg, a.tickers)
+    if speed != "daily":
+        period, frames = _intraday_period(cfg, a, tickers, speed)
+        try:
+            comp, results = experiments.compare(cfg, specs, tickers, period, frames, speed=speed)
+        except experiments.HoldoutUsed as e:
+            raise SystemExit(str(e)) from e
+        _print_table(comp)
+        print(f"\n{comp.data_quality['intraday_history']}")
+        print(
+            f"speed {speed}: decisions on each bar as it arrives ({cfg.trading.data_delay_min:g} min data delay, "
+            f"rounded up to whole bars), fills at the next opening print; "
+            f"{'flat at every close' if cfg.trading.flat_at_close else 'positions held overnight'}"
+        )
+        out = experiments.save_run(cfg, f"backtest-{speed}", comp, results)
+        print(f"saved: {out.relative_to(cfg.root)}  (report: {(out / 'report.html').relative_to(cfg.root)})")
+        return
     comp, results = experiments.compare(cfg, specs, tickers, _period(cfg, a))
     _print_table(comp)
     for r in results:
@@ -331,12 +375,20 @@ def cmd_pbo(cfg, a):
 def cmd_holdout(cfg, a):
     (spec,) = _specs(cfg, [a.signal], a.set)
     tickers = _tickers(cfg, a.tickers)
+    speed = _speed(cfg, a)
     try:
-        experiments.check_holdout_allowed(cfg, spec, a.again or "")
+        experiments.check_holdout_allowed(cfg, spec, a.again or "", speed=speed)
     except experiments.HoldoutUsed as e:
         raise SystemExit(str(e)) from e
-    comp, results = experiments.compare(cfg, [spec], tickers, cfg.period("holdout"), holdout_ok=True)
-    experiments.record_holdout(cfg, spec, comp, a.again or "")
+    if speed == "daily":
+        comp, results = experiments.compare(cfg, [spec], tickers, cfg.period("holdout"), holdout_ok=True)
+    else:
+        from lab import intraday
+
+        frames = intraday.load_many(cfg, tickers, intraday.speed(speed))
+        _, period = experiments.intraday_split(cfg, frames)
+        comp, results = experiments.compare(cfg, [spec], tickers, period, frames, holdout_ok=True, speed=speed)
+    experiments.record_holdout(cfg, spec, comp, a.again or "", speed=speed)
     _print_table(comp)
     out = experiments.save_run(cfg, f"holdout-{spec.name}", comp, results)
     print(f"\nrecorded in results/holdout_ledger.json; saved: {out.relative_to(cfg.root)}")
@@ -852,7 +904,14 @@ def build_parser() -> argparse.ArgumentParser:
         x.add_argument("--set", action="append", help="override a parameter, e.g. sma_trend.fast=20")
 
     b = sub.add_parser("backtest", help="compare signals against buy-and-hold")
-    b.add_argument("signals", nargs="*", default=["sma_trend", "rsi_reversion"])
+    b.add_argument(
+        "signals", nargs="*", help="default: sma_trend rsi_reversion (daily); orb intraday_momentum vwap_reversion"
+    )
+    b.add_argument(
+        "--speed",
+        choices=["daily", "1h", "15m", "5m"],
+        help="default: [trading] speed; quick speeds need the dynamic or aggressive profile and intraday data",
+    )
     b.add_argument(
         "--target-vol", type=float, help="volatility target for every portfolio, e.g. 0.15 (also the control)"
     )
@@ -887,6 +946,7 @@ def build_parser() -> argparse.ArgumentParser:
     h.add_argument("--tickers", nargs="+")
     h.add_argument("--set", action="append")
     h.add_argument("--again", metavar="REASON", help="repeat a holdout run; the reason is recorded")
+    h.add_argument("--speed", choices=["daily", "1h", "15m", "5m"], help="default: [trading] speed")
     h.set_defaults(fn=cmd_holdout)
 
     r = sub.add_parser("research", help="the AI research swarm").add_subparsers(dest="sub", required=True)

@@ -10,6 +10,7 @@ from nautilus_trader.common import DataActor, DataActorConfig
 
 from lab.agents.messages import T_SIGNAL, SignalUpdate
 from lab.agents.schedule import FUTURE_TOLERANCE, MAX_BAR_AGE_DAYS, market_now, next_at, now_ny, parse_clock
+from lab.agents.signal_agent import bar_minute, history_days
 from lab.signals.base import CrossSectionalSignal, Window, clean_weights
 from lab.universe import bar_type
 
@@ -38,6 +39,9 @@ class CrossSectionalAgentConfig(DataActorConfig):
         session_close: str = "16:00",
         market_offset_days: float = 0.0,
         max_bar_age_days: float = MAX_BAR_AGE_DAYS,
+        bar_spec: str = "1-DAY",
+        interval_min: int | None = None,
+        data_delay_min: float = 0.0,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. active_windows: ticker -> [(from_ns, until_ns)] or None."""
@@ -53,6 +57,9 @@ class CrossSectionalAgentConfig(DataActorConfig):
         self.session_close = session_close
         self.market_offset_days = market_offset_days
         self.max_bar_age_days = max_bar_age_days
+        self.bar_spec = bar_spec  # the trading speed, as in SignalAgentConfig
+        self.interval_min = interval_min
+        self.data_delay_min = data_delay_min
 
 
 class CrossSectionalAgent(DataActor):
@@ -82,13 +89,19 @@ class CrossSectionalAgent(DataActor):
             self._schedule_live()
         else:
             for iid in self.config.instruments.values():
-                self.subscribe_bars(bar_type(iid))
+                self.subscribe_bars(bar_type(iid, self.config.bar_spec))
 
     def on_bar(self, bar):
         self._add(bar)
         if not self.pending and bar.ts_event >= self.config.trade_start_ns:
-            # Evaluate once all of today's bars are in: one minute after the close.
             self.pending = True
+            if self.config.interval_min:
+                # Every stock's bar for this interval arrives at the same moment: rank half a second later,
+                # before the ExecutionAgent decides (one second after the bars).
+                at_ns = self.clock.timestamp_ns() + 500_000_000
+                self.clock.set_time_alert_ns(f"xs-{at_ns}", at_ns, callback=self._evaluate)
+                return
+            # Evaluate once all of today's bars are in: one minute after the close.
             day = datetime.fromtimestamp(bar.ts_event / 1e9, NY)
             at = day.replace(hour=16, minute=1, second=0, microsecond=0)
             self.clock.set_time_alert_ns(f"xs-{at:%Y%m%d}", int(at.timestamp() * 1e9), callback=self._evaluate)
@@ -100,7 +113,10 @@ class CrossSectionalAgent(DataActor):
             t = datetime.fromtimestamp(b.ts_event / 1e9, NY)
             if t > now + FUTURE_TOLERANCE:
                 continue  # stamped after now: never used
-            if t.date() == now.date() and now.time() < close:
+            if self.config.interval_min:
+                if t > now - timedelta(minutes=self.config.data_delay_min):
+                    continue  # not yet in the (delayed) data: may still be forming
+            elif t.date() == now.date() and now.time() < close:
                 continue  # today's bar is still forming
             self._add(b)
 
@@ -118,6 +134,7 @@ class CrossSectionalAgent(DataActor):
                 float(bar.close),
                 float(bar.volume),
                 _session_date(bar.ts_event),
+                bar_minute(bar.ts_event, self.config.interval_min),
             )
         )
 
@@ -172,10 +189,10 @@ class CrossSectionalAgent(DataActor):
     # ------------------------------------------------------------------ paper mode
 
     def _request_history(self, *_):
-        days = int(self.signal.lookback * 1.6) + 15
+        days = history_days(self.signal.lookback, self.config.interval_min)
         start = market_now(self.clock, self.config.market_offset_days) - timedelta(days=days)
         for iid in self.config.instruments.values():
-            self.request_bars(bar_type(iid), start=start)
+            self.request_bars(bar_type(iid, self.config.bar_spec), start=start)
 
     def _schedule_live(self):
         fetch = next_at(now_ny(self.clock), self.config.signal_time, weekdays_only=self.config.weekdays_only)

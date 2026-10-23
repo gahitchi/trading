@@ -18,7 +18,7 @@ from lab.agents.schedule import (
     now_ny,
     parse_clock,
 )
-from lab.signals.base import Signal, Window, clamp_target
+from lab.signals.base import SESSION_MINUTES, Signal, Window, clamp_target
 from lab.universe import bar_type
 
 NY = ZoneInfo("America/New_York")
@@ -29,6 +29,22 @@ def _session_date(ts_ns: int):
     import numpy as np
 
     return np.datetime64(datetime.fromtimestamp(ts_ns / 1e9, NY).date(), "D")
+
+
+def bar_minute(ts_ns: int, interval_min: int | None) -> float:
+    """Window.minute: minutes since 09:30 at the bar's close (bars are stamped at their close). Daily: 390."""
+    if not interval_min:
+        return SESSION_MINUTES
+    t = datetime.fromtimestamp(ts_ns / 1e9, NY)
+    return (t.hour * 60 + t.minute + t.second / 60) - (9 * 60 + 30)
+
+
+def history_days(lookback: int, interval_min: int | None) -> int:
+    """Calendar days of history that cover `lookback` bars (weekends and a holiday included)."""
+    if not interval_min:
+        return int(lookback * 1.6) + 15
+    sessions = -(-max(lookback, 1) // -(-390 // interval_min))
+    return int(sessions * 1.6) + 6
 
 
 class SignalAgentConfig(DataActorConfig):
@@ -47,9 +63,14 @@ class SignalAgentConfig(DataActorConfig):
         weekdays_only: bool = True,
         market_offset_days: float = 0.0,
         max_bar_age_days: float = MAX_BAR_AGE_DAYS,
+        bar_spec: str = "1-DAY",
+        interval_min: int | None = None,
+        data_delay_min: float = 0.0,
         **_kwargs,
     ):
-        """signal_time / session_close: New York clock times, HH:MM or HH:MM:SS (see agents/schedule.py)."""
+        """signal_time / session_close: New York clock times, HH:MM or HH:MM:SS (see agents/schedule.py).
+        bar_spec / interval_min: the trading speed (lab.intraday); None = daily bars. data_delay_min: how late
+        the broker's bars are (IBKR paper without a subscription: 15)."""
         super().__init__()
         self.signal = signal
         self.sleeve = sleeve
@@ -62,6 +83,9 @@ class SignalAgentConfig(DataActorConfig):
         self.weekdays_only = weekdays_only
         self.market_offset_days = market_offset_days  # harness only (agents/schedule.market_now)
         self.max_bar_age_days = max_bar_age_days
+        self.bar_spec = bar_spec
+        self.interval_min = interval_min
+        self.data_delay_min = data_delay_min
         # [(from_ns, until_ns or None), ...]: when this stock may be held. None = always.
         self.active_windows = active_windows
 
@@ -74,7 +98,7 @@ class SignalAgent(DataActor):
     def __init__(self, config: SignalAgentConfig):
         super().__init__(config)
         self.signal = config.signal
-        self.bar_type = bar_type(config.instrument_id)
+        self.bar_type = bar_type(config.instrument_id, config.bar_spec)
         self.rows = deque(maxlen=max(self.signal.lookback, 1))
         self.last_ts = -1
         self.errors = 0
@@ -105,7 +129,10 @@ class SignalAgent(DataActor):
             if t > now + FUTURE_TOLERANCE:
                 future += 1  # never act on (or even learn from) a bar stamped after now
                 continue
-            if t.date() == now.date() and now.time() < close:
+            if self.config.interval_min:
+                if t > now - timedelta(minutes=self.config.data_delay_min):
+                    continue  # its close is not yet in the (delayed) data: the bar may still be forming
+            elif t.date() == now.date() and now.time() < close:
                 continue  # today's bar is still forming
             fresh.append(b)
         if future:
@@ -129,6 +156,7 @@ class SignalAgent(DataActor):
                 float(bar.close),
                 float(bar.volume),
                 _session_date(bar.ts_event),
+                bar_minute(bar.ts_event, self.config.interval_min),
             )
         )
         if len(self.rows) < self.signal.lookback:
@@ -168,7 +196,7 @@ class SignalAgent(DataActor):
     # ------------------------------------------------------------------ paper mode
 
     def _request_history(self, *_):
-        days = int(self.signal.lookback * 1.6) + 15  # calendar days covering `lookback` sessions
+        days = history_days(self.signal.lookback, self.config.interval_min)
         start = market_now(self.clock, self.config.market_offset_days) - timedelta(days=days)
         self.request_bars(self.bar_type, start=start)
 

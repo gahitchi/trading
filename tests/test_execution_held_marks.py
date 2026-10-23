@@ -70,7 +70,9 @@ def test_two_equally_stale_marks_do_not_agree():
 def _intake(stamps, now=NOW):
     published, events = [], []
     agent = SimpleNamespace(
-        config=SimpleNamespace(session_close="16:00", market_offset_days=0.0, max_bar_age_days=4.0, ticker="GOOG"),
+        config=SimpleNamespace(
+            session_close="16:00", market_offset_days=0.0, max_bar_age_days=4.0, ticker="GOOG", interval_min=None
+        ),
         clock=_Clock(now),
         last_ts=-1,
         errors=0,

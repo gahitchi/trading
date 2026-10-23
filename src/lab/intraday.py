@@ -140,8 +140,28 @@ def validate_intraday(df: pd.DataFrame, ticker: str, sp: Speed, *, drop_incomple
 def save(cfg: LabConfig, ticker: str, df: pd.DataFrame, sp: Speed, *, source: str, adjusted: bool) -> dict:
     ticker = ticker.upper()
     clean = validate_intraday(df, ticker, sp, drop_incomplete=True)
+    dropped = clean.attrs.get("dropped_incomplete", [])
     d = _dir(cfg, sp)
     d.mkdir(parents=True, exist_ok=True)
+    old_path = d / f"{ticker}.parquet"
+    m = manifest(cfg, sp)
+    rebased = None
+    if old_path.exists() and m.get(ticker, {}).get("adjusted") == adjusted:
+        # Keep what was fetched before: free vendors serve only the last weeks, so history grows by fetching
+        # regularly (at least every few weeks, so the copies overlap). Newer bars replace older copies.
+        old = validate_intraday(pd.read_parquet(old_path), ticker, sp)
+        both = old.index.intersection(clean.index)
+        if len(both):
+            # Adjusted prices are rebased by every later split and dividend: scale the kept history onto the new
+            # fetch's basis, measured on the bars both copies share.
+            ratio = float((clean.loc[both, "close"] / old.loc[both, "close"]).median())
+            if abs(ratio - 1) > 1e-6:
+                old = old.assign(**{k: old[k] * ratio for k in ("open", "high", "low", "close")})
+                old = old.assign(volume=old["volume"] / ratio)
+                rebased = ratio
+            clean = pd.concat([old[~old.index.isin(clean.index)], clean]).sort_index()
+            dropped = sorted(set(m[ticker].get("dropped_incomplete", [])) | set(dropped))
+        # No shared bar: the stored copy cannot be put on the new basis, so it is replaced, not stitched.
     clean.to_parquet(d / f"{ticker}.parquet")
     sessions = clean.index.normalize().unique()
     entry = {
@@ -152,9 +172,9 @@ def save(cfg: LabConfig, ticker: str, df: pd.DataFrame, sp: Speed, *, source: st
         "last": str(clean.index[-1]),
         "rows": len(clean),
         "sessions": len(sessions),
-        "dropped_incomplete": clean.attrs.get("dropped_incomplete", []),
+        "dropped_incomplete": dropped,
+        "rebased_history_by": rebased,
     }
-    m = manifest(cfg, sp)
     m[ticker] = entry
     (d / "manifest.json").write_text(json.dumps(m, indent=2, sort_keys=True))
     return entry

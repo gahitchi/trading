@@ -105,11 +105,11 @@ except BaseException as e:
 hdr = struct.Struct("<Iid")
 while True:
     rows, has_dates, last = hdr.unpack(_read(hdr.size))
-    cols = [np.frombuffer(_read(8 * rows), dtype="<f8") for _ in range(5)]
+    cols = [np.frombuffer(_read(8 * rows), dtype="<f8") for _ in range(6)]  # o, h, l, c, v, minute
     dates = np.frombuffer(_read(8 * rows), dtype="<i8").astype("datetime64[D]") if has_dates else None
     try:
         sig.last = last
-        raw = sig.target(Window(*cols, dates))
+        raw = sig.target(Window(*cols[:5], dates, cols[5]))
         value = float(raw)
         _reply(0, value)
     except BaseException as e:
@@ -196,7 +196,9 @@ class IsolatedSignal(Signal):
         rows = len(w.close)
         has_dates = not np.isnat(w.dates).all() if rows else False
         parts = [_HDR.pack(rows, int(has_dates), float(self.last))]
-        parts += [np.ascontiguousarray(a, dtype="<f8").tobytes() for a in (w.open, w.high, w.low, w.close, w.volume)]
+        parts += [
+            np.ascontiguousarray(a, dtype="<f8").tobytes() for a in (w.open, w.high, w.low, w.close, w.volume, w.minute)
+        ]
         if has_dates:
             parts.append(np.ascontiguousarray(w.dates.astype("datetime64[D]").astype("<i8")).tobytes())
         self._send(b"".join(parts))

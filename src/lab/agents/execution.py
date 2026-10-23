@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -32,6 +32,10 @@ NY = ZoneInfo("America/New_York")
 # Hard halts under which exits are still sent (everything else in a halt sends nothing at all).
 _REDUCE_ONLY_HALTS = {"circuit_breaker", "margin_call"}
 _KEEP_TRADE_IDS = 2000  # broker trade IDs remembered for de-duplication (far more than a few days of fills)
+
+
+def _ny_date(ts_ns: int):
+    return datetime.fromtimestamp(ts_ns / 1e9, NY).date()
 
 
 def _opening(current: float, target: float) -> float:
@@ -78,13 +82,20 @@ class ExecutionAgentConfig(StrategyConfig):
         max_bar_age_days: float = MAX_BAR_AGE_DAYS,
         cash_tolerance: float = 1.0,
         max_external_cash: float = 0.02,
+        interval_min: int | None = None,
+        flat_at_close: bool = False,
+        decision_delay_s: float = 1.0,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. margin: financing rates accrued on short and levered books.
 
         max_order_value:    no single buy larger than this (USD)
-        max_orders_per_day: hard cap on orders per rebalance day
-        max_daily_turnover: value bought per day / equity (1.0 = the whole portfolio)
+        max_orders_per_day: orders per session day (all rebalances of the day); past it, only reductions go out
+        max_daily_turnover: new exposure opened per session day / equity (1.0 = the whole portfolio)
+        interval_min:       None = daily (rebalance at rebalance_time after the close). A quick speed (60, 15, 5):
+                            rebalance decision_delay_s after each bar reaches the agents
+        flat_at_close:      quick speeds: exit everything in the session's last interval and open nothing new
+                            until the next session (no overnight gap risk, no overnight financing)
         """
         super().__init__()
         self.instruments = instruments
@@ -112,6 +123,9 @@ class ExecutionAgentConfig(StrategyConfig):
         self.max_bar_age_days = max_bar_age_days
         self.cash_tolerance = cash_tolerance
         self.max_external_cash = max_external_cash
+        self.interval_min = interval_min
+        self.flat_at_close = flat_at_close
+        self.decision_delay_s = decision_delay_s
         if live and borrow_book is not None:
             raise ValueError("historical borrow evidence cannot authorize live paper-broker orders")
         if state_path and borrow_book is not None:
@@ -160,6 +174,11 @@ class ExecutionAgent(Strategy):
         self.accrued_to = 0  # bar timestamp the financing has been accrued up to
         self.borrow_ledger = HistoricalBorrowLedger(config.borrow_book) if config.borrow_book is not None else None
         self.borrow_error: str | None = None
+        # Daily caps count every rebalance of a session day (quick speeds rebalance many times a day).
+        self.cap_day = None
+        self.cap_orders = 0
+        self.cap_opened = 0.0
+        self.flattened_day = None
         self.held: dict[str, float] = dict.fromkeys(config.instruments, 0.0)
         # Write-ahead order journal: every order is recorded here BEFORE it is sent, and stays
         # until the broker reports it closed. After a crash between order and fill, the fills are
@@ -186,6 +205,10 @@ class ExecutionAgent(Strategy):
             self.pending = dict(state.get("pending", {}))
             self.applied = list(state.get("applied_trades", []))
             self._applied_set = set(self.applied)
+            caps = state.get("daily_caps") or {}
+            self.cap_day = date.fromisoformat(caps["day"]) if caps.get("day") else None
+            self.cap_orders = int(caps.get("orders", 0))
+            self.cap_opened = float(caps.get("opened", 0.0))
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -248,8 +271,15 @@ class ExecutionAgent(Strategy):
         self.price_stamps[msg.ticker] = msg.ts
         self.price_ts = max(self.price_ts, msg.ts)
         self.new_data = True
-        if not self.alert_pending:
-            self._schedule(datetime.fromtimestamp(msg.ts / 1e9, NY))
+        if self.alert_pending:
+            return
+        if self.config.interval_min:
+            # Quick speed: decide just after the bar arrives (every stock's bar arrives at the same moment).
+            at = self.clock.timestamp_ns() + int(self.config.decision_delay_s * 1e9)
+            self.clock.set_time_alert_ns(f"rebalance-{at}", at, callback=self._on_alert)
+            self.alert_pending = True
+            return
+        self._schedule(datetime.fromtimestamp(msg.ts / 1e9, NY))
 
     def _on_approved(self, msg):
         self.weights.update(msg.weights)
@@ -265,6 +295,11 @@ class ExecutionAgent(Strategy):
 
     def _on_alert(self, event):
         self.alert_pending = False
+        if self.config.interval_min:
+            if self.new_data:
+                self.new_data = False
+                self.rebalance()
+            return  # the next bar schedules the next decision
         if self.new_data:
             self.new_data = False
             self.rebalance()
@@ -405,16 +440,17 @@ class ExecutionAgent(Strategy):
         verified_fee = None
         if self.borrow_ledger is not None and ts > self.accrued_to:
             verified_fee = self.borrow_ledger.close(datetime.fromtimestamp(ts / 1e9, NY).date(), self.held, self.prices)
-        if self.accrued_to and ts > self.accrued_to:
-            days = round((ts - self.accrued_to) / 86_400e9)
-            if days > 0:
-                _, short_value = self._book()
-                borrow, debit = mg.financing_cost(
-                    self.cash, short_value, days, self.config.margin, verified_borrow_fee=verified_fee
-                )
-                self.borrow_fees += borrow
-                self.financing += borrow + debit
-        if ts and ts > self.accrued_to:
+        # Calendar days between session dates: the book is charged for each night it is held. Intraday
+        # rebalances on the same date accrue nothing; a book that is flat at the close accrues nothing.
+        days = (_ny_date(ts) - _ny_date(self.accrued_to)).days if self.accrued_to and ts > self.accrued_to else 0
+        if days > 0:
+            _, short_value = self._book()
+            borrow, debit = mg.financing_cost(
+                self.cash, short_value, days, self.config.margin, verified_borrow_fee=verified_fee
+            )
+            self.borrow_fees += borrow
+            self.financing += borrow + debit
+        if ts and (not self.accrued_to or days > 0):
             self.accrued_to = ts
             self._save()  # persist every accrual: a restart must not re-accrue the span at a different book
 
@@ -456,6 +492,12 @@ class ExecutionAgent(Strategy):
                         "account": self.ledger_account,
                         "pending": self.pending,
                         "applied_trades": self.applied[-_KEEP_TRADE_IDS:],
+                        # A restart within a session must not reset the day's order and turnover caps.
+                        "daily_caps": {
+                            "day": self.cap_day.isoformat() if self.cap_day else None,
+                            "orders": self.cap_orders,
+                            "opened": self.cap_opened,
+                        },
                         "updated": datetime.now(UTC).isoformat(timespec="seconds"),
                     }
                 )
@@ -567,6 +609,21 @@ class ExecutionAgent(Strategy):
         if liquidate:
             self._liquidate()
             return
+        phase = self._session_phase()
+        if self.config.flat_at_close and phase in ("closing", "closed"):
+            day = self._now().date()
+            if any(self.held.values()):
+                if self.flattened_day != day:
+                    self.flattened_day = day
+                    self._risk_event(
+                        "flat_at_close",
+                        "last interval of the session: every position is exited, nothing new opens until the "
+                        "next session"
+                        if phase == "closing"
+                        else "market closed with positions still held: exits go out for the next opening print",
+                    )
+                self._liquidate()
+            return
 
         reduce_only = self.reduce_only or (halt is not None and halt["kind"] == "margin_call")
         orders = []
@@ -612,8 +669,9 @@ class ExecutionAgent(Strategy):
             orders.append((_opening(current, target), target, current, iid, ticker, price))
 
         orders.sort(key=lambda o: o[0] > 0)  # pure reductions first: they free margin and are never capped
-        sent = 0
-        opened = 0.0
+        day = _ny_date(self.price_ts) if self.price_ts else None
+        if day != self.cap_day:
+            self.cap_day, self.cap_orders, self.cap_opened = day, 0, 0.0
         for opening, target, current, iid, ticker, price in orders:
             if borrow_blocked and opening > 0:
                 # Do not open the long hedge of an unavailable short (or any other
@@ -627,10 +685,10 @@ class ExecutionAgent(Strategy):
                 self._risk_event(
                     "order_capped", f"{ticker}: new exposure capped at {self.config.max_order_value:,.0f} USD"
                 )
-            if opening > 0 and sent >= self.config.max_orders_per_day:
+            if opening > 0 and self.cap_orders >= self.config.max_orders_per_day:
                 self._risk_event("daily_cap", f"max {self.config.max_orders_per_day} orders/day reached; rest deferred")
                 break
-            if opening > 0 and (opened + opening * price) / snap.equity > self.config.max_daily_turnover:
+            if opening > 0 and (self.cap_opened + opening * price) / snap.equity > self.config.max_daily_turnover:
                 self._risk_event(
                     "daily_cap",
                     f"daily cap on new exposure {self.config.max_daily_turnover:.0%} of equity reached; rest deferred",
@@ -638,8 +696,24 @@ class ExecutionAgent(Strategy):
                 break
             diff = target - current
             if diff != 0 and self._submit(iid, ticker, diff):
-                sent += 1
-                opened += opening * price
+                self.cap_orders += 1
+                self.cap_opened += opening * price
+                self._save()
+
+    def _now(self) -> datetime:
+        return market_now(self.clock, self.config.market_offset_days)
+
+    def _session_phase(self) -> str | None:
+        """Quick speeds: where the decision falls in the regular session (09:30-16:00 New York). "open", or
+        "closing" when at most one interval remains (orders still fill on the session's last bars), or "closed".
+        None at the daily speed."""
+        if not self.config.interval_min:
+            return None
+        now = self._now()
+        t = now.hour * 60 + now.minute + now.second / 60
+        if t < 9 * 60 + 30 or t >= 16 * 60:
+            return "closed"
+        return "closing" if 16 * 60 - t <= self.config.interval_min else "open"
 
     def _consume_adopt(self) -> bool:
         """Apply an operator's `lab recover --adopt-broker` request (the broker's book is the truth). It runs

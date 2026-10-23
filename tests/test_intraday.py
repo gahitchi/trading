@@ -171,3 +171,72 @@ def test_default_config_is_balanced_and_daily():
     assert cfg.risk.profile == "balanced" and cfg.trading.speed == "daily" and cfg.risk.max_short_gross == 0
     fast = replace(cfg.trading, speed="1h")
     assert fast.speed == "1h"
+
+
+# ----------------------------------------------------------------------------- intraday techniques
+
+
+def _window(closes, minutes=15, prev_close=None, volume=None):
+    """One session of bars closing every `minutes` from 09:30+minutes, optionally after a previous session."""
+    from lab.signals.base import Window
+
+    c = np.asarray(closes, dtype=float)
+    minute = minutes * np.arange(1, len(c) + 1, dtype=float)
+    dates = np.full(len(c), np.datetime64("2026-03-03"))
+    if prev_close is not None:
+        c = np.concatenate([[prev_close], c])
+        minute = np.concatenate([[390.0], minute])
+        dates = np.concatenate([[np.datetime64("2026-03-02")], dates])
+    v = np.ones(len(c)) if volume is None else np.asarray(volume, dtype=float)
+    return Window(c, c + 0.1, c - 0.1, c, v, dates, minute)
+
+
+def _feed(sig, closes, **kw):
+    out = []
+    for i in range(1, len(closes) + 1):
+        t = sig.target(_window(closes[:i], **kw))
+        sig.last = t
+        out.append(t)
+    return out
+
+
+def test_orb_breaks_out_stops_at_the_midpoint_and_does_not_retry():
+    from lab.signals.builtin import BUILTIN
+
+    # Opening range (first 30 min = two 15m bars): 100..101 (+-0.1). Breakout above, then a fall below the mid.
+    targets = _feed(BUILTIN["orb"](), [100, 101, 100.8, 101.5, 101.2, 100.3, 101.6])
+    assert targets[:3] == [0, 0, 0]  # forming, then inside the range
+    assert targets[3:5] == [1, 1]  # closed above the range high: long, held above the midpoint
+    assert targets[5:] == [0, 0]  # stopped at the midpoint; no second trade today
+
+
+def test_orb_short_side_and_relative_volume_filter():
+    from lab.signals.builtin import BUILTIN
+
+    assert _feed(BUILTIN["orb"](), [100, 101, 99.5])[-1] == -1
+    assert _feed(BUILTIN["orb"](short=0), [100, 101, 99.5])[-1] == 0
+    # 'Stocks in play' only: no earlier session in the window to compare with -> no trade.
+    assert _feed(BUILTIN["orb"](min_rvol=2), [100, 101, 101.5])[-1] == 0
+
+
+def test_intraday_momentum_trades_the_last_half_hour_in_the_first_half_hours_direction():
+    from lab.signals.builtin import BUILTIN
+
+    sig = BUILTIN["intraday_momentum"]()
+    # +1% by 10:00 against the previous close of 100; bar i closes at 15*(i+1) minutes, 15:30 is bar 23.
+    targets = _feed(sig, [101.0] * 25, prev_close=100.0)
+    assert set(targets[:23]) == {0}  # before 15:30
+    assert targets[23:] == [1, 1]  # 15:30 onward: long
+    down = _feed(BUILTIN["intraday_momentum"](), [99.0] * 25, prev_close=100.0)
+    assert down[-1] == -1
+
+
+def test_vwap_reversion_fades_a_stretch_and_exits_at_vwap():
+    from lab.signals.builtin import BUILTIN
+
+    calm = [100 + 0.01 * ((-1) ** i) for i in range(6)]  # 90 minutes of quiet trading around 100
+    targets = _feed(BUILTIN["vwap_reversion"](), [*calm, 98.0, 99.0, 100.5])
+    assert targets[:6] == [0] * 6
+    assert targets[6] == 1  # far below VWAP: long
+    assert targets[7] == 1  # still below
+    assert targets[8] == 0  # back above VWAP: out

@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from lab import backtest, data, stats
+from lab import backtest, data, intraday, stats
 from lab.config import LabConfig, Period, RiskSettings
 from lab.signals.registry import SignalSpec
 
@@ -51,7 +51,13 @@ def effective_risk(cfg: LabConfig, n_tickers: int) -> RiskSettings:
 
 
 def run_spec(
-    cfg: LabConfig, spec: SignalSpec, tickers: list[str], frames: dict, period: Period, label: str | None = None
+    cfg: LabConfig,
+    spec: SignalSpec,
+    tickers: list[str],
+    frames: dict,
+    period: Period,
+    label: str | None = None,
+    speed: str = "daily",
 ) -> backtest.RunResult:
     """Equal-weight portfolio of `tickers`. With a point-in-time membership file, each day's
     capital is shared among the stocks that were in the universe that day."""
@@ -76,6 +82,7 @@ def run_spec(
         normalize_active=True,
         cross_sectional=xs,
         target_vol=cfg.portfolio.target_vol,
+        speed=speed,
     )
 
 
@@ -196,14 +203,25 @@ def compare(
     *,
     register: bool = True,
     holdout_ok: bool = False,
+    speed: str = "daily",
 ) -> tuple[Comparison, list[backtest.RunResult]]:
-    guard_period(cfg, period, holdout_ok=holdout_ok)
-    frames = frames or data.load_many(cfg, tickers)
-    results = [run_spec(cfg, BASELINE, tickers, frames, period, "buy_and_hold (control)")]
+    sp = intraday.speed(speed)
+    if sp.daily:
+        guard_period(cfg, period, holdout_ok=holdout_ok)
+        frames = frames or data.load_many(cfg, tickers)
+        control_cfg = cfg
+    else:
+        frames = frames or intraday.load_many(cfg, tickers, sp)
+        guard_intraday(cfg, period, frames, holdout_ok=holdout_ok)
+        # The control really holds: buy-and-hold at the same speed, through the nights (no flat-at-close).
+        control_cfg = replace(cfg, trading=replace(cfg.trading, flat_at_close=False))
+    results = [run_spec(control_cfg, BASELINE, tickers, frames, period, "buy_and_hold (control)", speed)]
     cand_specs = [s for s in specs if s != BASELINE]
-    results += [run_spec(cfg, s, tickers, frames, period) for s in cand_specs]
+    results += [run_spec(cfg, s, tickers, frames, period, speed=speed) for s in cand_specs]
     end = period.end or max(f.index[-1] for f in frames.values()).date()
     key = dataset_key(period, str(period.start), str(end), tickers)
+    if not sp.daily:
+        key = f"{sp.name}|{key}"  # intraday trials are their own family
 
     actives = [active_returns(r, results[0]) for r in results[1:]]
     if register:
@@ -238,7 +256,10 @@ def compare(
                 expected_max_sharpe=d["expected_max_sharpe_annual"],
             )
         rows.append(m)
-    return Comparison(period.name, str(period.start), str(end), tickers, rows, data.quality(cfg, tickers)), results
+    quality = data.quality(cfg, tickers)
+    if not sp.daily:
+        quality = {**quality, "speed": sp.name, "intraday_history": intraday.history_note(frames, sp)}
+    return Comparison(period.name, str(period.start), str(end), tickers, rows, quality), results
 
 
 # ------------------------------------------------------------------------- parameter studies
@@ -454,12 +475,45 @@ def guard_period(cfg: LabConfig, period: Period, *, holdout_ok: bool = False) ->
         )
 
 
+def intraday_split(cfg: LabConfig, frames: dict) -> tuple[Period, Period]:
+    """(research, holdout) for intraday bars: the holdout is the last `[trading] intraday_holdout` share of
+    the sessions stored for every stock (at least one session).
+
+    Free intraday history (Yahoo: ~60 days of 15m/5m, ~2 years of 1h) lies entirely inside the daily holdout,
+    so intraday research cannot use the daily split: it reserves its own most recent sessions instead. The
+    split rolls forward as more sessions are stored (`lab data fetch --speed` keeps what it fetched before);
+    every holdout use is recorded in the same ledger, with its speed."""
+    sessions = None
+    for f in frames.values():
+        days = set(pd.DatetimeIndex(f.index).normalize())
+        sessions = days if sessions is None else sessions & days
+    sessions = sorted(sessions or [])
+    if len(sessions) < 2:
+        raise ValueError(f"intraday research needs at least 2 sessions stored for every stock (have {len(sessions)})")
+    k = max(1, int(np.ceil(len(sessions) * cfg.trading.intraday_holdout)))
+    k = min(k, len(sessions) - 1)
+    research = Period("intraday", sessions[0].date(), sessions[-k - 1].date())
+    holdout = Period("intraday_holdout", sessions[-k].date(), None)
+    return research, holdout
+
+
+def guard_intraday(cfg: LabConfig, period: Period, frames: dict, *, holdout_ok: bool = False) -> None:
+    _, h = intraday_split(cfg, frames)
+    if not holdout_ok and (period.end or date.max) >= h.start:
+        raise HoldoutUsed(
+            f"{period.name} {period.start}..{period.end or 'latest'} overlaps the intraday holdout ({h.start}.."
+            "latest); only `lab holdout --speed ...` may use it, and it records every use"
+        )
+
+
 def holdout_ledger(cfg: LabConfig) -> list:
     p = cfg.results_dir / "holdout_ledger.json"
     return json.loads(p.read_text()) if p.exists() else []
 
 
-def record_holdout(cfg: LabConfig, spec: SignalSpec, comparison: Comparison, reason: str = "") -> None:
+def record_holdout(
+    cfg: LabConfig, spec: SignalSpec, comparison: Comparison, reason: str = "", speed: str = "daily"
+) -> None:
     ledger = holdout_ledger(cfg)
     ledger.append(
         {
@@ -468,6 +522,8 @@ def record_holdout(cfg: LabConfig, spec: SignalSpec, comparison: Comparison, rea
             "params": spec.params,
             "fingerprint": spec_fingerprint(spec),
             "reason_for_repeat": reason,
+            "speed": speed,
+            "period": [comparison.start, comparison.end],
             "tickers": comparison.tickers,
             "rows": comparison.rows,
         }
@@ -476,9 +532,9 @@ def record_holdout(cfg: LabConfig, spec: SignalSpec, comparison: Comparison, rea
     (cfg.results_dir / "holdout_ledger.json").write_text(json.dumps(ledger, indent=2, default=str))
 
 
-def check_holdout_allowed(cfg: LabConfig, spec: SignalSpec, reason: str = "") -> None:
+def check_holdout_allowed(cfg: LabConfig, spec: SignalSpec, reason: str = "", speed: str = "daily") -> None:
     fp = spec_fingerprint(spec)
-    prior = [e for e in holdout_ledger(cfg) if e["fingerprint"] == fp]
+    prior = [e for e in holdout_ledger(cfg) if e["fingerprint"] == fp and e.get("speed", "daily") == speed]
     if prior and not reason:
         raise HoldoutUsed(
             f"{spec.name} with these parameters already used the holdout on {prior[0]['at']}. "

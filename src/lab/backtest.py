@@ -3,11 +3,17 @@ Run the full agent system over historical data in NautilusTrader's backtest engi
 
 One run = one portfolio: a set of sleeves (signal x ticker x weight), all agents
 wired over the message bus exactly as in paper trading, replaying real opening
-prints and daily bars through a single simulated broker account.
+prints and bars through a single simulated broker account.
+
+Speeds (lab.intraday): daily bars by default; at a quick speed ("1h", "15m", "5m") every bar is
+decided on as soon as it reaches the agents (after the market-data delay) and filled at the next
+opening print, with optional flat-at-close. Equity metrics are computed on session closes in both
+cases, so daily and intraday results are comparable; the intraday drawdown is reported as well.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -18,7 +24,7 @@ from nautilus_trader.common import LogLevel
 from nautilus_trader.config import BacktestEngineConfig, LoggerConfig
 from nautilus_trader.model import AccountType, ActorId, Money, OmsType, TraderId
 
-from lab import costs
+from lab import costs, intraday
 from lab.agents import (
     AllocatorAgent,
     AllocatorAgentConfig,
@@ -34,9 +40,9 @@ from lab.agents import (
 from lab.agents.cross_sectional import CrossSectionalAgent, CrossSectionalAgentConfig
 from lab.borrow import BorrowBook, BorrowUnavailable
 from lab.config import LabConfig, RiskSettings
-from lab.metrics import summarize
+from lab.metrics import max_drawdown, summarize
 from lab.signals.base import Signal
-from lab.universe import NY, SIM, USD, equity, instrument_id, to_market_events
+from lab.universe import NY, SIM, USD, equity, instrument_id, to_intraday_events, to_market_events
 
 
 @dataclass
@@ -70,6 +76,8 @@ class RunResult:
     borrow_model: str = "assumed"
     borrow_fingerprint: str | None = None
     borrow_evidence: list = field(default_factory=list)
+    speed: str = "daily"
+    sessions: int = 0  # sessions traded (intraday history is short: say how much a result rests on)
 
 
 def _ns(d: date) -> int:
@@ -128,19 +136,34 @@ def run(
     normalize_active: bool = False,
     cross_sectional: list | None = None,
     target_vol: float = 0.0,
+    speed: str = "daily",
 ) -> RunResult:
-    """sleeves: per-stock signals. cross_sectional: [(CrossSectionalSignal, weight, tickers)]."""
+    """sleeves: per-stock signals. cross_sectional: [(CrossSectionalSignal, weight, tickers)].
+    speed: "daily" (data: daily frames) or a quick speed (data: lab.intraday frames of that bar size)."""
     cross_sectional = cross_sectional or []
     if not sleeves and not cross_sectional:
         raise ValueError("no sleeves")
     risk = risk or cfg.risk
     capital = capital or cfg.capital
+    sp = intraday.speed(speed)
+    quick = not sp.daily
+    if quick:
+        try:
+            intraday.check_speed_allowed(speed, cfg.risk.profile)
+        except ValueError as e:
+            raise ValueError(f"{e} (Gabriel's rule: quick trades are for the dynamic and aggressive profiles)") from e
+    daily_only = [x.signal.name for x in sleeves if getattr(x.signal, "intraday", False)] if not quick else []
+    if daily_only:
+        raise ValueError(f"{', '.join(sorted(set(daily_only)))}: intraday technique(s); they need a quick speed")
+    # Delayed data (minutes) rounded up to whole bars: a decision is made when the bar is known, never sooner.
+    delay_bars = math.ceil(cfg.trading.data_delay_min / sp.minutes) if quick else 0
+    bars_per_year = 252 * sp.bars_per_session
     p = cfg.portfolio
     # Shorts and leverage need a margin account (a cash account refuses short sales, as IBKR's would);
     # a long-only, unlevered run keeps the cash account it always had.
     margin_book = risk.max_short_gross > 0 or risk.max_gross > 1 or p.leverage > 1 or p.max_leverage > 1
     warm = pd.Timestamp(warmup_start or cfg.warmup_start)
-    last = pd.Timestamp(end) if end else None
+    last = pd.Timestamp(end) + pd.Timedelta(days=1) if end else None  # exclusive: all of the end date
     tickers = sorted({s.ticker for s in sleeves} | {t for _, _, ts in cross_sectional for t in ts})
     borrow_book = None
     if cfg.borrow.history is not None:
@@ -160,6 +183,10 @@ def run(
             if margin_book
             else {"allow_cash_borrowing": True}  # overnight gaps can briefly overdraw, as in a margin account
         )
+        if quick:
+            # Fills only at opening prints: a bar reaching the agents late (delayed data) must never be a price
+            # an order fills at.
+            venue_kw["bar_execution"] = False
         engine.add_venue(
             SIM,
             OmsType.NETTING,
@@ -177,17 +204,33 @@ def run(
             if t not in data:
                 raise ValueError(f"no data for {t}")
             df = data[t]
-            df = df[(df.index >= warm) & ((df.index <= last) if last is not None else True)]
+            df = df[(df.index >= warm) & ((df.index < last) if last is not None else True)]
             if df.empty:
                 raise ValueError(f"{t}: no data between {warm.date()} and {end}")
             iid = instrument_id(t, "SIM")
             iids[t] = iid
             frames[t] = df
             engine.add_instrument(equity(iid))
-            engine.add_data(to_market_events(df, iid, cfg.costs.open_print_fraction))
+            if quick:
+                engine.add_data(
+                    to_intraday_events(df, iid, cfg.costs.open_print_fraction, sp.minutes, sp.bar_spec(), delay_bars)
+                )
+            else:
+                engine.add_data(to_market_events(df, iid, cfg.costs.open_print_fraction))
 
         start_ns = _ns(start)
         windows = active_windows(frames, membership)
+        speed_kw = (
+            {
+                "bar_spec": sp.bar_spec(),
+                "interval_min": sp.minutes,
+                "data_delay_min": cfg.trading.data_delay_min,
+                # The latest bar must be this interval's: no older than the delay plus one bar, plus slack.
+                "max_bar_age_days": (sp.minutes * (1 + delay_bars) + 2) / 1440,
+            }
+            if quick
+            else {}
+        )
         signal_agents = []
         for i, s in enumerate(sleeves):
             a = SignalAgent(
@@ -199,6 +242,7 @@ def run(
                     instrument_id=iids[s.ticker],
                     trade_start_ns=start_ns,
                     active_windows=windows[s.ticker],
+                    **speed_kw,
                 )
             )
             signal_agents.append(a)
@@ -213,6 +257,7 @@ def run(
                     instruments={t: iids[t] for t in xs_tickers},
                     trade_start_ns=start_ns,
                     active_windows={t: windows[t] for t in xs_tickers},
+                    **speed_kw,
                 )
             )
             xs_agents.append(a)
@@ -227,9 +272,11 @@ def run(
                     normalize_active=normalize_active,
                     absolute_groups={sig.name for sig, _, _ in cross_sectional},
                     target_vol=target_vol,
-                    vol_window=cfg.portfolio.vol_window,
+                    # Intraday: at least five sessions of bars, so one quiet morning cannot lever the book up.
+                    vol_window=max(cfg.portfolio.vol_window, 5 * sp.bars_per_session if quick else 0),
                     max_leverage=p.max_leverage,
                     leverage=p.leverage,
+                    periods_per_year=bars_per_year,
                 )
             )
         )
@@ -259,6 +306,8 @@ def run(
                 capital=capital,
                 margin=cfg.margin,
                 borrow_book=borrow_book,
+                interval_min=sp.minutes,
+                flat_at_close=quick and cfg.trading.flat_at_close,
                 **(execution_overrides or {}),
             )
         )
@@ -273,6 +322,7 @@ def run(
             [pd.Timestamp(s.ts, tz="UTC").tz_convert(NY).normalize().tz_localize(None) for s in snaps]
         )
         eq = pd.Series([s.equity for s in snaps], index=idx, dtype=float)
+        every = pd.Series([s.equity for s in snaps], dtype=float)  # every decision, intraday included
         gross = pd.Series([s.gross for s in snaps], index=idx, dtype=float)
         eq = eq[~eq.index.duplicated(keep="last")]
         gross = gross[~gross.index.duplicated(keep="last")]
@@ -280,11 +330,14 @@ def run(
             # Prepend the starting capital on the day before the first decision.
             eq = pd.concat([pd.Series([capital], index=[eq.index[0] - pd.Timedelta(days=1)]), eq])
 
+        metrics = summarize(eq, fills=recorder.fills, gross=gross)
+        if quick and len(every) > 2:
+            metrics["intraday_max_drawdown"] = max_drawdown(pd.concat([pd.Series([capital]), every]))[0]
         result = RunResult(
             label=label
             or ", ".join(sorted({s.signal.label() for s in sleeves} | {x[0].label() for x in cross_sectional})),
             equity=eq,
-            metrics=summarize(eq, fills=recorder.fills, gross=gross),
+            metrics=metrics,
             fills=recorder.fills,
             risk_events=recorder.risk,
             gross=gross,
@@ -300,6 +353,8 @@ def run(
             borrow_model="historical_close_book" if borrow_book is not None else "assumed",
             borrow_fingerprint=borrow_book.fingerprint() if borrow_book is not None else None,
             borrow_evidence=execution.borrow_ledger.evidence if execution.borrow_ledger is not None else [],
+            speed=sp.name,
+            sessions=len(eq) - 1 if len(eq) else 0,
         )
     finally:
         engine.dispose()

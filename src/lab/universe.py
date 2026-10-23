@@ -40,8 +40,9 @@ def ticker_of(iid: InstrumentId) -> str:
     return str(iid.symbol)
 
 
-def bar_type(iid: InstrumentId) -> BarType:
-    return BarType.from_str(f"{iid}-1-DAY-LAST-EXTERNAL")
+def bar_type(iid: InstrumentId, spec: str = "1-DAY") -> BarType:
+    """spec: "1-DAY", "1-HOUR", "15-MINUTE" or "5-MINUTE" (lab.intraday.Speed.bar_spec())."""
+    return BarType.from_str(f"{iid}-{spec}-LAST-EXTERNAL")
 
 
 def equity(iid: InstrumentId) -> Equity:
@@ -97,6 +98,70 @@ def to_market_events(df: pd.DataFrame, iid: InstrumentId, open_print_fraction: f
                 Quantity(max(1, int(v[i])), 0),
                 int(t_close[i]),
                 int(t_close[i]),
+            )
+        )
+    return events
+
+
+OPEN_PRINT_LAG_NS = 5_000_000_000  # an intraday bar's opening print, 5 s after its start (see below)
+
+
+def to_intraday_events(
+    df: pd.DataFrame, iid: InstrumentId, open_print_fraction: float, minutes: int, spec: str, delay_bars: int
+) -> list:
+    """Intraday bars (indexed by bar START, New York, regular hours) as replay events:
+
+      start + 5 s           a trade at the bar's real opening price, the only price orders fill at
+      end + delay_bars bars the completed bar reaches the agents: ts_event is its real close, ts_init the
+                            moment it becomes known (Nautilus replays by ts_init)
+
+    With delayed market data (15 minutes for IBKR paper without a subscription), a decision on the bar that
+    closed at 10:00 is made at 10:15 and fills at the opening print of the 10:15 bar, never at a price the
+    agents could not have traded at. The delay is rounded UP to whole bars (1h bars with 15 min delay: one
+    hour), which is conservative. Orders decided after the last opening print of a session fill at the next
+    session's first one.
+    """
+    from lab.intraday import bar_end
+
+    bt = bar_type(iid, spec)
+    starts = pd.DatetimeIndex(df.index).as_unit("ns")
+    ends = pd.DatetimeIndex([bar_end(t, minutes) for t in starts]).as_unit("ns")
+    seen = ends + pd.Timedelta(minutes=minutes * delay_bars)
+
+    def ns(idx):
+        return idx.tz_localize(NY).tz_convert("UTC").asi8
+
+    t_open, t_end, t_seen = ns(starts) + OPEN_PRINT_LAG_NS, ns(ends), ns(seen)
+    if len(t_end) and not (1e18 < t_end[0] < 1e19):
+        raise ValueError(f"{iid}: timestamps are not UNIX nanoseconds ({t_end[0]})")
+    o, h, lo, c = (df[k].round(2).to_numpy() for k in ("open", "high", "low", "close"))
+    v = df["volume"].to_numpy()
+    sym = ticker_of(iid)
+    events = []
+    for i in range(len(df)):
+        hi, low = max(h[i], o[i], c[i]), min(lo[i], o[i], c[i])
+        size = max(1, int(v[i] * open_print_fraction))
+        events.append(
+            TradeTick(
+                iid,
+                Price(o[i], 2),
+                Quantity(size, 0),
+                AggressorSide.NO_AGGRESSOR,
+                TradeId(f"{sym}-open-{i}"),
+                int(t_open[i]),
+                int(t_open[i]),
+            )
+        )
+        events.append(
+            Bar(
+                bt,
+                Price(o[i], 2),
+                Price(hi, 2),
+                Price(low, 2),
+                Price(c[i], 2),
+                Quantity(max(1, int(v[i])), 0),
+                int(t_end[i]),
+                int(t_seen[i]),
             )
         )
     return events

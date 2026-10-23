@@ -1,8 +1,10 @@
 """
 The signal interface: the ONLY thing a strategy author (human or AI) writes.
 
-A Signal sees a read-only window of past daily bars (prices, volume and session
-dates), ending with the bar that just closed, and returns its desired exposure:
+A Signal sees a read-only window of past bars (prices, volume, session dates and the
+time of day), ending with the bar that just closed, and returns its desired exposure.
+Bars are daily by default; at a quick trading speed ([trading] speed = "1h", "15m" or
+"5m") each element is one intraday bar, so `lookback` counts bars, not days:
 
     0.0 = no position      1.0 = fully invested (its share of the portfolio)
 
@@ -20,18 +22,24 @@ import math
 
 import numpy as np
 
+SESSION_MINUTES = 390.0  # 09:30-16:00
+
 
 class Window:
-    """Read-only numpy arrays of the most recent `len(window)` daily bars, oldest first.
+    """Read-only numpy arrays of the most recent `len(window)` bars, oldest first.
 
     open, high, low, close, volume: float arrays
-    dates: numpy datetime64[D] array of the session dates (New York), for calendar
-           effects; e.g. day of month: (w.dates - w.dates.astype("datetime64[M]")).astype(int) + 1
+    dates:  numpy datetime64[D] array of the session dates (New York), for calendar
+            effects; e.g. day of month: (w.dates - w.dates.astype("datetime64[M]")).astype(int) + 1
+    minute: float array, minutes since the 09:30 open at each bar's CLOSE (New York): 30 for the bar
+            that closes at 10:00, 390 for a bar that closes at 16:00 (every daily bar). Intraday
+            techniques use it: the opening range is the bars with minute <= 30, a new session starts
+            where dates change, the last bar before the close has minute > 390 - bar size.
     """
 
-    __slots__ = ("close", "dates", "high", "low", "open", "volume")
+    __slots__ = ("close", "dates", "high", "low", "minute", "open", "volume")
 
-    def __init__(self, o, h, lo, c, v, dates=None):
+    def __init__(self, o, h, lo, c, v, dates=None, minute=None):
         for name, arr in (("open", o), ("high", h), ("low", lo), ("close", c), ("volume", v)):
             a = np.asarray(arr, dtype=float)
             a.setflags(write=False)
@@ -43,6 +51,9 @@ class Window:
         )
         d.setflags(write=False)
         object.__setattr__(self, "dates", d)
+        m = np.asarray(minute, dtype=float) if minute is not None else np.full(len(self.close), SESSION_MINUTES)
+        m.setflags(write=False)
+        object.__setattr__(self, "minute", m)
 
     def __setattr__(self, *_):
         raise AttributeError("Window is read-only")

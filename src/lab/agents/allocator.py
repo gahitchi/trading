@@ -22,6 +22,7 @@ class AllocatorAgentConfig(DataActorConfig):
         vol_window: int = 63,
         max_leverage: float = 1.0,
         leverage: float = 1.0,
+        periods_per_year: float = 252.0,
         **_kwargs,
     ):
         """sleeves: sleeve id ("signal:TICKER") -> (ticker, weight). Weights are fractions of equity.
@@ -36,12 +37,13 @@ class AllocatorAgentConfig(DataActorConfig):
         self.normalize_active = normalize_active
         self.absolute_groups = set(absolute_groups)
         # Volatility targeting: scale all weights by min(max_leverage, target_vol / ex-ante portfolio vol),
-        # estimated from the stocks' last `vol_window` daily returns (shorts included). 0 = off, and then
+        # estimated from the stocks' last `vol_window` bar returns (shorts included). 0 = off, and then
         # the weights are multiplied by the fixed `leverage`. The RiskAgent's limits apply afterwards.
         self.target_vol = target_vol
         self.vol_window = vol_window
         self.max_leverage = max_leverage
         self.leverage = leverage
+        self.periods_per_year = periods_per_year  # bars per year: 252 daily, 252 x bars per session intraday
 
 
 class AllocatorAgent(DataActor):
@@ -96,7 +98,7 @@ class AllocatorAgent(DataActor):
         rets = np.diff(np.log(prices), axis=1)
         cov = np.atleast_2d(np.cov(rets))
         w = np.array([weights[t] for t in held])
-        vol = math.sqrt(max(float(w @ cov @ w), 0.0) * 252)
+        vol = math.sqrt(max(float(w @ cov @ w), 0.0) * self.config.periods_per_year)
         return 1.0 if vol <= 0 else min(self.config.max_leverage, self.config.target_vol / vol)
 
     def _on_signal(self, msg):

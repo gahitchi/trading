@@ -1,6 +1,11 @@
-"""Hand-written signals: the baseline and two classic hypotheses."""
+"""Hand-written signals: the baseline, classic daily hypotheses, and intraday techniques.
+
+Intraday signals (`intraday = True`) need a quick trading speed ([trading] speed = "1h", "15m" or "5m"):
+they read Window.minute and the session dates, and are refused at the daily speed."""
 
 from __future__ import annotations
+
+import numpy as np
 
 from lab.signals.base import CrossSectionalSignal, Signal, Window, rsi, sma
 
@@ -126,5 +131,145 @@ class MomentumLongShort(CrossSectionalSignal):
         return {**{t: 0.5 / p["top"] for t in longs}, **{t: -0.5 / p["bottom"] for t in shorts}}
 
 
+# ----------------------------------------------------------------------------- intraday techniques
+
+
+def _session(w: Window) -> np.ndarray:
+    """Boolean mask of the bars in the window that belong to the current (latest) session."""
+    return w.dates == w.dates[-1]
+
+
+class OpeningRangeBreakout(Signal):
+    name = "orb"
+    intraday = True
+    description = (
+        "I1 opening range breakout (Crabel 1990; Zarattini & Aziz 2023): after the first `range_min` minutes, "
+        "go long when a bar closes above the opening range's high, short (short=1) below its low. The stop is "
+        "the range's midpoint; one trade per stock per session, flat by the close. `min_rvol` keeps only "
+        "'stocks in play': opening-range volume at least that multiple of the earlier sessions' in the window."
+    )
+    lookback = 80  # bars: a full 5-minute session plus, at 15m and 1h, earlier sessions for relative volume
+    defaults = {"range_min": 30, "short": 1, "min_rvol": 0.0}
+
+    def __init__(self, **params):
+        super().__init__(**params)
+        p = self.params
+        if not (5 <= p["range_min"] <= 120 and p["short"] in (0, 1) and 0 <= p["min_rvol"] <= 20):
+            raise ValueError("orb: need 5 <= range_min <= 120, short 0 or 1, 0 <= min_rvol <= 20")
+        self._traded: object = None  # the session date this stock already traded
+
+    def target(self, w: Window) -> float:
+        p = self.params
+        today = _session(w)
+        opening = today & (w.minute <= p["range_min"])
+        if w.minute[-1] <= p["range_min"] or not opening.any():
+            return 0.0  # the range is still forming (or the bars are too coarse to have one)
+        hi, lo = w.high[opening].max(), w.low[opening].min()
+        mid = (hi + lo) / 2
+        c = w.close[-1]
+        if self.last > 0:
+            return 0.0 if c < mid else 1.0
+        if self.last < 0:
+            return 0.0 if c > mid else -1.0
+        if self._traded == w.dates[-1]:
+            return 0.0  # stopped out once today: no second attempt
+        if p["min_rvol"] > 0:
+            earlier = (~today) & (w.minute <= p["range_min"])
+            days = np.unique(w.dates[earlier])
+            if len(days) == 0:
+                return 0.0
+            base = w.volume[earlier].sum() / len(days)
+            if base <= 0 or w.volume[opening].sum() < p["min_rvol"] * base:
+                return 0.0
+        if c > hi:
+            self._traded = w.dates[-1]
+            return 1.0
+        if c < lo and p["short"]:
+            self._traded = w.dates[-1]
+            return -1.0
+        return 0.0
+
+
+class IntradayMomentum(Signal):
+    name = "intraday_momentum"
+    intraday = True
+    description = (
+        "I2 market intraday momentum (Gao, Han, Li & Zhou 2018): the return from the previous close to the "
+        "first half hour predicts the last half hour. From the bar closing at `entry_min` minutes after the "
+        "open (360 = 15:30), hold in the direction of that first-half-hour return when it exceeds `threshold` "
+        "(short=1 allows the short side), flat otherwise and at every other time."
+    )
+    lookback = 80
+    defaults = {"first_min": 30, "entry_min": 360, "threshold": 0.0, "short": 1}
+
+    def __init__(self, **params):
+        super().__init__(**params)
+        p = self.params
+        if not (15 <= p["first_min"] < p["entry_min"] < 390 and 0 <= p["threshold"] < 0.2 and p["short"] in (0, 1)):
+            raise ValueError("intraday_momentum: need 15 <= first_min < entry_min < 390, 0 <= threshold < 0.2")
+
+    def target(self, w: Window) -> float:
+        p = self.params
+        today = _session(w)
+        if w.minute[-1] < p["entry_min"] or (~today).sum() == 0:
+            return 0.0
+        prev_close = w.close[~today][-1]
+        first = today & (w.minute >= p["first_min"])
+        if not first.any() or prev_close <= 0:
+            return 0.0
+        r = w.close[first][0] / prev_close - 1  # the first bar closing at or after first_min
+        if r > p["threshold"]:
+            return 1.0
+        if r < -p["threshold"] and p["short"]:
+            return -1.0
+        return 0.0
+
+
+class VwapReversion(Signal):
+    name = "vwap_reversion"
+    intraday = True
+    description = (
+        "I3 VWAP reversion: once `min_minutes` of the session have traded, fade a stretch away from the "
+        "session's volume-weighted average price larger than `band` standard deviations of the session's own "
+        "deviations (long below, short above with short=1); exit when the price is back at VWAP."
+    )
+    lookback = 80
+    defaults = {"band": 2.0, "min_minutes": 60, "short": 1}
+
+    def __init__(self, **params):
+        super().__init__(**params)
+        p = self.params
+        if not (0.5 <= p["band"] <= 5 and 15 <= p["min_minutes"] <= 300 and p["short"] in (0, 1)):
+            raise ValueError("vwap_reversion: need 0.5 <= band <= 5, 15 <= min_minutes <= 300, short 0 or 1")
+
+    def target(self, w: Window) -> float:
+        p = self.params
+        today = _session(w)
+        if w.minute[-1] < p["min_minutes"] or today.sum() < 4:
+            return 0.0
+        typical = (w.high[today] + w.low[today] + w.close[today]) / 3
+        vol = w.volume[today]
+        if vol.sum() <= 0:
+            return 0.0
+        vwap = np.cumsum(typical * vol) / np.cumsum(vol)
+        dev = w.close[today] / vwap - 1
+        scale = float(np.std(dev[:-1], ddof=1)) if len(dev) > 2 else 0.0
+        d = dev[-1]
+        if self.last > 0:
+            return 0.0 if d >= 0 else 1.0
+        if self.last < 0:
+            return 0.0 if d <= 0 else -1.0
+        if scale <= 0:
+            return 0.0
+        if d < -p["band"] * scale:
+            return 1.0
+        if d > p["band"] * scale and p["short"]:
+            return -1.0
+        return 0.0
+
+
 CROSS_SECTIONAL = {cls.name: cls for cls in (Momentum, MomentumLongShort)}
-BUILTIN = {cls.name: cls for cls in (BuyAndHold, SmaTrend, RsiReversion, Momentum, MomentumLongShort)}
+INTRADAY = {cls.name: cls for cls in (OpeningRangeBreakout, IntradayMomentum, VwapReversion)}
+BUILTIN = {
+    cls.name: cls for cls in (BuyAndHold, SmaTrend, RsiReversion, Momentum, MomentumLongShort, *INTRADAY.values())
+}
