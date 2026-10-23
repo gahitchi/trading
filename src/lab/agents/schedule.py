@@ -24,7 +24,9 @@ def parse_clock(value: str) -> time:
 
 
 def is_session_day(day: datetime, weekdays_only: bool) -> bool:
-    return not weekdays_only or day.weekday() < 5
+    from lab.exchange import is_session
+
+    return not weekdays_only or is_session(day.date())
 
 
 def next_at(after: datetime, at: str | time, *, weekdays_only: bool = True) -> datetime:
@@ -100,6 +102,11 @@ class Session:
         return d.replace(hour=self.open.hour, minute=self.open.minute, second=self.open.second, microsecond=0)
 
     def close_at(self, day: datetime) -> datetime:
+        if self.weekdays_only and self.seconds_per_minute == 60 and self.minutes == 390:
+            from lab.exchange import bounds
+
+            session = bounds(day.astimezone(NY).date())
+            return session[1] if session else self.open_at(day)
         return self.open_at(day) + self._m(self.minutes)
 
     def minute_of(self, t: datetime) -> float:
@@ -110,10 +117,13 @@ class Session:
         """Close times of the session's bars (the last bar is cut at the close)."""
         o, n, out = self.open_at(day), self.interval_min, []
         m = n
-        while m < self.minutes:
+        close = self.close_at(day)
+        if close <= o:
+            return []
+        while o + self._m(m) < close:
             out.append(o + self._m(m))
             m += n
-        out.append(o + self._m(self.minutes))
+        out.append(close)
         return out
 
     def phase(self, now: datetime) -> str:

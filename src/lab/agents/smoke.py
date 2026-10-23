@@ -9,6 +9,7 @@ from pathlib import Path
 from nautilus_trader.model import OrderSide, TimeInForce
 from nautilus_trader.trading import Strategy, StrategyConfig
 
+from lab.persistence import atomic_json, read_json
 from lab.safety import is_paper_account
 from lab.universe import bar_type
 
@@ -57,8 +58,27 @@ class SmokeTest(Strategy):
         self.test_order_id = None
         self.close_order_id = None
         self.done = False
+        self.state_path = Path(config.report_path).parent / "smoke-state.json"
+        self.intents = {}
+        self.seen_trades = set()
+        self.initial_positions = {}
+        self.had_fill = False
+        self.state_account = config.paper_account
+        if self.state_path.exists():
+            saved = read_json(self.state_path)
+            if saved.get("unresolved"):
+                self.state_account = saved.get("account")
+                self.intents = saved["intents"]
+                self.seen_trades = set(saved.get("trades", []))
+                self.initial_positions = saved["initial_positions"]
+                self.had_fill = saved.get("had_fill", False)
 
     def on_start(self):
+        if self.intents:
+            self._check("recovery", False, "prior smoke order intents require terminal reconciliation")
+            self._after(5, self._recover)
+            self._after(self.config.wait_s + 90, self._timeout)
+            return
         start = datetime.now(UTC) - timedelta(days=14)
         for t, iid in self.config.instruments.items():
             self.bars[t] = 0
@@ -118,6 +138,9 @@ class SmokeTest(Strategy):
                 iid, OrderSide.BUY, inst.make_qty(1), inst.make_price(px), time_in_force=TimeInForce.DAY
             )
             self.test_order_id = order.client_order_id
+            self.initial_positions = positions
+            self.intents[str(order.client_order_id)] = {"side": "BUY", "ticker": t, "qty": 1}
+            self._persist(True)
             self.order_events.append(f"submitted BUY 1 {t} LIMIT {px} (half the last close; a real paper order)")
             self.submit_order(order)
             return  # continues in on_order_accepted / on_order_rejected
@@ -131,30 +154,79 @@ class SmokeTest(Strategy):
     def on_order_canceled(self, ev):
         if ev.client_order_id == self.test_order_id:
             self.order_events.append("cancelled")
-            self._check("test order", True, "; ".join(self.order_events))
-            self._finish()
+            self._check("test order", not self.had_fill, "; ".join(self.order_events))
+            self._after(1, self._recover)
 
     def on_order_rejected(self, ev):
         if ev.client_order_id == self.test_order_id:
             self.order_events.append(f"rejected: {ev.reason}")
             self._check("test order", False, "; ".join(self.order_events))
-            self._finish()
+            self._after(1, self._recover)
 
     def on_order_filled(self, ev):
+        trade = str(ev.trade_id)
+        if trade in self.seen_trades:
+            return
+        self.seen_trades.add(trade)
         if ev.client_order_id == self.test_order_id:
+            self.had_fill = True
             # Unlikely, not impossible. Undo it, and fail: the operator must look at the account.
             self.order_events.append(f"UNEXPECTED FILL {ev.last_qty} @ {ev.last_px}")
             close = self.order_factory.market(
                 ev.instrument_id, OrderSide.SELL, ev.last_qty, time_in_force=TimeInForce.DAY
             )
             self.close_order_id = close.client_order_id
+            self.intents[str(close.client_order_id)] = {
+                "side": "SELL",
+                "ticker": str(ev.instrument_id.symbol),
+                "qty": float(ev.last_qty),
+            }
+            self._persist(True)
             self.submit_order(close)
             self.order_events.append(f"closing order {close.client_order_id} sent (SELL {ev.last_qty} at market)")
             self._check("test order", False, "; ".join(self.order_events) + "; check the paper account")
-        elif ev.client_order_id == self.close_order_id:
+        elif str(ev.client_order_id) in self.intents:
             self.order_events.append(f"closing order filled {ev.last_qty} @ {ev.last_px}")
             self._check("test order", False, "; ".join(self.order_events) + "; position closed, check the account")
+            self._persist(True)
+            self._after(1, self._recover)
+
+    def _persist(self, unresolved):
+        atomic_json(
+            self.state_path,
+            {
+                "version": 1,
+                "account": self.state_account,
+                "unresolved": unresolved,
+                "intents": self.intents,
+                "trades": sorted(self.seen_trades),
+                "initial_positions": self.initial_positions,
+                "had_fill": self.had_fill,
+            },
+        )
+
+    def _recover(self, _event):
+        from nautilus_trader.model import ClientOrderId
+
+        account = str(self.cache.account_id(self.config.venue))
+        if (
+            self.state_account != self.config.paper_account
+            or not is_paper_account(account)
+            or account.split("-", 1)[-1] != self.state_account
+        ):
+            self._check("recovery account", False, "journal account identity is missing or differs from the broker")
+            return self._finish()
+        terminal = all((o := self.cache.order(ClientOrderId(k))) is not None and o.is_closed for k in self.intents)
+        positions = {t: float(self.portfolio.net_position(iid)) for t, iid in self.config.instruments.items()}
+        flat = positions == self.initial_positions
+        if terminal and flat:
+            self._persist(False)
+            self._check("settled", True, "every journaled order terminal; initial positions restored")
             self._finish()
+        elif not self.done:
+            self._persist(True)
+            self._check("settled", False, "unresolved orders or changed positions; no replacement order permitted")
+            self._after(5, self._recover)
 
     def _timeout(self, _event):
         if not self.done:
@@ -165,10 +237,12 @@ class SmokeTest(Strategy):
     def _finish(self):
         if self.done:
             return
+        if self.intents and not self.checks.get("settled", {}).get("ok"):
+            self._check("settled", False, "terminal order and restored-position evidence is still missing")
         self.done = True
-        ok = all(c["ok"] for c in self.checks.values())
+        ok = bool(self.checks) and all(c["ok"] for c in self.checks.values())
         report = {"at": datetime.now(UTC).isoformat(timespec="seconds"), "passed": ok, "checks": self.checks}
         Path(self.config.report_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(self.config.report_path).write_text(json.dumps(report, indent=2))
+        atomic_json(self.config.report_path, report)
         self.log.info(f"smoke test {'PASSED' if ok else 'FAILED'}: {report}")
         self.shutdown_system(f"smoke test finished ({'passed' if ok else 'failed'})")

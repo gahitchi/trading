@@ -74,6 +74,11 @@ def read_halt(path: str | Path) -> dict | None:
     state.setdefault("history", [])
     if not isinstance(state["history"], list):
         state["history"] = []
+    state.setdefault("at", "unknown")
+    state.setdefault("reason", "unspecified")
+    for entry in state["history"]:
+        entry.setdefault("at", "unknown")
+        entry.setdefault("reason", "unspecified")
     return state
 
 
@@ -85,6 +90,13 @@ def halt_kinds(state: dict | None) -> set[str]:
 
 
 def set_halt(path: str | Path, kind: str, reason: str) -> dict:
+    from lab.persistence import file_lock
+
+    with file_lock(Path(path).with_name(Path(path).name + ".lock")):
+        return _set_halt(path, kind, reason)
+
+
+def _set_halt(path, kind, reason):
     if kind not in HARD_KINDS:
         raise ValueError(f"{kind!r} is not a hard halt kind ({sorted(HARD_KINDS)})")
     p = Path(path)
@@ -95,13 +107,20 @@ def set_halt(path: str | Path, kind: str, reason: str) -> dict:
     else:
         state = {"kind": kind, "reason": reason, "at": _now(), "history": []}
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=1))
-    tmp.replace(p)
+    from lab.persistence import atomic_json
+
+    atomic_json(p, state)
     return state
 
 
 def clear_halt(path: str | Path, operator_reason: str, *, audit: str | Path) -> dict | None:
+    from lab.persistence import file_lock
+
+    with file_lock(Path(path).with_name(Path(path).name + ".lock")):
+        return _clear_halt(path, operator_reason, audit=audit)
+
+
+def _clear_halt(path, operator_reason, *, audit):
     """Clear a hard halt. Requires a reason, which is appended to the audit log with the halt."""
     if not operator_reason or not operator_reason.strip():
         raise ValueError("a reason is required to clear a hard halt")
@@ -112,7 +131,8 @@ def clear_halt(path: str | Path, operator_reason: str, *, audit: str | Path) -> 
     record = {"cleared_at": _now(), "operator_reason": operator_reason.strip(), "halt": state}
     a = Path(audit)
     a.parent.mkdir(parents=True, exist_ok=True)
-    with a.open("a") as fh:
-        fh.write(json.dumps(record) + "\n")
-    p.unlink()
+    from lab.persistence import append_json, durable_unlink
+
+    append_json(a, record)
+    durable_unlink(p)
     return record

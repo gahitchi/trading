@@ -42,7 +42,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
-      - run: uv venv && uv pip install -e ".[dev]"
+      - run: uv sync --frozen --extra dev
       - run: uv run --no-sync pytest
       - name: offline example on real prices
         working-directory: examples/goog-offline

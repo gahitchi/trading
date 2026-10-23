@@ -62,7 +62,7 @@ def test_a_journaled_client_order_id_is_never_sent_again():
             return SimpleNamespace(client_order_id="O-REUSED")
 
     agent = SimpleNamespace(
-        config=SimpleNamespace(live=False),
+        config=SimpleNamespace(live=False, session=None),
         cache=SimpleNamespace(instrument=lambda iid: SimpleNamespace(make_qty=lambda q: q)),
         order_factory=Factory(),
         pending={"O-REUSED": {"ticker": "GOOG", "side": "BUY", "qty": 1, "ts": 0}},

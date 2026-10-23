@@ -14,7 +14,7 @@ cases, so daily and intraday results are comparable; the intraday drawdown is re
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
 
@@ -90,28 +90,22 @@ def _ns_close(d: date) -> int:
 
 
 def active_windows(frames: dict[str, pd.DataFrame], membership: dict | None) -> dict[str, list | None]:
-    """When each stock may be held: its point-in-time membership spells, cut short where
-    its data ends early (a delisting) so the exit can still fill at the last real open.
-    None means always (no membership file and data through the end)."""
+    """Use declared membership only. Missing terminal data is not delisting evidence."""
+    from lab.data import DataError
+
     ref_end = max(df.index[-1] for df in frames.values())
-    out: dict[str, list | None] = {}
+    out = {}
     for t, df in frames.items():
-        ends_early = df.index[-1] < ref_end - pd.Timedelta(days=5)
-        # The exit message goes out on the first inactive bar's close and fills at the next
-        # open, so the window must end two bars before the last one: the sell then fills at
-        # the last real open instead of against a stale price.
-        cutoff = df.index[max(0, len(df) - 3)].date() if ends_early else None
-        if membership is None and not ends_early:
-            out[t] = None
-            continue
         spells = membership.get(t, []) if membership is not None else [(None, None)]
-        windows = []
-        for a, b in spells:
-            until = b
-            if cutoff is not None:
-                until = min(until, cutoff) if until else cutoff
-            windows.append((_ns(a) if a else 0, _ns_close(until) if until else None))
-        out[t] = windows
+        ends_early = df.index[-1] < ref_end - pd.Timedelta(days=5)
+        # A known membership exit is executable only when two subsequent real
+        # bars remain (decision, then execution). Never invent an exit from EOF.
+        exit_limit = df.index[-3].date() if len(df) >= 3 else date.min
+        if ends_early and any(b is None or b > exit_limit for _, b in spells):
+            raise DataError(
+                f"{t}: terminal/delisting economics are not qualified; require a declared membership exit and subsequent real prices"
+            )
+        out[t] = None if membership is None else [(_ns(a) if a else 0, _ns_close(b) if b else None) for a, b in spells]
     return out
 
 
@@ -141,6 +135,9 @@ def run(
 ) -> RunResult:
     """sleeves: per-stock signals. cross_sectional: [(CrossSectionalSignal, weight, tickers)].
     speed: "daily" (data: daily frames) or a quick speed (data: lab.intraday frames of that bar size)."""
+    from lab.config import validate_effective
+
+    validate_effective(cfg)
     cross_sectional = cross_sectional or []
     if not sleeves and not cross_sectional:
         raise ValueError("no sleeves")
@@ -148,7 +145,10 @@ def run(
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate sleeve identity: use each signal name once per ticker")
     risk = risk or cfg.risk
-    capital = capital or cfg.capital
+    capital = cfg.capital if capital is None else capital
+    validate_effective(
+        replace(cfg, risk=risk, capital=capital, portfolio=replace(cfg.portfolio, target_vol=target_vol))
+    )
     sp = intraday.speed(speed)
     quick = not sp.daily
     if quick:
@@ -161,6 +161,11 @@ def run(
         raise ValueError(f"{', '.join(sorted(set(daily_only)))}: intraday technique(s); they need a quick speed")
     # Delayed data (minutes) rounded up to whole bars: a decision is made when the bar is known, never sooner.
     delay_bars = math.ceil(cfg.trading.data_delay_min / sp.minutes) if quick else 0
+    if quick:
+        for sleeve in sleeves:
+            intraday.check_technique(
+                sleeve.signal.name, sleeve.signal.params, sp.minutes, delay_bars * sp.minutes, cfg.trading.flat_at_close
+            )
     bars_per_year = 252 * sp.bars_per_session
     p = cfg.portfolio
     # Shorts and leverage need a margin account (a cash account refuses short sales, as IBKR's would);
@@ -313,6 +318,8 @@ def run(
                 session=session,
                 flat_at_close=quick and cfg.trading.flat_at_close,
                 max_gross=risk.max_gross,
+                risk_limits=risk,
+                limit_collar=cfg.trading.limit_collar,
                 **(execution_overrides or {}),
             )
         )
@@ -322,6 +329,13 @@ def run(
         if execution.borrow_error:
             raise BorrowUnavailable(f"backtest invalid: {execution.borrow_error}")
 
+        # The engine stops at its last market event; a timer one second later
+        # never fires. Still value the final fills at the final completed marks.
+        if execution.price_ts:
+            unsafe = execution._unsafe_held_marks()
+            if unsafe:
+                raise ValueError(f"cannot value final held positions: {unsafe}")
+            recorder.equity.append(execution.snapshot())
         snaps = recorder.equity
         idx = pd.DatetimeIndex(
             [pd.Timestamp(s.ts, tz="UTC").tz_convert(NY).normalize().tz_localize(None) for s in snaps]
@@ -363,4 +377,7 @@ def run(
         )
     finally:
         engine.dispose()
+        for signal in [s.signal for s in sleeves] + [s for s, _, _ in cross_sectional]:
+            if hasattr(signal, "close"):
+                signal.close()
     return result

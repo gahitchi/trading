@@ -26,6 +26,7 @@ from lab.agents.schedule import MAX_BAR_AGE_DAYS, bar_freshness, market_now, nex
 from lab.borrow import BorrowBook, BorrowUnavailable, HistoricalBorrowLedger
 from lab.config import MarginSettings
 from lab.halt import halt_kinds, read_halt, set_halt
+from lab.persistence import atomic_json, read_json
 from lab.safety import is_paper_account, read_kill_switch
 
 NY = ZoneInfo("America/New_York")
@@ -87,6 +88,7 @@ class ExecutionAgentConfig(StrategyConfig):
         decision_delay_s: float = 1.0,
         limit_collar: float = 0.01,
         max_gross: float | None = None,
+        risk_limits=None,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. margin: financing rates accrued on short and levered books.
@@ -135,6 +137,7 @@ class ExecutionAgentConfig(StrategyConfig):
         # The risk limit on gross exposure (fraction of equity): new exposure sent beside unfilled reductions
         # must fit under it with the whole current book. None: nothing is added until reductions settle.
         self.max_gross = max_gross
+        self.risk_limits = risk_limits
         if live and borrow_book is not None:
             raise ValueError("historical borrow evidence cannot authorize live paper-broker orders")
         if state_path and borrow_book is not None:
@@ -201,7 +204,9 @@ class ExecutionAgent(Strategy):
         self.applied: list[str] = []
         self._applied_set: set[str] = set()
         if config.state_path and Path(config.state_path).exists():
-            state = json.loads(Path(config.state_path).read_text())
+            state = read_json(config.state_path)
+            if not isinstance(state, dict) or state.get("version", 1) != 1:
+                raise ValueError("unknown execution ledger schema")
             self.cash = float(state["cash"])
             self.commissions = float(state.get("commissions", 0.0))
             self.financing = float(state.get("financing", 0.0))
@@ -220,6 +225,27 @@ class ExecutionAgent(Strategy):
             self.cap_day = date.fromisoformat(caps["day"]) if caps.get("day") else None
             self.cap_orders = int(caps.get("orders", 0))
             self.cap_opened = float(caps.get("opened", 0.0))
+            numbers = [
+                self.cash,
+                self.commissions,
+                self.financing,
+                self.external_cash,
+                self.borrow_fees,
+                self.cap_opened,
+                *self.held.values(),
+                *self.orphans.values(),
+            ]
+            if not all(math.isfinite(v) for v in numbers) or self.cap_orders < 0:
+                raise ValueError("invalid/nonfinite execution ledger")
+            for intent in self.pending.values():
+                if (
+                    not isinstance(intent, dict)
+                    or intent.get("side") not in ("BUY", "SELL")
+                    or not isinstance(intent.get("ticker"), str)
+                ):
+                    raise ValueError("invalid pending order intent")
+                if not math.isfinite(float(intent.get("qty", 0))) or float(intent.get("qty", 0)) <= 0:
+                    raise ValueError("invalid pending order quantity")
 
     # ------------------------------------------------------------------ lifecycle
 
@@ -525,7 +551,9 @@ class ExecutionAgent(Strategy):
     def snapshot(self) -> EquitySnapshot:
         self._accrue()
         long_value, short_value = self._book()
-        equity = self.cash + long_value - short_value - self.financing
+        # Live financing is estimated for diagnostics; actual broker charges
+        # enter reconciled cash. Subtracting both would double-charge the book.
+        equity = self.cash + long_value - short_value - (0.0 if self.config.live else self.financing)
         self.min_cash = min(self.min_cash, self.cash)
         gross = (long_value + short_value) / equity if equity > 0 else 0.0
         net = (long_value - short_value) / equity if equity > 0 else 0.0
@@ -545,32 +573,30 @@ class ExecutionAgent(Strategy):
         if self.config.state_path:
             p = Path(self.config.state_path)
             p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix(".tmp")
-            tmp.write_text(
-                json.dumps(
-                    {
-                        "cash": self.cash,
-                        "commissions": self.commissions,
-                        "financing": self.financing,
-                        "external_cash": self.external_cash,
-                        "synced_cash": self.synced_cash,
-                        "borrow_fees": self.borrow_fees,
-                        "accrued_to": self.accrued_to,
-                        "positions": {**self.orphans, **self._nonzero(self.held)},
-                        "account": self.ledger_account,
-                        "pending": self.pending,
-                        "applied_trades": self.applied[-_KEEP_TRADE_IDS:],
-                        # A restart within a session must not reset the day's order and turnover caps.
-                        "daily_caps": {
-                            "day": self.cap_day.isoformat() if self.cap_day else None,
-                            "orders": self.cap_orders,
-                            "opened": self.cap_opened,
-                        },
-                        "updated": datetime.now(UTC).isoformat(timespec="seconds"),
-                    }
-                )
+            atomic_json(
+                p,
+                {
+                    "version": 1,
+                    "cash": self.cash,
+                    "commissions": self.commissions,
+                    "financing": self.financing,
+                    "external_cash": self.external_cash,
+                    "synced_cash": self.synced_cash,
+                    "borrow_fees": self.borrow_fees,
+                    "accrued_to": self.accrued_to,
+                    "positions": {**self.orphans, **self._nonzero(self.held)},
+                    "account": self.ledger_account,
+                    "pending": self.pending,
+                    "applied_trades": self.applied,
+                    # A restart within a session must not reset the day's order and turnover caps.
+                    "daily_caps": {
+                        "day": self.cap_day.isoformat() if self.cap_day else None,
+                        "orders": self.cap_orders,
+                        "opened": self.cap_opened,
+                    },
+                    "updated": datetime.now(UTC).isoformat(timespec="seconds"),
+                },
             )
-            tmp.replace(p)  # atomic: a crash never leaves a half-written ledger
 
     def _kill(self) -> dict | None:
         return read_kill_switch(self.config.kill_path) if self.config.kill_path else None
@@ -635,7 +661,7 @@ class ExecutionAgent(Strategy):
                 self._hard_halt("reconciliation_mismatch", self.blocked_reason)
             return
 
-        if self.config.live and self.config.session is not None:
+        if self.config.session is not None:
             self._cancel_stale_orders()
         unsafe = self._unsafe_held_marks()
         snap = None
@@ -750,6 +776,7 @@ class ExecutionAgent(Strategy):
         day = _ny_date(self.price_ts) if self.price_ts else None
         if day != self.cap_day:
             self.cap_day, self.cap_orders, self.cap_opened = day, 0, 0.0
+        reserved = {}
         for opening, target, current, iid, ticker, price in orders:
             if opening > 0 and unsettled:
                 self._risk_event("order_pending", "new exposure deferred until existing orders settle")
@@ -778,8 +805,19 @@ class ExecutionAgent(Strategy):
                     f"daily cap on new exposure {self.config.max_daily_turnover:.0%} of equity reached; rest deferred",
                 )
                 break
+            if opening > 0 and getattr(self.config, "risk_limits", None) is not None:
+                from lab.reservations import check_openings
+
+                candidate = {**reserved, ticker: target}
+                reason = check_openings(
+                    self.held, candidate, self.prices, snap.equity, self.config.risk_limits, self.config.margin
+                )
+                if reason:
+                    self._risk_event("reservation_blocked", f"{ticker}: {reason}")
+                    continue
             diff = target - current
             if diff != 0 and self._submit(iid, ticker, diff, adds=opening > 0):
+                reserved[ticker] = target
                 self.cap_orders += 1
                 self.cap_opened += opening * price
                 self._save()
@@ -898,10 +936,9 @@ class ExecutionAgent(Strategy):
             return False
         side = OrderSide.BUY if diff > 0 else OrderSide.SELL
         qty = inst.make_qty(abs(diff))
-        if not self.config.live:
-            order = self.order_factory.market(iid, side, qty, time_in_force=TimeInForce.GTC)
-        elif self.config.session is None:
-            order = self.order_factory.market(iid, side, qty, time_in_force=TimeInForce.AT_THE_OPEN)
+        if self.config.session is None:
+            tif = TimeInForce.AT_THE_OPEN if self.config.live else TimeInForce.GTC
+            order = self.order_factory.market(iid, side, qty, time_in_force=tif)
         elif adds and self.prices.get(ticker):
             # A marketable limit: delayed data can be stale, so new exposure never pays more than the collar.
             c = self.config.limit_collar
@@ -922,6 +959,9 @@ class ExecutionAgent(Strategy):
             "qty": abs(diff),
             "ts": self.clock.timestamp_ns(),
             "adds": adds,
+            "decision_price": self.prices.get(ticker),
+            "decision_ts": self.price_ts,
+            "filled": 0.0,
         }
         self._save()  # journaled before it can reach the broker
         self.submit_order(order)
@@ -957,16 +997,29 @@ class ExecutionAgent(Strategy):
         fee = float(ev.commission.as_double()) if ev.commission is not None else 0.0
         buy = ev.order_side == OrderSide.BUY
         ticker = str(ev.instrument_id.symbol)
+        info = self.pending.get(str(ev.client_order_id), {})
+        if info:
+            info["filled"] = info.get("filled", 0.0) + qty
         self.cash += -qty * px - fee if buy else qty * px - fee
         self.commissions += fee
         self.held[ticker] = self.held.get(ticker, 0.0) + (qty if buy else -qty)
         self.applied.append(trade)
         self._applied_set.add(trade)
-        if len(self.applied) > 2 * _KEEP_TRADE_IDS:
-            self.applied = self.applied[-_KEEP_TRADE_IDS:]
-            self._applied_set = set(self.applied)
         self._save()
-        self.publish_message(T_FILL, FillReport(ev.ts_event, ticker, "BUY" if buy else "SELL", qty, px, fee))
+        self.publish_message(
+            T_FILL,
+            FillReport(
+                ev.ts_event,
+                ticker,
+                "BUY" if buy else "SELL",
+                qty,
+                px,
+                fee,
+                str(ev.client_order_id),
+                info.get("decision_price"),
+                info.get("decision_ts"),
+            ),
+        )
         if recovered:
             self._risk_event(
                 "fill_recovered",

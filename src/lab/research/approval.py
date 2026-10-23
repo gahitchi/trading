@@ -26,10 +26,13 @@ def deployment_context(snapshot: dict, *, live: bool = False, tickers=None) -> d
         return {}
     # Share rounding, minimum commissions and entry thresholds depend on capital.
     # Daily validation excludes intraday-only knobs that cannot affect that run.
+    from lab.provenance import source_digest
+
     keys = ("risk", "portfolio", "costs", "margin")
     trading = snapshot["trading"]
     return {
         **{k: snapshot[k] for k in keys},
+        "implementation_sha256": source_digest(),
         "capital": snapshot["paper"]["capital"] if live else snapshot["capital"],
         "trading": trading if trading.get("speed") != "daily" else {"speed": "daily"},
         "universe": {t: snapshot["universe"][t] for t in sorted(tickers or snapshot["universe"])},

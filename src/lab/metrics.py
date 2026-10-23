@@ -32,6 +32,19 @@ def summarize(equity: pd.Series, *, fills: list | None = None, gross: pd.Series 
     if len(equity) < 3:
         # Two marks give one return: no volatility or Sharpe can be estimated (ChatGPT, G001-F4).
         return {"days": len(equity), "insufficient": "at least 3 equity marks are needed for risk metrics"}
+    if (values <= 0).any():
+        return {
+            "days": len(equity),
+            "final_equity": float(values[-1]),
+            "total_return": float(values[-1] / values[0] - 1) if values[0] > 0 else None,
+            "max_drawdown": max_drawdown(equity)[0] if values[0] > 0 else None,
+            "insolvent": True,
+            "qualified": False,
+            "insufficient": "nonpositive equity: return ratios require an explicit recapitalization model",
+            **dict.fromkeys(("sharpe", "sortino", "calmar", "cagr", "volatility")),
+            "fills": len(fills or []),
+            "commissions": sum(f.commission for f in (fills or [])),
+        }
     rets = equity.pct_change().dropna()
     years = max((equity.index[-1] - equity.index[0]).days / 365.25, 1e-9)
     total = equity.iloc[-1] / equity.iloc[0] - 1

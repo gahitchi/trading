@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from lab import margin as mg
 from lab.agents.messages import T_APPROVED, T_EQUITY, T_RISK, T_TARGETS, ApprovedTargets, RiskEvent
 from lab.config import MarginSettings
 from lab.halt import halt_kinds, read_halt, set_halt
+from lab.persistence import atomic_json, read_json
 
 
 class RiskAgentConfig(DataActorConfig):
@@ -68,8 +68,10 @@ class RiskAgent(DataActor):
         self.delever = 1.0  # < 1 while equity is too close to the maintenance requirement
         self.margin_called = False  # equity fell below maintenance: exposure may only shrink
         if config.state_path and Path(config.state_path).exists():
-            state = json.loads(Path(config.state_path).read_text())
+            state = read_json(config.state_path)
             self.peak = float(state.get("peak", 0.0))
+            if not math.isfinite(self.peak) or self.peak < 0:
+                raise ValueError("invalid persisted risk peak")
             self.halted = bool(state.get("halted", False))
             self.margin_called = bool(state.get("margin_called", False))
 
@@ -77,9 +79,7 @@ class RiskAgent(DataActor):
         if self.config.state_path:
             p = Path(self.config.state_path)
             p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"peak": self.peak, "halted": self.halted, "margin_called": self.margin_called}))
-            tmp.replace(p)
+            atomic_json(p, {"peak": self.peak, "halted": self.halted, "margin_called": self.margin_called})
 
     def _breaker_cleared(self) -> bool:
         """True once an operator has cleared the breaker's hard halt (lab recover)."""

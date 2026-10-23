@@ -10,7 +10,7 @@ Bars are daily by default; at a quick trading speed ([trading] speed = "1h", "15
 
 Everything else (sizing, risk limits, orders, fills, costs) is handled by the
 deterministic agents. Because the window physically contains no future bars,
-look-ahead bias is impossible by construction.
+direct access to future bars is prevented. Upstream data and research selection still require leakage controls.
 
 Signals may keep state between calls (e.g. "am I in a trade?"), but must be
 deterministic: same bars in the same order -> same targets.
@@ -72,6 +72,12 @@ class Signal:
         unknown = set(params) - set(self.defaults)
         if unknown:
             raise ValueError(f"{self.name}: unknown parameters {sorted(unknown)}")
+        for k, value in params.items():
+            default = self.defaults[k]
+            if isinstance(default, int) and not isinstance(default, bool) and type(value) is not int:
+                raise ValueError(f"{self.name}: {k} must be an integer")
+            if isinstance(default, (int, float)) and (not isinstance(value, (int, float)) or not math.isfinite(value)):
+                raise ValueError(f"{self.name}: {k} must be finite")
         self.params = {**self.defaults, **params}
         self.last = 0.0  # the target returned on the previous call
 
@@ -138,6 +144,12 @@ class CrossSectionalSignal:
         unknown = set(params) - set(self.defaults)
         if unknown:
             raise ValueError(f"{self.name}: unknown parameters {sorted(unknown)}")
+        for k, value in params.items():
+            default = self.defaults[k]
+            if isinstance(default, int) and not isinstance(default, bool) and type(value) is not int:
+                raise ValueError(f"{self.name}: {k} must be an integer")
+            if isinstance(default, (int, float)) and (not isinstance(value, (int, float)) or not math.isfinite(value)):
+                raise ValueError(f"{self.name}: {k} must be finite")
         self.params = {**self.defaults, **params}
         self.last: dict[str, float] = {}
 

@@ -49,12 +49,14 @@ def _charts(curves: pd.DataFrame) -> list[tuple[str, str]]:
             label=c,
             ls="--" if i == 0 else "-",
         )
-    ax.set_yscale("log")
-    ax.yaxis.set_major_locator(matplotlib.ticker.LogLocator(base=10, subs=(1, 2, 3, 5)))
+    positive = (curves > 0).all().all()
+    if positive:
+        ax.set_yscale("log")
+        ax.yaxis.set_major_locator(matplotlib.ticker.LogLocator(base=10, subs=(1, 2, 3, 5)))
     ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}×"))
     ax.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
     ax.legend(frameon=False, fontsize=8, loc="upper left")
-    _style(ax, "Growth of 1 (log scale)")
+    _style(ax, "Growth of 1 (log scale)" if positive else "Equity includes insolvency (linear scale)")
     out.append(("Equity", _png(fig)))
 
     fig, ax = plt.subplots(figsize=(10, 2.6))
@@ -64,7 +66,7 @@ def _charts(curves: pd.DataFrame) -> list[tuple[str, str]]:
     _style(ax, "Drawdown (%)")
     out.append(("Drawdown", _png(fig)))
 
-    if curves.shape[1] > 1:
+    if curves.shape[1] > 1 and positive:
         fig, ax = plt.subplots(figsize=(10, 2.6))
         base = curves.iloc[:, 0].pct_change()
         for i, c in enumerate(curves.columns[1:], start=1):
@@ -79,7 +81,12 @@ def _charts(curves: pd.DataFrame) -> list[tuple[str, str]]:
 
 
 def _monthly_table(equity: pd.Series) -> str:
-    m = equity.resample("ME").last().pct_change().dropna()
+    if equity.empty or (equity <= 0).any():
+        return "<p>Monthly returns unavailable for nonpositive equity.</p>"
+    ends = equity.resample("ME").last().dropna()
+    previous = ends.shift(1)
+    previous.iloc[0] = equity.iloc[0]
+    m = ends / previous - 1
     if m.empty:
         return ""
     t = pd.DataFrame({"y": m.index.year, "m": m.index.month, "r": m.values}).pivot(index="y", columns="m", values="r")

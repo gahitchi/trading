@@ -7,8 +7,7 @@ aggressive risk profiles (Gabriel, C003).
 
 Intraday bars are stored per speed in data/intraday/<speed>/<TICKER>.parquet with their own manifest. Each bar
 is indexed by its START in New York time, regular trading hours only (09:30-16:00); its close is
-min(start + interval, 16:00), so the last hourly bar of a session is 30 minutes. Early closes (13:00 on some
-holidays) are not modelled: such a session simply has fewer bars.
+min(start + interval, 16:00), so the last hourly bar of a session is 30 minutes. Early closes and holidays follow the pinned exchange calendar.
 
 Free history is short (Yahoo Finance: about 2 years of 1h bars, about 60 days of 15m and 5m), so intraday
 statistics rest on far less data than daily ones; every intraday result says how many sessions it used.
@@ -17,6 +16,7 @@ statistics rest on far less data than daily ones; every intraday result says how
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
@@ -25,6 +25,7 @@ import pandas as pd
 
 from lab.config import LabConfig
 from lab.data import COLUMNS, DataError, validate
+from lab.exchange import bounds
 
 OPEN, CLOSE = time(9, 30), time(16, 0)
 QUICK_PROFILES = {"dynamic", "aggressive"}
@@ -84,7 +85,10 @@ def check_speed_allowed(name: str, profile: str) -> None:
 def bar_end(start: pd.Timestamp, minutes: int) -> pd.Timestamp:
     """Close of the bar that starts at `start`: start + interval, cut at the 16:00 close."""
     end = start + pd.Timedelta(minutes=minutes)
-    close = start.normalize() + pd.Timedelta(hours=16)
+    hours = bounds(start.date())
+    if hours is None:
+        raise DataError(f"bar on a non-session: {start}")
+    close = pd.Timestamp(hours[1]).tz_localize(None)
     return min(end, close)
 
 
@@ -92,14 +96,20 @@ def in_closing_window(end: pd.Timestamp, minutes: int, n: int = 1) -> bool:
     """True if at most n intervals of the session remain after a bar that closed at `end`: an order decided now
     gets at most n bars to fill before 16:00. Flat-at-close exits here (n=1 leaves the session's last bar to
     fill the exit; a decision at 16:00 itself has none)."""
-    close = end.normalize() + pd.Timedelta(hours=16)
+    hours = bounds(end.date())
+    if hours is None:
+        return True
+    close = pd.Timestamp(hours[1]).tz_localize(None)
     return close - end <= pd.Timedelta(minutes=minutes * n)
 
 
 def session_bars(day: pd.Timestamp, minutes: int) -> list[pd.Timestamp]:
     """Bar starts of a regular session."""
     t = day.normalize() + pd.Timedelta(hours=9, minutes=30)
-    close = day.normalize() + pd.Timedelta(hours=16)
+    hours = bounds(day.date())
+    if hours is None:
+        return []
+    close = pd.Timestamp(hours[1]).tz_localize(None)
     out = []
     while t < close:
         out.append(t)
@@ -127,8 +137,14 @@ def validate_intraday(df: pd.DataFrame, ticker: str, sp: Speed, *, drop_incomple
         raise ValueError("validate_intraday is for quick speeds")
     out = validate(df, ticker, drop_incomplete=drop_incomplete, keep_time=True)
     tod = out.index - out.index.normalize()
-    open_, close = pd.Timedelta(hours=9, minutes=30), pd.Timedelta(hours=16)
-    outside = (tod < open_) | (tod >= close)
+    open_ = pd.Timedelta(hours=9, minutes=30)
+    actual_closes = []
+    for stamp in out.index:
+        hours = bounds(stamp.date())
+        if hours is None:
+            raise DataError(f"{ticker}: non-session bar {stamp}")
+        actual_closes.append(pd.Timestamp(hours[1]).tz_localize(None) - stamp.normalize())
+    outside = (tod < open_) | (tod >= pd.TimedeltaIndex(actual_closes))
     if outside.any():
         raise DataError(f"{ticker}: {int(outside.sum())} bar(s) outside regular hours, e.g. {out.index[outside][0]}")
     off_grid = ((tod - open_) % pd.Timedelta(minutes=sp.minutes)) != pd.Timedelta(0)
@@ -173,6 +189,7 @@ def save(cfg: LabConfig, ticker: str, df: pd.DataFrame, sp: Speed, *, source: st
         "rows": len(clean),
         "sessions": len(sessions),
         "dropped_incomplete": dropped,
+        "repaired_high_low": clean.attrs.get("repaired_high_low", []),
         "rebased_history_by": rebased,
     }
     m[ticker] = entry
@@ -229,3 +246,25 @@ def history_note(frames: dict[str, pd.DataFrame], sp: Speed) -> str:
 def now_session_bounds(now: datetime) -> tuple[datetime, datetime]:
     d = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return d + timedelta(hours=9, minutes=30), d + timedelta(hours=16)
+
+
+def check_technique(name, params, minutes, delay, flat_at_close):
+    """Refuse a configured technique with no possible entry before liquidation."""
+    from lab.signals.builtin import BUILTIN
+
+    if name not in ("orb", "intraday_momentum", "vwap_reversion"):
+        return
+    p = {**BUILTIN[name].defaults, **params}
+    if name == "orb":
+        if minutes > p["range_min"]:
+            raise ValueError("orb: bar interval exceeds the opening range; use finer bars or a longer range_min")
+        first = (p["range_min"] // minutes + 1) * minutes
+    elif name == "intraday_momentum":
+        if minutes > p["first_min"]:
+            raise ValueError("intraday_momentum: bars cannot resolve first_min; use finer bars")
+        first = math.ceil(p["entry_min"] / minutes) * minutes
+    else:
+        first = max(4 * minutes, math.ceil(p["min_minutes"] / minutes) * minutes)
+    cutoff = 390 - minutes if flat_at_close else 390
+    if first + delay >= cutoff:
+        raise ValueError(f"{name}: no executable entry window before liquidation/close at this interval and delay")

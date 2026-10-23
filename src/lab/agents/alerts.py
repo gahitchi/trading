@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from nautilus_trader.common import DataActor, DataActorConfig
 
@@ -45,6 +46,7 @@ class AlertAgent(DataActor):
         super().__init__(config)
         self.notifier = config.notifier
         self.last_equity = None
+        self.last_report_day = None
         self.pending_fills = []
         self.flush_scheduled = False
 
@@ -63,6 +65,10 @@ class AlertAgent(DataActor):
             self.notifier.send(f"started. {ev.detail}")
 
     def _on_equity(self, snap):
+        day = datetime.fromtimestamp(snap.ts / 1e9, ZoneInfo("America/New_York")).date()
+        if day == self.last_report_day:
+            return
+        self.last_report_day = day
         change = ""
         if self.last_equity:
             d = snap.equity / self.last_equity - 1

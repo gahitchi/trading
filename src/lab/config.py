@@ -296,11 +296,19 @@ def _check_risk(r: RiskSettings, m: MarginSettings) -> None:
 
 
 def load_config(path: str | Path | None = None) -> LabConfig:
+    try:
+        return _load_config(path)
+    except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as exc:
+        raise ConfigError(f"invalid configuration: {exc}") from exc
+
+
+def _load_config(path: str | Path | None = None) -> LabConfig:
     path = Path(path) if path else find_config()
     try:
         raw = tomllib.loads(path.read_text())
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: {e}") from e
+    _validate_raw_types(raw)
     root = path.parent.resolve()
     br = raw.get("borrow", {})
     if not isinstance(br, dict) or set(br) - {"history", "max_age_days"}:
@@ -454,7 +462,7 @@ def load_config(path: str | Path | None = None) -> LabConfig:
         trading=trading,
     )
 
-    _check_settings(cfg)
+    validate_effective(cfg)
     return cfg
 
 
@@ -492,3 +500,60 @@ def _check_settings(cfg: LabConfig) -> None:
     for p in cfg.periods.values():
         if p.end is not None and p.end < p.start:
             raise ConfigError(f"{p.name}: end precedes start")
+
+
+def validate_effective(cfg: LabConfig) -> None:
+    _check_settings(cfg)
+    _check_risk(cfg.risk, cfg.margin)
+    p = cfg.portfolio
+    if (
+        not all(math.isfinite(v) for v in (p.target_vol, p.leverage, p.max_leverage))
+        or not 0 < p.leverage <= p.max_leverage <= cfg.risk.max_gross
+    ):
+        raise ConfigError("invalid effective portfolio leverage")
+    if type(p.vol_window) is not int or p.vol_window < 2:
+        raise ConfigError("vol_window must be an integer >= 2")
+    _trading(vars(cfg.trading), cfg.risk.profile)
+
+
+def _validate_raw_types(raw):
+    from dataclasses import fields
+
+    schemas = {
+        "risk": RiskSettings,
+        "margin": MarginSettings,
+        "portfolio": PortfolioSettings,
+        "paper": PaperSettings,
+        "research": ResearchSettings,
+        "trading": TradingSettings,
+        "limits": LimitSettings,
+        "backtest": CostSettings,
+    }
+    allowed = set(schemas) | {"paths", "universe", "periods", "borrow"}
+    if set(raw) - allowed:
+        raise ConfigError(f"unknown sections: {sorted(set(raw) - allowed)}")
+    for section, values in raw.items():
+        if not isinstance(values, dict):
+            raise ConfigError(f"[{section}] must be a table")
+        if section not in schemas:
+            continue
+        types = {f.name: f.type for f in fields(schemas[section])}
+        if section == "backtest":
+            types["capital"] = "float"
+        for key, value in values.items():
+            if key not in types:
+                raise ConfigError(f"unknown setting {section}.{key}")
+            kind = types[key]
+            valid = (
+                type(value) is bool
+                if kind == "bool"
+                else type(value) is int
+                if kind == "int"
+                else type(value) in (int, float) and math.isfinite(value)
+                if kind == "float"
+                else isinstance(value, str)
+                if kind in ("str", "str | None")
+                else True
+            )
+            if not valid:
+                raise ConfigError(f"{section}.{key} must have type {kind}")

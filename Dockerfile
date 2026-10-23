@@ -20,9 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends libseccomp2 \
 WORKDIR /lab
 
 # Dependencies first (cached layer), then the code.
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md requirements.lock ./
 COPY src ./src
-RUN pip install . && python -c "import lab, nautilus_trader; print('nautilus', nautilus_trader.__version__)"
+RUN pip install --require-hashes -r requirements.lock && pip install --no-deps . && python -c "import lab, nautilus_trader; print('nautilus', nautilus_trader.__version__)"
 
 COPY lab.toml ./lab.toml
 RUN mkdir -p data results research && chown -R lab:lab /lab

@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from nautilus_trader.common import DataActor, DataActorConfig
 
-from lab.agents.messages import T_SIGNAL, SignalUpdate
+from lab.agents.messages import T_MARK, T_SIGNAL, PriceMark, SignalUpdate
 from lab.agents.schedule import FUTURE_TOLERANCE, MAX_BAR_AGE_DAYS, market_now, next_at, now_ny, parse_clock
 from lab.agents.signal_agent import bar_minute, history_days
 from lab.signals.base import CrossSectionalSignal, Window, clean_weights
@@ -129,6 +129,7 @@ class CrossSectionalAgent(DataActor):
         t = str(bar.bar_type.instrument_id.symbol)
         if t not in self.rows or bar.ts_event <= self.last_ts[t]:
             return
+        self.publish_message(T_MARK, PriceMark(t, float(bar.close), bar.ts_event))
         self.last_ts[t] = bar.ts_event
         self.last_bar[t] = bar
         self.rows[t].append(

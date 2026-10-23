@@ -92,9 +92,11 @@ def test_paper_report_measures_implementation_shortfall(tmp_path):
     msgs = [
         SignalUpdate("s:X", "X", 1.0, 100.0, 1 * day),
         EquitySnapshot(1 * day, 100_000.0, 100_000.0, {}, 0.0),
-        FillReport(2 * day, "X", "BUY", 100, 100.5, 1.0),  # 50 bps above the decision close: a cost
+        FillReport(
+            2 * day, "X", "BUY", 100, 100.5, 1.0, "buy-1", 100.0, 1 * day
+        ),  # 50 bps above the decision close: a cost
         SignalUpdate("s:X", "X", 0.0, 110.0, 3 * day),
-        FillReport(4 * day, "X", "SELL", 100, 109.0, 1.0),  # 91 bps below: also a cost
+        FillReport(4 * day, "X", "SELL", 100, 109.0, 1.0, "sell-1", 110.0, 3 * day),  # 91 bps below: also a cost
         EquitySnapshot(3 * day, 101_000.0, 90_000.0, {"X": 100}, 0.1),
         RiskEvent(3 * day, "daily_cap", "x"),
     ]

@@ -137,7 +137,8 @@ def test_holdout_ledger_allows_once(goog_lab):
     with pytest.raises(experiments.HoldoutUsed):
         experiments.check_holdout_allowed(goog_lab, spec)
     experiments.check_holdout_allowed(goog_lab, spec, reason="fixed a data bug")
-    experiments.check_holdout_allowed(goog_lab, SignalSpec("sma_trend", {"fast": 20}))  # different params
+    with pytest.raises(experiments.HoldoutUsed):
+        experiments.check_holdout_allowed(goog_lab, SignalSpec("sma_trend", {"fast": 20}))  # same exposed family
 
 
 def test_null_test_reports_a_valid_p_value(goog_lab):

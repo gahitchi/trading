@@ -26,24 +26,29 @@ def summarize(rows: list[dict]) -> dict:
     eq = [r for r in rows if r.get("type") == "EquitySnapshot"]
     fills = [r for r in rows if r.get("type") == "FillReport"]
     risk = Counter(r["kind"] for r in rows if r.get("type") == "RiskEvent")
-    last_signal_price: dict[str, tuple[int, float]] = {}
     shortfall = []
-    for r in sorted((r for r in rows if r.get("type") in ("SignalUpdate", "FillReport")), key=lambda r: r["ts"]):
-        if r["type"] == "SignalUpdate":
-            last_signal_price[r["ticker"]] = (r["ts"], r["price"])
-        elif r["ticker"] in last_signal_price:
-            ref = last_signal_price[r["ticker"]][1]
-            sign = 1 if r["side"] == "BUY" else -1
-            shortfall.append(sign * (r["price"] - ref) / ref * 1e4)
-    out = {"equity_points": len(eq), "fills": len(fills), "risk_events": dict(risk)}
+    unmeasured = 0
+    for r in fills:
+        ref = r.get("decision_price")
+        if ref is None or not np.isfinite(ref) or ref <= 0 or r.get("decision_ts") is None:
+            unmeasured += 1
+            continue
+        sign = 1 if r["side"] == "BUY" else -1
+        shortfall.append(sign * (r["price"] - ref) / ref * 1e4)
+    out = {"equity_points": len(eq), "fills": len(fills), "risk_events": dict(risk), "shortfall_unmeasured": unmeasured}
     if eq:
         s = pd.Series([e["equity"] for e in eq], index=pd.to_datetime([e["ts"] for e in eq], unit="ns"))
+        external = any(r.get("kind") in ("external_cash", "cash_adjusted", "ledger_reset", "adopted") for r in rows)
         out.update(
             start=str(s.index[0].date()),
             end=str(s.index[-1].date()),
             first_equity=float(s.iloc[0]),
             last_equity=float(s.iloc[-1]),
-            total_return=float(s.iloc[-1] / s.iloc[0] - 1),
+            total_return=None if external or s.iloc[0] <= 0 else float(s.iloc[-1] / s.iloc[0] - 1),
+            return_qualified=not external and s.iloc[0] > 0,
+            return_note="external cash/ownership adjustment needs classified flow evidence"
+            if external
+            else "no external-flow event recorded",
             max_drawdown=float((1 - s / s.cummax()).max()),
         )
     if fills:

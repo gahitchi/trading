@@ -74,6 +74,8 @@ def test_walk_forward_selection_does_not_shift_when_baseline_is_listed(goog_lab,
     chosen = SignalSpec("sma_trend")
     eq = pd.Series([100.0, 101.0, 100.0, 102.0], index=pd.bdate_range("2009-01-02", periods=4))
     selected = []
+    monkeypatch.setattr(backtest, "run", lambda *a, **kw: SimpleNamespace(equity=eq, metrics={}, fills=[]))
+    monkeypatch.setattr(experiments, "run_spec", lambda *a, **kw: SimpleNamespace(equity=eq, metrics={}, fills=[]))
     monkeypatch.setattr(
         experiments,
         "active_matrix",

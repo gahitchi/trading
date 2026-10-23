@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+from collections import deque
+from datetime import UTC, datetime
 from pathlib import Path
 
 from nautilus_trader.common import DataActor, DataActorConfig
@@ -29,10 +32,10 @@ class RecorderAgentConfig(DataActorConfig):
 class RecorderAgent(DataActor):
     def __init__(self, config: RecorderAgentConfig):
         super().__init__(config)
-        self.equity = []
-        self.fills = []
-        self.risk = []
-        self.signals = []
+        self.equity = deque(maxlen=10000) if config.journal else []
+        self.fills = deque(maxlen=10000) if config.journal else []
+        self.risk = deque(maxlen=10000) if config.journal else []
+        self.signals = deque(maxlen=10000) if config.journal else []
         self.signal_count = 0
         self._fh = None
 
@@ -60,7 +63,16 @@ class RecorderAgent(DataActor):
 
     def _write(self, m):
         if self._fh:
-            self._fh.write(json.dumps(to_dict(m), default=str) + "\n")
+            original = Path(self.config.journal)
+            if original.name.startswith("journal-"):
+                current = original.with_name(f"journal-{datetime.now(UTC):%Y%m}.jsonl")
+                if Path(self._fh.name) != current:
+                    self._fh.close()
+                    self._fh = current.open("a", buffering=1)
+            self._fh.write(json.dumps(to_dict(m), default=str, allow_nan=False) + "\n")
+            if type(m).__name__ in ("FillReport", "RiskEvent"):
+                self._fh.flush()
+                os.fsync(self._fh.fileno())
 
     def on_stop(self):
         if self._fh:

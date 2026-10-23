@@ -13,23 +13,38 @@ import json
 import logging
 import os
 import queue
+import sqlite3
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
+from pathlib import Path
 
 log = logging.getLogger("lab.notify")
 
 
 class Notifier:
-    def __init__(self, token: str | None = None, chat_id: str | None = None, prefix: str = "trading-lab"):
+    def __init__(
+        self,
+        token: str | None = None,
+        chat_id: str | None = None,
+        prefix: str = "trading-lab",
+        spool_path: str | None = None,
+    ):
         self.token = token if token is not None else os.environ.get("LAB_TELEGRAM_TOKEN", "")
         self.chat_id = chat_id if chat_id is not None else os.environ.get("LAB_TELEGRAM_CHAT_ID", "")
         self.prefix = prefix
         self.sent = 0
         self.failed = 0
         self._q: queue.Queue = queue.Queue(maxsize=500)
+        self.spool_path = spool_path
+        self._wake = threading.Event()
+        if spool_path:
+            Path(spool_path).parent.mkdir(parents=True, exist_ok=True)
+            with self._db() as db:
+                db.execute("CREATE TABLE IF NOT EXISTS notification (id INTEGER PRIMARY KEY, text TEXT)")
         self._worker = None
         if self.enabled:
             self._worker = threading.Thread(target=self._run, name="notifier", daemon=True)
@@ -42,6 +57,11 @@ class Notifier:
     def send(self, text: str) -> None:
         log.info("notify: %s", text)
         if not self.enabled:
+            return
+        if self.spool_path:
+            with self._db() as db:
+                db.execute("INSERT INTO notification(text) VALUES(?)", (f"[{self.prefix}] {text}"[:4000],))
+            self._wake.set()
             return
         try:
             self._q.put_nowait(f"[{self.prefix}] {text}"[:4000])
@@ -57,6 +77,13 @@ class Notifier:
     def flush(self, timeout: float = 10.0) -> bool:
         """Wait for queued AND in-flight requests; False means the deadline expired."""
         end = time.monotonic() + timeout
+        if self.spool_path:
+            while self.pending():
+                if time.monotonic() >= end:
+                    return False
+                self._wake.set()
+                time.sleep(min(0.05, max(0, end - time.monotonic())))
+            return True
         with self._q.all_tasks_done:
             while self._q.unfinished_tasks:
                 remaining = end - time.monotonic()
@@ -65,7 +92,25 @@ class Notifier:
                 self._q.all_tasks_done.wait(remaining)
         return True
 
+    @contextmanager
+    def _db(self):
+        db = sqlite3.connect(self.spool_path, timeout=10)
+        try:
+            db.execute("PRAGMA synchronous=FULL")
+            with db:
+                yield db
+        finally:
+            db.close()
+
+    def pending(self):
+        if not self.spool_path:
+            return self._q.unfinished_tasks
+        with self._db() as db:
+            return db.execute("SELECT COUNT(*) FROM notification").fetchone()[0]
+
     def _run(self):
+        if self.spool_path:
+            return self._run_durable()
         while True:
             text = self._q.get()
             try:
@@ -75,6 +120,26 @@ class Notifier:
                 log.error("notification worker failed")
             finally:
                 self._q.task_done()
+
+    def _run_durable(self):
+        while True:
+            with self._db() as db:
+                row = db.execute("SELECT id,text FROM notification ORDER BY id LIMIT 1").fetchone()
+            if row is None:
+                self._wake.wait(1)
+                self._wake.clear()
+                continue
+            try:
+                success = self._post(row[1])
+            except Exception:
+                success = False
+            if success:
+                with self._db() as db:
+                    db.execute("DELETE FROM notification WHERE id=?", (row[0],))
+            else:
+                log.error("notification remains in durable outbox after delivery failure")
+                self._wake.wait(30)
+                self._wake.clear()
 
     def _post(self, text: str) -> bool:
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
@@ -88,7 +153,7 @@ class Notifier:
                         self.sent += 1
                         return True
             except (urllib.error.URLError, TimeoutError, ValueError) as e:
-                log.warning("telegram send failed (attempt %d): %s", attempt + 1, e)
+                log.warning("telegram send failed (attempt %d): %s", attempt + 1, type(e).__name__)
             time.sleep(2**attempt)
         self.failed += 1
         return False

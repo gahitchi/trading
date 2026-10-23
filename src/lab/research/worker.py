@@ -40,7 +40,10 @@ def main(argv=None) -> int:
     digest = sha256_file(hdir / "signal.py")
     spec = SignalSpec(hdir.name, {}, str(hdir / "signal.py"), digest)
     frames = data.load_many(cfg, tickers)
+    from lab.provenance import frame_digest
+
     validation = {
+        "dataset_sha256": frame_digest(frames),
         "source_sha256": digest,
         "params": {},
         "config_fingerprint": experiments.config_fingerprint(cfg, len(tickers)),
