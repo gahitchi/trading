@@ -56,13 +56,14 @@ max_drawdown = 0.35     # circuit breaker: flatten and halt if equity drops 35% 
 
 [trading]
 # How fast the agents trade. daily: decide after the close, fill at the next open (any profile).
-# 1h | 15m | 5m: decide at every bar's close during regular hours, fill at the next bar's open; these quick
-# speeds need the dynamic or aggressive profile. Intraday history is short (Yahoo: ~2 years of 1h, ~60 days of
+# 1h | 15m | 5m: decide on every bar of the regular session as soon as the (delayed) data has it; these quick
+# speeds need the dynamic or aggressive profile. Built-in intraday techniques: orb, intraday_momentum,
+# vwap_reversion. The research swarm stays on daily bars. Intraday history is short (Yahoo: ~2 years of 1h, ~60 days of
 # 15m/5m), so their backtests rest on far less data than daily ones.
 speed = "daily"
 flat_at_close = true    # quick speeds: exit everything before the close, hold nothing overnight
 data_delay_min = 15     # IBKR paper without a real-time subscription sees US stocks 15 minutes late; 0 if real-time
-limit_collar = 0.01     # quick speeds, live: marketable limit orders at the last price +/- 1%, expire after one bar
+limit_collar = 0.01     # quick speeds, live: new exposure as limits 1% through the last price, re-priced after a bar; exits at market
 intraday_holdout = 0.2  # quick speeds: the last 20% of stored sessions are the holdout (lab holdout --speed ...)
 
 [limits]

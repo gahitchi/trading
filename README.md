@@ -45,6 +45,7 @@ Two layers of cooperating agents:
 |---|---|
 | Backtest engine, agents, costs, next-open fills, ledger = simulator account | automated tests, real GOOG prices |
 | Long/short, leverage, margin calls, borrow fees and debit interest | automated tests (`tests/test_long_short.py`) |
+| Risk profiles; quick trades at 1h / 15m / 5m (delayed data, flat at close, intraday holdout) | automated tests (`tests/test_intraday*.py`), a compressed intraday session through the real paper node |
 | Kill switch, reconciliation, daily caps, delistings, point-in-time universe | automated tests through full backtests |
 | PSR / Deflated Sharpe / PBO / bootstrap CI | tests incl. calibration (false-discovery control, 95% coverage) |
 | Research swarm via Claude Code | real end-to-end cycles (propose → implement → review → validate → gate) |
@@ -87,10 +88,11 @@ Offline check on real prices: `cd examples/goog-offline && lab data sample && la
 
 | | |
 |---|---|
-| `lab data fetch / import / membership / sample / list` | market data and the point-in-time universe |
-| `lab backtest [signals] [--period] [--set p=v] [--target-vol]` | strategies vs buy-and-hold, HTML report |
+| `lab data fetch / import / membership / sample / list [--speed]` | market data (daily or intraday) and the point-in-time universe |
+| `lab backtest [signals] [--period] [--set p=v] [--target-vol] [--speed]` | strategies vs buy-and-hold, HTML report |
+| `lab risk-profile` | the limits the selected profile really trades with |
 | `lab null-test`, `lab pbo`, `lab walk-forward` | noise floor, overfitting probability, walk-forward analysis |
-| `lab holdout <signal>` | the one-time final exam (ledgered) |
+| `lab holdout <signal> [--speed]` | the one-time final exam (ledgered; intraday has its own) |
 | `lab research run / list / show / retry / promote` | the AI research swarm |
 | `lab llm-check`, `lab notify-test`, `lab doctor` | provider check, alert check, pre-flight check |
 | `lab paper [--smoke] [--test-order] [--check-only] [--adopt-broker]` | paper trading on Interactive Brokers |
@@ -134,10 +136,17 @@ reports and tables print a warning when the data is biased.
 
 Survivorship-free data with a membership file is what makes results credible; free data gives a biased first look.
 
+Intraday bars (`--speed 1h|15m|5m`) live in `data/intraday/<speed>/`, regular hours only, indexed by bar start in
+New York time. Yahoo serves about 2 years of 1h bars and about 60 days of 15m and 5m bars; each `lab data fetch
+--speed ...` keeps what earlier fetches stored (rebased onto the newest split/dividend adjustment), so fetching
+every few weeks builds a longer history. Every intraday result states how many sessions it rests on.
+
 ## Writing signals
 
-A per-stock signal is a pure function of one stock's past bars (prices, volume, session dates) returning a target
-exposure in [0, 1]; the window holds only closed bars, so look-ahead is impossible by construction.
+A per-stock signal is a pure function of one stock's past bars (prices, volume, session dates, time of day)
+returning a target exposure in [-1, 1] (negative = short); the window holds only closed bars, so look-ahead is
+impossible by construction. At a quick speed each element is one intraday bar and `lookback` counts bars;
+`w.minute` is the minutes since the 09:30 open at each bar's close (390 for daily bars).
 
 ```python
 from lab.signals.base import Signal, sma
@@ -155,6 +164,13 @@ class Breakout(Signal):
 A cross-sectional signal (`CrossSectionalSignal`) ranks stocks against each other and returns weights
 (see `Momentum`, Jegadeesh & Titman 12-1 momentum). Register signals in `BUILTIN` in
 `src/lab/signals/builtin.py`.
+
+Built-in intraday techniques (quick speeds only): `orb`, the opening range breakout (Crabel; Zarattini & Aziz
+2023: long above the first 30 minutes' high, short below its low, stop at the midpoint, one trade per session,
+optional "stocks in play" relative-volume filter); `intraday_momentum`, market intraday momentum (Gao, Han, Li &
+Zhou 2018: the first half hour's return predicts the last half hour); `vwap_reversion` (fade a stretch from the
+session VWAP beyond a band of its own deviations, out at VWAP). They are hypotheses like the rest: they earn
+trust only through the protocol, on enough sessions.
 
 ## Research swarm
 
@@ -201,9 +217,34 @@ targeting) or `leverage`. The broker's rules bound all of it: `[margin]` holds R
 default, so gross exposure can never be configured above 2x. The risk agent keeps the targets' initial margin
 inside equity with a cushion, deleverages by itself when equity nears the maintenance requirement, and turns a
 breach into a `margin_call` hard halt during which positions may only shrink. Borrow fees and interest on
-borrowed cash accrue daily in the ledger; their rates are assumptions (no free point-in-time borrow data), and
-every result says so. Built-ins: `sma_trend --set short=1` (trend long/short) and `momentum_ls` (dollar-neutral
-cross-sectional momentum).
+borrowed cash accrue for every night a book is held; their rates are assumptions (no free point-in-time borrow
+data), and every result says so. Built-ins: `sma_trend --set short=1` (trend long/short) and `momentum_ls`
+(dollar-neutral cross-sectional momentum).
+
+### Risk profiles and trading speeds
+
+`[risk] profile` sets how hard the bots trade; `[limits]` is the operator's ceiling over every profile (by default
+the broker's maximum, so the profile decides). `lab risk-profile` prints what is really in force.
+
+| profile | target vol | drawdown halt | gross | shorts | net range | quick trades |
+|---|---|---|---|---|---|---|
+| calm | 6% | 8% | 0.3x | none | 0 .. 0.3 | no |
+| cautious | 10% | 12% | 0.5x | none | 0 .. 0.5 | no |
+| **balanced** (default) | 14% | 18% | 1.0x | none | 0 .. 1.0 | no |
+| dynamic | 20% | 25% | 1.35x | up to 0.30x | -0.30 .. 1.10 | 1h, 15m, 5m |
+| aggressive | 28% | 30% | 1.8x | up to 0.75x | -0.75 .. 1.60 | 1h, 15m, 5m |
+
+`[trading] speed` is `daily` (decide after the close, fill at the next open) or, for dynamic and aggressive only,
+`1h`, `15m` or `5m`: the agents then decide on every bar of the regular session. With IBKR paper data, bars are
+15 minutes late (`data_delay_min = 15`; set 0 with a real-time subscription). In backtests a bar reaches the agents
+only when the delayed feed would have it (rounded up to whole bars) and orders fill at the next opening print; live,
+new exposure goes out as a limit order 1% (`limit_collar`) through the last price, cancelled and re-priced if still
+working a bar later, and exits as market orders. `flat_at_close = true` (default) exits everything in the session's
+last interval, so a quick book carries no overnight gap or financing. Order and turnover caps count every
+rebalance of the day. Intraday research has its own holdout, the last 20% of stored sessions
+(`intraday_holdout`), because free intraday history falls entirely inside the daily holdout. The research swarm
+works on daily bars. IBKR paces historical-data requests (60 per 10 minutes), so the node refuses setups that would
+exceed about 50: at 5m that is 25 stock-strategy pairs.
 
 ## Safety
 
@@ -247,7 +288,11 @@ experiments/LOG.md          your lab notebook
 ## Known limitations
 
 - **Free data is survivorship-biased** and unofficial; see [Data](#data).
-- Daily bars only; idle cash and short-sale proceeds earn no interest (conservative).
+- Idle cash and short-sale proceeds earn no interest (conservative).
+- Intraday: free history is short (weeks for 15m/5m), so intraday statistics are much weaker than daily ones.
+  Delayed data costs a quick strategy real edge; backtests charge it conservatively (whole bars). Early closes
+  (13:00) and halts are not modelled. How IBKR stamps intraday bars (at their close, as the agents assume) is
+  checked on the first real run; if it stamps them at their start, the agents would act one bar early.
 - Borrow fees use one assumed rate for every stock: there is no free historical borrow data, so hard-to-borrow
   names are underpriced in backtests. In paper trading IBKR charges the real fee; the ledger's estimate is
   reported next to it. The simulated broker refuses shorts without borrowable shares but does not liquidate

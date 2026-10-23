@@ -10,8 +10,10 @@ plus IBKR's account-approval time.
    check the current conditions during sign-up.
 2. Once approved, request a **paper trading account** in the IBKR Client Portal (account settings). You get a
    separate paper **username** and a paper **account ID starting with `DU`**. Write both down.
-3. Market data: without subscriptions the paper account gets delayed data, which is fine (the agents act on
-   completed daily bars). If you subscribe on the live account, enable market-data sharing with the paper account.
+3. Market data: without subscriptions the paper account gets delayed data (15 minutes), which is fine at the
+   daily speed (the agents act on completed daily bars). At a quick speed (1h, 15m, 5m) the delay is a real cost:
+   keep `[trading] data_delay_min = 15` so the agents wait for each bar, or subscribe on the live account, enable
+   market-data sharing with the paper account and set it to 0.
 
 Check: log in to the paper account once with IBKR's normal Trader Workstation or the web portal and confirm the
 `DU…` account ID and the simulated balance.
@@ -27,8 +29,9 @@ sudo usermod -aG docker "$USER"                  # log out and in again
 git clone https://github.com/gahitchi/trading.git && cd trading
 ```
 
-The agents only act once a day, but the machine has to be on at 16:10–16:15 New York time (normally 22:10–22:15
-in Italy) and IB Gateway must stay logged in. A small always-on VPS avoids depending on your PC.
+At the daily speed the agents act once a day, but the machine has to be on at 16:10–16:15 New York time (normally
+22:10–22:15 in Italy) and IB Gateway must stay logged in. At a quick speed they trade the whole session, 09:30–16:00
+New York (15:30–22:00 in Italy). A small always-on VPS avoids depending on your PC.
 
 ## 3. Configure
 
@@ -44,9 +47,15 @@ if it cannot; set `dedicated_account = true` if the agents own the whole account
 `max_order_value`, `max_orders_per_day` and `max_daily_turnover` are hard limits; `[risk]` holds the position cap,
 gross cap and drawdown circuit breaker. `.env` and `secrets/` are git-ignored: never commit them.
 
-**Shorts and leverage (optional).** The defaults are long-only and unlevered. To let the agents short or lever up,
-raise `[risk] max_short_gross`, `max_gross` and the net range, and `[portfolio] max_leverage` or `leverage`
-(README, "Long/short, leverage and margin"). First check in IBKR's Client Portal that the account is a **margin**
+**Risk profile and speed.** `[risk] profile` (calm, cautious, balanced, dynamic, aggressive; default balanced)
+sets volatility target, drawdown halt, gross, shorts and net range together; `lab risk-profile` shows what is in
+force. `dynamic` and `aggressive` short and lever up, and only they may set `[trading] speed` to `1h`, `15m` or
+`5m` (README, "Risk profiles and trading speeds"). Start a quick speed with `lab paper --check-only` (it refuses
+setups beyond IBKR's data pacing) and a day of watching the journal.
+
+**Shorts and leverage (optional).** The balanced default is long-only and unlevered. Choose the dynamic or
+aggressive profile, or use `profile = "custom"` and raise `[risk] max_short_gross`, `max_gross` and the net range,
+and `[portfolio] max_leverage` or `leverage` (README, "Long/short, leverage and margin"). First check in IBKR's Client Portal that the account is a **margin**
 account with short-selling permissions (paper accounts normally mirror the live account's type). Set
 `[margin] debit_apr` to IBKR's current rate for your balance. Shorts IBKR cannot borrow are rejected: the agents
 report it and stay flat in that stock. Watch `borrow_fees` and `financing` in `ledger.json` against IBKR's
