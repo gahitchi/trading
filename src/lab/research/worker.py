@@ -17,6 +17,7 @@ from pathlib import Path
 
 from lab import data, experiments
 from lab.config import load_config
+from lab.research.approval import deployment_context, sha256_file
 from lab.signals.registry import SignalSpec
 
 
@@ -32,8 +33,17 @@ def main(argv=None) -> int:
     if not tickers:
         print("no data for any universe ticker; run: lab data fetch", file=sys.stderr)
         return 2
-    spec = SignalSpec(hdir.name, {}, str(hdir / "signal.py"))
+    if cfg.trading.speed != "daily":
+        raise ValueError("the research validator requires daily trading; intraday research is not qualified")
+    digest = sha256_file(hdir / "signal.py")
+    spec = SignalSpec(hdir.name, {}, str(hdir / "signal.py"), digest)
     frames = data.load_many(cfg, tickers)
+    validation = {
+        "source_sha256": digest,
+        "params": {},
+        "config_fingerprint": experiments.config_fingerprint(cfg, len(tickers)),
+        "deployment": deployment_context(cfg.snapshot(), tickers=tickers),
+    }
     r = cfg.research
 
     if mode == "train":
@@ -50,6 +60,7 @@ def main(argv=None) -> int:
             "traded at all": cand.get("fills", 0) > 0,
         }
         out = {
+            "validation": validation,
             "period": "train",
             "tickers": tickers,
             "rows": comp.rows,
@@ -60,10 +71,20 @@ def main(argv=None) -> int:
         }
         (hdir / "train.json").write_text(json.dumps(out, indent=2, default=str))
     elif mode == "test":
+        train = json.loads((hdir / "train.json").read_text())
+        if train.get("passed") is not True or train.get("validation") != validation:
+            raise ValueError("test requires passing train evidence for the same source and configuration")
         period = cfg.period("test")
         comp, _ = experiments.compare(cfg, [spec], tickers, period, frames)
         edge = comp.rows[1]["sharpe_edge"]
-        out = {"period": "test", "tickers": tickers, "rows": comp.rows, "sharpe_edge": edge, "survived": edge > 0}
+        out = {
+            "validation": validation,
+            "period": "test",
+            "tickers": tickers,
+            "rows": comp.rows,
+            "sharpe_edge": edge,
+            "survived": edge > 0 and comp.rows[1]["signal_errors"] == 0,
+        }
         (hdir / "test.json").write_text(json.dumps(out, indent=2, default=str))
     else:
         print(f"unknown mode {mode}", file=sys.stderr)

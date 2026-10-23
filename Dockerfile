@@ -14,7 +14,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     TZ=America/New_York
 
-RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin lab
+RUN apt-get update && apt-get install -y --no-install-recommends libseccomp2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 1000 --shell /usr/sbin/nologin lab
 WORKDIR /lab
 
 # Dependencies first (cached layer), then the code.

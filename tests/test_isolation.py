@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pytest
 
-from lab.research.approval import write_approval
+from lab.research.approval import ApprovalError, sha256_bytes, write_approval
 from lab.research.isolation import IsolatedSignal, IsolationError
 from lab.research.sandbox import static_check
 from lab.signals.base import Window
@@ -45,7 +45,7 @@ def test_class_body_side_effect_that_passes_the_static_check_cannot_touch_the_fi
     src = _src(extra=f"    marker = np.array([7]).tofile({str(marker)!r})\n")
     assert static_check(src).ok  # the static filter alone lets it through
     (tmp_path / "signal.py").write_text(src)
-    with pytest.raises(SignalNotFound, match="Too many open files"):
+    with pytest.raises(SignalNotFound, match="Operation not permitted"):
         SignalSpec("probe", {}, str(tmp_path / "signal.py")).make()
     assert not marker.exists()
 
@@ -76,6 +76,47 @@ def test_a_hanging_signal_is_killed_at_the_deadline():
         s.target(_window())
 
 
+def test_descriptor_reuse_and_path_operations_cannot_escape(tmp_path):
+    """These programs pass the static filter. NOFILE/FSIZE alone stop neither one."""
+    marker = tmp_path / "sentinel"
+    marker.write_text("7")
+    for body in (
+        f"        api = np.array([0]).ctypes._ctypes._os\n        api.unlink({str(marker)!r})\n        return 0.0",
+        f"        api = np.array([0]).ctypes._ctypes._os\n        api.close(2)\n"
+        f"        fd = api.open({str(marker)!r}, 0)\n        return float(api.read(fd, 1))",
+    ):
+        src = _src(body=body)
+        assert static_check(src).ok
+        s = IsolatedSignal(src)
+        try:
+            with pytest.raises(IsolationError, match="Operation not permitted"):
+                s.target(_window())
+        finally:
+            s.close()
+        assert marker.read_text() == "7"
+
+
+def test_sending_to_an_unresponsive_worker_has_a_deadline(monkeypatch):
+    from lab.research import isolation
+
+    monkeypatch.setattr(isolation, "CALL_TIMEOUT_S", 0.15)
+    # After returning once, stop consuming input; the next 250-row window exceeds
+    # the pipe buffer. A receive-only timeout never protected this write.
+    s = IsolatedSignal(_src())
+    try:
+        import os
+        import signal
+        import time
+
+        os.kill(s._proc.pid, signal.SIGSTOP)
+        started = time.monotonic()
+        with pytest.raises(IsolationError, match="write timed out"):
+            s._send(b"x" * 1_000_000, timeout=0.15)
+        assert time.monotonic() - started < 2
+    finally:
+        s.close()
+
+
 # ---------------------------------------------------------------------------- promotion binding
 
 
@@ -83,8 +124,14 @@ def _promoted(research, body="        return 0.1"):
     hdir = research / "hypotheses" / "probe"
     hdir.mkdir(parents=True)
     (hdir / "signal.py").write_text(_src(body=body))
+    validation = {
+        "source_sha256": sha256_bytes((hdir / "signal.py").read_bytes()),
+        "params": {},
+        "deployment": {},
+        "config_fingerprint": "test-fixture",
+    }
     for name in ("train.json", "test.json"):
-        (hdir / name).write_text(json.dumps({"passed": True}))
+        (hdir / name).write_text(json.dumps({"passed": True, "survived": True, "validation": validation}))
     (hdir / "status.json").write_text(json.dumps({"status": "promoted", "history": []}))
     write_approval(hdir, (hdir / "signal.py").read_bytes(), {})
     return hdir
@@ -114,3 +161,27 @@ def test_changed_evidence_or_missing_manifest_voids_the_approval(tmp_path):
     (hdir / "approval.json").unlink()
     with pytest.raises(SignalNotFound, match="approval manifest"):
         resolve("probe", tmp_path, require_tradable=True)
+
+
+def test_source_changed_between_validation_and_promotion_is_rejected(tmp_path):
+    hdir = _promoted(tmp_path)
+    (hdir / "signal.py").write_text(_src(body="        return 0.999"))
+    with pytest.raises(ApprovalError, match="re-validate"):
+        write_approval(hdir, (hdir / "signal.py").read_bytes(), {})
+
+
+def test_failed_or_unbound_validation_cannot_be_promoted(tmp_path):
+    hdir = _promoted(tmp_path)
+    raw = (hdir / "signal.py").read_bytes()
+    for bad in ({"passed": True}, {"survived": False}, {"validation": {}}):
+        (hdir / "test.json").write_text(json.dumps(bad))
+        with pytest.raises(ApprovalError, match="re-validate"):
+            write_approval(hdir, raw, {})
+
+
+def test_deployment_configuration_is_bound_to_validation(tmp_path):
+    from lab.research.approval import verify_approval
+
+    hdir = _promoted(tmp_path)
+    with pytest.raises(ApprovalError, match="deployment configuration"):
+        verify_approval(hdir, {}, context={"risk": "changed"})

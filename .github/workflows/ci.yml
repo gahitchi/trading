@@ -61,6 +61,15 @@ jobs:
         run: |
           docker run --rm trading-lab:ci --help
           docker run --rm -e LAB_PAPER_ACCOUNT=DU1234567 -e LAB_IB_PORT=4004 trading-lab:ci paper --check-only
+      - name: generated-signal boundary in the unprivileged runtime
+        run: |
+          docker run --rm -i --entrypoint python trading-lab:ci - <<'PY'
+          from lab.research.isolation import IsolatedSignal
+          source = "from lab.signals.base import Signal\nclass Probe(Signal):\n    name = 'probe'\n    lookback = 1\n    def target(self, w):\n        return 0.0\n"
+          signal = IsolatedSignal(source)
+          assert signal.name == "probe"
+          signal.close()
+          PY
       - name: validate the compose file
         run: |
           mkdir -p secrets && echo x > secrets/tws_password

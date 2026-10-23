@@ -164,7 +164,7 @@ The agents run unattended and continuously by default. What they do when somethi
 | undo the kill switch | `docker compose exec lab lab resume` |
 | see a hard halt | `docker compose exec lab lab recover` |
 | clear a breaker or account halt | `docker compose exec lab lab recover --reason "what you checked"` |
-| ledger/broker mismatch | check the positions in IBKR; if IBKR is right: `lab recover --reason "..." --adopt-broker` (the ledger takes IBKR's positions at the next rebalance; no restart needed) |
+| ledger/broker mismatch | check the positions in IBKR; if IBKR is right: `lab recover --reason "..." --adopt-broker` (adoption requires terminal broker reports for every pending order; unknown intents remain journaled and halted) |
 | change strategy | edit `LAB_SIGNALS` / `LAB_TICKERS` in `.env`, `docker compose up -d lab` |
 | trade a research hypothesis | `lab research promote <id>` (reads you the code first), then add it to `LAB_SIGNALS` |
 | update | `git pull && docker compose build lab && docker compose up -d` |

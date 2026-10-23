@@ -29,7 +29,8 @@ class _Clock:
 
 def _marks(held, prices, times, latest, *, live=True, now=NOW):
     self = SimpleNamespace(
-        config=SimpleNamespace(live=live, borrow_book=None, market_offset_days=0.0, max_bar_age_days=4.0),
+        config=SimpleNamespace(live=live, borrow_book=None, market_offset_days=0.0, max_bar_age_days=4.0, session=None),
+        weights={},
         held=held,
         prices=prices,
         price_stamps=times,
@@ -71,7 +72,12 @@ def _intake(stamps, now=NOW):
     published, events = [], []
     agent = SimpleNamespace(
         config=SimpleNamespace(
-            session_close="16:00", market_offset_days=0.0, max_bar_age_days=4.0, ticker="GOOG", session=None
+            session_close="16:00",
+            market_offset_days=0.0,
+            max_bar_age_days=4.0,
+            ticker="GOOG",
+            session=None,
+            ib_timestamps=False,
         ),
         clock=_Clock(now),
         last_ts=-1,

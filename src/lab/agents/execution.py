@@ -30,7 +30,7 @@ from lab.safety import is_paper_account, read_kill_switch
 
 NY = ZoneInfo("America/New_York")
 # Hard halts under which exits are still sent (everything else in a halt sends nothing at all).
-_REDUCE_ONLY_HALTS = {"circuit_breaker", "margin_call"}
+_REDUCE_ONLY_HALTS = {"circuit_breaker", "margin_call", "cash_mismatch"}
 _KEEP_TRADE_IDS = 2000  # broker trade IDs remembered for de-duplication (far more than a few days of fills)
 
 
@@ -184,6 +184,8 @@ class ExecutionAgent(Strategy):
         self.cap_orders = 0
         self.cap_opened = 0.0
         self.flattened_day = None
+        self.liquidation_requested = False
+        self.exit_retry_pending = False
         self.held: dict[str, float] = dict.fromkeys(config.instruments, 0.0)
         # Write-ahead order journal: every order is recorded here BEFORE it is sent, and stays
         # until the broker reports it closed. After a crash between order and fill, the fills are
@@ -229,6 +231,8 @@ class ExecutionAgent(Strategy):
             self._recover_pending()
             if self.config.session is None:
                 self._schedule(now)  # daily; a quick speed decides after every bar instead
+            elif self.config.flat_at_close:
+                self._schedule_session_exit(now)
             self.clock.set_timer("heartbeat", timedelta(seconds=60), callback=self._on_heartbeat)
             self._on_heartbeat(None)
             self._risk_event(
@@ -300,6 +304,33 @@ class ExecutionAgent(Strategy):
         self.halted = msg.halted  # follows the RiskAgent: halted until its breaker is cleared
         self.reduce_only = msg.reduce_only
 
+    def _schedule_session_exit(self, after):
+        from lab.agents.schedule import is_session_day
+
+        sess = self.config.session
+        day = after
+        for _ in range(10):
+            at = sess.close_at(day) - sess._m(sess.interval_min)
+            if at > after and is_session_day(day, sess.weekdays_only):
+                self.clock.set_time_alert_ns("session-exit", int(at.timestamp() * 1e9), callback=self._on_session_exit)
+                return
+            day += timedelta(days=1)
+
+    def _on_session_exit(self, event):
+        self.rebalance()  # independent of new_data or a successful historical-data request
+        self._schedule_session_exit(datetime.fromtimestamp(event.ts_event / 1e9, NY))
+
+    def _retry_liquidation(self):
+        if self.config.live and self.liquidation_requested and not self.exit_retry_pending:
+            self.exit_retry_pending = True
+            self.clock.set_time_alert_ns(
+                "exit-retry", self.clock.timestamp_ns() + 10_000_000, callback=self._on_exit_retry
+            )
+
+    def _on_exit_retry(self, _event):
+        self.exit_retry_pending = False
+        self.rebalance()
+
     def _schedule(self, after: datetime):
         nxt = next_at(after, self.config.rebalance_time, weekdays_only=self.config.weekdays_only)
         self.clock.set_time_alert_ns(
@@ -331,6 +362,11 @@ class ExecutionAgent(Strategy):
             self._recover_pending()  # safety net: settle journaled orders from the broker's latest state
         if self._kill():
             self._cancel_open_orders()
+        # Exit controls must not depend on another market-data message arriving.
+        kill = self._kill()
+        closing = self.config.flat_at_close and self._session_phase() in ("closing", "closed")
+        if (kill and kill.get("mode") == "flatten") or (closing and (any(self.held.values()) or self.pending)):
+            self.rebalance()
         self._write_heartbeat(running=True)
 
     def _read_heartbeat(self) -> dict | None:
@@ -412,8 +448,23 @@ class ExecutionAgent(Strategy):
                 diffs.append(f"{t}: ledger {mine:g} vs broker {b:g}")
         return diffs
 
-    def _adopt_broker_positions(self):
+    def _adopt_broker_positions(self) -> bool:
         """Operator-requested reset: take the broker's positions as truth, at their cost basis."""
+        if self.config.live and not self._paper_guard():
+            return False
+        if self.orphans:
+            self._hard_halt("reconciliation_mismatch", "restore orphaned instruments before adopting the book")
+            return False
+        self._recover_pending()
+        if self.pending or any(
+            self.cache.orders_open_count(instrument_id=iid) for iid in self.config.instruments.values()
+        ):
+            self._hard_halt(
+                "reconciliation_mismatch",
+                "cannot adopt while orders are open or unresolved; obtain terminal broker reports first. "
+                "An account snapshot is not proof that an in-flight order cannot fill",
+            )
+            return False
         adopted = {}
         for t, iid in self.config.instruments.items():
             q = self._broker_position(t)
@@ -435,13 +486,12 @@ class ExecutionAgent(Strategy):
             # that the account can carry it.
             self.cash = self.config.capital - sum(q * avg for q, avg in adopted.values())
             basis = "capital minus cost basis"
-        self.pending = {}
-        self.orphans = {}  # the operator decided: the broker's book for this universe is the truth
         self.ledger_account = self._account_id() or self.ledger_account
         self._save()
         self._risk_event(
             "ledger_reset", f"adopted broker positions {adopted}; ledger cash now {self.cash:,.2f} ({basis})"
         )
+        return True
 
     def _book(self) -> tuple[float, float]:
         long_value = sum(q * self.prices.get(t, 0.0) for t, q in self.held.items() if q > 0)
@@ -539,7 +589,7 @@ class ExecutionAgent(Strategy):
         the bar-age limit nor from the future (G007-F2): two equally stale prices must not "agree"."""
         if not self.config.live and self.config.borrow_book is None:
             return []
-        held = [t for t, q in self.held.items() if q]
+        held = [t for t in self.held if self.held[t] or self.weights.get(t, 0)]
         if not self.price_ts:
             return ["<no prices yet>"] if held else []
         if self.config.live:
@@ -558,6 +608,7 @@ class ExecutionAgent(Strategy):
                 or mark <= 0
                 or ts is None
                 or datetime.fromtimestamp(ts / 1e9, NY).date() != session
+                or (self.config.session is not None and ts != self.price_ts)
             ):
                 bad.append(ticker)
         return bad
@@ -592,8 +643,6 @@ class ExecutionAgent(Strategy):
                 self._risk_event("borrow_history_invalid", self.borrow_error)
                 return
             self.publish_message(T_EQUITY, snap)  # RiskAgent may halt here; its reply arrives synchronously
-            if self.config.live and not self._check_funding(snap):
-                return
         elif self.borrow_ledger is not None:
             self.borrow_error = f"missing/stale marks for held positions: {', '.join(sorted(unsafe))}"
 
@@ -616,32 +665,33 @@ class ExecutionAgent(Strategy):
             if self.config.live:
                 self._hard_halt("margin_call", detail)
         breaker = halt is not None and halt["kind"] == "circuit_breaker"
-        liquidate = flatten or self.halted or breaker or (snap is not None and not equity_ok)
+        phase = self._session_phase()
+        closing = self.config.flat_at_close and phase in ("closing", "closed")
+        liquidate = flatten or self.halted or breaker or closing or (snap is not None and not equity_ok)
         if unsafe and not liquidate:
             self.blocked_reason = f"missing/stale marks for held positions: {', '.join(sorted(unsafe))}"
             self._risk_event("stale_data", self.blocked_reason + "; no orders until all held marks are current")
             return
         self.blocked_reason = ""
         if liquidate:
+            if closing and any(self.held.values()) and self.flattened_day != self._now().date():
+                self.flattened_day = self._now().date()
+                self._risk_event("flat_at_close", "session exit: cancel entries and close reconciled quantities")
             self._liquidate()
             return
-        phase = self._session_phase()
-        if self.config.flat_at_close and phase in ("closing", "closed"):
-            day = self._now().date()
-            if any(self.held.values()):
-                if self.flattened_day != day:
-                    self.flattened_day = day
-                    self._risk_event(
-                        "flat_at_close",
-                        "last interval of the session: every position is exited, nothing new opens until the "
-                        "next session"
-                        if phase == "closing"
-                        else "market closed with positions still held: exits go out for the next opening print",
-                    )
-                self._liquidate()
+        if phase == "closed":
+            return  # no quick-speed entries outside the regular session, even when overnight holds are allowed
+        self.liquidation_requested = False
+        if self.config.live and not self._check_funding(snap):
             return
+        if self.config.live:
+            snap = self.snapshot()  # include any dedicated-account cash adjustment before sizing
+            self.publish_message(T_EQUITY, snap)
+            if self.halted or snap.equity <= 0:
+                self._liquidate()
+                return
 
-        reduce_only = self.reduce_only or (halt is not None and halt["kind"] == "margin_call")
+        reduce_only = self.reduce_only or (halt is not None and halt["kind"] in ("margin_call", "cash_mismatch"))
         orders = []
         borrow_blocked = False
         for ticker, iid in self.config.instruments.items():
@@ -653,6 +703,8 @@ class ExecutionAgent(Strategy):
             exit_all = self.halted or flatten or (halt is not None and not reduce_only)
             w = 0.0 if exit_all else self.weights.get(ticker, 0.0)
             target = math.trunc(w * snap.equity * (1 - self.config.cash_buffer) / price)  # signed, toward zero
+            if current * target < 0:
+                target = 0  # settle the exit before opening the opposite side on a later decision
             if reduce_only:
                 # Margin call: exposure may only shrink, never flip or grow.
                 target = 0 if target * current <= 0 else math.copysign(min(abs(target), abs(current)), current)
@@ -684,11 +736,20 @@ class ExecutionAgent(Strategy):
                 continue
             orders.append((_opening(current, target), target, current, iid, ticker, price))
 
-        orders.sort(key=lambda o: o[0] > 0)  # pure reductions first: they free margin and are never capped
+        orders.sort(key=lambda o: o[0] > 0)
+        # Submission isn't a fill: don't spend margin released only by a proposed
+        # reduction. A rejected/partial reduction must not finance another entry.
+        reductions = any(o[0] == 0 for o in orders)
+        unsettled = bool(self.pending) or any(
+            self.cache.orders_open_count(instrument_id=iid) for iid in self.config.instruments.values()
+        )
         day = _ny_date(self.price_ts) if self.price_ts else None
         if day != self.cap_day:
             self.cap_day, self.cap_orders, self.cap_opened = day, 0, 0.0
         for opening, target, current, iid, ticker, price in orders:
+            if opening > 0 and (reductions or unsettled):
+                self._risk_event("order_pending", "new exposure deferred until existing orders and reductions settle")
+                continue
             if borrow_blocked and opening > 0:
                 # Do not open the long hedge of an unavailable short (or any other
                 # new exposure from the now-incomplete approved portfolio).
@@ -737,15 +798,22 @@ class ExecutionAgent(Strategy):
 
     def _consume_adopt(self) -> bool:
         """Apply an operator's `lab recover --adopt-broker` request (the broker's book is the truth). It runs
-        before the journal is settled, so a disposed unknown order cannot re-halt the system."""
+        only after pending orders have terminal broker reports; a snapshot cannot dispose an unknown order."""
         if self.config.adopt_path and Path(self.config.adopt_path).exists():
-            self._adopt_broker_positions()
+            accepted = self._adopt_broker_positions()
             Path(self.config.adopt_path).unlink()
-            return True
+            return accepted
         return False
 
     def _liquidate(self):
         """Exit every held position by quantity: no equity, price, cap or band can block an exit."""
+        self.liquidation_requested = True
+        # Cancel any working entry or resize before covering the remaining position.
+        # Wait for the terminal broker event; a cancel request is not cancellation.
+        for coid, info in list(self.pending.items()):
+            order = self.cache.order(ClientOrderId(coid))
+            if order is not None and not order.is_closed and info.get("adds", True):
+                self.cancel_order(order.client_order_id)
         for ticker, iid in self.config.instruments.items():
             current = self.held.get(ticker, 0.0)
             if not current:
@@ -846,6 +914,7 @@ class ExecutionAgent(Strategy):
             "side": "BUY" if diff > 0 else "SELL",
             "qty": abs(diff),
             "ts": self.clock.timestamp_ns(),
+            "adds": adds,
         }
         self._save()  # journaled before it can reach the broker
         self.submit_order(order)
@@ -941,9 +1010,11 @@ class ExecutionAgent(Strategy):
         order = self.cache.order(ev.client_order_id)
         if order is not None and order.is_closed:
             self._close_pending(ev.client_order_id)
+        self._retry_liquidation()
 
     def on_order_canceled(self, ev):
         self._close_pending(ev.client_order_id)
+        self._retry_liquidation()
 
     def on_order_rejected(self, ev):
         self.rejections += 1
