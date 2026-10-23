@@ -82,9 +82,10 @@ class ExecutionAgentConfig(StrategyConfig):
         max_bar_age_days: float = MAX_BAR_AGE_DAYS,
         cash_tolerance: float = 1.0,
         max_external_cash: float = 0.02,
-        interval_min: int | None = None,
+        session=None,
         flat_at_close: bool = False,
         decision_delay_s: float = 1.0,
+        limit_collar: float = 0.01,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. margin: financing rates accrued on short and levered books.
@@ -92,10 +93,13 @@ class ExecutionAgentConfig(StrategyConfig):
         max_order_value:    no single buy larger than this (USD)
         max_orders_per_day: orders per session day (all rebalances of the day); past it, only reductions go out
         max_daily_turnover: new exposure opened per session day / equity (1.0 = the whole portfolio)
-        interval_min:       None = daily (rebalance at rebalance_time after the close). A quick speed (60, 15, 5):
-                            rebalance decision_delay_s after each bar reaches the agents
+        session:            None = daily (rebalance at rebalance_time after the close). A quick speed
+                            (agents.schedule.Session): rebalance after each bar; backtest decision_delay_s after
+                            the bar reaches the agents, live the session's decide_s after the bar is requested
         flat_at_close:      quick speeds: exit everything in the session's last interval and open nothing new
                             until the next session (no overnight gap risk, no overnight financing)
+        limit_collar:       quick speeds, live: new exposure goes out as a limit order this far through the
+                            last (delayed) price, cancelled if still working a bar later; exits are market orders
         """
         super().__init__()
         self.instruments = instruments
@@ -123,9 +127,10 @@ class ExecutionAgentConfig(StrategyConfig):
         self.max_bar_age_days = max_bar_age_days
         self.cash_tolerance = cash_tolerance
         self.max_external_cash = max_external_cash
-        self.interval_min = interval_min
+        self.session = session
         self.flat_at_close = flat_at_close
         self.decision_delay_s = decision_delay_s
+        self.limit_collar = limit_collar
         if live and borrow_book is not None:
             raise ValueError("historical borrow evidence cannot authorize live paper-broker orders")
         if state_path and borrow_book is not None:
@@ -222,7 +227,8 @@ class ExecutionAgent(Strategy):
                 self._adopt_broker_positions()
             self._consume_adopt()
             self._recover_pending()
-            self._schedule(now)
+            if self.config.session is None:
+                self._schedule(now)  # daily; a quick speed decides after every bar instead
             self.clock.set_timer("heartbeat", timedelta(seconds=60), callback=self._on_heartbeat)
             self._on_heartbeat(None)
             self._risk_event(
@@ -273,9 +279,17 @@ class ExecutionAgent(Strategy):
         self.new_data = True
         if self.alert_pending:
             return
-        if self.config.interval_min:
-            # Quick speed: decide just after the bar arrives (every stock's bar arrives at the same moment).
-            at = self.clock.timestamp_ns() + int(self.config.decision_delay_s * 1e9)
+        if self.config.session is not None:
+            # Quick speed: decide just after the bar arrives. Backtest: every stock's bar arrives at the same
+            # moment. Live: the session's decide_s after this cycle's request, when every response is in.
+            now = self.clock.timestamp_ns()
+            at = now + int(self.config.decision_delay_s * 1e9)
+            if self.config.live:
+                sess = self.config.session
+                t = datetime.fromtimestamp(now / 1e9, NY)
+                fetched = [f for f in sess.fetch_times(t) if f <= t]
+                if fetched:
+                    at = max(at, int((fetched[-1] + timedelta(seconds=sess.decide_s)).timestamp() * 1e9))
             self.clock.set_time_alert_ns(f"rebalance-{at}", at, callback=self._on_alert)
             self.alert_pending = True
             return
@@ -295,7 +309,7 @@ class ExecutionAgent(Strategy):
 
     def _on_alert(self, event):
         self.alert_pending = False
-        if self.config.interval_min:
+        if self.config.session is not None:
             if self.new_data:
                 self.new_data = False
                 self.rebalance()
@@ -566,6 +580,8 @@ class ExecutionAgent(Strategy):
                 self._hard_halt("reconciliation_mismatch", self.blocked_reason)
             return
 
+        if self.config.live and self.config.session is not None:
+            self._cancel_stale_orders()
         unsafe = self._unsafe_held_marks()
         snap = None
         if not unsafe:
@@ -695,7 +711,7 @@ class ExecutionAgent(Strategy):
                 )
                 break
             diff = target - current
-            if diff != 0 and self._submit(iid, ticker, diff):
+            if diff != 0 and self._submit(iid, ticker, diff, adds=opening > 0):
                 self.cap_orders += 1
                 self.cap_opened += opening * price
                 self._save()
@@ -704,16 +720,20 @@ class ExecutionAgent(Strategy):
         return market_now(self.clock, self.config.market_offset_days)
 
     def _session_phase(self) -> str | None:
-        """Quick speeds: where the decision falls in the regular session (09:30-16:00 New York). "open", or
-        "closing" when at most one interval remains (orders still fill on the session's last bars), or "closed".
-        None at the daily speed."""
-        if not self.config.interval_min:
-            return None
-        now = self._now()
-        t = now.hour * 60 + now.minute + now.second / 60
-        if t < 9 * 60 + 30 or t >= 16 * 60:
-            return "closed"
-        return "closing" if 16 * 60 - t <= self.config.interval_min else "open"
+        """Quick speeds: where the decision falls in the regular session: "open", "closing" when at most one
+        interval remains (orders still fill on the session's last bar), or "closed". None at the daily speed."""
+        return None if self.config.session is None else self.config.session.phase(self._now())
+
+    def _cancel_stale_orders(self):
+        """Quick speeds, live: a limit order still working one bar after it was sent is cancelled; the next
+        decision re-prices it from fresh data."""
+        sess = self.config.session
+        limit = sess.interval_min * sess.seconds_per_minute * 1e9
+        now = self.clock.timestamp_ns()
+        for iid in self.config.instruments.values():
+            for order in self.cache.orders_open(instrument_id=iid):
+                if now - order.ts_init >= limit:
+                    self.cancel_order(order.client_order_id)
 
     def _consume_adopt(self) -> bool:
         """Apply an operator's `lab recover --adopt-broker` request (the broker's book is the truth). It runs
@@ -793,7 +813,8 @@ class ExecutionAgent(Strategy):
             return False
         return True
 
-    def _submit(self, iid, ticker: str, diff: float) -> bool:
+    def _submit(self, iid, ticker: str, diff: float, *, adds: bool = False) -> bool:
+        """adds: the order opens new exposure (live quick speeds send it as a collared limit order)."""
         if self.config.live and not self._paper_guard():
             return False
         inst = self.cache.instrument(iid)
@@ -801,8 +822,20 @@ class ExecutionAgent(Strategy):
             self._risk_event("blocked", f"{ticker}: instrument {iid} not loaded; order skipped")
             return False
         side = OrderSide.BUY if diff > 0 else OrderSide.SELL
-        tif = TimeInForce.AT_THE_OPEN if self.config.live else TimeInForce.GTC
-        order = self.order_factory.market(iid, side, inst.make_qty(abs(diff)), time_in_force=tif)
+        qty = inst.make_qty(abs(diff))
+        if not self.config.live:
+            order = self.order_factory.market(iid, side, qty, time_in_force=TimeInForce.GTC)
+        elif self.config.session is None:
+            order = self.order_factory.market(iid, side, qty, time_in_force=TimeInForce.AT_THE_OPEN)
+        elif adds and self.prices.get(ticker):
+            # A marketable limit: delayed data can be stale, so new exposure never pays more than the collar.
+            c = self.config.limit_collar
+            px = self.prices[ticker] * (1 + c if side == OrderSide.BUY else 1 - c)
+            order = self.order_factory.limit(
+                iid, side, qty, inst.make_price(round(px, 2)), time_in_force=TimeInForce.DAY
+            )
+        else:
+            order = self.order_factory.market(iid, side, qty, time_in_force=TimeInForce.DAY)  # exits must go
         coid = str(order.client_order_id)
         if coid in self.pending:
             # Never reuse an identifier the broker may already know: it would be refused, or worse, matched.

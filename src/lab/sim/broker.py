@@ -8,6 +8,8 @@ happen while the node is down are reported when it reconnects.
 Behaviour modelled on IBKR (as used by this lab):
   - market-on-open orders (MARKET + AT_THE_OPEN) queue until the next session's open and
     fill at its opening price; a partially filled remainder is cancelled after the auction
+  - intraday (quick speeds): MARKET and LIMIT DAY orders fill at the next trade print the harness
+    delivers (open_session with the bar's opening prices); DAY orders expire at the close (expire_day)
   - resting limit orders fill at the open if the open crosses their limit
   - IBKR Pro Fixed commissions and the backtest's one-tick slippage (lab/costs.py), so a
     harness run and a backtest over the same bars must produce the same ledger
@@ -163,8 +165,6 @@ class SimBroker:
         fault = self._take_fault("reject")
         if fault:
             rec["status"], rec["reason"] = "REJECTED", fault.get("reason", "rejected by broker")
-        elif order_type == "MARKET" and tif != "AT_THE_OPEN":
-            rec["status"], rec["reason"] = "REJECTED", "sim broker fills market orders only at the open"
         elif order_type == "LIMIT" and limit is None:
             rec["status"], rec["reason"] = "REJECTED", "limit order without a price"
         elif order_type not in ("MARKET", "LIMIT"):
@@ -241,6 +241,16 @@ class SimBroker:
                 cancelled.append(rec)
         self.save()
         return fills, cancelled
+
+    def expire_day(self, ts: int) -> list[dict]:
+        """The close: working DAY orders expire, as at IBKR."""
+        out = []
+        for rec in self.open_orders():
+            if rec["tif"] != "AT_THE_OPEN":
+                rec["status"], rec["reason"], rec["ts_last"] = "CANCELED", "DAY order expired at the close", ts
+                out.append(rec)
+        self.save()
+        return out
 
     def fills_for(self, client_order_id: str) -> list[Fill]:
         return [Fill(**f) for f in self.state["fills"] if f["client_order_id"] == client_order_id]

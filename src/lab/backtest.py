@@ -38,6 +38,7 @@ from lab.agents import (
     SignalAgentConfig,
 )
 from lab.agents.cross_sectional import CrossSectionalAgent, CrossSectionalAgentConfig
+from lab.agents.schedule import Session
 from lab.borrow import BorrowBook, BorrowUnavailable
 from lab.config import LabConfig, RiskSettings
 from lab.metrics import max_drawdown, summarize
@@ -220,13 +221,13 @@ def run(
 
         start_ns = _ns(start)
         windows = active_windows(frames, membership)
+        session = Session(sp.minutes, delay_min=delay_bars * sp.minutes, fetch_lag_s=0, decide_s=1) if quick else None
         speed_kw = (
             {
                 "bar_spec": sp.bar_spec(),
-                "interval_min": sp.minutes,
-                "data_delay_min": cfg.trading.data_delay_min,
+                "session": session,
                 # The latest bar must be this interval's: no older than the delay plus one bar, plus slack.
-                "max_bar_age_days": (sp.minutes * (1 + delay_bars) + 2) / 1440,
+                "max_bar_age_days": session.max_bar_age().total_seconds() / 86_400,
             }
             if quick
             else {}
@@ -306,7 +307,7 @@ def run(
                 capital=capital,
                 margin=cfg.margin,
                 borrow_book=borrow_book,
-                interval_min=sp.minutes,
+                session=session,
                 flat_at_close=quick and cfg.trading.flat_at_close,
                 **(execution_overrides or {}),
             )

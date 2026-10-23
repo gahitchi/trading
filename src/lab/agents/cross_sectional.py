@@ -40,8 +40,7 @@ class CrossSectionalAgentConfig(DataActorConfig):
         market_offset_days: float = 0.0,
         max_bar_age_days: float = MAX_BAR_AGE_DAYS,
         bar_spec: str = "1-DAY",
-        interval_min: int | None = None,
-        data_delay_min: float = 0.0,
+        session=None,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. active_windows: ticker -> [(from_ns, until_ns)] or None."""
@@ -58,8 +57,7 @@ class CrossSectionalAgentConfig(DataActorConfig):
         self.market_offset_days = market_offset_days
         self.max_bar_age_days = max_bar_age_days
         self.bar_spec = bar_spec  # the trading speed, as in SignalAgentConfig
-        self.interval_min = interval_min
-        self.data_delay_min = data_delay_min
+        self.session = session  # agents.schedule.Session, or None (daily)
 
 
 class CrossSectionalAgent(DataActor):
@@ -95,7 +93,7 @@ class CrossSectionalAgent(DataActor):
         self._add(bar)
         if not self.pending and bar.ts_event >= self.config.trade_start_ns:
             self.pending = True
-            if self.config.interval_min:
+            if self.config.session is not None:
                 # Every stock's bar for this interval arrives at the same moment: rank half a second later,
                 # before the ExecutionAgent decides (one second after the bars).
                 at_ns = self.clock.timestamp_ns() + 500_000_000
@@ -113,8 +111,8 @@ class CrossSectionalAgent(DataActor):
             t = datetime.fromtimestamp(b.ts_event / 1e9, NY)
             if t > now + FUTURE_TOLERANCE:
                 continue  # stamped after now: never used
-            if self.config.interval_min:
-                if t > now - timedelta(minutes=self.config.data_delay_min):
+            if self.config.session is not None:
+                if t > now - self.config.session.delay():
                     continue  # not yet in the (delayed) data: may still be forming
             elif t.date() == now.date() and now.time() < close:
                 continue  # today's bar is still forming
@@ -134,7 +132,7 @@ class CrossSectionalAgent(DataActor):
                 float(bar.close),
                 float(bar.volume),
                 _session_date(bar.ts_event),
-                bar_minute(bar.ts_event, self.config.interval_min),
+                bar_minute(bar.ts_event, self.config.session),
             )
         )
 
@@ -189,19 +187,24 @@ class CrossSectionalAgent(DataActor):
     # ------------------------------------------------------------------ paper mode
 
     def _request_history(self, *_):
-        days = history_days(self.signal.lookback, self.config.interval_min)
+        days = history_days(self.signal.lookback, self.config.session)
         start = market_now(self.clock, self.config.market_offset_days) - timedelta(days=days)
         for iid in self.config.instruments.values():
             self.request_bars(bar_type(iid, self.config.bar_spec), start=start)
 
     def _schedule_live(self):
-        fetch = next_at(now_ny(self.clock), self.config.signal_time, weekdays_only=self.config.weekdays_only)
+        session = self.config.session
+        if session is not None:
+            fetch = session.next_fetch(now_ny(self.clock))
+            evaluate = fetch + timedelta(seconds=session.eval_s)
+        else:
+            fetch = next_at(now_ny(self.clock), self.config.signal_time, weekdays_only=self.config.weekdays_only)
+            evaluate = fetch + timedelta(seconds=self.config.eval_delay_s)  # after the requested bars arrived
         self.clock.set_time_alert_ns(
-            f"xs-fetch-{fetch:%Y%m%d-%H%M%S}", int(fetch.timestamp() * 1e9), callback=self._on_fetch_time
+            f"xs-fetch-{fetch:%Y%m%d-%H%M%S%f}", int(fetch.timestamp() * 1e9), callback=self._on_fetch_time
         )
-        evaluate = fetch + timedelta(seconds=self.config.eval_delay_s)  # after the requested bars have arrived
         self.clock.set_time_alert_ns(
-            f"xs-eval-{evaluate:%Y%m%d-%H%M%S}", int(evaluate.timestamp() * 1e9), callback=self._on_live_evaluate
+            f"xs-eval-{evaluate:%Y%m%d-%H%M%S%f}", int(evaluate.timestamp() * 1e9), callback=self._on_live_evaluate
         )
 
     def _on_fetch_time(self, _event):

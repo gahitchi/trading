@@ -224,11 +224,14 @@ class SimExecutionClient(ExecutionClient):
                 f.ts,
             )
         for rec in cancelled:
-            order = self.cache.order(ClientOrderId(rec["client_order_id"]))
-            if order is not None:
-                self.generate_order_canceled(order, VenueOrderId(rec["venue_order_id"]), self.clock.timestamp_ns())
+            self._report_canceled(rec)
         self._send_account_state()
         return fills
+
+    def _report_canceled(self, rec: dict) -> None:
+        order = self.cache.order(ClientOrderId(rec["client_order_id"]))
+        if order is not None:
+            self.generate_order_canceled(order, VenueOrderId(rec["venue_order_id"]), self.clock.timestamp_ns())
 
     # ------------------------------------------------------------------ reconciliation reports
 

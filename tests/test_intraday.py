@@ -240,3 +240,48 @@ def test_vwap_reversion_fades_a_stretch_and_exits_at_vwap():
     assert targets[6] == 1  # far below VWAP: long
     assert targets[7] == 1  # still below
     assert targets[8] == 0  # back above VWAP: out
+
+
+# ----------------------------------------------------------------------------- the live session clock
+
+
+def test_session_grid_phase_and_fetch_times():
+    from datetime import datetime
+
+    from lab.agents.schedule import NY, Session
+
+    s = Session(15, delay_min=15)
+    day = datetime(2026, 3, 2, 12, 0, tzinfo=NY)
+    ends = s.bar_ends(day)
+    assert len(ends) == 26 and ends[0].strftime("%H:%M") == "09:45" and ends[-1].strftime("%H:%M") == "16:00"
+    assert [s.phase(day.replace(hour=h, minute=m)) for h, m in ((9, 0), (10, 0), (15, 46), (16, 0))] == [
+        "closed",
+        "open",
+        "closing",
+        "closed",
+    ]
+    assert s.minute_of(day.replace(hour=10, minute=0)) == 30
+    first = s.next_fetch(day.replace(hour=9, minute=0))
+    assert first.strftime("%H:%M:%S") == "10:00:20"  # the 09:30-09:45 bar, 15 minutes late, plus the lag
+    friday_late = datetime(2026, 3, 6, 17, 0, tzinfo=NY)
+    assert s.next_fetch(friday_late).date().isoformat() == "2026-03-09"  # Monday
+    h = Session(60, delay_min=15)
+    assert [e.strftime("%H:%M") for e in h.bar_ends(day)][-2:] == ["15:30", "16:00"]
+
+
+def test_pacing_refuses_too_many_live_requests(goog_lab):
+    from lab import paper
+    from lab.signals.registry import SignalSpec
+
+    cfg = replace(goog_lab, trading=replace(goog_lab.trading, speed="5m"))
+    paper.check_pacing(cfg, [SignalSpec("orb")], ["T"] * 20)  # 40 requests / 10 min: fine
+    with pytest.raises(ValueError, match="pacing"):
+        paper.check_pacing(cfg, [SignalSpec("orb"), SignalSpec("vwap_reversion")], ["T"] * 20)
+
+
+def test_paper_node_refuses_intraday_techniques_at_the_daily_speed(goog_lab):
+    from lab import paper
+    from lab.signals.registry import SignalSpec
+
+    with pytest.raises(ValueError, match="intraday technique"):
+        paper.build_node(goog_lab, [SignalSpec("orb")], ["GOOG"])

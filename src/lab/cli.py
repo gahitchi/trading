@@ -576,6 +576,15 @@ def cmd_paper(cfg, a):
         raise SystemExit(str(e)) from e
     what = "smoke test" if a.smoke else f"{len(a.signals)} signal(s) x {len(tickers)} stocks"
     print(f"paper node ready: {what}, account {cfg.paper.account_id} via {cfg.paper.host}:{cfg.paper.port}")
+    if not a.smoke:
+        t = cfg.trading
+        pace = (
+            "daily: decide after the close, market-on-open orders"
+            if t.speed == "daily"
+            else f"{t.speed} bars, {t.data_delay_min:g} min data delay, limit collar {t.limit_collar:.1%}, "
+            + ("flat at every close" if t.flat_at_close else "positions held overnight")
+        )
+        print(f"profile {cfg.risk.profile}, speed {pace}")
     if a.check_only:
         node.dispose()
         print("check only: configuration is valid; not connecting.")
