@@ -76,18 +76,19 @@ def to_market_events(df: pd.DataFrame, iid: InstrumentId, open_print_fraction: f
     for i in range(len(df)):
         hi = max(h[i], o[i], c[i])
         low = min(lo[i], o[i], c[i])
-        size = max(1, int(v[i] * open_print_fraction))
-        events.append(
-            TradeTick(
-                iid,
-                Price(o[i], 2),
-                Quantity(size, 0),
-                AggressorSide.NO_AGGRESSOR,
-                TradeId(f"{sym}-open-{i}"),
-                int(t_open[i]),
-                int(t_open[i]),
+        size = int(v[i] * open_print_fraction)
+        if size > 0:
+            events.append(
+                TradeTick(
+                    iid,
+                    Price(o[i], 2),
+                    Quantity(size, 0),
+                    AggressorSide.NO_AGGRESSOR,
+                    TradeId(f"{sym}-open-{i}"),
+                    int(t_open[i]),
+                    int(t_open[i]),
+                )
             )
-        )
         events.append(
             Bar(
                 bt,
@@ -95,7 +96,7 @@ def to_market_events(df: pd.DataFrame, iid: InstrumentId, open_print_fraction: f
                 Price(hi, 2),
                 Price(low, 2),
                 Price(c[i], 2),
-                Quantity(max(1, int(v[i])), 0),
+                Quantity(int(v[i]), 0),
                 int(t_close[i]),
                 int(t_close[i]),
             )
@@ -118,7 +119,7 @@ def to_intraday_events(
     With delayed market data (15 minutes for IBKR paper without a subscription), a decision on the bar that
     closed at 10:00 is made at 10:15 and fills at the opening print of the 10:15 bar, never at a price the
     agents could not have traded at. The delay is rounded UP to whole bars (1h bars with 15 min delay: one
-    hour), which is conservative. Orders decided after the last opening print of a session fill at the next
+    hour), which changes the fill scenario and is not guaranteed to be conservative. Orders decided after the last opening print of a session fill at the next
     session's first one.
     """
     from lab.intraday import bar_end
@@ -140,18 +141,19 @@ def to_intraday_events(
     events = []
     for i in range(len(df)):
         hi, low = max(h[i], o[i], c[i]), min(lo[i], o[i], c[i])
-        size = max(1, int(v[i] * open_print_fraction))
-        events.append(
-            TradeTick(
-                iid,
-                Price(o[i], 2),
-                Quantity(size, 0),
-                AggressorSide.NO_AGGRESSOR,
-                TradeId(f"{sym}-open-{i}"),
-                int(t_open[i]),
-                int(t_open[i]),
+        size = int(v[i] * open_print_fraction)
+        if size > 0:
+            events.append(
+                TradeTick(
+                    iid,
+                    Price(o[i], 2),
+                    Quantity(size, 0),
+                    AggressorSide.NO_AGGRESSOR,
+                    TradeId(f"{sym}-open-{i}"),
+                    int(t_open[i]),
+                    int(t_open[i]),
+                )
             )
-        )
         events.append(
             Bar(
                 bt,
@@ -159,7 +161,7 @@ def to_intraday_events(
                 Price(hi, 2),
                 Price(low, 2),
                 Price(c[i], 2),
-                Quantity(max(1, int(v[i])), 0),
+                Quantity(int(v[i]), 0),
                 int(t_end[i]),
                 int(t_seen[i]),
             )

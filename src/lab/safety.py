@@ -61,7 +61,9 @@ def set_kill_switch(path: Path, mode: str, reason: str) -> dict:
         raise ValueError("mode must be 'halt' or 'flatten'")
     state = {"mode": mode, "reason": reason, "at": datetime.now(UTC).isoformat(timespec="seconds")}
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state))
+    from lab.persistence import atomic_json
+
+    atomic_json(path, state)
     return state
 
 
@@ -71,7 +73,7 @@ def read_kill_switch(path: str | Path) -> dict | None:
         if not p.exists():
             return None
         raw = p.read_text()
-    except OSError as e:
+    except (OSError, UnicodeError) as e:
         return {"mode": "halt", "reason": f"cannot read kill file: {e}"}
     try:
         state = json.loads(raw or "{}")
@@ -87,6 +89,8 @@ def read_kill_switch(path: str | Path) -> dict | None:
 
 def clear_kill_switch(path: Path) -> bool:
     if path.exists():
-        path.unlink()
+        from lab.persistence import durable_unlink
+
+        durable_unlink(path)
         return True
     return False

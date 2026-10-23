@@ -1,0 +1,590 @@
+{
+  "scenario": "Zero arithmetic-drift GBM, 25% annual volatility, one stock; choose higher observed Sharpe edge of two fixed candidates, then evaluate its bootstrap p-value and complete training gate. 120 warm-up bars excluded from evaluation.",
+  "limitations": [
+    "Small Monte Carlo cohort; interval is wide",
+    "No staggered histories, correlated panel, historical borrow, intraday data, model-generated selection or repeated human selection",
+    "Bootstrap null is conditional on observed history; a single scenario cannot establish general validity",
+    "This is the training gate, not test-period survival or live qualification"
+  ],
+  "source_head": "ae0f0dfa3f60e4761993252fd1ec77817a91c019",
+  "source_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "python": "3.13.16 (main, Oct  3 2026, 01:06:22) [Clang 22.1.3 ]",
+  "packages": {
+    "nautilus_trader": "2.0.0rc7",
+    "numpy": "2.5.4",
+    "pandas": "3.1.0",
+    "pyarrow": "26.0.0"
+  },
+  "config": {
+    "root": "/tmp/null-calibration-4eigwj0g",
+    "data_dir": "/workspace/scratch/2996c8998120/trading/data",
+    "results_dir": "/tmp/null-calibration-4eigwj0g/results",
+    "research_dir": "/tmp/null-calibration-4eigwj0g/research",
+    "universe": {
+      "GOOG": "XNAS"
+    },
+    "warmup_start": "2009-01-01",
+    "periods": {
+      "train": {
+        "name": "train",
+        "start": "2010-01-01",
+        "end": "2018-12-31"
+      },
+      "test": {
+        "name": "test",
+        "start": "2019-01-01",
+        "end": "2022-12-31"
+      },
+      "holdout": {
+        "name": "holdout",
+        "start": "2023-01-01",
+        "end": null
+      }
+    },
+    "capital": 100000.0,
+    "costs": {
+      "commission_per_share": 0.005,
+      "commission_min": 1.0,
+      "commission_max_pct": 0.01,
+      "slippage": true,
+      "open_print_fraction": 0.01,
+      "min_trade_value": 500.0,
+      "rebalance_band": 0.02,
+      "cash_buffer": 0.01
+    },
+    "risk": {
+      "max_weight": 0.25,
+      "max_gross": 1.0,
+      "max_drawdown": 0.18,
+      "max_short_gross": 0.0,
+      "min_net": 0.0,
+      "max_net": 1.0,
+      "profile": "balanced"
+    },
+    "margin": {
+      "initial_long": 0.5,
+      "initial_short": 0.5,
+      "maintenance_long": 0.25,
+      "maintenance_short": 0.3,
+      "cushion": 0.1,
+      "borrow_apr": 0.005,
+      "debit_apr": 0.06
+    },
+    "portfolio": {
+      "target_vol": 0.14,
+      "vol_window": 63,
+      "max_leverage": 1.0,
+      "leverage": 1.0
+    },
+    "paper": {
+      "host": "127.0.0.1",
+      "port": 4002,
+      "client_id": 7,
+      "account_id": "<not applicable: offline synthetic experiment>",
+      "market_data": "DELAYED_FROZEN",
+      "capital": 100000.0,
+      "rebalance_time": "16:15",
+      "signal_time": "16:10",
+      "max_order_value": 30000.0,
+      "max_orders_per_day": 40,
+      "max_daily_turnover": 1.0,
+      "order_rate": "10/00:00:01",
+      "dedicated_account": false,
+      "cash_tolerance": 1.0,
+      "max_external_cash": 0.02
+    },
+    "research": {
+      "provider": "claude_code",
+      "model": "sonnet",
+      "ollama_url": "http://127.0.0.1:11434",
+      "call_timeout_s": 600,
+      "max_llm_calls_per_cycle": 10,
+      "max_fix_attempts": 3,
+      "null_samples": 30,
+      "min_sharpe_edge": 0.1,
+      "max_p_value": 0.05,
+      "min_dsr": 0.95
+    },
+    "borrow": {
+      "history": null,
+      "max_age_days": 3
+    },
+    "limits": {
+      "max_gross": 2.0,
+      "max_short_gross": 2.0,
+      "max_weight": 1.0,
+      "min_net": -2.0,
+      "max_net": 2.0,
+      "max_drawdown": 0.99,
+      "max_leverage": 2.0
+    },
+    "trading": {
+      "speed": "daily",
+      "flat_at_close": true,
+      "data_delay_min": 15,
+      "limit_collar": 0.01,
+      "intraday_holdout": 0.2,
+      "intraday_holdout_start": null
+    }
+  },
+  "config_fingerprint": "079fab10effc8495",
+  "outer": 40,
+  "inner": 19,
+  "bars": 252,
+  "seed": 73000,
+  "nominal_alpha": 0.05,
+  "null_rejections": 0,
+  "null_rejection_rate": 0.0,
+  "null_rejection_wilson95": [
+    0,
+    0.08762160119728664
+  ],
+  "gate_passes": 0,
+  "gate_pass_rate": 0.0,
+  "gate_pass_wilson95": [
+    0,
+    0.08762160119728664
+  ],
+  "runs": [
+    {
+      "seed": 73000,
+      "data_sha256": "f1559ec5625ede4daa6d25640c629cb2ce555383aacb1bec44bdec24468c480f",
+      "selected": "rsi_reversion",
+      "edge": 2.4542583187315756,
+      "dsr": 0.44248104672384625,
+      "fills": 3,
+      "p_value": 0.25,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73001,
+      "data_sha256": "20dd130f9cf6527c55a1df48cfaeca92b362da123b294a165f5ecb27eba247b7",
+      "selected": "rsi_reversion",
+      "edge": 1.3587042700406777,
+      "dsr": 0.3916232013314801,
+      "fills": 5,
+      "p_value": 0.3,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73002,
+      "data_sha256": "5adb781931821d81b27e3aab16af1a8a2ce6a2e7f41f58509b8ea3d1e140c7ee",
+      "selected": "rsi_reversion",
+      "edge": 3.2777060500950217,
+      "dsr": 0.12015434764905714,
+      "fills": 4,
+      "p_value": 0.1,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73003,
+      "data_sha256": "e6e42372c67a98ec5b1ebc9db25a7c94a475c036bf65adb0a30c890f1d15eda7",
+      "selected": "rsi_reversion",
+      "edge": -1.1871973550658073,
+      "dsr": 0.19521404258524244,
+      "fills": 1,
+      "p_value": 0.65,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73004,
+      "data_sha256": "d7d148e0ac489d898f1d701e10b6e12d0bd3bf276fde91a10cbf055dc33b6bf7",
+      "selected": "sma_trend",
+      "edge": 0.6838081039677095,
+      "dsr": 0.5953712534199367,
+      "fills": 0,
+      "p_value": 0.35,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73005,
+      "data_sha256": "3fe86fbdad61967bc90e9250cd448a0e25b5d8c5be0a32fd8934ee6a88951170",
+      "selected": "rsi_reversion",
+      "edge": -0.17633798559471126,
+      "dsr": 0.6275740805710558,
+      "fills": 6,
+      "p_value": 0.4,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73006,
+      "data_sha256": "43da2d76e9568af26598d1edbd2256d79ed7e8d0cab0aa2c75bb6c3661ff3146",
+      "selected": "sma_trend",
+      "edge": -0.2602484430104755,
+      "dsr": 0.1973212209864214,
+      "fills": 0,
+      "p_value": 0.8,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73007,
+      "data_sha256": "81d4b1eb0ebcdaecdd7b99e9128426e1657279c6d05bff6ce2352da9dca44806",
+      "selected": "rsi_reversion",
+      "edge": 1.8318375641627904,
+      "dsr": 0.9655283936042955,
+      "fills": 0,
+      "p_value": 0.2,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73008,
+      "data_sha256": "8e5894ca341b3b8b091ad65a55633a190f8cca016e4e970eb1d8a6eab0b5067c",
+      "selected": "sma_trend",
+      "edge": 0.009448288634483428,
+      "dsr": 0.19765423369836,
+      "fills": 0,
+      "p_value": 0.65,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73009,
+      "data_sha256": "ee16b6f01ae6ec4ed01e13d4d2a9eee1952b2929778c6e0e60f3cd58adcdf240",
+      "selected": "sma_trend",
+      "edge": -0.355955936094938,
+      "dsr": 0.006204988684749779,
+      "fills": 1,
+      "p_value": 0.55,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73010,
+      "data_sha256": "e57a8233d02fcbc1cde6ad9968cbd73c04a63d3830ae88be58533f26c3b29d98",
+      "selected": "rsi_reversion",
+      "edge": 0.3292069036509009,
+      "dsr": 0.810135677527523,
+      "fills": 4,
+      "p_value": 0.4,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73011,
+      "data_sha256": "cfc1d3c19dab3e8c901ba5f31a35bb551abfe3d594437520d2851f5648f923cb",
+      "selected": "sma_trend",
+      "edge": 2.3754931015804495,
+      "dsr": 0.947201485347172,
+      "fills": 0,
+      "p_value": 0.1,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73012,
+      "data_sha256": "03aaa298d525865ee8f5609d99c396694ff6b82a0d8766f557b6c639920cee2a",
+      "selected": "rsi_reversion",
+      "edge": -0.9671533506914851,
+      "dsr": 0.5777506842425374,
+      "fills": 3,
+      "p_value": 0.7,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73013,
+      "data_sha256": "e7426ab44d02056fd1e9914d4708408b500f10c02269cc293c5a85a764dbd4f8",
+      "selected": "rsi_reversion",
+      "edge": 0.7960162304815194,
+      "dsr": 0.5324936421126403,
+      "fills": 0,
+      "p_value": 0.45,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73014,
+      "data_sha256": "806ec4e65fe6b65c629f22cd1b2f012575ec967256cc012fa321b7969360b87d",
+      "selected": "sma_trend",
+      "edge": 0.28959279721096026,
+      "dsr": 0.7425630375798039,
+      "fills": 0,
+      "p_value": 0.85,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73015,
+      "data_sha256": "9d39e1f56b5163b2dd0cd4d80c14b0d1e95aa8c6ceaf3766c21b24fe2a547741",
+      "selected": "rsi_reversion",
+      "edge": -1.8466629395643541,
+      "dsr": 0.9321780282086022,
+      "fills": 7,
+      "p_value": 0.8,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73016,
+      "data_sha256": "23a19ed6ae4dedc5273d143252b5fdbe901f49bbbc95e78be285cc481cab717f",
+      "selected": "sma_trend",
+      "edge": 0.5038621131789496,
+      "dsr": 0.6389819860572133,
+      "fills": 0,
+      "p_value": 0.35,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73017,
+      "data_sha256": "990d35e977b1f39c8bbb88de3096f373820f6df26fe052f56b2a008b773eb8cd",
+      "selected": "sma_trend",
+      "edge": -0.11735817763780428,
+      "dsr": 0.17069326740974505,
+      "fills": 0,
+      "p_value": 0.4,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73018,
+      "data_sha256": "34e986167726b8316747a51b75d122f3c66674995f2ddc53e170c6bb59ed31bf",
+      "selected": "rsi_reversion",
+      "edge": -1.8537105512355754,
+      "dsr": 0.43824016947003874,
+      "fills": 6,
+      "p_value": 0.85,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73019,
+      "data_sha256": "aaffc0a881ffc4d8b279f8348e44f8038824301f17f1c2d67d370dca5a40e114",
+      "selected": "sma_trend",
+      "edge": 1.133169764436479,
+      "dsr": 0.47506393999942076,
+      "fills": 0,
+      "p_value": 0.6,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73020,
+      "data_sha256": "3de50ebe06754530a18ee3058968f05657810616cd7685da5a9cf5574231de57",
+      "selected": "sma_trend",
+      "edge": 1.0706853830786909,
+      "dsr": 0.9134484235913322,
+      "fills": 0,
+      "p_value": 0.3,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73021,
+      "data_sha256": "54e5fc6f9e144eba202fa4c106bb34b65da87f3f643bfc4be62e9e478ae51002",
+      "selected": "sma_trend",
+      "edge": 0.0003649246561152619,
+      "dsr": 0.03089674883828991,
+      "fills": 2,
+      "p_value": 0.4,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73022,
+      "data_sha256": "57226f77cf1e92f2ec1596a0254887511f6a9eb66c150174822d3458e1938caa",
+      "selected": "sma_trend",
+      "edge": 0.8229511933393939,
+      "dsr": 0.16516913211675904,
+      "fills": 2,
+      "p_value": 0.25,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73023,
+      "data_sha256": "ab9cb9a31df1228b57b65986b67c88bdbc5129c0c0cfa77baa371c786f52a301",
+      "selected": "sma_trend",
+      "edge": -0.21743135640938616,
+      "dsr": 0.30604620882768274,
+      "fills": 3,
+      "p_value": 0.5,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73024,
+      "data_sha256": "51f54f4e02b9b156b920da140d8b522e6c8328f7342d1905238aa24a44876c85",
+      "selected": "rsi_reversion",
+      "edge": -0.41176009274500736,
+      "dsr": 0.4612408581590196,
+      "fills": 0,
+      "p_value": 0.7,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73025,
+      "data_sha256": "86036492aecf2b9ac9057dc208179bba13cf1f3590e0b4dcd6482974f22f2b91",
+      "selected": "rsi_reversion",
+      "edge": -0.9014791080399569,
+      "dsr": 0.3177289115113413,
+      "fills": 2,
+      "p_value": 0.9,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73026,
+      "data_sha256": "8108c1a72b29466ff89ffd9b15e92c53a4436e4f3ca74550bf640c66c5efd95d",
+      "selected": "sma_trend",
+      "edge": -0.18096470376769613,
+      "dsr": 0.7376126510384879,
+      "fills": 1,
+      "p_value": 0.9,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73027,
+      "data_sha256": "27db69bdb87d8b18cae9e0464981c29d7899a3eebd1755df466af6efd1fb7b6d",
+      "selected": "sma_trend",
+      "edge": -0.3729987261932668,
+      "dsr": 0.21282352959613077,
+      "fills": 0,
+      "p_value": 0.95,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73028,
+      "data_sha256": "f889f3aad96bc9884f08aebf2691cbc601ed6051253cdc2ca2bb9bcff15b7bdb",
+      "selected": "sma_trend",
+      "edge": 1.4346955722472843,
+      "dsr": 0.6662287703908365,
+      "fills": 0,
+      "p_value": 0.85,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73029,
+      "data_sha256": "ce2039a1447815d790bae422f7962773277a229f9f46c9c0050a0a915aa24334",
+      "selected": "sma_trend",
+      "edge": 1.9013504721314207,
+      "dsr": 0.8194764696643719,
+      "fills": 0,
+      "p_value": 0.1,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73030,
+      "data_sha256": "a3108aadb057c97bb566d1d85ec353c81c616bd9722cd5e36b7d34b69deb97f2",
+      "selected": "rsi_reversion",
+      "edge": 1.3136614532963184,
+      "dsr": 0.13156680372796004,
+      "fills": 6,
+      "p_value": 0.35,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73031,
+      "data_sha256": "185619f5c57990101c1e5989bdfe32590051b2c69bc367583f278ae00baea024",
+      "selected": "rsi_reversion",
+      "edge": 0.3439708592426612,
+      "dsr": 0.870132082610521,
+      "fills": 0,
+      "p_value": 0.8,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73032,
+      "data_sha256": "533e1a7b5f0c97a40c36341177a96105ab4c604bba82c45d967d9c685240f0e2",
+      "selected": "rsi_reversion",
+      "edge": 1.824177453189775,
+      "dsr": 0.046100267842079656,
+      "fills": 4,
+      "p_value": 0.35,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73033,
+      "data_sha256": "bccec2e56b5892918654f855d89c292c2bb9bf34a3f90d1b8e12a85d0f87a1bf",
+      "selected": "sma_trend",
+      "edge": 2.4354063717076984,
+      "dsr": 0.4131449763347581,
+      "fills": 0,
+      "p_value": 0.1,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73034,
+      "data_sha256": "f5acbffb7db0dd83fa6c4bb339d619e5b992475821e1487dbfc70256afbfe953",
+      "selected": "sma_trend",
+      "edge": 1.2446625048187334,
+      "dsr": 0.03134869959021186,
+      "fills": 2,
+      "p_value": 0.25,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73035,
+      "data_sha256": "f689faad87e3056c0f6b79fce31deefea3b4a4fad1316b589c7496c32adad11d",
+      "selected": "rsi_reversion",
+      "edge": 0.7158190526350111,
+      "dsr": 0.2835199285116737,
+      "fills": 0,
+      "p_value": 0.3,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73036,
+      "data_sha256": "c68192dbcb6e5576e5c98363dc8520c26970bc8da73a491a9873a03526eefed2",
+      "selected": "rsi_reversion",
+      "edge": 0.13363324213867922,
+      "dsr": 0.09056721925113259,
+      "fills": 4,
+      "p_value": 0.7,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73037,
+      "data_sha256": "ab2f360555cfbacaf22786c504ac2e10938038b0db523ceb131eba02ef62934f",
+      "selected": "sma_trend",
+      "edge": 0.5286886748335436,
+      "dsr": 0.2962938517486748,
+      "fills": 0,
+      "p_value": 0.75,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73038,
+      "data_sha256": "f79e30de9f2ee4c3a3efda18ed2c3f46ae164b5b543ffa2cbc4071719482f69b",
+      "selected": "rsi_reversion",
+      "edge": 0.10146157396033699,
+      "dsr": 0.14105564801800918,
+      "fills": 0,
+      "p_value": 0.5,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    },
+    {
+      "seed": 73039,
+      "data_sha256": "8283cf3f05a9c0b221cca9831db045cde8036044c4f67a36f63dbd8b2df2cc38",
+      "selected": "sma_trend",
+      "edge": 0.42825970477065706,
+      "dsr": 0.5866904657268528,
+      "fills": 0,
+      "p_value": 0.9,
+      "fallback_fraction": 0.0,
+      "training_gate_passed": false
+    }
+  ]
+}

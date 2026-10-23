@@ -20,7 +20,11 @@ def _frame(n, start="2024-01-02", px=100.0):
 
 def test_delisting_exit_and_late_joiner(goog_lab):
     frames = {"A": _frame(60), "B": _frame(30), "C": _frame(60)}  # B's data stops: delisted
-    membership = {"A": [(date(2024, 1, 1), None)], "B": [(date(2024, 1, 1), None)], "C": [(date(2024, 2, 1), None)]}
+    membership = {
+        "A": [(date(2024, 1, 1), None)],
+        "B": [(date(2024, 1, 1), frames["B"].index[-3].date())],
+        "C": [(date(2024, 2, 1), None)],
+    }
     cfg = dataclasses.replace(goog_lab, warmup_start=date(2024, 1, 1))
     r = backtest.run(
         cfg,
@@ -44,12 +48,10 @@ def test_delisting_exit_and_late_joiner(goog_lab):
     assert r.gross.iloc[-1] > 0.9  # capital redeployed into the remaining members
 
 
-def test_active_windows_cut_at_data_end():
+def test_missing_terminal_data_is_not_a_foreknown_delisting():
     frames = {"A": _frame(60), "B": _frame(30)}
-    w = backtest.active_windows(frames, None)
-    assert w["A"] is None
-    ((_start, until),) = w["B"]
-    assert until == backtest._ns_close(frames["B"].index[-3].date())
+    with pytest.raises(data.DataError, match="terminal/delisting economics"):
+        backtest.active_windows(frames, None)
 
 
 def test_membership_file_roundtrip(goog_lab, tmp_path):

@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "phase": "development",
+  "standard": "No known unresolved blocking defects; reproducible builds; reviewed safety-critical changes; evidence for failure recovery and supported operating conditions. Passing unit tests alone is insufficient.",
+  "gates": [
+    {
+      "id": "code-review",
+      "status": "blocked",
+      "criterion": "Claude independently reviews the final code SHA, answers every G009/G010 blocking finding, and integrates only accepted changes after all supported CI jobs pass.",
+      "evidence": ["docs/audits/2026-10-23-full-system-audit.md"]
+    },
+    {
+      "id": "broker-lifecycle",
+      "status": "blocked",
+      "criterion": "Supervised actual IB paper acceptance: late/partial fills, cancel/fill races, unknown intents, smoke crash cleanup, restart, margin and dedicated/allocation cash semantics. Demonstrate reservations under execution costs and gaps, and durable bounded trade-ID storage.",
+      "evidence": ["tests/test_harness.py", "tests/test_intraday_harness.py", "tests/test_audit_closure.py"]
+    },
+    {
+      "id": "research-calibration",
+      "status": "blocked",
+      "criterion": "Prospectively specify and run adequately powered false-positive and power studies across correlated/staggered data, horizons, selection policies and failure/retry exposure. No statistical threshold relaxation. Prior bounded one-stock pilot is insufficient.",
+      "evidence": ["docs/audits/2026-10-23-null-calibration.json", "tools/calibrate_null.py"]
+    },
+    {
+      "id": "market-data-and-execution",
+      "status": "blocked",
+      "criterion": "Qualify source revisions, point-in-time membership, delisting/corporate-action economics, supported calendar/adapter timestamps, true borrow/recall economics and intrabar execution. Sparse replay with whole-bar delay rounding is an approximation.",
+      "evidence": ["src/lab/exchange.py", "src/lab/intraday.py", "tests/test_borrow_execution.py"]
+    },
+    {
+      "id": "adaptive-product",
+      "status": "blocked",
+      "criterion": "Specify and qualify adaptive strategy-bank eligibility, retirement, fallback, regime changes, and manual/supervised authority and expiry. Continuous walk-forward execution alone is not that complete product.",
+      "evidence": ["src/lab/signals/walk_forward.py"]
+    },
+    {
+      "id": "operations-and-build",
+      "status": "blocked",
+      "criterion": "Pin and record runtime image and OS package provenance; qualify supervisor recovery, disk-full/power-loss behavior, migration, rotation, alert outage/delivery and resource growth during soak tests. Python dependency locks are necessary but insufficient.",
+      "evidence": ["uv.lock", "requirements.lock", "Dockerfile", "docker-compose.yml"]
+    },
+    {
+      "id": "independent-security",
+      "status": "blocked",
+      "criterion": "Independent review of generated-code isolation and deployment permissions, resource exhaustion, supported native architectures and syscall boundaries. Existing exploit regressions remain mandatory.",
+      "evidence": ["tests/test_isolation.py", ".github/workflows/ci.yml"]
+    }
+  ]
+}

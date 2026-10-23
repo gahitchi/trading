@@ -60,6 +60,8 @@ def validate(df: pd.DataFrame, ticker: str, *, drop_incomplete: bool = False, ke
     out = out[COLUMNS]
 
     idx = pd.DatetimeIndex(pd.to_datetime(out.index))
+    if idx.hasnans:
+        raise DataError(f"{ticker}: missing timestamp")
     if idx.tz is not None:
         idx = idx.tz_convert("America/New_York").tz_localize(None)
     out.index = idx if keep_time else idx.normalize()
@@ -74,7 +76,8 @@ def validate(df: pd.DataFrame, ticker: str, *, drop_incomplete: bool = False, ke
     infinite = np.isinf(out[[*ohlc, "volume"]].to_numpy(dtype=float)).any(axis=1)
     if infinite.any():
         raise DataError(f"{ticker}: non-finite value on {out.index[infinite][0].date()}")
-    out["volume"] = out["volume"].fillna(0.0)
+    if out["volume"].isna().any():
+        raise DataError(f"{ticker}: missing/nonfinite volume; liquidity cannot be inferred")
     incomplete = out[ohlc].isna().any(axis=1)
     dropped = [str(d) if keep_time else str(d.date()) for d in out.index[incomplete]]
     if dropped and not drop_incomplete:
@@ -97,6 +100,8 @@ def validate(df: pd.DataFrame, ticker: str, *, drop_incomplete: bool = False, ke
     if worst > _REPAIR_TOLERANCE:
         d = out.index[(hi_gap > _REPAIR_TOLERANCE) | (lo_gap > _REPAIR_TOLERANCE)][0]
         raise DataError(f"{ticker}: high/low inconsistent with open/close on {d.date()} ({worst:.2%})")
+    repairs = [str(d) for d in out.index[(hi_gap > 0) | (lo_gap > 0)]]
+    out.attrs["repaired_high_low"] = repairs
     out["high"] = np.maximum(out["high"], body_hi)
     out["low"] = np.minimum(out["low"], body_lo)
     out.attrs["dropped_incomplete"] = dropped
@@ -145,7 +150,10 @@ def save(
         "first": str(clean.index[0].date()),
         "last": str(clean.index[-1].date()),
         "rows": len(clean),
-        "dropped_incomplete": dropped,  # vendor bars missing a price, removed at import (never silently)
+        "dropped_incomplete": dropped,
+        "repaired_high_low": clean.attrs.get(
+            "repaired_high_low", []
+        ),  # vendor bars missing a price, removed at import (never silently)
     }
     m = manifest(cfg)
     m[ticker] = entry

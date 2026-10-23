@@ -57,8 +57,11 @@ def _agent(**kw):
 
 def _run(cfg, signal, frames, start, end, risk, **pf):
     cfg = replace(cfg, risk=risk, portfolio=replace(cfg.portfolio, **pf))
-    t = next(iter(frames))
-    return backtest.run(cfg, [backtest.Sleeve(signal, t, 1.0)], frames, start, end, capital=100_000)
+    if cfg.portfolio.leverage > 1:
+        # Valid leveraged book: spread exposure across two stocks, keeping each <= 100%.
+        frames = {"GOOG": next(iter(frames.values())), "OTHER": next(iter(frames.values())).copy()}
+    sleeves = [backtest.Sleeve(type(signal)(**signal.params), t, 1 / len(frames)) for t in frames]
+    return backtest.run(cfg, sleeves, frames, start, end, capital=100_000)
 
 
 def _positions(fills):
@@ -135,7 +138,12 @@ def test_shorts_trade_in_a_margin_account_and_the_ledger_matches_it(goog_lab, go
     )
     path = _positions(r.fills)
     assert r.margin_account and min(path) < 0 < max(path)  # it went short and long
-    assert r.ledger_vs_account == pytest.approx(0.0, abs=1e-6)  # cash identity of the margin account
+    # Nautilus rounds each realized partial-close P&L to USD cents; the cash ledger
+    # sums executions. This fixture accumulates 0.01 at weighted-average close-outs.
+    assert abs(r.ledger_vs_account) <= 0.010001
+    signed_cash = 100_000 - sum((1 if f.side == "BUY" else -1) * f.qty * f.price + f.commission for f in r.fills)
+    final_price = goog.loc[goog.index[500], "close"]
+    assert r.equity.iloc[-1] + r.financing == pytest.approx(signed_cash + path[-1] * final_price, abs=1e-6)
     assert r.borrow_fees > 0 and r.financing >= r.borrow_fees
     assert r.signal_errors == 0 and r.rejections == 0
 
@@ -163,7 +171,7 @@ def test_fixed_leverage_borrows_and_pays_debit_interest(goog_lab):
         {"GOOG": flat},
         flat.index[1].date(),
         None,
-        _risk(max_weight=1.5, max_gross=1.5, max_short_gross=0.0, min_net=0.0, max_net=1.5),  # one stock
+        _risk(max_weight=1.0, max_gross=1.5, max_short_gross=0.0, min_net=0.0, max_net=1.5),  # one stock
         leverage=1.5,
         max_leverage=1.5,
     )
@@ -180,7 +188,7 @@ def test_overnight_gap_on_a_levered_short_triggers_a_margin_call_and_only_reduce
         {"open": close, "high": close * 1.01, "low": close * 0.99, "close": close, "volume": 1e7},
         index=pd.bdate_range("2021-01-04", periods=n),
     )
-    risk = _risk(max_weight=2.0, max_gross=2.0, max_short_gross=2.0, min_net=-2.0, max_net=2.0)  # one stock
+    risk = _risk(max_weight=1.0, max_gross=2.0, max_short_gross=2.0, min_net=-2.0, max_net=2.0)  # one stock
     r = _run(goog_lab, Constant(x=-1.0), {"GOOG": df}, df.index[1].date(), None, risk, leverage=2.0, max_leverage=2.0)
     kinds = [e.kind for e in r.risk_events]
     assert "margin_call" in kinds and "deleverage" in kinds

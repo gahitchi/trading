@@ -143,22 +143,23 @@ def test_unreported_journaled_order_cannot_be_erased_by_adoption(goog_lab, goog,
     h.session()
     assert "order_unknown" in _kinds(h) and h.broker().state["orders"] == {}
     halt = read_halt(h.runtime / "HALT")
-    assert halt["kind"] == "reconciliation_mismatch" and "can no longer fill after" in halt["reason"]
+    assert halt["kind"] == "reconciliation_mismatch" and "Elapsed time is not evidence" in halt["reason"]
     assert h.ledger()["pending"]  # the intent is kept, so a late fill would still be attributable
     assert _lab(h, "recover", "--reason", "IBKR shows no such order; it never left", "--adopt-broker") == 0
     h.session()
     assert read_halt(h.runtime / "HALT")["kind"] == "reconciliation_mismatch"  # (ChatGPT, G004-F1)
     assert h.ledger()["pending"] and not h.broker().positions()
 
-    # Days later the order's sessions are over and IBKR never reported it: it can no longer fill. An audited
-    # recover lets the next start dispose of it, and trading resumes (Claude: no journal surgery needed).
+    # Even days later, time cannot prove that an order never filled. Recovery must
+    # retain its attribution until broker evidence resolves the uncertainty.
     state = json.loads(ledger.read_text())
     state["pending"][coid]["ts"] = time.time_ns() - 5 * 86_400 * 10**9
     ledger.write_text(json.dumps(state))
     assert _lab(h, "recover", "--reason", "IBKR shows no such order after its sessions ended", "--adopt-broker") == 0
     h.session()
-    assert "order_expired_unreported" in _kinds(h)
-    assert read_halt(h.runtime / "HALT") is None and h.ledger()["pending"] == {} and h.broker().positions()
+    assert "order_expired_unreported" not in _kinds(h)
+    assert read_halt(h.runtime / "HALT")["kind"] == "reconciliation_mismatch"
+    assert coid in h.ledger()["pending"] and not h.broker().positions()
 
 
 # ---------------------------------------------------------------------------- F15: who owns the state

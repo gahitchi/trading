@@ -2,8 +2,12 @@
 
 [![ci](https://github.com/gahitchi/trading/actions/workflows/ci.yml/badge.svg)](https://github.com/gahitchi/trading/actions/workflows/ci.yml)
 
-A research-grade, paper-only trading system for US stocks, built on
+A paper-only US-stock research system **in development**, built on
 [NautilusTrader](https://nautilustrader.io) (Rust core, event-driven, identical code in backtests and live trading).
+
+Release readiness is blocked until the criteria in [docs/release-criteria.json](docs/release-criteria.json) are met.
+Run `python3 tools/release_check.py` for the current blockers. Passing automated tests alone is not release qualification;
+see the [remediation review](docs/audits/2026-10-23-remediation-and-release-review.md).
 
 Two layers of cooperating agents:
 
@@ -46,8 +50,8 @@ Two layers of cooperating agents:
 | Backtest engine, agents, costs, next-open fills, ledger = simulator account | automated tests, real GOOG prices |
 | Long/short, leverage, margin calls, borrow fees and debit interest | automated tests (`tests/test_long_short.py`) |
 | Risk profiles; quick trades at 1h / 15m / 5m (delayed data, flat at close, intraday holdout) | automated tests (`tests/test_intraday*.py`), a compressed intraday session through the real paper node |
-| Kill switch, reconciliation, daily caps, delistings, point-in-time universe | automated tests through full backtests |
-| PSR / Deflated Sharpe / PBO / bootstrap CI | tests incl. calibration (false-discovery control, 95% coverage) |
+| Kill switch, reconciliation, daily caps, declared membership exits | automated tests through full backtests |
+| PSR / Deflated Sharpe / PBO / bootstrap CI | formula and bounded synthetic tests; general selection-aware calibration remains open |
 | Research swarm via Claude Code | real end-to-end cycles (propose → implement → review → validate → gate) |
 | Docker image and compose stack | GitHub Actions builds and runs the image on every push |
 | **The paper node itself** (same agents, start-up reconciliation, restarts, rejects, partial fills, hard halts) | **runs against a simulated IBKR paper broker (`lab.sim`, `tests/test_harness.py`); a week of trading, long-only and long/short, matches the backtest fill for fill** |
@@ -60,9 +64,9 @@ Python 3.13 or 3.14 (NautilusTrader 2.0 requires it), Linux or macOS. Uses [uv](
 
 ```bash
 git clone https://github.com/gahitchi/trading.git && cd trading
-uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
-pytest                 # ~70 tests, ~15 s, offline
+uv sync --frozen --extra dev
+source .venv/bin/activate
+pytest                 # offline suite, including several minutes of recovery scenarios
 lab doctor             # what is ready, what is missing
 ```
 
@@ -132,7 +136,7 @@ reports and tables print a warning when the data is biased.
   (date, open, high, low, close, volume), e.g. exports from IBKR or vendors that include delisted stocks.
 - `lab data membership members.csv`: a point-in-time universe (`ticker,start,end`; several spells per ticker
   allowed). Stocks are only held while they are members; capital is shared among the members of each day; when a
-  stock's data ends (delisting) the agents exit at its last real open.
+  stock's data ends early, a run requires a declared membership exit with subsequent real prices; otherwise it is refused. EOF does not establish delisting proceeds or a foreknown exit.
 
 Survivorship-free data with a membership file is what makes results credible; free data gives a biased first look.
 
@@ -302,9 +306,9 @@ experiments/LOG.md          your lab notebook
 - **Free data is survivorship-biased** and unofficial; see [Data](#data).
 - Idle cash and short-sale proceeds earn no interest (conservative).
 - Intraday: free history is short (weeks for 15m/5m), so intraday statistics are much weaker than daily ones.
-  Delayed data costs a quick strategy real edge; backtests charge it conservatively (whole bars). Early closes
-  (13:00) and halts are not modelled. How IBKR stamps intraday bars (at their close, as the agents assume) is
-  checked on the first real run; if it stamps them at their start, the agents would act one bar early.
+  Backtests round data delay up to whole bars and replay sparse opening prints; this is an approximation,
+  not a guaranteed conservative execution model. The pinned exchange calendar handles regular holidays and
+  early closes; unscheduled halts and actual broker-adapter timestamp parity still need acceptance evidence.
 - Borrow fees use one assumed rate for every stock: there is no free historical borrow data, so hard-to-borrow
   names are underpriced in backtests. In paper trading IBKR charges the real fee; the ledger's estimate is
   reported next to it. The simulated broker refuses shorts without borrowable shares but does not liquidate

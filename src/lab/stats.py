@@ -32,7 +32,8 @@ DAYS = 252
 def moments(r: np.ndarray) -> tuple[float, float, float, int]:
     """(daily Sharpe, skewness, kurtosis (normal = 3), number of observations)."""
     r = np.asarray(r, dtype=float)
-    r = r[np.isfinite(r)]
+    if not np.isfinite(r).all():
+        raise ValueError("returns must be finite; refusing to discard invalid observations")
     t = len(r)
     if t < 3:
         return 0.0, 0.0, 3.0, t
@@ -89,7 +90,8 @@ def sharpe_ci(
 ) -> tuple[float, float]:
     """Circular block-bootstrap confidence interval of the annualized Sharpe ratio."""
     r = np.asarray(returns, dtype=float)
-    r = r[np.isfinite(r)]
+    if not np.isfinite(r).all():
+        raise ValueError("returns must be finite; refusing to discard invalid observations")
     n = len(r)
     if n < 2 * block:
         return float("nan"), float("nan")
@@ -114,11 +116,15 @@ def pbo(returns: np.ndarray, *, splits: int = 10) -> dict:
     out-of-sample ranking. PBO = share of cases where it lands in the bottom half.
     """
     m = np.asarray(returns, dtype=float)
+    if m.ndim != 2 or not np.isfinite(m).all():
+        raise ValueError("PBO requires a finite two-dimensional returns matrix")
     t, n = m.shape
     if n < 2:
         raise ValueError("PBO needs at least 2 configurations")
     if splits % 2 or splits < 4:
         raise ValueError("splits must be an even number >= 4")
+    if t < 2 * splits:
+        raise ValueError("PBO needs at least two observations per block")
     blocks = np.array_split(np.arange(t), splits)
 
     def sharpe(x):

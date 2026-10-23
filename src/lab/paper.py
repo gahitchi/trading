@@ -221,14 +221,29 @@ def build_node(
     clients: Clients | None = None,
     schedule: Schedule | None = None,
 ) -> LiveNode:
+    from lab.config import validate_effective
+
+    validate_effective(cfg)
+    from lab.persistence import read_json
+
+    smoke_state = runtime_dir(cfg) / "smoke-state.json"
+    if smoke_state.exists() and read_json(smoke_state).get("unresolved"):
+        raise ValueError("unresolved smoke orders: run smoke reconciliation before normal trading")
     if not specs:
         raise ValueError("need at least one signal")
+    if len({s.name for s in specs}) != len(specs) or len(set(tickers)) != len(tickers):
+        raise ValueError("duplicate signal or ticker: sleeve identities must be unique")
     sc = schedule or Schedule.from_config(cfg)
     session = quick_session(cfg, sc)
     sp = intraday.speed(cfg.trading.speed)
     needs_quick = sorted({s.name for s in specs if s.name in INTRADAY})
     if session is None and needs_quick:
         raise ValueError(f"{', '.join(needs_quick)}: intraday technique(s); set [trading] speed to 1h, 15m or 5m")
+    if session is not None:
+        for spec in specs:
+            intraday.check_technique(
+                spec.name, spec.params, sp.minutes, cfg.trading.data_delay_min, cfg.trading.flat_at_close
+            )
     check_pacing(cfg, specs, tickers)
     from lab.research.approval import ApprovalError, deployment_context, verify_approval
 
@@ -245,6 +260,21 @@ def build_node(
             )
             if spec.sha256 != digest:
                 raise ApprovalError("paper node requires an approved, digest-bound research SignalSpec")
+    from lab.persistence import atomic_json, file_lock
+    from lab.research.approval import deployment_context
+
+    identity_path = runtime_dir(cfg) / "identity.json"
+    identity = {
+        "version": 1,
+        "account": cfg.paper.account_id,
+        "tickers": sorted(tickers),
+        "signals": [{"name": s.name, "params": s.params, "sha256": s.sha256} for s in specs],
+        "deployment": deployment_context(cfg.snapshot(), live=True, tickers=tickers),
+    }
+    with file_lock(runtime_dir(cfg) / "identity.lock"):
+        if identity_path.exists() and read_json(identity_path) != identity:
+            raise ValueError("runtime identity changed; reconcile existing state before an explicit migration")
+        atomic_json(identity_path, identity)
     node, iids = _base_node(cfg, tickers, clients)
     p = cfg.paper
     rt = runtime_dir(cfg)
@@ -317,6 +347,7 @@ def build_node(
                 max_leverage=cfg.portfolio.max_leverage,
                 leverage=cfg.portfolio.leverage,
                 periods_per_year=252 * sp.bars_per_session,
+                state_path=str(rt / "allocator.json"),
             )
         )
     )
@@ -370,6 +401,7 @@ def build_node(
                 flat_at_close=session is not None and cfg.trading.flat_at_close,
                 limit_collar=cfg.trading.limit_collar,
                 max_gross=cfg.risk.max_gross,
+                risk_limits=cfg.risk,
                 max_order_value=p.max_order_value,
                 max_orders_per_day=p.max_orders_per_day,
                 max_daily_turnover=p.max_daily_turnover,
@@ -396,6 +428,8 @@ def build_smoke_node(
         SmokeTest(
             SmokeTestConfig(
                 order_id_tag="SMOKE",
+                use_uuid_client_order_ids=True,
+                external_order_instrument_ids=list(iids.values()),
                 instruments=iids,
                 venue=Venue(IB),
                 paper_account=cfg.paper.account_id,

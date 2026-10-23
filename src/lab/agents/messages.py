@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
+T_MARK = "lab.mark"
 T_SIGNAL = "lab.signal"
 T_TARGETS = "lab.targets"
 T_APPROVED = "lab.approved"
@@ -18,6 +19,13 @@ T_EQUITY = "lab.equity"
 T_FILL = "lab.fill"
 T_RISK = "lab.risk"
 ALL_TOPICS = (T_SIGNAL, T_TARGETS, T_APPROVED, T_EQUITY, T_FILL, T_RISK)
+
+
+@dataclass(frozen=True)
+class PriceMark:
+    ticker: str
+    price: float
+    ts: int
 
 
 @dataclass(frozen=True)
@@ -66,6 +74,9 @@ class FillReport:
     qty: float
     price: float
     commission: float
+    order_id: str = ""
+    decision_price: float | None = None
+    decision_ts: int | None = None
 
 
 @dataclass(frozen=True)

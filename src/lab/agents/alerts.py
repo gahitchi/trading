@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from nautilus_trader.common import DataActor, DataActorConfig
 
@@ -11,6 +12,8 @@ from lab.agents.messages import T_EQUITY, T_FILL, T_RISK
 # Risk events worth waking someone up for (everything else goes to the daily report).
 URGENT = {
     "circuit_breaker",
+    "margin_call",
+    "cash_mismatch",
     "paper_guard",
     "reconciliation_mismatch",
     "hard_halt",
@@ -43,6 +46,7 @@ class AlertAgent(DataActor):
         super().__init__(config)
         self.notifier = config.notifier
         self.last_equity = None
+        self.last_report_day = None
         self.pending_fills = []
         self.flush_scheduled = False
 
@@ -51,6 +55,9 @@ class AlertAgent(DataActor):
         self.subscribe_topic(T_EQUITY, self._on_equity)
         self.subscribe_topic(T_FILL, self._on_fill)
 
+    def on_stop(self):
+        self._flush_fills(None)
+
     def _on_risk(self, ev):
         if ev.kind in URGENT:
             self.notifier.send(f"⚠ {ev.kind}: {ev.detail}")
@@ -58,6 +65,10 @@ class AlertAgent(DataActor):
             self.notifier.send(f"started. {ev.detail}")
 
     def _on_equity(self, snap):
+        day = datetime.fromtimestamp(snap.ts / 1e9, ZoneInfo("America/New_York")).date()
+        if day == self.last_report_day:
+            return
+        self.last_report_day = day
         change = ""
         if self.last_equity:
             d = snap.equity / self.last_equity - 1

@@ -16,7 +16,12 @@ from lab.agents.schedule import NY
 def normalize_ib_bar(bar, session=None):
     if session is None:
         day = datetime.fromtimestamp(bar.ts_event // 1_000_000_000, UTC).date()
-        close = datetime(day.year, day.month, day.day, 16, tzinfo=NY)
+        from lab.exchange import bounds
+
+        hours = bounds(day)
+        if hours is None:
+            raise ValueError(f"IB daily bar on a non-session: {day}")
+        close = hours[1]
     else:
         raw = datetime.fromtimestamp(bar.ts_event / 1e9, NY)
         close = min(raw, session.close_at(raw))

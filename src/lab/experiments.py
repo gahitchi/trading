@@ -163,25 +163,27 @@ def config_fingerprint(cfg: LabConfig, n_tickers: int = 1) -> str:
     return hashlib.sha256(json.dumps(ident, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
-def register_trial(cfg: LabConfig, key: str, spec: SignalSpec, label: str, active: pd.Series) -> None:
+def register_trial(
+    cfg: LabConfig, key: str, spec: SignalSpec, label: str, active: pd.Series, data_digest: str = "unspecified"
+) -> None:
     """Every configuration ever evaluated on a dataset is a trial; the Deflated Sharpe Ratio charges for all
     of them. A trial is the strategy (code + parameters) AND the settings that shape its result, so trying
     the same strategy under another risk or cost setting counts again. Re-running an identical one does not."""
     sr, *_ = stats.moments(active.to_numpy())
     cfg.results_dir.mkdir(parents=True, exist_ok=True)
-    with _trials_path(cfg).open("a") as f:
-        f.write(
-            json.dumps(
-                {
-                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
-                    "dataset": key,
-                    "fingerprint": f"{spec_fingerprint(spec)}:{config_fingerprint(cfg)}",
-                    "label": label,
-                    "sharpe_daily": sr,
-                }
-            )
-            + "\n"
-        )
+    from lab.persistence import append_json
+    from lab.provenance import source_digest
+
+    append_json(
+        _trials_path(cfg),
+        {
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "dataset": key,
+            "fingerprint": f"{spec_fingerprint(spec)}:{config_fingerprint(cfg)}:{source_digest()}:{data_digest}",
+            "label": label,
+            "sharpe_daily": sr,
+        },
+    )
 
 
 def trial_sharpes(cfg: LabConfig, key: str) -> list[float]:
@@ -191,12 +193,35 @@ def trial_sharpes(cfg: LabConfig, key: str) -> list[float]:
     latest = {}
     for line in p.read_text().splitlines():
         t = json.loads(line)
-        if t["dataset"] == key:
-            latest[t["fingerprint"]] = t["sharpe_daily"]
+        # Workspace-wide family: changing labels, dates or universe cannot
+        # erase earlier selection. New workspaces are explicit new protocols.
+        latest[t["fingerprint"]] = t["sharpe_daily"]
     return list(latest.values())
 
 
 def compare(
+    cfg, specs, tickers, period, frames=None, *, register=True, holdout_ok=False, speed="daily", holdout_reason=""
+):
+    from lab.config import validate_effective
+
+    validate_effective(cfg)
+    from lab.research_state import holdout_attempt, record_research
+
+    if holdout_ok:
+        with holdout_attempt(cfg, specs, period, speed, holdout_reason):
+            return _compare(cfg, specs, tickers, period, frames, register=register, holdout_ok=True, speed=speed)
+    # Guard and record exposure before loading/evaluating strategies. Failed runs
+    # are exposure too; this record cannot be removed by a retry or new label.
+    if speed == "daily":
+        guard_period(cfg, period)
+    else:
+        frames = frames or intraday.load_many(cfg, tickers, intraday.speed(speed))
+        guard_intraday(cfg, period, frames)
+    record_research(cfg, period, speed)
+    return _compare(cfg, specs, tickers, period, frames, register=register, speed=speed)
+
+
+def _compare(
     cfg: LabConfig,
     specs: list[SignalSpec],
     tickers: list[str],
@@ -226,12 +251,18 @@ def compare(
     if not sp.daily:
         key = f"{sp.name}|{key}"  # intraday trials are their own family
 
+    if any(r.metrics.get("insolvent") for r in results):
+        raise ValueError("comparison not qualified: insolvent equity cannot enter significance calculations")
     actives = [active_returns(r, results[0]) for r in results[1:]]
     if register:
         for s, r, act in zip(cand_specs, results[1:], actives, strict=True):
-            register_trial(cfg, key, s, r.label, act)
+            from lab.provenance import frame_digest
+
+            register_trial(cfg, key, s, r.label, act, frame_digest(frames))
     trials = trial_sharpes(cfg, key) or [stats.moments(a.to_numpy())[0] for a in actives]
 
+    if any(r.metrics.get("insolvent") for r in results):
+        raise ValueError("comparison not qualified: insolvent equity cannot enter significance calculations")
     base = results[0].metrics
     rows = []
     for i, r in enumerate(results):
@@ -289,6 +320,9 @@ def active_matrix(
 ) -> pd.DataFrame:
     """Daily active returns (vs buy-and-hold) of each configuration, one column each."""
     _, results = compare(cfg, specs, tickers, period, frames)
+    labels = [r.label for r in results[1:]]
+    if len(labels) != len(set(labels)):
+        raise ValueError("candidate labels must be unique; duplicate strategies collapse matrix columns")
     cols = {r.label: active_returns(r, results[0]) for r in results[1:]}
     return pd.DataFrame(cols).dropna()
 
@@ -316,8 +350,13 @@ def walk_forward(
 ) -> dict:
     """Rolling optimization: pick the best configuration (active Sharpe) on each
     in-sample window, then trade it, unchanged, on the following out-of-sample window.
-    The stitched out-of-sample record is what the optimization procedure really delivers."""
+    Aggregate results come from one continuous policy book, including transition orders and costs."""
+    if any(type(n) is not int or n <= 0 for n in (is_years, oos_years)):
+        raise ValueError("walk-forward window lengths must be positive integers")
     guard_period(cfg, Period("walk-forward", start, end))
+    specs = [s for s in specs if s.name != BASELINE.name]
+    if not specs:
+        raise ValueError("walk-forward requires at least one non-baseline candidate")
     windows = []
     ws = pd.Timestamp(start)
     while True:
@@ -331,12 +370,14 @@ def walk_forward(
         raise ValueError("period too short for one in-sample + out-of-sample window")
 
     steps, oos_active, oos_strategy = [], [], []
+    schedule = []
     for i, (a, b, c, d) in enumerate(windows):
         ins = Period(f"wfa-is-{i}", a, b)
         m = active_matrix(cfg, specs, tickers, ins, frames)
         is_sr = {col: stats.moments(m[col].to_numpy())[0] * stats.math.sqrt(stats.DAYS) for col in m.columns}
         best_label = max(is_sr, key=is_sr.get)
         best = specs[list(m.columns).index(best_label)]
+        schedule.append((c, best))
         oos = Period(f"wfa-oos-{i}", c, d)
         comp, results = compare(cfg, [best], tickers, oos, frames, register=False)
         act = active_returns(results[1], results[0])
@@ -353,12 +394,47 @@ def walk_forward(
                 "oos_buy_and_hold": comp.rows[0].get("total_return"),
             }
         )
-    act_all = pd.concat(oos_active)
-    d = stats.dsr(act_all.to_numpy(), [stats.moments(act_all.to_numpy())[0]])
+    from lab.signals.walk_forward import ScheduledCrossSectional, ScheduledSignal
+
+    first = schedule[0][1].make()
+    cross = getattr(first, "cross_sectional", False)
+    if hasattr(first, "close"):
+        first.close()
+    if cross:
+        sleeves, xs = [], [(ScheduledCrossSectional(schedule), 1.0, tickers)]
+    else:
+        sleeves = [backtest.Sleeve(ScheduledSignal(schedule), t, 1 / len(tickers)) for t in tickers]
+        xs = []
+    policy = backtest.run(
+        cfg,
+        sleeves,
+        frames,
+        windows[0][2],
+        windows[-1][3],
+        label="walk_forward_policy",
+        risk=effective_risk(cfg, len(tickers)),
+        cross_sectional=xs,
+        normalize_active=True,
+        membership=data.membership(cfg),
+        target_vol=cfg.portfolio.target_vol,
+    )
+    control = run_spec(cfg, BASELINE, tickers, frames, Period("wfa-policy", windows[0][2], windows[-1][3]))
+    act_all = active_returns(policy, control)
+    policy_spec = SignalSpec(
+        "walk_forward_policy", {"schedule": [(str(day), spec_fingerprint(spec)) for day, spec in schedule]}
+    )
+    key = dataset_key(Period("walk-forward", start, end), str(start), str(end), tickers)
+    from lab.provenance import frame_digest
+
+    register_trial(cfg, key, policy_spec, "walk_forward_policy", act_all, frame_digest(frames))
+    d = stats.dsr(act_all.to_numpy(), trial_sharpes(cfg, key))
     lo, hi = stats.sharpe_ci(act_all.to_numpy())
     is_mean = float(np.mean([s["is_active_sharpe"] for s in steps]))
     return {
         "windows": steps,
+        "execution": "continuous book, transition orders and costs included",
+        "policy_metrics": policy.metrics,
+        "policy_fills": len(policy.fills),
         "oos_active_sharpe": d["sharpe_annual"],
         "oos_active_sharpe_ci": [lo, hi],
         "oos_psr": d["psr"],
@@ -374,10 +450,7 @@ NULL_MAX_FALLBACK = 0.25
 
 
 def _null_worker(args):
-    cfg_path, spec, tickers, frames, period, seed = args
-    from lab.config import load_config
-
-    cfg = load_config(cfg_path)
+    cfg, spec, tickers, frames, period, seed = args
     # Resample only data available by the end of the evaluated period (G007-F6: drawing donors from the
     # whole file let later test/holdout rows shape the training noise floor). Warm-up history before the
     # period start is past data and stays in the donor pool.
@@ -388,6 +461,8 @@ def _null_worker(args):
     cand = run_spec(cfg, spec, tickers, boot, period).metrics
     base = run_spec(cfg, BASELINE, tickers, boot, period).metrics
     worst = max((v["fallback_fraction"] for v in diag["per_instrument"].values()), default=0.0)
+    if cand.get("insolvent") or base.get("insolvent"):
+        raise ValueError("null experiment not qualified: insolvent equity")
     return cand.get("sharpe", 0) - base.get("sharpe", 0), diag["fallback_fraction"], worst
 
 
@@ -401,6 +476,8 @@ def null_test(
     workers: int | None = None,
     observed_edge: float | None = None,
 ) -> dict:
+    if type(samples) is not int or samples <= 0 or (workers is not None and (type(workers) is not int or workers <= 0)):
+        raise ValueError("null samples and workers must be positive integers")
     guard_period(cfg, period)
     if cfg.borrow.history is not None and cfg.risk.max_short_gross > 0:
         raise data.DataError(
@@ -411,7 +488,7 @@ def null_test(
     if observed_edge is None:
         comp, _ = compare(cfg, [spec], tickers, period, frames)
         observed_edge = comp.rows[1]["sharpe_edge"] if len(comp.rows) > 1 else 0.0
-    jobs = [(str(cfg.root / "lab.toml"), spec, tickers, frames, period, s) for s in range(1, samples + 1)]
+    jobs = [(cfg, spec, tickers, frames, period, s) for s in range(1, samples + 1)]
     workers = workers or max(1, min(samples, (os.cpu_count() or 2) - 1))
     if workers == 1:
         measured = [_null_worker(j) for j in jobs]
@@ -455,6 +532,15 @@ def spec_fingerprint(spec: SignalSpec) -> str:
     h = hashlib.sha256(json.dumps({"name": spec.name, "params": spec.params}, sort_keys=True).encode())
     if spec.path:
         h.update(Path(spec.path).read_bytes())
+    else:
+        from lab.signals import base, builtin
+
+        h.update(Path(base.__file__).read_bytes())
+        h.update(Path(builtin.__file__).read_bytes())
+        if spec.name == "walk_forward_policy":
+            from lab.signals import walk_forward
+
+            h.update(Path(walk_forward.__file__).read_bytes())
     return h.hexdigest()[:16]
 
 
@@ -520,6 +606,13 @@ def intraday_split(cfg: LabConfig, frames: dict) -> tuple[Period, Period]:
     # longer history and leaves another speed no research sessions). Sessions never run as a holdout can be
     # released; those an intraday holdout run has seen cannot (the ledger bounds every choice).
     boundary = min(date.fromisoformat(explicit) if explicit else recorded, *(prior or [date.max]))
+    from lab.research_state import latest_research
+
+    used = latest_research(cfg, "intraday")
+    # Migration is conservative: even before a ledger existed, sessions before
+    # the persisted boundary were available for research. Never relabel them.
+    if boundary < recorded or (used is not None and boundary <= date.fromisoformat(used)):
+        raise HoldoutUsed("holdout boundary would relabel exposed research; reserve new prospective sessions")
     research_days = [s for s in sessions if s.date() < boundary]
     if not research_days:
         raise HoldoutUsed(
@@ -542,34 +635,39 @@ def guard_intraday(cfg: LabConfig, period: Period, frames: dict, *, holdout_ok: 
 
 
 def holdout_ledger(cfg: LabConfig) -> list:
+    from lab.research_state import holdouts
+
     p = cfg.results_dir / "holdout_ledger.json"
-    return json.loads(p.read_text()) if p.exists() else []
+    return (json.loads(p.read_text()) if p.exists() else []) + holdouts(cfg)
 
 
 def record_holdout(
     cfg: LabConfig, spec: SignalSpec, comparison: Comparison, reason: str = "", speed: str = "daily"
 ) -> None:
-    ledger = holdout_ledger(cfg)
-    ledger.append(
-        {
-            "at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "signal": spec.name,
-            "params": spec.params,
-            "fingerprint": spec_fingerprint(spec),
-            "reason_for_repeat": reason,
-            "speed": speed,
-            "period": [comparison.start, comparison.end],
-            "tickers": comparison.tickers,
-            "rows": comparison.rows,
-        }
-    )
-    cfg.results_dir.mkdir(parents=True, exist_ok=True)
-    (cfg.results_dir / "holdout_ledger.json").write_text(json.dumps(ledger, indent=2, default=str))
+    from lab.persistence import atomic_json, file_lock, nullable_numbers
+
+    ledger_path = cfg.results_dir / "holdout_ledger.json"
+    entry = {
+        "at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "signal": spec.name,
+        "params": spec.params,
+        "fingerprint": spec_fingerprint(spec),
+        "reason_for_repeat": reason,
+        "speed": speed,
+        "period": [comparison.start, comparison.end],
+        "tickers": comparison.tickers,
+        "rows": nullable_numbers(comparison.rows),
+    }
+    with file_lock(cfg.results_dir / "holdout-record.lock"):
+        ledger = json.loads(ledger_path.read_text()) if ledger_path.exists() else []
+        ledger.append(entry)
+        atomic_json(ledger_path, ledger)
 
 
 def check_holdout_allowed(cfg: LabConfig, spec: SignalSpec, reason: str = "", speed: str = "daily") -> None:
-    fp = spec_fingerprint(spec)
-    prior = [e for e in holdout_ledger(cfg) if e["fingerprint"] == fp and e.get("speed", "daily") == speed]
+    from lab.research_state import family
+
+    prior = [e for e in holdout_ledger(cfg) if family(e.get("speed", "daily")) == family(speed)]
     if prior and not reason:
         raise HoldoutUsed(
             f"{spec.name} with these parameters already used the holdout on {prior[0]['at']}. "
@@ -579,9 +677,11 @@ def check_holdout_allowed(cfg: LabConfig, spec: SignalSpec, reason: str = "", sp
 
 
 def save_run(cfg: LabConfig, name: str, comparison: Comparison, results: list, extra: dict | None = None) -> Path:
+    import uuid
+
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    out = cfg.results_dir / f"{stamp}-{name}"
-    out.mkdir(parents=True, exist_ok=True)
+    out = cfg.results_dir / f"{stamp}-{uuid.uuid4().hex[:12]}-{name}"
+    out.mkdir(parents=True, exist_ok=False)
     (out / "summary.json").write_text(
         json.dumps(
             {
@@ -604,6 +704,9 @@ def save_run(cfg: LabConfig, name: str, comparison: Comparison, results: list, e
             default=str,
         )
     )
+    from lab.provenance import environment
+
+    (out / "environment.json").write_text(json.dumps(environment(), indent=2))
     curves = pd.DataFrame({r.label: r.equity for r in results})
     curves.to_csv(out / "equity.csv")
     comparison.table().to_csv(out / "table.csv", index=False)

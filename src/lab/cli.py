@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from datetime import UTC, date, datetime
 
 import pandas as pd
@@ -285,6 +286,8 @@ def cmd_backtest(cfg, a):
 
 
 def cmd_null(cfg, a):
+    if a.samples <= 0:
+        raise ConfigError("--samples must be positive")
     (spec,) = _specs(cfg, [a.signal], a.set)
     tickers = _tickers(cfg, a.tickers)
     period = _period(cfg, a)
@@ -324,6 +327,8 @@ def _grid_specs(cfg, a):
 
 
 def cmd_walk_forward(cfg, a):
+    if a.is_years <= 0 or a.oos_years <= 0:
+        raise ConfigError("walk-forward window lengths must be positive")
     specs = _grid_specs(cfg, a)
     tickers = _tickers(cfg, a.tickers)
     start = date.fromisoformat(a.start) if a.start else cfg.period("train").start
@@ -381,13 +386,17 @@ def cmd_holdout(cfg, a):
     except experiments.HoldoutUsed as e:
         raise SystemExit(str(e)) from e
     if speed == "daily":
-        comp, results = experiments.compare(cfg, [spec], tickers, cfg.period("holdout"), holdout_ok=True)
+        comp, results = experiments.compare(
+            cfg, [spec], tickers, cfg.period("holdout"), holdout_ok=True, holdout_reason=a.again or ""
+        )
     else:
         from lab import intraday
 
         frames = intraday.load_many(cfg, tickers, intraday.speed(speed))
         _, period = experiments.intraday_split(cfg, frames)
-        comp, results = experiments.compare(cfg, [spec], tickers, period, frames, holdout_ok=True, speed=speed)
+        comp, results = experiments.compare(
+            cfg, [spec], tickers, period, frames, holdout_ok=True, speed=speed, holdout_reason=a.again or ""
+        )
     experiments.record_holdout(cfg, spec, comp, a.again or "", speed=speed)
     _print_table(comp)
     out = experiments.save_run(cfg, f"holdout-{spec.name}", comp, results)
@@ -508,7 +517,7 @@ def cmd_research_promote(cfg, a):
     if not a.yes and input("Read the code above. Promote it to paper trading? [y/N] ").strip().lower() != "y":
         raise SystemExit("not promoted")
     try:
-        rec = write_approval(h.dir, source, {}, cfg.snapshot())
+        rec = write_approval(h.dir, source, {}, replace(cfg, trading=replace(cfg.trading, speed="daily")).snapshot())
     except ApprovalError as e:
         raise SystemExit(str(e)) from e
     h.set_status("promoted", f"human approval; source sha256 {rec['source_sha256'][:16]}")
@@ -556,12 +565,14 @@ _HELD_LOCKS: list = []  # runtime locks: closing (or garbage-collecting) one wou
 
 def cmd_paper(cfg, a):
     from lab.notify import Notifier
-    from lab.paper import RuntimeLocked, acquire_runtime_lock, build_node, build_smoke_node
+    from lab.paper import RuntimeLocked, acquire_runtime_lock, build_node, build_smoke_node, runtime_dir
     from lab.research.approval import ApprovalError
     from lab.safety import SafetyError
 
     tickers = [t.upper() for t in (a.tickers or cfg.universe)]
     try:
+        _HELD_LOCKS.append(acquire_runtime_lock(cfg))
+        notifier = Notifier(spool_path=str(runtime_dir(cfg) / "notifications.sqlite3"))
         if a.smoke:
             node, report = build_smoke_node(cfg, tickers, test_order=a.test_order)
         else:
@@ -571,8 +582,7 @@ def cmd_paper(cfg, a):
                 resolve(s.name, cfg.research_dir, s.params, require_tradable=True) if s.path is not None else s
                 for s in _specs(cfg, a.signals, a.set)
             ]
-            _HELD_LOCKS.append(acquire_runtime_lock(cfg))  # referenced, so held until this process exits
-            node = build_node(cfg, specs, tickers, adopt_broker=a.adopt_broker)
+            node = build_node(cfg, specs, tickers, adopt_broker=a.adopt_broker, notifier=notifier)
     except (SafetyError, ValueError, SignalNotFound, RuntimeLocked, ApprovalError) as e:
         raise SystemExit(str(e)) from e
     what = "smoke test" if a.smoke else f"{len(a.signals)} signal(s) x {len(tickers)} stocks"
@@ -590,7 +600,6 @@ def cmd_paper(cfg, a):
         node.dispose()
         print("check only: configuration is valid; not connecting.")
         return 0
-    notifier = Notifier()
     if not a.smoke:
         notifier.send(f"paper trading starting: {what}")
     print("connecting to Interactive Brokers... (Ctrl+C to stop)")
@@ -600,7 +609,8 @@ def cmd_paper(cfg, a):
         print("stopping...")
     finally:
         node.dispose()
-        notifier.flush()
+        if not notifier.flush():
+            print("ALERT DELIVERY PENDING: durable outbox will retry on restart", file=sys.stderr)
     if a.smoke:
         if not report.exists():
             print("smoke test produced no report: the node did not get far enough (check the log above)")
@@ -622,9 +632,12 @@ def cmd_paper_report(cfg, a):
         raise SystemExit("no paper-trading journal yet (results/paper/journal-*.jsonl)")
     r = summarize(load_journal(journals))
     if "last_equity" in r:
+        return_text = (
+            f"{r['total_return']:+.2%}" if r["total_return"] is not None else "unqualified return (external flows)"
+        )
         print(
             f"{r['start']} .. {r['end']}: equity {r['first_equity']:,.2f} -> {r['last_equity']:,.2f} "
-            f"({r['total_return']:+.2%}), max drawdown {r['max_drawdown']:.1%}"
+            f"({return_text}), max drawdown {r['max_drawdown']:.1%}"
         )
     print(
         f"fills: {r['fills']}, traded {r.get('traded_value', 0):,.0f} USD, commissions {r.get('commissions', 0):,.2f} USD"
@@ -670,7 +683,7 @@ def cmd_resume(cfg, a):
 
 def cmd_recover(cfg, a):
     """Clear a hard halt (lab/halt.py) after an operator has looked at it. Audited."""
-    from lab.halt import HARD_KINDS, clear_halt, read_halt
+    from lab.halt import HARD_KINDS, clear_halt, halt_kinds, read_halt
     from lab.notify import Notifier
     from lab.paper import adopt_path, halt_path, recoveries_path
 
@@ -685,10 +698,10 @@ def cmd_recover(cfg, a):
     if not a.reason:
         print(
             '\nto clear it: lab recover --reason "what you checked and why it is safe"'
-            + ("  [--adopt-broker]" if halt["kind"] == "reconciliation_mismatch" else "")
+            + ("  [--adopt-broker]" if "reconciliation_mismatch" in halt_kinds(halt) else "")
         )
         return 1
-    if halt["kind"] == "reconciliation_mismatch" and not a.adopt_broker:
+    if "reconciliation_mismatch" in halt_kinds(halt) and not a.adopt_broker:
         raise SystemExit(
             "a reconciliation mismatch is cleared by deciding which book is right: add --adopt-broker to take the "
             "broker's positions as the truth (after checking the broker account), or fix the cause and re-run"

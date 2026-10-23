@@ -187,9 +187,8 @@ def test_deployment_configuration_is_bound_to_validation(tmp_path):
         verify_approval(hdir, {}, context={"risk": "changed"})
 
 
-def test_deployment_context_ignores_capital_and_intraday_settings_at_the_daily_speed(goog_lab):
-    """Claude on G008-F3: paper capital differing from research capital (share rounding only) or an
-    intraday-only setting must not refuse a signal validated and traded at the daily speed."""
+def test_deployment_context_binds_capital_but_ignores_intraday_settings_at_daily_speed(goog_lab):
+    """Capital changes the executed path; irrelevant daily settings do not."""
     from dataclasses import replace
 
     from lab.research.approval import deployment_context
@@ -201,6 +200,8 @@ def test_deployment_context_ignores_capital_and_intraday_settings_at_the_daily_s
         paper=replace(goog_lab.paper, capital=25_000.0),
         trading=replace(goog_lab.trading, limit_collar=0.02, data_delay_min=0),
     )
-    assert deployment_context(other.snapshot(), live=True, tickers=["GOOG"]) == base
+    assert deployment_context(other.snapshot(), live=True, tickers=["GOOG"]) != base
+    same_capital = replace(other, paper=replace(other.paper, capital=goog_lab.capital))
+    assert deployment_context(same_capital.snapshot(), live=True, tickers=["GOOG"]) == base
     riskier = replace(goog_lab, risk=replace(goog_lab.risk, max_drawdown=0.5))
     assert deployment_context(riskier.snapshot(), tickers=["GOOG"]) != base  # risk still binds

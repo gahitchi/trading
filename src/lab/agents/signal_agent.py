@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from nautilus_trader.common import DataActor, DataActorConfig
 
-from lab.agents.messages import T_RISK, T_SIGNAL, RiskEvent, SignalUpdate
+from lab.agents.messages import T_MARK, T_RISK, T_SIGNAL, PriceMark, RiskEvent, SignalUpdate
 from lab.agents.schedule import (
     FUTURE_TOLERANCE,
     MAX_BAR_AGE_DAYS,
@@ -165,11 +166,14 @@ class SignalAgent(DataActor):
                 bar_minute(bar.ts_event, self.config.session),
             )
         )
+        self.publish_message(T_MARK, PriceMark(self.config.ticker, float(bar.close), bar.ts_event))
         if len(self.rows) < self.signal.lookback:
             return
         cols = list(zip(*self.rows, strict=True))
         try:
-            raw = self.signal.target(Window(*cols))
+            raw = float(self.signal.target(Window(*cols)))
+            if not math.isfinite(raw):
+                raise ValueError("signal target must be finite")
         except Exception as e:  # a buggy signal must never take the system down
             self.errors += 1
             self.log.error(f"{self.config.sleeve}: signal raised {type(e).__name__}: {e}; going flat")

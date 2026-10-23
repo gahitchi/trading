@@ -15,5 +15,4 @@ examples/*/research/
 research/.agent_workspace/
 research/usage.jsonl
 
-# lockfile written by local `uv run`; the project installs with pip / `uv pip install -e`
-uv.lock
+# uv.lock is tracked for reproducible development and CI.

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import math
 from collections import deque
+from itertools import pairwise
+from pathlib import Path
 
 import numpy as np
 from nautilus_trader.common import DataActor, DataActorConfig
 
-from lab.agents.messages import T_SIGNAL, T_TARGETS, TargetWeights
+from lab.agents.messages import T_MARK, T_SIGNAL, T_TARGETS, TargetWeights
+from lab.persistence import atomic_json, read_json
 
 
 class AllocatorAgentConfig(DataActorConfig):
@@ -23,6 +26,7 @@ class AllocatorAgentConfig(DataActorConfig):
         max_leverage: float = 1.0,
         leverage: float = 1.0,
         periods_per_year: float = 252.0,
+        state_path: str | None = None,
         **_kwargs,
     ):
         """sleeves: sleeve id ("signal:TICKER") -> (ticker, weight). Weights are fractions of equity.
@@ -43,6 +47,7 @@ class AllocatorAgentConfig(DataActorConfig):
         self.vol_window = vol_window
         self.max_leverage = max_leverage
         self.leverage = leverage
+        self.state_path = state_path
         self.periods_per_year = periods_per_year  # bars per year: 252 daily, 252 x bars per session intraday
 
 
@@ -57,12 +62,24 @@ class AllocatorAgent(DataActor):
         self.tickers = sorted({t for t, _ in config.sleeves.values()})
         self.closes = {t: deque(maxlen=config.vol_window + 1) for t in self.tickers}
         self.close_ts = dict.fromkeys(self.tickers, -1)
+        if config.state_path and Path(config.state_path).exists():
+            saved = read_json(config.state_path)
+            if saved.get("version") != 1 or saved.get("window") != config.vol_window:
+                raise ValueError("allocator state version/window changed; explicit migration required")
+            for t in self.tickers:
+                rows = saved.get("closes", {}).get(t, [])
+                for ts, price in rows:
+                    if not isinstance(ts, int) or not math.isfinite(price) or price <= 0 or ts <= self.close_ts[t]:
+                        raise ValueError("invalid allocator history")
+                    self.closes[t].append((ts, price))
+                    self.close_ts[t] = ts
         self.scale = 1.0
         self.groups: dict[str, list[str]] = {}
         for sleeve in config.sleeves:
             self.groups.setdefault(sleeve.split(":", 1)[0], []).append(sleeve)
 
     def on_start(self):
+        self.subscribe_topic(T_MARK, self._on_mark)
         self.subscribe_topic(T_SIGNAL, self._on_signal)
 
     def weights(self) -> dict[str, float]:
@@ -90,26 +107,54 @@ class AllocatorAgent(DataActor):
         return out
 
     def _vol_scale(self, weights: dict[str, float]) -> float:
-        held = [t for t, w in weights.items() if w != 0 and len(self.closes[t]) > 20]
+        held = [t for t, w in weights.items() if w != 0]
         if not held:
             return 1.0
-        n = min(len(self.closes[t]) for t in held)
-        prices = np.array([list(self.closes[t])[-n:] for t in held], dtype=float)
-        rets = np.diff(np.log(prices), axis=1)
+        # Match BOTH endpoints. A two-day return is not interchangeable with
+        # somebody else's one-day return. Missing/partial warm-up stays in cash.
+        returns = {}
+        for t in held:
+            rows = list(self.closes[t])
+            returns[t] = {(a[0], b[0]): math.log(b[1] / a[1]) for a, b in pairwise(rows)}
+        shared = sorted(set.intersection(*(set(returns[t]) for t in held)))
+        if len(shared) < min(20, self.config.vol_window):
+            return 0.0
+        rets = np.array([[returns[t][k] for k in shared] for t in held])
         cov = np.atleast_2d(np.cov(rets))
         w = np.array([weights[t] for t in held])
         vol = math.sqrt(max(float(w @ cov @ w), 0.0) * self.config.periods_per_year)
-        return 1.0 if vol <= 0 else min(self.config.max_leverage, self.config.target_vol / vol)
+        return (
+            min(1.0, self.config.max_leverage)
+            if vol <= 0
+            else min(self.config.max_leverage, self.config.target_vol / vol)
+        )
+
+    def _save(self):
+        if self.config.state_path:
+            atomic_json(
+                self.config.state_path,
+                {
+                    "version": 1,
+                    "window": self.config.vol_window,
+                    "closes": {t: list(rows) for t, rows in self.closes.items()},
+                },
+            )
 
     def _on_signal(self, msg):
         if msg.sleeve not in self.config.sleeves:
             return
-        if msg.ts > self.close_ts[msg.ticker]:
-            self.close_ts[msg.ticker] = msg.ts
-            self.closes[msg.ticker].append(msg.price)
+        self._on_mark(msg)
         self.targets[msg.sleeve] = msg.target
         if msg.active:
             self.active.add(msg.sleeve)
         else:
             self.active.discard(msg.sleeve)
         self.publish_message(T_TARGETS, TargetWeights(self.weights(), msg.ts))
+
+    def _on_mark(self, msg):
+        if msg.ticker in self.closes and msg.ts > self.close_ts[msg.ticker]:
+            if not math.isfinite(msg.price) or msg.price <= 0:
+                raise ValueError("allocator requires a finite positive mark")
+            self.close_ts[msg.ticker] = msg.ts
+            self.closes[msg.ticker].append((msg.ts, msg.price))
+            self._save()

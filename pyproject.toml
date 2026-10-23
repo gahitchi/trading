@@ -9,6 +9,7 @@ dependencies = [
     # Pinned exactly: 2.0 is in release candidates and its API still moves between RCs.
     "nautilus_trader==2.0.0rc7",
     "numpy>=2.0",
+    "exchange-calendars==4.13.2",
     "pandas>=2.2",
     "pyarrow>=17",
     "yfinance>=0.2.54",
