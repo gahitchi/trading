@@ -106,3 +106,33 @@ def test_approval_capacity_is_bounded_and_expired_requests_are_reclaimed(authori
         db.execute("UPDATE request SET expires=0")
     assert not authority.authorize({"ticker": "A", "qty": 1})
     assert len(authority.requests()) == 1
+
+
+@pytest.mark.parametrize("record", [None, [], {"payload": None, "hmac": "x"}, {"payload": {}, "hmac": False}])
+def test_malformed_authority_is_a_controlled_refusal(authority, record):
+    atomic_json(authority.path, record)
+    with pytest.raises(ValueError, match="authority"):
+        authority.read()
+
+
+def test_corrupt_authority_requests_cancellation_on_heartbeat(authority):
+    from types import SimpleNamespace
+
+    from lab.agents.execution import ExecutionAgent
+
+    atomic_json(authority.path, None)
+    cancelled, heartbeats = [], []
+    agent = SimpleNamespace(
+        config=SimpleNamespace(authority=authority, flat_at_close=False),
+        _consume_adopt=lambda: None,
+        _consume_dispose=lambda: None,
+        _cancel_open_orders=lambda: cancelled.append(True),
+        pending={},
+        disposed={},
+        terminal={},
+        _kill=lambda: None,
+        _write_heartbeat=lambda **kw: heartbeats.append(kw),
+    )
+    ExecutionAgent._on_heartbeat(agent, None)
+    assert cancelled == [True] and heartbeats == [{"running": True}]
+    assert "authority unavailable" in agent.blocked_reason

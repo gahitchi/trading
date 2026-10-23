@@ -58,6 +58,12 @@ class Authority:
 
     def read(self, *, allow_expired=False):
         rec = read_json(self.path)
+        if (
+            not isinstance(rec, dict)
+            or not isinstance(rec.get("payload"), dict)
+            or not isinstance(rec.get("hmac"), str)
+        ):
+            raise ValueError("malformed operator authority")
         payload = rec["payload"]
         if not hmac.compare_digest(rec["hmac"], self.sign(payload)) or payload["binding"] != self.binding:
             raise ValueError("authority signature or runtime identity differs")

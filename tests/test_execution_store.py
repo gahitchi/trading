@@ -85,3 +85,37 @@ def test_projection_prevents_unsafe_downgrade_to_json_only_code(tmp_path):
     assert read_json(p)["version"] == 3
     assert read_json(p)["authoritative_store"] == "ledger.sqlite3"
     assert store.load()["version"] == 3
+
+
+@pytest.mark.parametrize("boundary", ["before_commit", "after_commit"])
+def test_abrupt_process_exit_preserves_atomic_accounting(tmp_path, boundary):
+    import subprocess
+    import sys
+
+    path = tmp_path / "ledger.json"
+    ExecutionStore(path).save({"cash": 1000})
+    script = r"""
+import os, sys
+from contextlib import contextmanager
+import lab.execution_store as module
+store = module.ExecutionStore(sys.argv[1])
+if sys.argv[2] == 'before_commit':
+    original = store.connect
+    @contextmanager
+    def crash_before_commit():
+        with original() as db:
+            yield db
+            os._exit(23)
+    store.connect = crash_before_commit
+else:
+    module.atomic_json = lambda *args: os._exit(23)
+store.maps['applied']['T'] = [1, 'X']
+store.save({'cash': 900, 'positions': {'A': 10}})
+"""
+    result = subprocess.run([sys.executable, "-c", script, str(path), boundary], check=False, timeout=30)
+    assert result.returncode == 23
+    restarted = ExecutionStore(path)
+    committed = boundary == "after_commit"
+    assert restarted.load()["cash"] == (900 if committed else 1000)
+    assert ("T" in restarted.maps["applied"]) == committed
+    assert read_json(path)["cash"] == 1000
