@@ -165,6 +165,7 @@ The agents run unattended and continuously by default. What they do when somethi
 | see a hard halt | `docker compose exec lab lab recover` |
 | clear a breaker or account halt | `docker compose exec lab lab recover --reason "what you checked"` |
 | ledger/broker mismatch | check the positions in IBKR; if IBKR is right: `lab recover --reason "..." --adopt-broker` (adoption requires terminal broker reports for every pending order; unknown intents remain journaled and halted) |
+| unconfirmed order (`order_unknown`) | in TWS or the Client Portal, open **Trades** and the order history for the days since the journaled time and look for the client order ID in the halt. If IBKR shows no such order and no execution: `lab recover --reason "..." --dispose-order ID --evidence "what you saw, where, which dates"`. The next start disposes of it only if IBKR still does not report it and the stock's position matches the ledger; the intent and your evidence stay in the ledger, and a fill that still arrives is booked and halts again. If IBKR shows the order, let the agents settle it from its reports instead |
 | change strategy | edit `LAB_SIGNALS` / `LAB_TICKERS` in `.env`, `docker compose up -d lab` |
 | trade a research hypothesis | `lab research promote <id>` (reads you the code first), then add it to `LAB_SIGNALS` |
 | update | `git pull && docker compose build lab && docker compose up -d` |

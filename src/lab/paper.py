@@ -112,6 +112,10 @@ def adopt_path(cfg: LabConfig) -> Path:
     return runtime_dir(cfg) / "ADOPT"
 
 
+def dispose_path(cfg: LabConfig) -> Path:
+    return runtime_dir(cfg) / "DISPOSE"
+
+
 def recoveries_path(cfg: LabConfig) -> Path:
     return runtime_dir(cfg) / "recoveries.jsonl"
 
@@ -411,6 +415,7 @@ def build_node(
                 kill_path=str(kill_path(cfg)),
                 halt_path=str(halt_path(cfg)),
                 adopt_path=str(adopt_path(cfg)),
+                dispose_path=str(dispose_path(cfg)),
                 heartbeat_path=str(heartbeat_path(cfg)),
                 adopt_broker_positions=adopt_broker,
             )

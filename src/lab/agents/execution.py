@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -32,7 +33,9 @@ from lab.safety import is_paper_account, read_kill_switch
 NY = ZoneInfo("America/New_York")
 # Hard halts under which exits are still sent (everything else in a halt sends nothing at all).
 _REDUCE_ONLY_HALTS = {"circuit_breaker", "margin_call", "cash_mismatch"}
-_KEEP_TRADE_IDS = 2000  # broker trade IDs remembered for de-duplication (far more than a few days of fills)
+# Broker trade IDs are remembered for de-duplication for this long after their fill (IBKR re-reports executions
+# for about a week), and for as long as their order is still journaled, whatever its age.
+_KEEP_TRADE_DAYS = 30
 
 
 def _ny_date(ts_ns: int):
@@ -73,6 +76,7 @@ class ExecutionAgentConfig(StrategyConfig):
         kill_path: str | None = None,
         halt_path: str | None = None,
         adopt_path: str | None = None,
+        dispose_path: str | None = None,
         heartbeat_path: str | None = None,
         adopt_broker_positions: bool = False,
         weekdays_only: bool = True,
@@ -121,6 +125,7 @@ class ExecutionAgentConfig(StrategyConfig):
         self.kill_path = kill_path
         self.halt_path = halt_path  # hard-halt file (lab/halt.py)
         self.adopt_path = adopt_path  # request file written by `lab recover --adopt-broker`
+        self.dispose_path = dispose_path  # request file written by `lab recover --dispose-order ... --evidence ...`
         self.heartbeat_path = heartbeat_path
         self.adopt_broker_positions = adopt_broker_positions
         self.weekdays_only = weekdays_only
@@ -199,10 +204,12 @@ class ExecutionAgent(Strategy):
         # recovered from the broker's reports at start-up (_recover_pending) instead of leaving the
         # ledger behind the broker. Fills are applied once per broker trade ID.
         self.pending: dict[str, dict] = {}
+        # Unconfirmed intents an operator disposed of with broker evidence (`lab recover --dispose-order`). Kept,
+        # not erased: a fill that still arrives for one is booked to the lab and halts for review.
+        self.disposed: dict[str, dict] = {}
         self.orphans: dict[str, float] = {}
         self.ledger_account: str | None = None  # the broker account this ledger belongs to
-        self.applied: list[str] = []
-        self._applied_set: set[str] = set()
+        self.applied: dict[str, list] = {}  # trade ID -> [fill time ns, client order ID]
         if config.state_path and Path(config.state_path).exists():
             state = read_json(config.state_path)
             if not isinstance(state, dict) or state.get("version", 1) != 1:
@@ -219,8 +226,15 @@ class ExecutionAgent(Strategy):
             self.orphans = {t: float(q) for t, q in state.get("positions", {}).items() if t not in self.held and q}
             self.ledger_account = state.get("account")
             self.pending = dict(state.get("pending", {}))
-            self.applied = list(state.get("applied_trades", []))
-            self._applied_set = set(self.applied)
+            self.disposed = dict(state.get("disposed", {}))
+            now = time.time_ns()
+            for entry in state.get("applied_trades", []):
+                if isinstance(entry, str):  # older ledgers: IDs only; kept for the full window from now
+                    self.applied[entry] = [now, None]
+                elif isinstance(entry, list) and len(entry) == 3 and isinstance(entry[0], str):
+                    self.applied[entry[0]] = [int(entry[1]), entry[2]]
+                else:
+                    raise ValueError("invalid applied trade record")
             caps = state.get("daily_caps") or {}
             self.cap_day = date.fromisoformat(caps["day"]) if caps.get("day") else None
             self.cap_orders = int(caps.get("orders", 0))
@@ -258,6 +272,7 @@ class ExecutionAgent(Strategy):
             if self.config.adopt_broker_positions:
                 self._adopt_broker_positions()
             self._consume_adopt()
+            self._consume_dispose()
             self._recover_pending()
             if self.config.session is None:
                 self._schedule(now)  # daily; a quick speed decides after every bar instead
@@ -388,6 +403,7 @@ class ExecutionAgent(Strategy):
 
     def _on_heartbeat(self, _event):
         self._consume_adopt()
+        self._consume_dispose()
         if self.pending:
             self._recover_pending()  # safety net: settle journaled orders from the broker's latest state
         if self._kill():
@@ -551,9 +567,13 @@ class ExecutionAgent(Strategy):
     def snapshot(self) -> EquitySnapshot:
         self._accrue()
         long_value, short_value = self._book()
-        # Live financing is estimated for diagnostics; actual broker charges
-        # enter reconciled cash. Subtracting both would double-charge the book.
-        equity = self.cash + long_value - short_value - (0.0 if self.config.live else self.financing)
+        # Dedicated account: the broker's actual charges enter the ledger's cash (booked as external cash), so
+        # the estimate is diagnostic only and subtracting both would double-charge the book (ChatGPT, G009-F27).
+        # Allocation mode: the lab's cash never sees the broker's charges, which land on the whole account, so
+        # the estimate is the only financing the lab's equity carries (Claude: without it a short or levered book
+        # looks richer every night than it is).
+        actual_in_cash = self.config.live and self.config.dedicated_account
+        equity = self.cash + long_value - short_value - (0.0 if actual_in_cash else self.financing)
         self.min_cash = min(self.min_cash, self.cash)
         gross = (long_value + short_value) / equity if equity > 0 else 0.0
         net = (long_value - short_value) / equity if equity > 0 else 0.0
@@ -587,7 +607,8 @@ class ExecutionAgent(Strategy):
                     "positions": {**self.orphans, **self._nonzero(self.held)},
                     "account": self.ledger_account,
                     "pending": self.pending,
-                    "applied_trades": self.applied,
+                    "disposed": self.disposed,
+                    "applied_trades": [[t, ts, coid] for t, (ts, coid) in self.applied.items()],
                     # A restart within a session must not reset the day's order and turnover caps.
                     "daily_caps": {
                         "day": self.cap_day.isoformat() if self.cap_day else None,
@@ -768,8 +789,12 @@ class ExecutionAgent(Strategy):
 
         orders.sort(key=lambda o: o[0] > 0)
         # A reduction is not settled until its broker report arrives. Gross-only
-        # headroom cannot enforce short/net/margin limits under partial fills.
-        reductions = any(o[0] == 0 for o in orders)
+        # headroom cannot enforce short/net/margin limits under partial fills (ChatGPT, G009).
+        # With the risk limits known, every addition is checked against the worst case over every subset of
+        # this batch's fills, reductions included (lab.reservations): one that passes is safe beside an
+        # unfilled reduction, so it need not wait (Claude: a blanket wait starves a book trimmed every day).
+        # Without them (component tests), nothing is added until reductions settle.
+        reductions = any(o[0] == 0 for o in orders) and getattr(self.config, "risk_limits", None) is None
         unsettled = bool(self.pending) or any(
             self.cache.orders_open_count(instrument_id=iid) for iid in self.config.instruments.values()
         )
@@ -991,7 +1016,7 @@ class ExecutionAgent(Strategy):
     def _apply_fill(self, ev, *, recovered: bool = False) -> bool:
         """Book one broker fill into the ledger, once per trade ID. Returns False for a repeat."""
         trade = str(ev.trade_id)
-        if trade in self._applied_set:
+        if trade in self.applied:
             return False
         qty, px = float(ev.last_qty), float(ev.last_px)
         fee = float(ev.commission.as_double()) if ev.commission is not None else 0.0
@@ -1003,8 +1028,8 @@ class ExecutionAgent(Strategy):
         self.cash += -qty * px - fee if buy else qty * px - fee
         self.commissions += fee
         self.held[ticker] = self.held.get(ticker, 0.0) + (qty if buy else -qty)
-        self.applied.append(trade)
-        self._applied_set.add(trade)
+        self.applied[trade] = [time.time_ns(), str(ev.client_order_id)]
+        self._prune_applied()
         self._save()
         self.publish_message(
             T_FILL,
@@ -1058,8 +1083,75 @@ class ExecutionAgent(Strategy):
             if order.is_closed:
                 self._close_pending(coid)
 
+    def _consume_dispose(self) -> None:
+        """Apply an operator's `lab recover --dispose-order COID --evidence ...`: an unconfirmed journaled intent
+        that the broker's own records show never executed (its order and trade history, read by the operator).
+        Refused while the broker reports the order, or while its stock's position disagrees with the ledger
+        (a fill could be missing). The intent moves to `disposed` with the evidence; it is never erased, so a
+        fill that still arrives is booked to the lab (and halts for review)."""
+        path = Path(self.config.dispose_path) if self.config.dispose_path else None
+        if path is None or not path.exists():
+            return
+        try:
+            req = json.loads(path.read_text())
+            orders, evidence = list(req["orders"]), str(req["evidence"]).strip()
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self._risk_event("dispose_refused", f"unreadable disposal request ({exc}); nothing disposed")
+            path.unlink(missing_ok=True)
+            return
+        diffs = self.reconcile()
+        for coid in orders:
+            info = self.pending.get(coid)
+            reason = None
+            if info is None:
+                reason = "not an unconfirmed journaled intent"
+            elif not evidence:
+                reason = "no broker evidence given"
+            elif self.cache.order(ClientOrderId(coid)) is not None:
+                reason = "the broker reports this order: settle it from its reports instead"
+            elif any(d.startswith(f"{info['ticker']}:") for d in diffs):
+                reason = f"{info['ticker']}'s position disagrees with the ledger: a fill may be missing"
+            if reason:
+                self._risk_event("dispose_refused", f"{coid}: {reason}; the intent is kept")
+                continue
+            self.disposed[coid] = {
+                **info,
+                "evidence": evidence,
+                "reason": str(req.get("reason", "")),
+                "disposed_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            }
+            del self.pending[coid]
+            self._risk_event(
+                "order_disposed",
+                f"{coid} ({info['ticker']} {info['side']} {info['qty']:g}) disposed on evidence: {evidence}",
+            )
+        if len(self.disposed) > 500:
+            self.disposed = dict(list(self.disposed.items())[-500:])
+        self._save()
+        path.unlink(missing_ok=True)
+
+    def _prune_applied(self) -> None:
+        """Bounded de-duplication store: forget a trade ID once it is older than the broker re-reports and its
+        order is no longer journaled (a fill of a pending order can still be re-reported at recovery)."""
+        cutoff = time.time_ns() - _KEEP_TRADE_DAYS * 86_400 * 10**9
+        stale = [t for t, (ts, coid) in self.applied.items() if ts < cutoff and coid not in self.pending]
+        for t in stale:
+            del self.applied[t]
+
     def on_order_filled(self, ev):
         coid = str(ev.client_order_id)
+        if self.config.live and coid in self.disposed:
+            # The evidence was wrong: the order did execute. Book it (the lab sent it) and stop for review.
+            info = self.disposed.pop(coid)
+            self.pending[coid] = info
+            self._apply_fill(ev)
+            self._close_pending(ev.client_order_id)
+            self._hard_halt(
+                "reconciliation_mismatch",
+                f"{info['ticker']}: order {coid} filled after it was disposed of on evidence "
+                f"({info.get('evidence')}); booked to the ledger, review before trading",
+            )
+            return
         if self.config.live and coid not in self.pending:
             # Not an order this agent journaled (e.g. a trade placed by hand in the same paper
             # account): it is not part of the lab's book, and reconciliation will flag the difference.
