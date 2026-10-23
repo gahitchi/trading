@@ -24,10 +24,14 @@ EVIDENCE = ("train.json", "test.json")
 def deployment_context(snapshot: dict, *, live: bool = False, tickers=None) -> dict:
     if not snapshot:
         return {}
-    keys = ("risk", "portfolio", "costs", "margin", "trading")
+    # Capital is not bound: it changes only share rounding, and binding it would refuse every promoted
+    # signal whenever the paper allocation differs from the research capital. At the daily speed the
+    # intraday-only trading settings (delay, collar, flat at close, intraday holdout) do not act either.
+    keys = ("risk", "portfolio", "costs", "margin")
+    trading = snapshot["trading"]
     return {
         **{k: snapshot[k] for k in keys},
-        "capital": snapshot["paper"]["capital"] if live else snapshot["capital"],
+        "trading": trading if trading.get("speed") != "daily" else {"speed": "daily"},
         "universe": {t: snapshot["universe"][t] for t in sorted(tickers or snapshot["universe"])},
     }
 

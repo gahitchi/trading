@@ -79,3 +79,23 @@ def test_flat_at_close_survives_a_lost_data_feed(goog_lab, tmp_path):
     assert any(f.side == "SELL" for f in result.fills)
     assert not result.broker_positions
     assert any(e["kind"] == "flat_at_close" for e in result.risk_events)
+
+
+def test_an_explicit_intraday_boundary_releases_unseen_sessions_but_never_seen_ones(goog_lab):
+    """Claude on G008-F7: a partition first made from long history (1h) left shorter speeds no research
+    sessions; the operator may set the boundary, bounded by every intraday holdout already run."""
+    from dataclasses import replace
+
+    cfg = lab(goog_lab)
+    long = {"GOOG": frames(days=pd.bdate_range("2026-01-05", periods=60))}
+    short = {"GOOG": frames(days=pd.bdate_range("2026-03-16", periods=10))}
+    experiments.intraday_split(cfg, long)  # the partition is first made from the long history
+    with pytest.raises(experiments.HoldoutUsed, match="intraday_holdout_start"):
+        experiments.intraday_split(cfg, short)  # every short-history session is past the persisted boundary
+    explicit = replace(cfg, trading=replace(cfg.trading, intraday_holdout_start="2026-03-25"))
+    research, holdout = experiments.intraday_split(explicit, short)
+    assert research.end < holdout.start == pd.Timestamp("2026-03-25").date()
+    ledger = cfg.results_dir / "holdout_ledger.json"
+    ledger.write_text('[{"fingerprint": "x", "speed": "15m", "period": ["2026-03-20", null]}]')
+    _, bounded = experiments.intraday_split(explicit, short)
+    assert bounded.start == pd.Timestamp("2026-03-20").date()  # a session a holdout run saw stays reserved

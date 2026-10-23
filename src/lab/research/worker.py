@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from lab import data, experiments
@@ -33,8 +34,9 @@ def main(argv=None) -> int:
     if not tickers:
         print("no data for any universe ticker; run: lab data fetch", file=sys.stderr)
         return 2
-    if cfg.trading.speed != "daily":
-        raise ValueError("the research validator requires daily trading; intraday research is not qualified")
+    # The swarm researches daily bars only (intraday history is too short for its train/test/holdout split).
+    # A quick [trading] speed is for the node; research keeps working, validated and bound at "daily".
+    cfg = replace(cfg, trading=replace(cfg.trading, speed="daily"))
     digest = sha256_file(hdir / "signal.py")
     spec = SignalSpec(hdir.name, {}, str(hdir / "signal.py"), digest)
     frames = data.load_many(cfg, tickers)

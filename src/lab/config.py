@@ -114,6 +114,9 @@ class TradingSettings:
     data_delay_min: int = 15  # minutes the live data lags (IBKR paper without a subscription: 15; real-time: 0)
     limit_collar: float = 0.01  # quick speeds, live: marketable limit at last price +/- this fraction
     intraday_holdout: float = 0.2  # quick speeds: the last 20% of the stored sessions are the holdout
+    # The operator's explicit intraday holdout start (ISO date), overriding the boundary persisted at first use.
+    # Never later than the start of any intraday holdout already run (experiments.intraday_split).
+    intraday_holdout_start: str | None = None
 
 
 @dataclass(frozen=True)
@@ -197,7 +200,7 @@ def find_config(start: Path | None = None) -> Path:
 def _trading(raw: dict, profile: str) -> TradingSettings:
     if not isinstance(raw, dict):
         raise ConfigError("[trading] must be a table")
-    known = {"speed", "flat_at_close", "data_delay_min", "limit_collar", "intraday_holdout"}
+    known = {"speed", "flat_at_close", "data_delay_min", "limit_collar", "intraday_holdout", "intraday_holdout_start"}
     if set(raw) - known:
         raise ConfigError(f"[trading]: unknown keys {sorted(set(raw) - known)}")
     t = TradingSettings(
@@ -206,7 +209,13 @@ def _trading(raw: dict, profile: str) -> TradingSettings:
         data_delay_min=int(raw.get("data_delay_min", 15)),
         limit_collar=float(raw.get("limit_collar", 0.01)),
         intraday_holdout=float(raw.get("intraday_holdout", 0.2)),
+        intraday_holdout_start=str(raw["intraday_holdout_start"]) if raw.get("intraday_holdout_start") else None,
     )
+    if t.intraday_holdout_start is not None:
+        try:
+            date.fromisoformat(t.intraday_holdout_start)
+        except ValueError as e:
+            raise ConfigError(f"[trading] intraday_holdout_start must be an ISO date: {e}") from e
     from lab.intraday import check_speed_allowed
 
     try:

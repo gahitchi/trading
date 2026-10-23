@@ -233,6 +233,10 @@ def build_node(
     from lab.research.approval import ApprovalError, deployment_context, verify_approval
 
     for spec in specs:
+        if spec.path is not None and session is not None:
+            raise ValueError(
+                f"{spec.name}: research signals are validated on daily bars; trade them at [trading] speed daily"
+            )
         if spec.path is not None:
             digest = verify_approval(
                 Path(spec.path).parent,
@@ -365,6 +369,7 @@ def build_node(
                 session=session,
                 flat_at_close=session is not None and cfg.trading.flat_at_close,
                 limit_collar=cfg.trading.limit_collar,
+                max_gross=cfg.risk.max_gross,
                 max_order_value=p.max_order_value,
                 max_orders_per_day=p.max_orders_per_day,
                 max_daily_turnover=p.max_daily_turnover,

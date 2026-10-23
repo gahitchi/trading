@@ -248,9 +248,12 @@ last interval, using a timer independent of market-data arrival. Rejected orders
 closures can still prevent an exit; being flat overnight is an objective, not a guarantee. Order and turnover caps count every
 rebalance of the day. Intraday research initially reserves the last 20% of stored sessions
 (`intraday_holdout`) and persists that boundary in `results/intraday_partition.json`; later downloads do
-not move reserved sessions into training. This is a separate protocol because free intraday history falls
-inside the daily holdout, not proof of independence from prior daily research. The research swarm
-works on daily bars. IBKR paces historical-data requests (60 per 10 minutes), so the node refuses setups that would
+not move reserved sessions into training. `[trading] intraday_holdout_start` sets the boundary deliberately
+(e.g. when the partition was first made from 1h history and leaves 15m none), never after a holdout already run.
+This is a separate protocol because free intraday history falls inside the daily holdout, not proof of
+independence from prior daily research. The research swarm works on daily bars, and its promoted signals trade
+at the daily speed only. New exposure waits while earlier orders are unsettled; beside a reduction that has not
+filled, it goes out only as far as the whole current book plus the entry stays within the profile's gross limit. IBKR paces historical-data requests (60 per 10 minutes), so the node refuses setups that would
 exceed about 50: at 5m that is 25 stock-strategy pairs.
 
 ## Safety

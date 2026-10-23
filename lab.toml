@@ -65,6 +65,7 @@ flat_at_close = true    # quick speeds: exit everything before the close, hold n
 data_delay_min = 15     # IBKR paper without a real-time subscription sees US stocks 15 minutes late; 0 if real-time
 limit_collar = 0.01     # quick speeds, live: new exposure as limits 1% through the last price, re-priced after a bar; exits at market
 intraday_holdout = 0.2  # quick speeds: the last 20% of stored sessions are the holdout (lab holdout --speed ...)
+# intraday_holdout_start = "2026-09-01"  # explicit holdout start; never after an intraday holdout already run
 
 [limits]
 # Absolute ceilings for every named profile. Unset keys default to the broker's maximum: gross 2x at Reg T

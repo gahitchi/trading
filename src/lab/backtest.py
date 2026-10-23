@@ -309,6 +309,7 @@ def run(
                 borrow_book=borrow_book,
                 session=session,
                 flat_at_close=quick and cfg.trading.flat_at_close,
+                max_gross=risk.max_gross,
                 **(execution_overrides or {}),
             )
         )

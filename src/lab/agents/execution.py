@@ -86,6 +86,7 @@ class ExecutionAgentConfig(StrategyConfig):
         flat_at_close: bool = False,
         decision_delay_s: float = 1.0,
         limit_collar: float = 0.01,
+        max_gross: float | None = None,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. margin: financing rates accrued on short and levered books.
@@ -131,6 +132,9 @@ class ExecutionAgentConfig(StrategyConfig):
         self.flat_at_close = flat_at_close
         self.decision_delay_s = decision_delay_s
         self.limit_collar = limit_collar
+        # The risk limit on gross exposure (fraction of equity): new exposure sent beside unfilled reductions
+        # must fit under it with the whole current book. None: nothing is added until reductions settle.
+        self.max_gross = max_gross
         if live and borrow_book is not None:
             raise ValueError("historical borrow evidence cannot authorize live paper-broker orders")
         if state_path and borrow_book is not None:
@@ -738,18 +742,31 @@ class ExecutionAgent(Strategy):
 
         orders.sort(key=lambda o: o[0] > 0)
         # Submission isn't a fill: don't spend margin released only by a proposed
-        # reduction. A rejected/partial reduction must not finance another entry.
+        # reduction. A rejected/partial reduction must not finance another entry (ChatGPT, G008-F8).
+        # New exposure that fits beside the whole current book, as if no reduction filled, stays within the
+        # risk limit either way, so it goes out now (Claude: otherwise any trim deferred every entry, and a
+        # book trimmed every day would never add).
         reductions = any(o[0] == 0 for o in orders)
         unsettled = bool(self.pending) or any(
             self.cache.orders_open_count(instrument_id=iid) for iid in self.config.instruments.values()
         )
+        worst = sum(abs(q) * self.prices.get(t, 0.0) for t, q in self.held.items())
+        headroom = (self.config.max_gross * snap.equity - worst) if self.config.max_gross is not None else 0.0
         day = _ny_date(self.price_ts) if self.price_ts else None
         if day != self.cap_day:
             self.cap_day, self.cap_orders, self.cap_opened = day, 0, 0.0
         for opening, target, current, iid, ticker, price in orders:
-            if opening > 0 and (reductions or unsettled):
-                self._risk_event("order_pending", "new exposure deferred until existing orders and reductions settle")
+            if opening > 0 and unsettled:
+                self._risk_event("order_pending", "new exposure deferred until existing orders settle")
                 continue
+            if opening > 0 and reductions:
+                fits = max(0, math.floor(headroom / price)) if price > 0 else 0
+                if fits <= 0:
+                    self._risk_event("order_pending", f"{ticker}: new exposure deferred until reductions settle")
+                    continue
+                if fits < opening:
+                    target, opening = _with_opening(current, target, fits), fits
+                headroom -= opening * price
             if borrow_blocked and opening > 0:
                 # Do not open the long hedge of an unavailable short (or any other
                 # new exposure from the now-incomplete approved portfolio).

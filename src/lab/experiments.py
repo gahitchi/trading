@@ -512,12 +512,21 @@ def intraday_split(cfg: LabConfig, frames: dict) -> tuple[Period, Period]:
         record = json.loads(path.read_text())
         if record["version"] != 1:
             raise ValueError("unknown partition version")
-        boundary = min(date.fromisoformat(record["holdout_start"]), *(prior or [date.max]))
+        recorded = date.fromisoformat(record["holdout_start"])
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise HoldoutUsed(f"unreadable intraday partition; restore its recorded boundary: {exc}") from exc
+    explicit = cfg.trading.intraday_holdout_start
+    # The operator may set the boundary deliberately (e.g. when the partition was first made from a speed with
+    # longer history and leaves another speed no research sessions). Sessions never run as a holdout can be
+    # released; those an intraday holdout run has seen cannot (the ledger bounds every choice).
+    boundary = min(date.fromisoformat(explicit) if explicit else recorded, *(prior or [date.max]))
     research_days = [s for s in sessions if s.date() < boundary]
     if not research_days:
-        raise HoldoutUsed(f"all available intraday sessions are reserved holdout data from {boundary}")
+        raise HoldoutUsed(
+            f"all available intraday sessions are reserved holdout data from {boundary} "
+            f"({path.relative_to(cfg.root) if path.is_relative_to(cfg.root) else path}); to choose the boundary "
+            "deliberately, set [trading] intraday_holdout_start (never after a holdout already run)"
+        )
     research = Period("intraday", research_days[0].date(), research_days[-1].date())
     holdout = Period("intraday_holdout", boundary, None)
     return research, holdout
