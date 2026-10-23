@@ -80,7 +80,7 @@ options (`TWS_USERID_PAPER`, 2FA handling).
 From the host (the compose file exposes the paper API on `127.0.0.1:4002`):
 
 ```bash
-uv venv && source .venv/bin/activate && uv pip install -e .
+uv sync --frozen && source .venv/bin/activate
 LAB_PAPER_ACCOUNT=DU1234567 lab doctor
 ```
 
@@ -146,8 +146,8 @@ First real decision: the next weekday at 16:15 New York time; orders fill at the
 
 The agents run unattended and continuously by default. What they do when something goes wrong:
 
-- **Transient trouble resumes by itself.** A broker or gateway disconnect, the gateway's daily restart (11:45 AM
-  New York, when nothing is pending), a container restart, a late or missing daily bar, a rejected order. Docker
+- **Transient trouble resumes by itself.** A broker or gateway disconnect, the gateway's daily restart (05:00 AM
+  New York; pending-order reconciliation is still required), a container restart, a late or missing daily bar, a rejected order. Docker
   restarts the agents; at start-up they re-check the paper account, reconcile positions, cash and open orders with
   IBKR, and book any fills that happened while they were down (from IBKR's reports, once per trade ID). Then they
   carry on. You get a Telegram message (`auto_resumed`, `fill_recovered`, `stale_data`, ...) but nothing to do.

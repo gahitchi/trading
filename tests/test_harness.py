@@ -307,7 +307,21 @@ def test_live_long_short_matches_the_backtest_including_financing(goog_lab, fram
     ledger = h.ledger()
     assert ledger["positions"] == h.broker().positions()
     assert ledger["cash"] == pytest.approx(h.broker().cash, abs=0.005)
-    assert ledger["borrow_fees"] > 0 and ledger["financing"] == pytest.approx(bt.financing, abs=1e-6)
+    # The last harness auction is the NEXT day's open, before that day's close
+    # valuation. Compare financing over matching completed-close horizons. The
+    # full backtest above now correctly includes its final day's close/accrual.
+    matching_closes = backtest.run(
+        cfg,
+        [backtest.Sleeve(LS.make(), "GOOG", 1.0)],
+        frames,
+        goog.index[D0].date(),
+        goog.index[D0 + days - 1].date(),
+        capital=cfg.paper.capital,
+        execution_overrides=paper_caps,
+    )
+    assert ledger["borrow_fees"] > 0
+    assert ledger["financing"] == pytest.approx(matching_closes.financing, abs=1e-6)
+    assert bt.financing >= matching_closes.financing
 
 
 def test_short_without_shares_to_borrow_is_refused_and_the_book_stays_consistent(goog_lab, frames, tmp_path):
