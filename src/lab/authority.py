@@ -27,6 +27,17 @@ def digest(value):
     return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
+def _hex(value, size):
+    return isinstance(value, str) and len(value) == size and all(c in "0123456789abcdef" for c in value)
+
+
+def _finite(value):
+    try:
+        return type(value) in (int, float) and math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 class Authority:
     def __init__(self, runtime, identity):
         self.runtime = Path(runtime)
@@ -58,29 +69,36 @@ class Authority:
 
     def read(self, *, allow_expired=False):
         rec = read_json(self.path)
-        if (
-            not isinstance(rec, dict)
-            or not isinstance(rec.get("payload"), dict)
-            or not isinstance(rec.get("hmac"), str)
-        ):
+        if not isinstance(rec, dict) or not isinstance(rec.get("payload"), dict) or not _hex(rec.get("hmac"), 64):
             raise ValueError("malformed operator authority")
         payload = rec["payload"]
-        if not hmac.compare_digest(rec["hmac"], self.sign(payload)) or payload["binding"] != self.binding:
+        if not hmac.compare_digest(rec["hmac"], self.sign(payload)) or payload.get("binding") != self.binding:
             raise ValueError("authority signature or runtime identity differs")
-        if payload["mode"] not in MODES:
-            raise ValueError("invalid authority mode")
+        if (
+            type(payload.get("version")) is not int
+            or payload["version"] != 1
+            or payload.get("mode") not in MODES
+            or not _hex(payload.get("nonce"), 32)
+            or not _finite(payload.get("issued"))
+            or not _finite(payload.get("expires"))
+            or not 0 < payload["expires"] - payload["issued"] <= 168 * 3600
+            or not self._valid_targets(payload.get("targets"))
+        ):
+            raise ValueError("invalid operator authority schema")
         if not allow_expired and not payload["issued"] <= time.time() < payload["expires"]:
             raise ValueError("operator authority expired or not yet valid")
         return payload
 
+    def _valid_targets(self, targets):
+        return isinstance(targets, dict) and all(
+            t in self.identity["tickers"] and _finite(w) for t, w in targets.items()
+        )
+
     def issue(self, mode, hours=24, targets=None):
-        if mode not in MODES or type(hours) not in (float, int) or not math.isfinite(hours) or not 0 < hours <= 168:
+        if mode not in MODES or not _finite(hours) or not 0 < hours <= 168:
             raise ValueError("mode must be autonomous, supervised or manual; lease must be 0..168 hours")
-        targets = targets or {}
-        if any(
-            t not in self.identity["tickers"] or type(w) not in (float, int) or not math.isfinite(w)
-            for t, w in targets.items()
-        ):
+        targets = {} if targets is None else targets
+        if not self._valid_targets(targets):
             raise ValueError("manual targets must be finite weights for configured tickers")
         self.runtime.mkdir(parents=True, exist_ok=True)
         with file_lock(self.runtime / "authority.lock"):
@@ -111,6 +129,30 @@ class Authority:
         finally:
             db.close()
 
+    def _request(self, ident, row):
+        raw, expires, approval, used = row
+        if (
+            not isinstance(raw, str)
+            or not _finite(expires)
+            or type(used) is not int
+            or used not in (0, 1)
+            or (approval is not None and not _hex(approval, 64))
+        ):
+            raise ValueError("malformed operator approval record")
+        try:
+            payload = json.loads(raw)
+            if (
+                not isinstance(payload, dict)
+                or not isinstance(payload.get("order"), dict)
+                or payload.get("binding") != self.binding
+                or not _hex(payload.get("mandate"), 32)
+                or digest(payload) != ident
+            ):
+                raise ValueError("invalid proposal")
+        except (ValueError, TypeError) as exc:
+            raise ValueError("malformed operator approval payload") from exc
+        return payload
+
     def authorize(self, order, *, emergency=False, expected_nonce=None):
         # Reducing a reconciled position under an existing emergency control remains possible.
         if emergency:
@@ -136,6 +178,7 @@ class Authority:
                         (ident, canonical(payload), min(mandate["expires"], now + 3600)),
                     )
                     return False
+                self._request(ident, row)
                 expected = self.sign({"request": ident, "expires": row[1]})
                 if (
                     row[0] != canonical(payload)
@@ -148,11 +191,16 @@ class Authority:
                 return True
 
     def requests(self):
-        with self.database() as db:
+        with file_lock(self.runtime / "authority.lock"), self.database() as db:
             return [
-                {"id": k, "order": json.loads(p)["order"], "expires": e, "approved": a is not None}
-                for k, p, e, a in db.execute(
-                    "SELECT id,payload,expires,approval FROM request WHERE used=0 AND expires>? ORDER BY expires",
+                {
+                    "id": k,
+                    "order": self._request(k, (p, e, a, used))["order"],
+                    "expires": e,
+                    "approved": a is not None,
+                }
+                for k, p, e, a, used in db.execute(
+                    "SELECT id,payload,expires,approval,used FROM request WHERE used=0 AND expires>? ORDER BY expires",
                     (time.time(),),
                 )
             ]
@@ -162,10 +210,10 @@ class Authority:
             mandate = self.read()
             with self.database() as db:
                 db.execute("BEGIN IMMEDIATE")
-                row = db.execute("SELECT payload,expires,used FROM request WHERE id=?", (ident,)).fetchone()
-                if row is None or row[2] or row[1] <= time.time():
+                row = db.execute("SELECT payload,expires,approval,used FROM request WHERE id=?", (ident,)).fetchone()
+                payload = self._request(ident, row) if row is not None else None
+                if row is None or row[3] or row[1] <= time.time():
                     raise ValueError("unknown, consumed or expired order proposal")
-                payload = json.loads(row[0])
                 if (
                     digest(payload) != ident
                     or payload["binding"] != self.binding

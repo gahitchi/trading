@@ -63,7 +63,7 @@ def test_database_approval_without_operator_signature_cannot_authorize(authority
     order = {"ticker": "A", "qty": 1}
     assert not authority.authorize(order)
     with authority.database() as db:
-        db.execute("UPDATE request SET approval='fabricated'")
+        db.execute("UPDATE request SET approval=?", ("0" * 64,))
     assert not authority.authorize(order)
 
 
@@ -108,19 +108,32 @@ def test_approval_capacity_is_bounded_and_expired_requests_are_reclaimed(authori
     assert len(authority.requests()) == 1
 
 
-@pytest.mark.parametrize("record", [None, [], {"payload": None, "hmac": "x"}, {"payload": {}, "hmac": False}])
+@pytest.mark.parametrize(
+    "record",
+    [None, [], {"payload": None, "hmac": "x"}, {"payload": {}, "hmac": False}, {"payload": {}, "hmac": "é"}],
+)
 def test_malformed_authority_is_a_controlled_refusal(authority, record):
     atomic_json(authority.path, record)
     with pytest.raises(ValueError, match="authority"):
         authority.read()
 
 
-def test_corrupt_authority_requests_cancellation_on_heartbeat(authority):
+@pytest.mark.parametrize("corruption", ["envelope", "signature", "approval"])
+def test_corrupt_authority_requests_cancellation_on_heartbeat(authority, corruption):
     from types import SimpleNamespace
 
     from lab.agents.execution import ExecutionAgent
 
-    atomic_json(authority.path, None)
+    if corruption == "envelope":
+        atomic_json(authority.path, None)
+    elif corruption == "signature":
+        rec = read_json(authority.path)
+        rec["hmac"] = "é"
+        atomic_json(authority.path, rec)
+    else:
+        authority.authorize({"ticker": "A", "qty": 1})
+        with authority.database() as db:
+            db.execute("UPDATE request SET approval=?", (b"invalid",))
     cancelled, heartbeats = [], []
     agent = SimpleNamespace(
         config=SimpleNamespace(authority=authority, flat_at_close=False),
@@ -136,3 +149,30 @@ def test_corrupt_authority_requests_cancellation_on_heartbeat(authority):
     ExecutionAgent._on_heartbeat(agent, None)
     assert cancelled == [True] and heartbeats == [{"running": True}]
     assert "authority unavailable" in agent.blocked_reason
+
+
+@pytest.mark.parametrize("field,value", [("approval", b"bad"), ("approval", "é"), ("payload", "[]")])
+def test_corrupt_approval_records_are_controlled_refusals(authority, field, value):
+    order = {"ticker": "A", "qty": 1}
+    assert not authority.authorize(order)
+    with authority.database() as db:
+        db.execute(f"UPDATE request SET {field}=?", (value,))
+    with pytest.raises(ValueError, match="approval"):
+        authority.requests()
+    with pytest.raises(ValueError, match="approval"):
+        authority.authorize(order)
+    with authority.database() as db:
+        assert db.execute("SELECT used FROM request").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("version", 2), ("issued", "yesterday"), ("expires", True), ("targets", []), ("nonce", None)],
+)
+def test_signed_but_invalid_mandate_schema_is_rejected(authority, field, value):
+    rec = read_json(authority.path)
+    rec["payload"][field] = value
+    rec["hmac"] = authority.sign(rec["payload"])
+    atomic_json(authority.path, rec)
+    with pytest.raises(ValueError, match="authority"):
+        authority.read(allow_expired=True)

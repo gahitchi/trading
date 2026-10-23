@@ -9,7 +9,7 @@ from pathlib import Path
 from lab.authority import digest
 from lab.execution_store import ExecutionStore
 from lab.paper import acquire_runtime_lock, execution_identity, runtime_dir
-from lab.persistence import atomic_json, read_json
+from lab.persistence import atomic_json, file_lock, read_json
 from lab.provenance import source_digest
 
 
@@ -22,6 +22,13 @@ def snapshot_locked(runtime, destination):
     runtime, destination = Path(runtime).resolve(), Path(destination).resolve()
     if destination == runtime or runtime in destination.parents or destination.exists():
         raise ValueError("backup destination must be new and outside the runtime directory")
+    parents_to_sync = []
+    parent = destination.parent
+    while True:
+        parents_to_sync.append(parent)
+        if parent.exists():
+            break
+        parent = parent.parent
     destination.mkdir(parents=True, mode=0o700)
     files = {}
     for source in sorted(runtime.rglob("*")):
@@ -51,6 +58,15 @@ def snapshot_locked(runtime, destination):
     atomic_json(
         destination / "backup-manifest.json", {"version": 1, "created": datetime.now(UTC).isoformat(), "files": files}
     )
+    # Persist the directory entries that make the whole backup reachable before
+    # an upgrade may replace the runtime identity. Sync inside-out, including
+    # the existing ancestor when --destination creates multiple new parents.
+    for parent in parents_to_sync:
+        fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
     return {"destination": str(destination), "files": len(files), "bytes": sum(r["bytes"] for r in files.values())}
 
 
@@ -81,48 +97,51 @@ def upgrade_plan(runtime, cfg):
 def run(cfg, action, *, destination=None, evidence=None, reason=""):
     lock = acquire_runtime_lock(cfg)
     try:
-        rt = runtime_dir(cfg)
-        if action == "backup":
-            if destination is None:
-                raise ValueError("backup requires --destination")
-            return snapshot_locked(rt, destination)
-        plan = upgrade_plan(rt, cfg)
-        if action == "preflight":
-            return {k: v for k, v in plan.items() if k != "identity"}
-        if plan["blockers"]:
-            raise ValueError("; ".join(plan["blockers"]))
-        if not evidence or not reason.strip() or not destination:
-            raise ValueError("upgrade requires --evidence, --reason and a new --destination for a cold backup")
-        report = read_json(evidence)
-        captured = datetime.fromisoformat(report["captured_at"])
-        age = (datetime.now(UTC) - captured).total_seconds()
-        if (
-            not 0 <= age <= 600
-            or report.get("runtime_identity") != plan["old"]
-            or report.get("ledger") != plan["ledger"]
-        ):
-            raise ValueError("broker attestation must be fresh and bind the exact old identity and ledger")
-        if (
-            report.get("account") != plan["identity"]["account"]
-            or report.get("open_orders") != []
-            or report.get("positions") != {}
-        ):
-            raise ValueError("broker attestation must report the same paper account, no orders and a flat book")
-        result = snapshot_locked(rt, destination)
-        receipt = {
-            "version": 1,
-            "old": plan["old"],
-            "new": plan["new"],
-            "ledger": plan["ledger"],
-            "reason": reason,
-            "evidence_sha256": hashlib.sha256(Path(evidence).read_bytes()).hexdigest(),
-            "backup": result,
-            "at": datetime.now(UTC).isoformat(),
-        }
-        # Audit first. A crash here leaves old identity (safe to retry). The ledger,
-        # its permanent history and all hard halts are never reset by an upgrade.
-        atomic_json(rt / f"upgrade-{plan['new']}.json", receipt)
-        atomic_json(rt / "identity.json", plan["identity"])
-        return receipt
+        # Control commands can write while the paper node is stopped. Serialize
+        # them with the cold snapshot/upgrade as well as excluding the node.
+        with file_lock(runtime_dir(cfg) / "authority.lock"):
+            return _run_locked(cfg, action, destination=destination, evidence=evidence, reason=reason)
     finally:
         lock.close()
+
+
+def _run_locked(cfg, action, *, destination=None, evidence=None, reason=""):
+    rt = runtime_dir(cfg)
+    if action == "backup":
+        if destination is None:
+            raise ValueError("backup requires --destination")
+        return snapshot_locked(rt, destination)
+    plan = upgrade_plan(rt, cfg)
+    if action == "preflight":
+        return {k: v for k, v in plan.items() if k != "identity"}
+    if plan["blockers"]:
+        raise ValueError("; ".join(plan["blockers"]))
+    if not evidence or not reason.strip() or not destination:
+        raise ValueError("upgrade requires --evidence, --reason and a new --destination for a cold backup")
+    report = read_json(evidence)
+    captured = datetime.fromisoformat(report["captured_at"])
+    age = (datetime.now(UTC) - captured).total_seconds()
+    if not 0 <= age <= 600 or report.get("runtime_identity") != plan["old"] or report.get("ledger") != plan["ledger"]:
+        raise ValueError("broker attestation must be fresh and bind the exact old identity and ledger")
+    if (
+        report.get("account") != plan["identity"]["account"]
+        or report.get("open_orders") != []
+        or report.get("positions") != {}
+    ):
+        raise ValueError("broker attestation must report the same paper account, no orders and a flat book")
+    result = snapshot_locked(rt, destination)
+    receipt = {
+        "version": 1,
+        "old": plan["old"],
+        "new": plan["new"],
+        "ledger": plan["ledger"],
+        "reason": reason,
+        "evidence_sha256": hashlib.sha256(Path(evidence).read_bytes()).hexdigest(),
+        "backup": result,
+        "at": datetime.now(UTC).isoformat(),
+    }
+    # Audit first. A crash here leaves old identity (safe to retry). The ledger,
+    # its permanent history and all hard halts are never reset by an upgrade.
+    atomic_json(rt / f"upgrade-{plan['new']}.json", receipt)
+    atomic_json(rt / "identity.json", plan["identity"])
+    return receipt
