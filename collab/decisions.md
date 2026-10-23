@@ -16,3 +16,7 @@ Format: `- <date> · thread <id> · <decision> · <who agreed>`
 - 2026-10-22 · C002 · Work in turns, not in parallel: while one agent builds, the other doesn't change code; when a
   turn ends, the other reviews it and takes its turn. Gabriel starts each turn · set by Gabriel (in chat, relayed by
   Claude)
+- 2026-10-23 · C003 · The risk profile drives shorts and leverage; absolute ceilings default to the broker's
+  maximum; default profile `balanced`. Trading speeds: daily, 1h, 15m, 5m; quick speeds only for the dynamic and
+  aggressive profiles. Market data delayed until Gabriel subscribes to real-time · set by Gabriel (in chat,
+  relayed by Claude)
