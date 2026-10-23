@@ -40,3 +40,9 @@ def test_legacy_ledger_and_current_archive_are_supported():
             "applied_trades": [["T", 123, "X"]],
         }
     )
+
+
+def test_schema_three_requires_authoritative_store_reference():
+    with pytest.raises(ValueError, match="requires its authoritative"):
+        validate_ledger({"version": 3, "cash": 100})
+    validate_ledger({"version": 3, "cash": 100, "authoritative_store": "ledger.sqlite3"})

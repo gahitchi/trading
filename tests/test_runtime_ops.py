@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import pytest
 
 from lab.execution_store import ExecutionStore
-from lab.paper import acquire_runtime_lock, runtime_dir
+from lab.paper import acquire_runtime_lock, execution_identity, runtime_dir
 from lab.persistence import atomic_json, read_json
 from lab.runtime_ops import run, snapshot_locked
 
@@ -32,7 +32,12 @@ def test_upgrade_requires_bound_fresh_flat_broker_evidence_and_preserves_book(go
     rt = runtime_dir(cfg)
     atomic_json(
         rt / "identity.json",
-        {"account": "DU1234567", "tickers": ["GOOG"], "deployment": {"implementation_sha256": "old"}},
+        {
+            "account": "DU1234567",
+            "tickers": ["GOOG"],
+            "deployment": {"implementation_sha256": "old"},
+            "execution": execution_identity(cfg),
+        },
     )
     store = ExecutionStore(rt / "ledger.json")
     store.maps["applied"]["T"] = [1, "X"]

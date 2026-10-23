@@ -230,3 +230,14 @@ def test_manual_targets_replace_signal_targets_without_bypassing_limits(tmp_path
     agent.config.authority = authority
     ExecutionAgent.rebalance(agent)
     assert sent == [("A", 1, True)]
+
+
+def test_reservation_gap_changes_research_identity(goog_lab):
+    from dataclasses import replace
+
+    from lab.experiments import config_fingerprint
+    from lab.research.approval import deployment_context
+
+    changed = replace(goog_lab, paper=replace(goog_lab.paper, reservation_gap=0.1))
+    assert config_fingerprint(changed) != config_fingerprint(goog_lab)
+    assert deployment_context(changed.snapshot()) != deployment_context(goog_lab.snapshot())

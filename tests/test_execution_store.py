@@ -76,3 +76,12 @@ def test_interrupted_import_resumes_from_legacy_snapshot(tmp_path):
         ExecutionStore(p)
     s = ExecutionStore(p)
     assert s.load()["cash"] == 789 and "T" in s.maps["applied"]
+
+
+def test_projection_prevents_unsafe_downgrade_to_json_only_code(tmp_path):
+    p = tmp_path / "ledger.json"
+    store = ExecutionStore(p)
+    store.save({"cash": 1000})
+    assert read_json(p)["version"] == 3
+    assert read_json(p)["authoritative_store"] == "ledger.sqlite3"
+    assert store.load()["version"] == 3

@@ -3,7 +3,8 @@
 The authoritative execution state is now `results/paper/ledger.sqlite3`. One FULL
 SQLite transaction commits cash, positions, daily caps, pending intents, terminal
 attribution and applied trade IDs. `ledger.json` is a small diagnostic projection
-and may lag after a crash. **Do not edit it to change the book.** Existing v1/v2 JSON
+and may lag after a crash. **Do not edit it to change the book.** The schema-3 projection deliberately makes older binaries refuse the ledger;
+downgrading to a JSON-only binary is unsupported. Existing v1/v2 JSON
 ledgers migrate transactionally on first opening. Missing/corrupt stores fail closed.
 
 Terminal orders and trade IDs have indexed disk storage and are never expired on an
@@ -61,5 +62,6 @@ and audit receipt before updating only implementation identity. It does not chan
 cash, trade IDs, strategy approvals, account, configuration, hard halts or positions.
 The old authority mandate no longer matches; explicitly issue a new one when starting
 the reviewed candidate. Research artifacts need revalidation against changed source.
-Non-flat migrations, account changes, strategy/configuration migrations and recovery
+Legacy identities that did not bind execution settings require an independent migration
+plan. Non-flat migrations, account changes, strategy/configuration migrations and recovery
 from ambiguous broker state still require an independently reviewed migration plan.

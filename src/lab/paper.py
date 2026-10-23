@@ -23,7 +23,7 @@ cleared halts), journal-YYYYMM.jsonl, smoke-*.json
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -65,6 +65,17 @@ from lab.signals.registry import SignalSpec
 from lab.universe import instrument_id
 
 IB = "IB"
+
+
+def execution_identity(cfg):
+    return {
+        "paper": {
+            key: value
+            for key, value in asdict(cfg.paper).items()
+            if key not in {"host", "port", "client_id", "account_id"}
+        },
+        "entry_gap": max(cfg.paper.reservation_gap, cfg.trading.limit_collar),
+    }
 
 
 def runtime_dir(cfg: LabConfig) -> Path:
@@ -285,6 +296,7 @@ def build_node(
         "tickers": sorted(tickers),
         "signals": [{"name": s.name, "params": s.params, "sha256": s.sha256} for s in specs],
         "deployment": deployment_context(cfg.snapshot(), live=True, tickers=tickers),
+        "execution": execution_identity(cfg),
     }
     if bank is not None:
         identity["strategy_bank"] = bank.manifest

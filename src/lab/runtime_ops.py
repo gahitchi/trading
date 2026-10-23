@@ -8,7 +8,7 @@ from pathlib import Path
 
 from lab.authority import digest
 from lab.execution_store import ExecutionStore
-from lab.paper import acquire_runtime_lock, runtime_dir
+from lab.paper import acquire_runtime_lock, execution_identity, runtime_dir
 from lab.persistence import atomic_json, read_json
 from lab.provenance import source_digest
 
@@ -54,17 +54,23 @@ def snapshot_locked(runtime, destination):
     return {"destination": str(destination), "files": len(files), "bytes": sum(r["bytes"] for r in files.values())}
 
 
-def upgrade_plan(runtime):
+def upgrade_plan(runtime, cfg):
     runtime = Path(runtime)
     old = read_json(runtime / "identity.json")
     new = {**old, "deployment": {**old["deployment"], "implementation_sha256": source_digest()}}
     ledger_path = runtime / "ledger.json"
     state = (
         ExecutionStore(ledger_path).load()
-        if ledger_path.exists() or ledger_path.with_suffix(".sqlite3").exists()
+        if ledger_path.with_suffix(".sqlite3").exists()
+        else read_json(ledger_path)
+        if ledger_path.exists()
         else None
     )
     blockers = []
+    if old.get("execution") != execution_identity(cfg):
+        blockers.append(
+            "execution configuration changed or legacy identity lacks its binding; independent migration plan required"
+        )
     if state is None:
         blockers.append("no persisted execution snapshot to reconcile")
     elif state.get("pending") or any(state.get("positions", {}).values()):
@@ -80,7 +86,7 @@ def run(cfg, action, *, destination=None, evidence=None, reason=""):
             if destination is None:
                 raise ValueError("backup requires --destination")
             return snapshot_locked(rt, destination)
-        plan = upgrade_plan(rt)
+        plan = upgrade_plan(rt, cfg)
         if action == "preflight":
             return {k: v for k, v in plan.items() if k != "identity"}
         if plan["blockers"]:

@@ -33,6 +33,9 @@ def deployment_context(snapshot: dict, *, live: bool = False, tickers=None) -> d
     return {
         **{k: snapshot[k] for k in keys},
         "implementation_sha256": source_digest(),
+        "entry_reservation": {
+            "gap": max(snapshot["paper"].get("reservation_gap", 0.03), trading.get("limit_collar", 0.01))
+        },
         "capital": snapshot["paper"]["capital"] if live else snapshot["capital"],
         "trading": trading if trading.get("speed") != "daily" else {"speed": "daily"},
         "universe": {t: snapshot["universe"][t] for t in sorted(tickers or snapshot["universe"])},

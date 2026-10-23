@@ -33,3 +33,15 @@ def test_controlled_node_does_not_submit_automatic_orders(mode, goog_lab, goog, 
         result = h.session()
         assert result.error is None and h.broker().positions()["GOOG"] > 0
         assert h.ledger()["positions"] == h.broker().positions()
+
+
+def test_runtime_identity_binds_execution_authority_limits(goog_lab, goog, tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    h = LiveHarness(goog_lab, [SignalSpec("buy_and_hold")], {"GOOG": goog}, tmp_path / "h", first_day=556)
+    h.session()
+    identity = read_json(h.runtime / "identity.json")
+    assert identity["execution"]["paper"]["max_orders_per_day"] == h.cfg.paper.max_orders_per_day
+    changed = replace(h.cfg, paper=replace(h.cfg.paper, max_orders_per_day=h.cfg.paper.max_orders_per_day + 1))
+    with pytest.raises(ValueError, match="runtime identity changed"):
+        paper.build_node(changed, h.specs, h.tickers)

@@ -14,8 +14,16 @@ def validate_ledger(state):
         ):
             raise ValueError(f"invalid execution ledger {name}")
 
-    if not isinstance(state, dict) or type(state.get("version", 1)) is not int or state.get("version", 1) not in (1, 2):
+    if (
+        not isinstance(state, dict)
+        or type(state.get("version", 1)) is not int
+        or state.get("version", 1) not in (1, 2, 3)
+    ):
         raise ValueError("unknown execution ledger schema")
+    if state.get("version") == 3:
+        store = state.get("authoritative_store")
+        if not isinstance(store, str) or not store.endswith(".sqlite3") or "/" in store or "\\" in store:
+            raise ValueError("schema 3 requires its authoritative execution database")
     if "cash" not in state:
         raise ValueError("execution ledger cash is missing")
     for name in ("cash", "commissions", "financing", "external_cash", "borrow_fees"):

@@ -136,16 +136,23 @@ def main():
     ap.add_argument("--outer", type=int, default=400)
     ap.add_argument("--inner", type=int, default=199)
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument(
+        "--power-pilot",
+        action="store_true",
+        help="bounded diagnostic only; run every planned power exposure without a release qualification claim",
+    )
     a = ap.parse_args()
     if a.outer < 1 or a.inner < 19 or not 1 <= a.workers <= 16:
         ap.error("outer >= 1, inner >=19, workers 1..16 required")
     a.output.mkdir(parents=True, exist_ok=True)
+    cases = [case for case in CASES if case["power"]] if a.power_pilot else CASES
     protocol = {
         "version": 1,
-        "cases": CASES,
+        "cases": cases,
+        "power_pilot_only": a.power_pilot,
         "outer": a.outer,
         "inner": a.inner,
-        "seed_start": 9180000,
+        "seed_start": 9280000,
         "config_sha256": hashlib.sha256(a.config.read_bytes()).hexdigest(),
         "source_sha256": source_digest(),
         "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
@@ -170,7 +177,7 @@ def main():
         raise SystemExit("protocol/source/config changed; refuse to combine or overwrite exposures")
     atomic_json(protocol_path, protocol)
     jobs = []
-    for c, case in enumerate(CASES):
+    for c, case in enumerate(cases):
         for i in range(a.outer):
             seed = protocol["seed_start"] + c * 100000 + i
             if not (a.output / f"{seed}.json").exists():
@@ -183,9 +190,34 @@ def main():
     with ProcessPoolExecutor(a.workers, mp_context=multiprocessing.get_context("spawn")) as pool:
         for start in range(0, len(jobs), a.workers):
             batch = jobs[start : start + a.workers]
-            futures = [pool.submit(trial, job) for job in batch]
+            # Reserve exposure BEFORE dispatch. A killed worker/run cannot erase
+            # an attempted seed or silently retry it on resume.
+            for job in batch:
+                atomic_json(
+                    a.output / f"{job[2]}.json",
+                    {
+                        "case": job[1]["name"],
+                        "seed": job[2],
+                        "failed": True,
+                        "passed": False,
+                        "rejected": False,
+                        "error": "worker interrupted before durable result",
+                    },
+                )
+            futures = {pool.submit(trial, job): job for job in batch}
             for future in as_completed(futures):
-                row = future.result()
+                try:
+                    row = future.result()
+                except Exception as exc:
+                    job = futures[future]
+                    row = {
+                        "case": job[1]["name"],
+                        "seed": job[2],
+                        "failed": True,
+                        "passed": False,
+                        "rejected": False,
+                        "error": f"worker failure: {type(exc).__name__}",
+                    }
                 atomic_json(a.output / f"{row['seed']}.json", row)
             power_rows = [
                 read_json(p) for p in a.output.glob("[0-9]*.json") if read_json(p)["case"] == "predictable_selected_504"
@@ -196,12 +228,12 @@ def main():
                 f"completed {min(start + a.workers, len(jobs))}/{len(jobs)}; power failures={failures}; best possible lower bound={best_possible_lower:.4f}",
                 flush=True,
             )
-            if best_possible_lower < 0.80:
+            if best_possible_lower < 0.80 and not a.power_pilot:
                 futile = True
                 break
     rows = [read_json(p) for p in sorted(a.output.glob("[0-9]*.json"))]
     summaries = []
-    for case in CASES:
+    for case in cases:
         group = [r for r in rows if r["case"] == case["name"]]
         if not group:
             summaries.append(
@@ -216,7 +248,8 @@ def main():
         passed, rejected, failed = (sum(bool(r.get(key)) for r in group) for key in ("passed", "rejected", "failed"))
         interval = wilson(passed, len(group))
         qualified = (
-            len(group) >= 400
+            not a.power_pilot
+            and len(group) >= 400
             and a.inner >= 199
             and failed == 0
             and (interval[0] >= 0.80 if case["power"] else interval[1] <= 0.10)

@@ -138,10 +138,12 @@ class ExecutionStore:
             return None
         state = json.loads(row[0])
         validate_ledger(state)
+        if state.get("authoritative_store") != self.path.name:
+            raise ValueError("execution snapshot/store binding differs")
         return state
 
     def save(self, state):
-        state = {**state, "version": 2, "authoritative_store": self.path.name}
+        state = {**state, "version": 3, "authoritative_store": self.path.name}
         validate_ledger(state)
         for bucket, records in self.maps.items():
             if bucket == "applied":
