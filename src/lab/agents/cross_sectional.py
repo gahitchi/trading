@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -162,7 +163,10 @@ class CrossSectionalAgent(DataActor):
             if self._is_active(t, ts) and len(self.rows[t]) >= self.signal.lookback
         }
         try:
-            weights = clean_weights(self.signal.weights(eligible)) if eligible else {}
+            raw = self.signal.weights(eligible) if eligible else {}
+            if any(not math.isfinite(float(w)) for w in raw.values()):
+                raise ValueError("signal weights must be finite")
+            weights = clean_weights(raw)
         except Exception as e:  # a buggy strategy must never take the system down
             self.errors += 1
             self.log.error(f"{self.signal.name}: weights() raised {type(e).__name__}: {e}; going flat")

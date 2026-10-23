@@ -44,7 +44,9 @@ def main(argv=None) -> int:
         "source_sha256": digest,
         "params": {},
         "config_fingerprint": experiments.config_fingerprint(cfg, len(tickers)),
-        "deployment": deployment_context(cfg.snapshot(), tickers=tickers),
+        "deployment": deployment_context(
+            replace(cfg, risk=experiments.effective_risk(cfg, len(tickers))).snapshot(), tickers=tickers
+        ),
     }
     r = cfg.research
 

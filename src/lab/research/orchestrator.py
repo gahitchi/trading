@@ -204,6 +204,8 @@ class Orchestrator:
             raise ValueError(f"no hypothesis {hid}")
         if h.status not in ("broken", "error", "rejected_by_critic", "proposed", "implemented"):
             raise ValueError(f"{hid} is {h.status!r}: it already met the data, so retrying would be p-hacking")
+        if any((h.dir / n).exists() for n in ("validation_attempt.json", "train.json", "test.json")):
+            raise ValueError(f"{hid}: validation was attempted; retry cannot rewrite an exposed hypothesis")
         h.set_status("proposed", "retry requested")
         budget = Budget(self.provider, self.cfg.research.max_llm_calls_per_cycle)
         try:
@@ -299,7 +301,13 @@ class Orchestrator:
 
     def _run_worker(self, mode: str, h: Hypothesis) -> bool:
         cmd = [sys.executable, "-m", "lab.research.worker", mode, str(h.dir), str(self.cfg.root / "lab.toml")]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        # Persist before launching: even a killed validator may already have seen data.
+        h.write("validation_attempt.json", {"mode": mode})
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        except subprocess.TimeoutExpired:
+            h.set_status("error", f"validator ({mode}) timed out after validation exposure")
+            return False
         if proc.returncode != 0:
             h.set_status("error", f"validator ({mode}) failed: {proc.stderr[-1500:]}")
             self.log(

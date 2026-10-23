@@ -9,8 +9,6 @@ class _Cache:
 
 
 class _Agent:
-    _order_expiry = ExecutionAgent._order_expiry
-
     def __init__(self):
         from types import SimpleNamespace
 

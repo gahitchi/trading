@@ -60,6 +60,8 @@ def validate(df: pd.DataFrame, ticker: str, *, drop_incomplete: bool = False, ke
     out = out[COLUMNS]
 
     idx = pd.DatetimeIndex(pd.to_datetime(out.index))
+    if idx.hasnans:
+        raise DataError(f"{ticker}: missing timestamp")
     if idx.tz is not None:
         idx = idx.tz_convert("America/New_York").tz_localize(None)
     out.index = idx if keep_time else idx.normalize()

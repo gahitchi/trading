@@ -144,6 +144,9 @@ def run(
     cross_sectional = cross_sectional or []
     if not sleeves and not cross_sectional:
         raise ValueError("no sleeves")
+    ids = [s.id for s in sleeves] + [f"{sig.name}:{t}" for sig, _, tickers in cross_sectional for t in tickers]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate sleeve identity: use each signal name once per ticker")
     risk = risk or cfg.risk
     capital = capital or cfg.capital
     sp = intraday.speed(speed)

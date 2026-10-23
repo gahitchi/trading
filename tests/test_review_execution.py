@@ -83,16 +83,13 @@ def test_cash_halt_and_missing_marks_cannot_block_requested_quantity_exit():
     assert sent == [("A", -5, False)]
 
 
-def test_entries_that_fit_beside_an_unfilled_reduction_still_go_out():
-    """Claude on G008-F8: with room under the gross limit for the whole current book plus the entry, a failed
-    reduction leaves the book inside the limit, so the entry need not wait (else a book trimmed every day
-    would never add)."""
-    agent, sent = _agent({"A": 3, "B": 0}, {"A": 0, "B": 0.3}, max_gross=1.0)  # 30% invested, 70% cash
+def test_gross_headroom_does_not_bypass_settlement_of_reductions():
+    agent, sent = _agent({"A": 3, "B": 0}, {"A": 0, "B": 0.3}, max_gross=1.0)
     ExecutionAgent.rebalance(agent)
-    assert sent == [("A", -3, False), ("B", 3, True)]
+    assert sent == [("A", -3, False)]
 
 
-def test_a_full_rotation_adds_only_what_fits_until_the_exit_fills():
-    agent, sent = _agent({"A": 8, "B": 0}, {"A": 0, "B": 1.0}, max_gross=1.0)  # 80% in A, rotate into B
+def test_a_full_rotation_waits_for_the_exit_to_settle():
+    agent, sent = _agent({"A": 8, "B": 0}, {"A": 0, "B": 1.0}, max_gross=1.0)
     ExecutionAgent.rebalance(agent)
-    assert sent == [("A", -8, False), ("B", 2, True)]  # the 20% that fits even if A's exit is rejected
+    assert sent == [("A", -8, False)]

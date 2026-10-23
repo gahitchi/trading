@@ -29,7 +29,7 @@ def test_null_draws_never_depend_on_data_after_the_evaluated_period(monkeypatch,
     monkeypatch.setattr(experiments, "run_spec", capture)
     monkeypatch.setattr("lab.config.load_config", lambda _p: goog_lab)
     for frame in (original, revised):
-        experiments._null_worker(("lab.toml", SignalSpec("sma_trend"), ["GOOG"], {"GOOG": frame}, period, 7))
+        experiments._null_worker((goog_lab, SignalSpec("sma_trend"), ["GOOG"], {"GOOG": frame}, period, 7))
     assert seen[0].equals(seen[2])  # same seed, same past: identical resampled history
     assert seen[0].index[-1] <= pd.Timestamp(period.end)
 

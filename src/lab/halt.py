@@ -45,7 +45,7 @@ def read_halt(path: str | Path) -> dict | None:
         if not p.exists():
             return None
         raw = p.read_text()
-    except OSError as e:
+    except (OSError, UnicodeError) as e:
         return {"kind": "invalid_control_file", "reason": f"cannot read {p}: {e}", "at": _now(), "history": []}
     try:
         state = json.loads(raw or "{}")
@@ -53,7 +53,16 @@ def read_halt(path: str | Path) -> dict | None:
         state = None
     if (
         not isinstance(state, dict)
-        or state.get("kind") not in HARD_KINDS
+        or not isinstance(state.get("kind"), str)
+        or state["kind"] not in HARD_KINDS
+        or not isinstance(state.get("history", []), list)
+        or any(
+            not isinstance(h, dict)
+            or not isinstance(h.get("kind"), str)
+            or h["kind"] not in HARD_KINDS
+            or not isinstance(h.get("reason", ""), str)
+            for h in state.get("history", [])
+        )
         or not isinstance(state.get("reason", ""), str)
     ):
         return {
@@ -66,6 +75,13 @@ def read_halt(path: str | Path) -> dict | None:
     if not isinstance(state["history"], list):
         state["history"] = []
     return state
+
+
+def halt_kinds(state: dict | None) -> set[str]:
+    """Every active reason matters, including those appended after the first halt."""
+    if state is None:
+        return set()
+    return {state["kind"], *(h["kind"] for h in state.get("history", []))}
 
 
 def set_halt(path: str | Path, kind: str, reason: str) -> dict:

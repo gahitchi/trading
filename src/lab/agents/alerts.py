@@ -11,6 +11,8 @@ from lab.agents.messages import T_EQUITY, T_FILL, T_RISK
 # Risk events worth waking someone up for (everything else goes to the daily report).
 URGENT = {
     "circuit_breaker",
+    "margin_call",
+    "cash_mismatch",
     "paper_guard",
     "reconciliation_mismatch",
     "hard_halt",
@@ -50,6 +52,9 @@ class AlertAgent(DataActor):
         self.subscribe_topic(T_RISK, self._on_risk)
         self.subscribe_topic(T_EQUITY, self._on_equity)
         self.subscribe_topic(T_FILL, self._on_fill)
+
+    def on_stop(self):
+        self._flush_fills(None)
 
     def _on_risk(self, ev):
         if ev.kind in URGENT:

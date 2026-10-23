@@ -289,6 +289,9 @@ def active_matrix(
 ) -> pd.DataFrame:
     """Daily active returns (vs buy-and-hold) of each configuration, one column each."""
     _, results = compare(cfg, specs, tickers, period, frames)
+    labels = [r.label for r in results[1:]]
+    if len(labels) != len(set(labels)):
+        raise ValueError("candidate labels must be unique; duplicate strategies collapse matrix columns")
     cols = {r.label: active_returns(r, results[0]) for r in results[1:]}
     return pd.DataFrame(cols).dropna()
 
@@ -318,6 +321,9 @@ def walk_forward(
     in-sample window, then trade it, unchanged, on the following out-of-sample window.
     The stitched out-of-sample record is what the optimization procedure really delivers."""
     guard_period(cfg, Period("walk-forward", start, end))
+    specs = [s for s in specs if s.name != BASELINE.name]
+    if not specs:
+        raise ValueError("walk-forward requires at least one non-baseline candidate")
     windows = []
     ws = pd.Timestamp(start)
     while True:
@@ -374,10 +380,7 @@ NULL_MAX_FALLBACK = 0.25
 
 
 def _null_worker(args):
-    cfg_path, spec, tickers, frames, period, seed = args
-    from lab.config import load_config
-
-    cfg = load_config(cfg_path)
+    cfg, spec, tickers, frames, period, seed = args
     # Resample only data available by the end of the evaluated period (G007-F6: drawing donors from the
     # whole file let later test/holdout rows shape the training noise floor). Warm-up history before the
     # period start is past data and stays in the donor pool.
@@ -411,7 +414,7 @@ def null_test(
     if observed_edge is None:
         comp, _ = compare(cfg, [spec], tickers, period, frames)
         observed_edge = comp.rows[1]["sharpe_edge"] if len(comp.rows) > 1 else 0.0
-    jobs = [(str(cfg.root / "lab.toml"), spec, tickers, frames, period, s) for s in range(1, samples + 1)]
+    jobs = [(cfg, spec, tickers, frames, period, s) for s in range(1, samples + 1)]
     workers = workers or max(1, min(samples, (os.cpu_count() or 2) - 1))
     if workers == 1:
         measured = [_null_worker(j) for j in jobs]
@@ -579,9 +582,11 @@ def check_holdout_allowed(cfg: LabConfig, spec: SignalSpec, reason: str = "", sp
 
 
 def save_run(cfg: LabConfig, name: str, comparison: Comparison, results: list, extra: dict | None = None) -> Path:
+    import uuid
+
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    out = cfg.results_dir / f"{stamp}-{name}"
-    out.mkdir(parents=True, exist_ok=True)
+    out = cfg.results_dir / f"{stamp}-{uuid.uuid4().hex[:12]}-{name}"
+    out.mkdir(parents=True, exist_ok=False)
     (out / "summary.json").write_text(
         json.dumps(
             {

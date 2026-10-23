@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 from nautilus_trader.common import DataActor, DataActorConfig
@@ -10,7 +11,7 @@ from nautilus_trader.common import DataActor, DataActorConfig
 from lab import margin as mg
 from lab.agents.messages import T_APPROVED, T_EQUITY, T_RISK, T_TARGETS, ApprovedTargets, RiskEvent
 from lab.config import MarginSettings
-from lab.halt import read_halt, set_halt
+from lab.halt import halt_kinds, read_halt, set_halt
 
 
 class RiskAgentConfig(DataActorConfig):
@@ -89,7 +90,7 @@ class RiskAgent(DataActor):
         if not self.config.halt_path:
             return False
         halt = read_halt(self.config.halt_path)
-        return halt is None or halt.get("kind") != kind
+        return kind not in halt_kinds(halt)
 
     def on_start(self):
         self.subscribe_topic(T_TARGETS, self._on_targets)
@@ -102,7 +103,13 @@ class RiskAgent(DataActor):
         notes = []
         out = {}
         for t, w in weights.items():
-            w = float(w)
+            try:
+                w = float(w)
+            except (ValueError, TypeError):
+                w = float("nan")
+            if not math.isfinite(w):
+                notes.append(f"{t}: invalid target; set to zero")
+                w = 0.0
             if w < 0 and c.max_short_gross <= 0:
                 w = 0.0  # long-only configuration
             if abs(w) > c.max_weight + 1e-12:

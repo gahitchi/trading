@@ -71,7 +71,7 @@ def read_kill_switch(path: str | Path) -> dict | None:
         if not p.exists():
             return None
         raw = p.read_text()
-    except OSError as e:
+    except (OSError, UnicodeError) as e:
         return {"mode": "halt", "reason": f"cannot read kill file: {e}"}
     try:
         state = json.loads(raw or "{}")

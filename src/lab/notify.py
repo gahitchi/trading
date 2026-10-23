@@ -54,16 +54,27 @@ class Notifier:
             return False
         return self._post(f"[{self.prefix}] {text}"[:4000])
 
-    def flush(self, timeout: float = 10.0) -> None:
+    def flush(self, timeout: float = 10.0) -> bool:
+        """Wait for queued AND in-flight requests; False means the deadline expired."""
         end = time.monotonic() + timeout
-        while not self._q.empty() and time.monotonic() < end:
-            time.sleep(0.1)
+        with self._q.all_tasks_done:
+            while self._q.unfinished_tasks:
+                remaining = end - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._q.all_tasks_done.wait(remaining)
+        return True
 
     def _run(self):
         while True:
             text = self._q.get()
-            self._post(text)
-            self._q.task_done()
+            try:
+                self._post(text)
+            except Exception:
+                self.failed += 1
+                log.error("notification worker failed")
+            finally:
+                self._q.task_done()
 
     def _post(self, text: str) -> bool:
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"

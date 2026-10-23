@@ -223,6 +223,8 @@ def build_node(
 ) -> LiveNode:
     if not specs:
         raise ValueError("need at least one signal")
+    if len({s.name for s in specs}) != len(specs) or len(set(tickers)) != len(tickers):
+        raise ValueError("duplicate signal or ticker: sleeve identities must be unique")
     sc = schedule or Schedule.from_config(cfg)
     session = quick_session(cfg, sc)
     sp = intraday.speed(cfg.trading.speed)

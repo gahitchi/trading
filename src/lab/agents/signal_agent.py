@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -169,7 +170,9 @@ class SignalAgent(DataActor):
             return
         cols = list(zip(*self.rows, strict=True))
         try:
-            raw = self.signal.target(Window(*cols))
+            raw = float(self.signal.target(Window(*cols)))
+            if not math.isfinite(raw):
+                raise ValueError("signal target must be finite")
         except Exception as e:  # a buggy signal must never take the system down
             self.errors += 1
             self.log.error(f"{self.config.sleeve}: signal raised {type(e).__name__}: {e}; going flat")
