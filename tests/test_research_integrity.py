@@ -102,12 +102,17 @@ def test_holdout_window_from_config_is_still_usable_by_the_holdout_command(goog_
 
 
 def test_a_profile_capped_by_operator_limits_says_so(tmp_path, goog_lab):
-    """Integrating ChatGPT's profiles: aggressive on the default long-only hard limits trades long-only, and
-    that must be reported, not silent."""
+    """A profile bounded by a tighter [limits] ceiling must say so, never trade differently in silence."""
     from lab.risk_profiles import profile_bindings
 
+    text = (goog_lab.root / "lab.toml").read_text().replace('profile = "custom"', 'profile = "aggressive"')
     p = tmp_path / "aggr.toml"
-    p.write_text((goog_lab.root / "lab.toml").read_text().replace('profile = "custom"', 'profile = "aggressive"'))
-    notes = profile_bindings(load_config(p))
-    assert any(n.startswith("max_short_gross") for n in notes) and any(n.startswith("max_gross") for n in notes)
+    p.write_text(text)
+    cfg = load_config(p)
+    assert profile_bindings(cfg) == []  # default ceilings are the broker's maximum: aggressive applies in full
+    assert cfg.risk.max_short_gross == pytest.approx(0.75) and cfg.risk.max_gross == pytest.approx(1.8)
+    p.write_text(text.replace("# max_short_gross = 2.0", "max_short_gross = 0.2"))
+    capped = load_config(p)
+    assert capped.risk.max_short_gross == pytest.approx(0.2)
+    assert any(n.startswith("max_short_gross") for n in profile_bindings(capped))
     assert profile_bindings(goog_lab) == []  # custom: nothing to report

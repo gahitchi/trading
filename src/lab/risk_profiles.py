@@ -82,25 +82,26 @@ def apply_profile(
 
 
 def profile_bindings(cfg) -> list[str]:
-    """Where an operator hard limit in lab.toml is tighter than the selected profile, so the profile is NOT what
-    trades. Choosing "aggressive" while [risk] max_short_gross = 0 must not silently trade long-only."""
+    """Where an absolute ceiling in [limits] is tighter than the selected profile, so the profile is NOT exactly
+    what trades. Never silent: `lab risk-profile` lists these and trading commands print them."""
     name = cfg.risk.profile
-    if name not in PROFILES:
+    lim = getattr(cfg, "limits", None)
+    if name not in PROFILES or lim is None:
         return []
-    p, rk, pf = PROFILES[name], cfg.raw.get("risk", {}), cfg.raw.get("portfolio", {})
+    p = PROFILES[name]
     pairs = [
-        ("max_gross", p.max_gross, float(rk.get("max_gross", 1.0)), "[risk] max_gross"),
-        ("max_short_gross", p.max_short_gross, float(rk.get("max_short_gross", 0.0)), "[risk] max_short_gross"),
-        ("max_weight", p.max_weight, float(rk.get("max_weight", 0.25)), "[risk] max_weight"),
-        ("max_net", p.max_net, float(rk.get("max_net", 1.0)), "[risk] max_net"),
-        ("max_leverage", p.max_leverage, float(pf.get("max_leverage", 1.0)), "[portfolio] max_leverage"),
+        ("max_gross", p.max_gross, lim.max_gross),
+        ("max_short_gross", p.max_short_gross, lim.max_short_gross),
+        ("max_weight", p.max_weight, lim.max_weight),
+        ("max_net", p.max_net, lim.max_net),
+        ("max_drawdown", p.max_drawdown, lim.max_drawdown),
+        ("max_leverage", p.max_leverage, lim.max_leverage),
     ]
     out = [
-        f"{key}: the {name} profile allows {want:g}, but {where} = {cap:g} limits it"
-        for key, want, cap, where in pairs
+        f"{key}: the {name} profile allows {want:g}, but [limits] {key} = {cap:g} limits it"
+        for key, want, cap in pairs
         if cap < want - 1e-12
     ]
-    floor = float(rk.get("min_net", 0.0))
-    if floor > p.min_net + 1e-12:
-        out.append(f"min_net: the {name} profile allows {p.min_net:g}, but [risk] min_net = {floor:g} limits it")
+    if lim.min_net > p.min_net + 1e-12:
+        out.append(f"min_net: the {name} profile allows {p.min_net:g}, but [limits] min_net = {lim.min_net:g}")
     return out

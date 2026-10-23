@@ -5,7 +5,7 @@ from __future__ import annotations
 import itertools
 import os
 import tomllib
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
@@ -106,6 +106,20 @@ class ResearchSettings:
 
 
 @dataclass(frozen=True)
+class LimitSettings:
+    """Absolute ceilings for every named risk profile ([limits] in lab.toml). Defaults: the broker's maximum
+    (gross 1 / initial margin, i.e. 2x at Reg T, shorts up to that). The custom profile uses [risk] instead."""
+
+    max_gross: float
+    max_short_gross: float
+    max_weight: float
+    min_net: float
+    max_net: float
+    max_drawdown: float
+    max_leverage: float
+
+
+@dataclass(frozen=True)
 class BorrowSettings:
     history: Path | None = None  # historical research only; never a paper-broker locate
     max_age_days: int = 3
@@ -129,6 +143,7 @@ class LabConfig:
     research: ResearchSettings
     raw: dict = field(repr=False, default_factory=dict)
     borrow: BorrowSettings = field(default_factory=BorrowSettings)
+    limits: LimitSettings | None = None
 
     def period(self, name: str) -> Period:
         if name not in self.periods:
@@ -165,6 +180,41 @@ def find_config(start: Path | None = None) -> Path:
         if (d / "lab.toml").is_file():
             return d / "lab.toml"
     raise ConfigError("lab.toml not found in this directory or any parent")
+
+
+def _limits(raw: dict, m: MarginSettings) -> LimitSettings:
+    if not isinstance(raw, dict):
+        raise ConfigError("[limits] must be a table")
+    unknown = set(raw) - {
+        "max_gross",
+        "max_short_gross",
+        "max_weight",
+        "min_net",
+        "max_net",
+        "max_drawdown",
+        "max_leverage",
+    }
+    if unknown:
+        raise ConfigError(f"[limits]: unknown keys {sorted(unknown)}")
+    broker = 1.0 / max(m.initial_long, m.initial_short)
+    gross = float(raw.get("max_gross", broker))
+    short = float(raw.get("max_short_gross", gross))
+    lim = LimitSettings(
+        max_gross=gross,
+        max_short_gross=short,
+        max_weight=float(raw.get("max_weight", 1.0)),
+        min_net=float(raw.get("min_net", -short)),
+        max_net=float(raw.get("max_net", gross)),
+        max_drawdown=float(raw.get("max_drawdown", 0.99)),
+        max_leverage=float(raw.get("max_leverage", gross)),
+    )
+    _check_risk(
+        RiskSettings(lim.max_weight, lim.max_gross, lim.max_drawdown, lim.max_short_gross, lim.min_net, lim.max_net),
+        m,
+    )
+    if not 0 < lim.max_leverage <= lim.max_gross:
+        raise ConfigError("[limits]: need 0 < max_leverage <= max_gross")
+    return lim
 
 
 def _check_risk(r: RiskSettings, m: MarginSettings) -> None:
@@ -276,7 +326,22 @@ def load_config(path: str | Path | None = None) -> LabConfig:
     # so backtests and paper trading use the same effective limits.
     from lab.risk_profiles import apply_profile
 
-    risk, portfolio = apply_profile(risk, portfolio, risk.profile)
+    limits = _limits(raw.get("limits", {}), margin)
+    if risk.profile != "custom":
+        # A named profile is intersected with the absolute ceilings in [limits] (default: the broker's maximum),
+        # not with [risk], which holds the custom profile's own limits (Gabriel: the profile decides, C003).
+        ceiling = RiskSettings(
+            limits.max_weight,
+            limits.max_gross,
+            limits.max_drawdown,
+            limits.max_short_gross,
+            limits.min_net,
+            limits.max_net,
+            profile=risk.profile,
+        )
+        risk, portfolio = apply_profile(
+            ceiling, replace(portfolio, max_leverage=limits.max_leverage, leverage=1.0), risk.profile
+        )
     _check_risk(risk, margin)
 
     research = ResearchSettings(
@@ -336,4 +401,5 @@ def load_config(path: str | Path | None = None) -> LabConfig:
         research=research,
         raw=raw,
         borrow=borrow,
+        limits=limits,
     )

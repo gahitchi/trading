@@ -37,18 +37,29 @@ rebalance_band = 0.02         # resize a held position only if the change exceed
 cash_buffer = 0.01            # size buys on 99% of equity: next-open fills can gap above the close
 
 [risk]
-# Set profile to calm|cautious|balanced|dynamic|aggressive for adaptive risk units.
-# 'custom' preserves the existing operating limits until the user opts into a preset.
-# Profiles cannot exceed the hard limits below; dynamic/aggressive shorts need operator
-# short caps > 0, gross > 1, broker permissions and confirmed borrow availability.
-profile = "custom"
-# Fractions of equity. Weights are signed (negative = short). These defaults are long-only, unlevered.
+# The risk profile decides how the agents trade (exposure, shorts, leverage, volatility, drawdown):
+#   calm       long only, 30% invested at most, 6% volatility target, 8% drawdown limit
+#   cautious   long only, 50%, 10% volatility, 12% drawdown
+#   balanced   long only, unlevered, 14% volatility, 18% drawdown                      (default)
+#   dynamic    shorts up to 30%, leverage up to 1.35x, 20% volatility, 25% drawdown
+#   aggressive shorts up to 75%, leverage up to 1.8x, 28% volatility, 30% drawdown
+#   custom     exactly the limits below in this section, nothing else
+# A named profile is bounded only by [limits] (default: the broker's maximum); `lab risk-profile` shows what applies.
+profile = "balanced"
+# --- the custom profile's limits (fractions of equity; weights are signed, negative = short) ---
 max_weight = 0.25       # max |weight| of one stock
-max_gross = 1.0         # max sum of |weights|; above 1 is leverage (capped by [margin] initial: 2.0 at Reg T)
+max_gross = 1.0         # max sum of |weights|; above 1 is leverage
 max_short_gross = 0.0   # max sum of short |weights|; 0 forbids shorting
 min_net = 0.0           # net exposure (longs - shorts) must stay within [min_net, max_net]
 max_net = 1.0
 max_drawdown = 0.35     # circuit breaker: flatten and halt if equity drops 35% from its peak
+
+[limits]
+# Absolute ceilings for every named profile. Unset keys default to the broker's maximum: gross 2x at Reg T
+# (1 / the initial margin below), shorts up to the same, net from -2 to 2, a whole position in one stock.
+# Tighten any of them to cap every profile, e.g. max_short_gross = 0.5.
+# max_gross = 2.0
+# max_short_gross = 2.0
 
 [margin]
 # Requirements as fractions of position value: Reg T / FINRA minimums. IBKR's house rules can be stricter.

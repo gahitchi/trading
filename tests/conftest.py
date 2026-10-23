@@ -20,6 +20,7 @@ def _write_lab(tmp: Path, universe: dict, warmup: str, train, test, holdout) -> 
     s = s.replace('test = ["2019-01-01", "2022-12-31"]', f'test = ["{test[0]}", "{test[1]}"]')
     s = s.replace('holdout = ["2023-01-01", ""]', f'holdout = ["{holdout}", ""]')
     s = s.replace("null_samples = 30", "null_samples = 6")
+    s = s.replace('profile = "balanced"', 'profile = "custom"')  # tests state their limits explicitly
     p = tmp / "lab.toml"
     p.write_text(s)
     return p
