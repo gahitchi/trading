@@ -958,6 +958,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", help="path to lab.toml (default: search upwards from here)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    app = sub.add_parser("app", help="open guided setup and local paper-trading controls")
+    app.add_argument("--directory", default="~/TradingLab", help="private app workspace")
+    app.add_argument("--port", type=int, default=8765)
+    app.add_argument("--host", choices=["127.0.0.1", "0.0.0.0"], default="127.0.0.1")
+    app.add_argument("--no-browser", action="store_true")
+
     d = sub.add_parser("data", help="market data").add_subparsers(dest="sub", required=True)
     f = d.add_parser("fetch", help="download daily bars from Yahoo Finance (free)")
     f.add_argument("tickers", nargs="*")
@@ -1153,6 +1159,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
+    if a.cmd == "app":
+        from lab.app import serve
+
+        return serve(a)
     try:
         cfg = load_config(a.config)
     except ConfigError as e:

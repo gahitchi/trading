@@ -43,6 +43,7 @@ class CrossSectionalAgentConfig(DataActorConfig):
         bar_spec: str = "1-DAY",
         session=None,
         ib_timestamps: bool = False,
+        warmup_bars: int = 0,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. active_windows: ticker -> [(from_ns, until_ns)] or None."""
@@ -61,6 +62,7 @@ class CrossSectionalAgentConfig(DataActorConfig):
         self.bar_spec = bar_spec  # the trading speed, as in SignalAgentConfig
         self.session = session  # agents.schedule.Session, or None (daily)
         self.ib_timestamps = ib_timestamps
+        self.warmup_bars = warmup_bars
 
 
 class CrossSectionalAgent(DataActor):
@@ -199,7 +201,7 @@ class CrossSectionalAgent(DataActor):
     # ------------------------------------------------------------------ paper mode
 
     def _request_history(self, *_):
-        days = history_days(self.signal.lookback, self.config.session)
+        days = history_days(max(self.signal.lookback, self.config.warmup_bars), self.config.session)
         start = market_now(self.clock, self.config.market_offset_days) - timedelta(days=days)
         for iid in self.config.instruments.values():
             self.request_bars(bar_type(iid, self.config.bar_spec), start=start)

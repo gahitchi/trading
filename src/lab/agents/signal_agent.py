@@ -69,6 +69,7 @@ class SignalAgentConfig(DataActorConfig):
         bar_spec: str = "1-DAY",
         session: Session | None = None,
         ib_timestamps: bool = False,
+        warmup_bars: int = 0,
         **_kwargs,
     ):
         """signal_time / session_close: New York clock times, HH:MM or HH:MM:SS (see agents/schedule.py).
@@ -89,6 +90,7 @@ class SignalAgentConfig(DataActorConfig):
         self.bar_spec = bar_spec
         self.session = session
         self.ib_timestamps = ib_timestamps
+        self.warmup_bars = warmup_bars
         # [(from_ns, until_ns or None), ...]: when this stock may be held. None = always.
         self.active_windows = active_windows
 
@@ -207,7 +209,7 @@ class SignalAgent(DataActor):
     # ------------------------------------------------------------------ paper mode
 
     def _request_history(self, *_):
-        days = history_days(self.signal.lookback, self.config.session)
+        days = history_days(max(self.signal.lookback, self.config.warmup_bars), self.config.session)
         start = market_now(self.clock, self.config.market_offset_days) - timedelta(days=days)
         self.request_bars(self.bar_type, start=start)
 

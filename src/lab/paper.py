@@ -345,6 +345,7 @@ def build_node(
                         session_close=sc.session_close,
                         eval_delay_s=sc.xs_eval_delay_s,
                         market_offset_days=sc.market_offset_days,
+                        warmup_bars=max(cfg.portfolio.vol_window + 1, bank.window + 1 if bank else 0),
                         **speed_kw,
                     )
                 )
@@ -368,11 +369,30 @@ def build_node(
                         signal_time=sc.signal_time,
                         session_close=sc.session_close,
                         market_offset_days=sc.market_offset_days,
+                        warmup_bars=max(cfg.portfolio.vol_window + 1, bank.window + 1 if bank else 0),
                         **speed_kw,
                     )
                 )
             )
             k += 1
+    import os
+
+    if app_session := os.environ.get("LAB_APP_SESSION"):
+        from lab.agents.readiness import ReadinessAgent, ReadinessConfig
+        from lab.authority import digest
+
+        node.add_actor(
+            ReadinessAgent(
+                ReadinessConfig(
+                    path=str(rt / "data-readiness.json"),
+                    session=app_session,
+                    binding=digest(identity),
+                    sleeves={s: t for s, (t, _) in sleeves.items()},
+                    window=cfg.portfolio.vol_window,
+                    source="ibkr" if clients is None else "simulated",
+                )
+            )
+        )
     node.add_actor(
         AllocatorAgent(
             AllocatorAgentConfig(

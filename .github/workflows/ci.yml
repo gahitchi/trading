@@ -66,6 +66,16 @@ jobs:
           git diff --exit-code -- requirements.lock requirements-build.lock
       - name: build source and wheel without unpinned build isolation
         run: uv build --no-build-isolation
+      - name: verify the installed app includes setup and browser assets
+        run: |
+          uv run --no-sync python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          wheel = next(Path('dist').glob('*.whl'))
+          with ZipFile(wheel) as z:
+              for name in ['lab/default.toml', 'lab/ui/index.html', 'lab/ui/app.js', 'lab/ui/app.css']:
+                  assert z.read(name), name
+          PY
 
   docker:
     runs-on: ubuntu-latest
@@ -90,3 +100,24 @@ jobs:
         run: |
           mkdir -p secrets && echo x > secrets/tws_password
           TWS_USERID=ci LAB_PAPER_ACCOUNT=DU1234567 docker compose config -q
+          TWS_USERID=ci LAB_PAPER_ACCOUNT=DU1234567 docker compose -f compose.app.yml config -q
+      - name: guided app starts without enabling an engine or requiring broker data
+        run: |
+          docker run -d --name app-ci -p 127.0.0.1:8765:8765 trading-lab:ci app --directory /lab/results/app-ci --host 0.0.0.0 --no-browser
+          python3 - <<'PY'
+          import json, re, time, urllib.request
+          for attempt in range(30):
+              try:
+                  page = urllib.request.urlopen('http://127.0.0.1:8765/', timeout=2).read().decode()
+                  break
+              except OSError:
+                  time.sleep(1)
+          else:
+              raise AssertionError('app did not start')
+          token = re.search('name="app-token" content="([a-f0-9]+)"', page)[1]
+          req = urllib.request.Request('http://127.0.0.1:8765/api/status', headers={'X-App-Token': token})
+          state = json.load(urllib.request.urlopen(req, timeout=2))
+          assert state['phase'] == 'setup' and not state['engine_alive'] and state['authority'] is None
+          assert urllib.request.urlopen('http://127.0.0.1:8765/app.js').read()
+          PY
+          docker stop -t 30 app-ci

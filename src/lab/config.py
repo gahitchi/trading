@@ -296,14 +296,15 @@ def _check_risk(r: RiskSettings, m: MarginSettings) -> None:
         )
 
 
-def load_config(path: str | Path | None = None) -> LabConfig:
+def load_config(path: str | Path | None = None, *, environ=None) -> LabConfig:
     try:
-        return _load_config(path)
+        return _load_config(path, environ=environ)
     except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as exc:
         raise ConfigError(f"invalid configuration: {exc}") from exc
 
 
-def _load_config(path: str | Path | None = None) -> LabConfig:
+def _load_config(path: str | Path | None = None, *, environ=None) -> LabConfig:
+    env = os.environ if environ is None else environ
     path = Path(path) if path else find_config()
     try:
         raw = tomllib.loads(path.read_text())
@@ -440,10 +441,10 @@ def _load_config(path: str | Path | None = None) -> LabConfig:
         margin=margin,
         portfolio=portfolio,
         paper=PaperSettings(
-            host=os.environ.get("LAB_IB_HOST", str(pp["host"])),
-            port=int(os.environ.get("LAB_IB_PORT", pp["port"])),
-            client_id=int(os.environ.get("LAB_IB_CLIENT_ID", pp["client_id"])),
-            account_id=os.environ.get("LAB_PAPER_ACCOUNT", str(pp["account_id"])),
+            host=env.get("LAB_IB_HOST", str(pp["host"])),
+            port=int(env.get("LAB_IB_PORT", pp["port"])),
+            client_id=int(env.get("LAB_IB_CLIENT_ID", pp["client_id"])),
+            account_id=env.get("LAB_PAPER_ACCOUNT", str(pp["account_id"])),
             market_data=str(pp["market_data"]).upper(),
             capital=float(pp["capital"]),
             rebalance_time=str(pp["rebalance_time"]),
