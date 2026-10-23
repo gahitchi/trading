@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "date": "2026-10-23",
+  "agent": "chatgpt",
+  "branch": "chatgpt/release-completion-20261023",
+  "review_candidate": "1dddadbd1bb45e0a7bb1ce046ab2362e37ca0625",
+  "candidate_tree": "d397bf95516d4154c926d07b4350f24f472622ab",
+  "runtime_commit": "70563382a07e97a8914bcc13e5a73a6c9272d67f",
+  "source_digest": "3312ff9c8df4b684c9af73988022fc122c3c7feb15f60fc783d8389a8b4f4926",
+  "main_observed": "8c10e4c05a6ec282858909c91544dfc52f3be320",
+  "handoff_scope": "Subsequent handoff commit changes only README, RUNBOOK, docs and ChatGPT outbox; no runtime, dependency, deployment or test changes.",
+  "hosted_ci": {
+    "run_id": 40030701296,
+    "url": "https://github.com/gahitchi/trading/actions/runs/40030701296",
+    "status": "completed",
+    "conclusion": "success",
+    "head_sha": "1dddadbd1bb45e0a7bb1ce046ab2362e37ca0625",
+    "jobs": [
+      {
+        "id": 120677952634,
+        "name": "collab",
+        "conclusion": "success"
+      },
+      {
+        "id": 120677952819,
+        "name": "test (3.14)",
+        "conclusion": "success"
+      },
+      {
+        "id": 120677952849,
+        "name": "docker",
+        "conclusion": "success"
+      },
+      {
+        "id": 120677952890,
+        "name": "package",
+        "conclusion": "success"
+      },
+      {
+        "id": 120677952911,
+        "name": "test (3.13)",
+        "conclusion": "success"
+      },
+      {
+        "id": 120677953002,
+        "name": "lint",
+        "conclusion": "success"
+      }
+    ],
+    "tests": [
+      {
+        "python": "3.13",
+        "job_id": 120677952911,
+        "summary": "2026-10-23T22:09:55.9186209Z 430 passed, 1 deselected, 80 warnings in 576.92s (0:09:36)"
+      },
+      {
+        "python": "3.14",
+        "job_id": 120677952819,
+        "summary": "2026-10-23T22:09:57.9628750Z 430 passed, 1 deselected, 80 warnings in 577.50s (0:09:37)"
+      }
+    ],
+    "offline_example": "Both Python jobs passed sample-data loading, backtest and ten-draw block-bootstrap CLI example; p = 0.182 is not a calibration or profitability claim."
+  },
+  "local_checks": [
+    {
+      "name": "final runtime focused reservations/execution/accounting",
+      "result": "64 passed, 32 warnings in 15.18s"
+    },
+    {
+      "name": "authority, simulated control, process crash/storage, engine/financing",
+      "candidate": "16d1a45106348b3119755b4128be1b2a25d4266a",
+      "result": "60 passed, 32 warnings in 46.53s"
+    },
+    {
+      "name": "corrected intraday backtest file",
+      "command": ".venv/bin/python -m pytest -q tests/test_intraday_backtest.py",
+      "result": "16 tests passed; exit 0"
+    },
+    {
+      "name": "lint",
+      "command": "uvx --offline ruff check src tests tools",
+      "result": "All checks passed!"
+    },
+    {
+      "name": "format",
+      "command": "uvx --offline ruff format --check src tests tools",
+      "result": "103 files already formatted"
+    },
+    {
+      "name": "collaboration",
+      "command": "python3 tools/collab.py check",
+      "result": "0 errors after final handoff messages; checked before commit"
+    }
+  ],
+  "intermediate_validation": [
+    {
+      "candidate": "03e5840bc1d34f9557a7a3b308bcba28274d7fb3",
+      "local_full": "413 passed, 2 failed, 1 deselected, 80 warnings in 657.18s",
+      "cause": "Backtest lacked paper cost/gap reservations; shared configuration fixed in d711718."
+    },
+    {
+      "candidate": "d7117180ae266164632c4a37adb5fcabb8e018e4",
+      "local_full": "417 passed, 4 failed, 1 deselected, 80 warnings in 677.27s",
+      "cause": "Single-entry financing and breaker assertions invalid after conservative reserve sizing; strengthened independent fill/book/fee reconstruction in follow-up tests."
+    },
+    {
+      "candidate": "16d1a45106348b3119755b4128be1b2a25d4266a",
+      "local_full": "Incomplete and invalidated by source changes during the run; not counted as validation."
+    },
+    {
+      "candidate": "70563382a07e97a8914bcc13e5a73a6c9272d67f",
+      "local_full": "428 passed, 2 failed, 1 deselected, 80 warnings in 657.73s",
+      "ci_run": 40029525738,
+      "ci_python_313": "428 passed, 2 failed, 1 deselected, 80 warnings in 601.23s",
+      "ci_python_314": "428 passed, 2 failed, 1 deselected, 80 warnings in 601.71s",
+      "cause": "Two intraday assertions required one entry order per day. Test-only 1dddadb verifies ordered entries followed by one complete close, daily flatness, and no overnight financing."
+    },
+    {
+      "candidate": "1dddadbd1bb45e0a7bb1ce046ab2362e37ca0625",
+      "local_full": "Execution session disappeared before final result/XML. This incomplete repeat is not counted as a pass; use completed hosted CI results."
+    }
+  ],
+  "synthetic_diagnostics": {
+    "power_pilot": {
+      "file": "docs/audits/2026-10-23-power-pilot.json",
+      "source_digest": "133af35a2df4ff0d4212f68f712b77fe14fa734af0465843585204daa9379ea7",
+      "outer": 16,
+      "inner": 199,
+      "full_gate_passes": 8,
+      "p_value_rejections": 11,
+      "wilson_95_full_gate": [
+        0.27999563610326017,
+        0.7200043638967398
+      ],
+      "execution_failures": 0,
+      "qualifies_final_candidate": false
+    },
+    "superseded_exposures": {
+      "file": "docs/audits/2026-10-23-superseded-calibration.json",
+      "completed": 34,
+      "interrupted_submitted": 14,
+      "qualifies_final_candidate": false
+    },
+    "interpretation": "No final-candidate calibration claim. Pilot preceded malformed-authority and independent-price fixes. Thresholds unchanged. Independent methodological review and prospectively agreed qualification still required."
+  },
+  "release": {
+    "ready": false,
+    "blocked_gate_ids": [
+      "code-review",
+      "broker-lifecycle",
+      "research-calibration",
+      "market-data-and-execution",
+      "adaptive-product",
+      "operations-and-build",
+      "independent-security"
+    ],
+    "real_broker_connected": false,
+    "real_broker_orders_placed": false,
+    "paid_llm_calls": false,
+    "main_modified": false,
+    "statistical_thresholds_relaxed": false,
+    "external_llm_test": "One opt-in provider test deselected by default suite; not executed."
+  },
+  "evidence_sha256": {
+    "/tmp/trading-release-final-frozen.xml": "5a4ecb7cc9786a1b7016ea00489bc8c8f8b556dba3b3c0c29eaf097162aa951a",
+    "/tmp/trading-intraday-final.log": "89bfef9ab6e1e4f909bef976930c5ea38fa9be2602fb4051c5d27ed0d23d1266",
+    "/tmp/trading-stress-final.log": "475eca547cbf7361fb03b360bf03c4fd17cefe238ef4a92ffa2e41184d14a78e",
+    "/tmp/trading-final-followup.log": "f5d3ec34abfcd97914b9a405e102557a84e5db379d06cfda159fd5d181477e5c",
+    "docs/audits/2026-10-23-power-pilot.json": "7b0b3a2a8609ca1cf4d13ee370b89749384e113c9d0a3b376c815ad165490510",
+    "docs/audits/2026-10-23-superseded-calibration.json": "b625058a07e177560cddae2714682806f9f3854f4e028427536b1af2797d0a64"
+  }
+}

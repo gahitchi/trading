@@ -144,7 +144,7 @@ First real decision: the next weekday at 16:15 New York time; orders fill at the
 
 ## 9. Daily operations
 
-The agents run unattended and continuously by default. What they do when something goes wrong:
+The agents run unattended within an active authority mandate. The first start creates a 24-hour mandate; restart does not renew it. See [operating controls](docs/operator-controls.md) for explicit renewal and supervised/manual operation. What they do when something goes wrong:
 
 - **Transient trouble resumes by itself.** A broker or gateway disconnect, the gateway's daily restart (05:00 AM
   New York; pending-order reconciliation is still required), a container restart, a late or missing daily bar, a rejected order. Docker
@@ -166,13 +166,14 @@ The agents run unattended and continuously by default. What they do when somethi
 | clear a breaker or account halt | `docker compose exec lab lab recover --reason "what you checked"` |
 | ledger/broker mismatch | check the positions in IBKR; if IBKR is right: `lab recover --reason "..." --adopt-broker` (adoption requires terminal broker reports for every pending order; unknown intents remain journaled and halted) |
 | unconfirmed order (`order_unknown`) | in TWS or the Client Portal, open **Trades** and the order history for the days since the journaled time and look for the client order ID in the halt. If IBKR shows no such order and no execution: `lab recover --reason "..." --dispose-order ID --evidence "what you saw, where, which dates"`. The next start disposes of it only if IBKR still does not report it and the stock's position matches the ledger; the intent and your evidence stay in the ledger, and a fill that still arrives is booked and halts again. If IBKR shows the order, let the agents settle it from its reports instead |
-| change strategy | edit `LAB_SIGNALS` / `LAB_TICKERS` in `.env`, `docker compose up -d lab` |
+| change strategy | stop and obtain a reviewed identity/state migration plan before changing `LAB_SIGNALS` / `LAB_TICKERS`; changing the environment alone is refused |
 | trade a research hypothesis | `lab research promote <id>` (reads you the code first), then add it to `LAB_SIGNALS` |
-| update | `git pull && docker compose build lab && docker compose up -d` |
+| update | use `lab runtime backup` and `lab runtime preflight`; follow [the reviewed code-upgrade workflow](docs/runtime-storage.md) before starting the new image |
 
 Every cleared halt is recorded with your reason in `results/paper/recoveries.jsonl`.
 
-Runtime files in `results/paper/`: `ledger.json` (the agents' cash, positions and orders sent but not yet settled),
+Runtime files in `results/paper/`: `ledger.sqlite3` (authoritative transactional cash,
+positions, orders and permanent trade history), `ledger.json` (small diagnostic projection),
 `risk.json` (equity peak for the drawdown limit), `journal-YYYYMM.jsonl` (every message), `heartbeat.json`,
 `KILL` (kill switch), `HALT` (hard halt), `recoveries.jsonl`, `smoke-*.json`.
 
@@ -198,11 +199,12 @@ without surprises.
 Development remains open. Use [the candidate acceptance protocol](docs/paper-acceptance.md) before a supervised
 IBKR paper session; it defines evidence, failure scenarios and pass rules for all seven release gates.
 
-The execution ledger now writes schema **v2**, preserving terminal orders as well as disposed intents. It
-reads legacy v1 ledgers, validates numeric/intent/trade-ID types before recovery and retains unattributed
-legacy trade IDs. The new notification outbox migrates existing rows transactionally and uses monotonic IDs.
-Never edit archived intent, disposal or trade-ID records to reduce file size. Capacity/archival qualification
-remains open. A v1 binary must not be pointed at a v2 runtime.
+The authoritative execution ledger is now SQLite; its small diagnostic JSON projection
+uses schema **v3** so older JSON-only binaries refuse it. Legacy v1/v2 JSON is validated
+and migrated on first opening. Terminal/disposed attribution and trade IDs remain indexed
+on disk and never expire automatically; the 2 GiB capacity limit stops new execution on
+exhaustion. The notification outbox migrates transactionally with monotonic IDs and bounded
+admission. Never remove history records to free space or downgrade a runtime in place.
 
 For an upgrade, stop all writers; back up the entire paper runtime (including SQLite journal/WAL files if
 present), configuration, exact old source/image identity and the new candidate. Verify broker orders, fills,

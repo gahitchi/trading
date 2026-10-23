@@ -14,7 +14,9 @@ lab control renew --mode autonomous --hours 24
 lab control renew --mode manual --hours 8 --target SPY=0.2 --target QQQ=0.1
 ```
 
-Manual targets are fractions of ledger equity; omitted stocks target zero. They
+Manual targets are fractions of ledger equity; omitted stocks target zero. Starting
+manual mode with no targets creates a cash target and can close existing positions
+at the next decision. Supply the intended target book explicitly when switching. They
 are applied at the next normal decision, through reconciliation, price freshness,
 quantity rounding, cost/gap reservations, portfolio limits, financing and daily caps.
 Supervised mode proposes exact quantities against a particular book and completed
@@ -37,7 +39,7 @@ The isolated generated-code worker must never be granted access to them.
 
 A bank is a predeclared fixed-priority regime policy, not a live optimizer. It can
 select an eligible, unexpired strategy for an up/down/range/high-volatility regime,
-retire a strategy on an execution exception, or leave its allocation in cash. Dated
+retire a strategy on a signal exception, or leave its allocation in cash. Dated
 retirement and eligibility use completed common-timestamp marks. Retired strategies
 stay retired across restart. The selected strategy retains its original sleeve
 budget; unselected budgets remain in cash. Risk limits still apply.
