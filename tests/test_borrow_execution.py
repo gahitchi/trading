@@ -97,8 +97,17 @@ def test_engine_charges_per_day_history_and_records_exact_provenance(goog_lab):
     # Every day is charged on the preceding close's book; first fill is Jan 6.
     assert result.borrow_evidence[0]["day"] == "2021-01-06"
     assert result.borrow_evidence[-1]["day"] == str((result.equity.index[-1] - pd.Timedelta(days=1)).date())
-    days = (result.equity.index[-1] - pd.Timestamp("2021-01-06")).days
-    assert result.borrow_fees == pytest.approx(result.fills[0].qty * 100 * 0.365 * days / 365)
+    # Cost/gap reserves may permit later top-ups. Independently reconstruct the
+    # short book from broker fills at each calendar day's close, including weekends.
+    expected = 0.0
+    for day in pd.date_range("2021-01-06", result.equity.index[-1] - pd.Timedelta(days=1)):
+        held = sum(
+            f.qty * (1 if f.side == "BUY" else -1)
+            for f in result.fills
+            if pd.Timestamp(f.ts, tz="UTC").tz_convert("America/New_York").date() <= day.date()
+        )
+        expected += max(0, -held) * 100 * 0.365 / 365
+    assert result.borrow_fees == pytest.approx(expected)
     assert all(e["apr"] == 0.365 and e["source"] == "test vendor" for e in result.borrow_evidence)
     assert result.borrow_fees > 100  # cannot silently fall back to assumed 0.5% APR
     assert result.ledger_vs_account == pytest.approx(0, abs=1e-6)
