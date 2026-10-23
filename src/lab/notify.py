@@ -44,7 +44,18 @@ class Notifier:
         if spool_path:
             Path(spool_path).parent.mkdir(parents=True, exist_ok=True)
             with self._db() as db:
-                db.execute("CREATE TABLE IF NOT EXISTS notification (id INTEGER PRIMARY KEY, text TEXT)")
+                # Serialize migration with other notifier instances. AUTOINCREMENT prevents an old
+                # worker acknowledgement deleting a new message which reused the last deleted ID.
+                db.execute("BEGIN IMMEDIATE")
+                schema = db.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='notification'"
+                ).fetchone()
+                if schema is not None and "AUTOINCREMENT" not in schema[0].upper():
+                    db.execute("ALTER TABLE notification RENAME TO notification_legacy")
+                db.execute("CREATE TABLE IF NOT EXISTS notification (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT)")
+                if schema is not None and "AUTOINCREMENT" not in schema[0].upper():
+                    db.execute("INSERT INTO notification(id,text) SELECT id,text FROM notification_legacy")
+                    db.execute("DROP TABLE notification_legacy")
         self._worker = None
         if self.enabled:
             self._worker = threading.Thread(target=self._run, name="notifier", daemon=True)
@@ -123,23 +134,28 @@ class Notifier:
 
     def _run_durable(self):
         while True:
-            with self._db() as db:
-                row = db.execute("SELECT id,text FROM notification ORDER BY id LIMIT 1").fetchone()
-            if row is None:
-                self._wake.wait(1)
-                self._wake.clear()
-                continue
             try:
-                success = self._post(row[1])
-            except Exception:
-                success = False
-            if success:
                 with self._db() as db:
-                    db.execute("DELETE FROM notification WHERE id=?", (row[0],))
-            else:
+                    row = db.execute("SELECT id,text FROM notification ORDER BY id LIMIT 1").fetchone()
+                if row is None:
+                    self._wake.wait(1)
+                    self._wake.clear()
+                    continue
+                try:
+                    success = self._post(row[1])
+                except Exception:
+                    success = False
+                if success:
+                    with self._db() as db:
+                        db.execute("DELETE FROM notification WHERE id=?", (row[0],))
+                    continue
                 log.error("notification remains in durable outbox after delivery failure")
-                self._wake.wait(30)
-                self._wake.clear()
+            except (sqlite3.Error, OSError):
+                # A transient lock/I/O failure must not silently kill the only delivery worker.
+                self.failed += 1
+                log.error("notification outbox unavailable; delivery worker will retry")
+            self._wake.wait(30)
+            self._wake.clear()
 
     def _post(self, text: str) -> bool:
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"

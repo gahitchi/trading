@@ -194,7 +194,11 @@ def test_disposal_is_refused_while_the_position_disagrees():
 
     events = []
     agent = SimpleNamespace(
-        config=SimpleNamespace(dispose_path=None),
+        config=SimpleNamespace(dispose_path=None, live=True),
+        _paper_guard=lambda: True,
+        _account_id=lambda: "IB-DU1234567",
+        ledger_account="IB-DU1234567",
+        applied={},
         pending={"X": {"ticker": "GOOG", "side": "BUY", "qty": 10}},
         disposed={},
         reconcile=lambda: ["GOOG: ledger 0 vs broker 10"],
@@ -245,23 +249,14 @@ def test_a_ledger_from_another_account_or_universe_is_refused(goog_lab, goog, tm
         assert json.loads(ledger.read_text())["positions"].get("TSLA") == 10  # kept, never dropped
 
 
-def test_a_fill_for_a_disposed_order_is_booked_and_halts():
-    from types import SimpleNamespace
-
+def test_a_fill_for_a_disposed_order_is_booked_and_halts(tmp_path):
     from lab.agents.execution import ExecutionAgent
+    from tests.test_disposal_review import _agent, _fill
 
-    booked, halts = [], []
-    agent = SimpleNamespace(
-        config=SimpleNamespace(live=True),
-        pending={},
-        disposed={"X": {"ticker": "GOOG", "side": "BUY", "qty": 10, "evidence": "none seen"}},
-        _apply_fill=lambda ev: booked.append(ev),
-        _close_pending=lambda coid: agent.pending.pop(str(coid), None),
-        _hard_halt=lambda kind, reason: halts.append((kind, reason)),
-    )
-    ExecutionAgent.on_order_filled(agent, SimpleNamespace(client_order_id="X"))
-    assert booked and halts[0][0] == "reconciliation_mismatch" and "after it was disposed" in halts[0][1]
-    assert not agent.disposed and not agent.pending  # attributed to the lab, then settled
+    agent = _agent(tmp_path)
+    ExecutionAgent.on_order_filled(agent, _fill("T1", 4))
+    assert agent.held["A"] == 4 and agent.halts[0][0] == "reconciliation_mismatch"
+    assert "X" in agent.disposed and "X" in agent.pending  # remaining quantity still attributable
 
 
 def test_the_trade_id_store_is_bounded_but_keeps_ids_of_journaled_orders():
@@ -275,6 +270,8 @@ def test_the_trade_id_store_is_bounded_but_keeps_ids_of_journaled_orders():
     old = time.time_ns() - (_KEEP_TRADE_DAYS + 1) * 86_400 * 10**9
     agent = SimpleNamespace(
         pending={"STILL-OPEN": {}},
+        disposed={},
+        terminal={},
         applied={"T1": [old, "DONE"], "T2": [old, "STILL-OPEN"], "T3": [time.time_ns(), "DONE"]},
     )
     ExecutionAgent._prune_applied(agent)

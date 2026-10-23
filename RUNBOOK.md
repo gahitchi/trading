@@ -192,3 +192,27 @@ Run it for weeks, not days. Then compare against the backtest of the same signal
 
 A strategy is worth more attention only if it passed the research gates, its holdout run, and paper trading
 without surprises.
+
+## Candidate release acceptance and state upgrades
+
+Development remains open. Use [the candidate acceptance protocol](docs/paper-acceptance.md) before a supervised
+IBKR paper session; it defines evidence, failure scenarios and pass rules for all seven release gates.
+
+The execution ledger now writes schema **v2**, preserving terminal orders as well as disposed intents. It
+reads legacy v1 ledgers, validates numeric/intent/trade-ID types before recovery and retains unattributed
+legacy trade IDs. The new notification outbox migrates existing rows transactionally and uses monotonic IDs.
+Never edit archived intent, disposal or trade-ID records to reduce file size. Capacity/archival qualification
+remains open. A v1 binary must not be pointed at a v2 runtime.
+
+For an upgrade, stop all writers; back up the entire paper runtime (including SQLite journal/WAL files if
+present), configuration, exact old source/image identity and the new candidate. Verify broker orders, fills,
+positions and cash against the backup. Runtime identity deliberately refuses an implementation/configuration
+change: this release does **not** provide an automatic identity-reset/migration command. Have the reviewer
+approve the migration with preserved evidence before changing identity. A rollback must restore a mutually
+consistent runtime and implementation only after reconciling all broker activity since the backup; restoring
+an old ledger over later fills is unsafe. Do not run old and new binaries concurrently on the same account.
+
+If ledger persistence fails, the node latches a submission refusal and requests shutdown. Do not simply restart
+until storage is healthy and the broker reports have been reconciled against the last durable ledger. An atomic
+replacement may already have succeeded when directory fsync failed; inspect the actual file, not assumptions
+about the error. Local injected-fault tests are not power-loss or actual-broker qualification.

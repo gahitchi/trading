@@ -147,3 +147,47 @@ def test_live_financing_is_carried_by_the_estimate_unless_the_broker_cash_books_
 
     assert equity(dedicated=False) == pytest.approx(10_000 - 1_000 - 12.5)
     assert equity(dedicated=True) == pytest.approx(10_000 - 1_000)
+
+
+def test_daily_caps_are_reserved_before_order_submission():
+    agent, _ = _agent({"A": 0}, {"A": 0.2}, risk_limits=_limits("balanced"))
+    saved_before_send = []
+
+    def crash_after_send(*args, **kwargs):
+        saved_before_send.append((agent.cap_orders, agent.cap_opened))
+        raise OSError("process interrupted immediately after transmission")
+
+    agent._submit = crash_after_send
+    with pytest.raises(OSError):
+        ExecutionAgent.rebalance(agent)
+    assert saved_before_send == [(1, 200)]
+    assert agent.cap_orders == 1 and agent.cap_opened == 200
+
+
+def test_local_submission_refusal_does_not_consume_daily_caps():
+    agent, _ = _agent({"A": 0}, {"A": 0.2}, risk_limits=_limits("balanced"))
+    agent._submit = lambda *args, **kwargs: False
+    ExecutionAgent.rebalance(agent)
+    assert agent.cap_orders == 0 and agent.cap_opened == 0
+
+
+@pytest.mark.parametrize("quantity", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_broker_positions_never_reconcile(quantity):
+    a, _ = _agent({"A": 0}, {"A": 0})
+    a._broker_position = lambda ticker: quantity
+    assert ExecutionAgent.reconcile(a)
+
+
+@pytest.mark.parametrize("cost", [float("nan"), float("inf"), -1])
+def test_invalid_cost_reservations_fail_closed(cost):
+    from lab.config import MarginSettings
+    from lab.reservations import check_openings
+
+    assert check_openings({}, {"A": 1}, {"A": 100}, 1000, _limits("balanced"), MarginSettings(), cost)
+
+
+def test_nan_position_cannot_bypass_reservation_limits():
+    from lab.config import MarginSettings
+    from lab.reservations import check_openings
+
+    assert check_openings({"A": float("nan")}, {"A": 1}, {"A": 100}, 1000, _limits("balanced"), MarginSettings())

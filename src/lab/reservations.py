@@ -11,12 +11,16 @@ def check_openings(held, destinations, prices, equity, limits, margin, reserve_c
     Bounds are exact for independent fills at the supplied marks; prices can
     subsequently gap. Execution rechecks fresh marks and keeps margin cushion.
     """
+    if not math.isfinite(reserve_cost) or reserve_cost < 0:
+        return "invalid execution-cost reservation"
     if not math.isfinite(equity) or equity <= reserve_cost:
         return "no equity after execution-cost reservation"
     denominator = equity - reserve_cost
     lower, upper = {}, {}
     for t in set(held) | set(destinations):
         a, b = held.get(t, 0), destinations.get(t, held.get(t, 0))
+        if not math.isfinite(a) or not math.isfinite(b):
+            return f"{t}: nonfinite reservation quantity"
         p = prices.get(t)
         if not p or not math.isfinite(p) or p <= 0:
             return f"{t}: missing valid reservation mark"

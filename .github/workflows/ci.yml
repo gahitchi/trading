@@ -51,6 +51,22 @@ jobs:
           uv run --no-sync lab backtest
           uv run --no-sync lab null-test sma_trend --samples 10
 
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - run: uv sync --frozen --group build
+      - name: verify exported dependency graphs match the frozen lock
+        run: |
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt --output-file requirements.lock
+          uv export --frozen --only-group build --no-emit-project --format requirements-txt --output-file requirements-build.lock
+          git diff --exit-code -- requirements.lock requirements-build.lock
+      - name: build source and wheel without unpinned build isolation
+        run: uv build --no-build-isolation
+
   docker:
     runs-on: ubuntu-latest
     steps:
