@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -32,7 +33,9 @@ from lab.safety import is_paper_account, read_kill_switch
 NY = ZoneInfo("America/New_York")
 # Hard halts under which exits are still sent (everything else in a halt sends nothing at all).
 _REDUCE_ONLY_HALTS = {"circuit_breaker", "margin_call", "cash_mismatch"}
-_KEEP_TRADE_IDS = 2000  # broker trade IDs remembered for de-duplication (far more than a few days of fills)
+# Broker trade IDs are remembered for de-duplication for this long after their fill (IBKR re-reports executions
+# for about a week), and for as long as their order is still journaled, whatever its age.
+_KEEP_TRADE_DAYS = 30
 
 
 def _ny_date(ts_ns: int):
@@ -206,8 +209,7 @@ class ExecutionAgent(Strategy):
         self.disposed: dict[str, dict] = {}
         self.orphans: dict[str, float] = {}
         self.ledger_account: str | None = None  # the broker account this ledger belongs to
-        self.applied: list[str] = []
-        self._applied_set: set[str] = set()
+        self.applied: dict[str, list] = {}  # trade ID -> [fill time ns, client order ID]
         if config.state_path and Path(config.state_path).exists():
             state = read_json(config.state_path)
             if not isinstance(state, dict) or state.get("version", 1) != 1:
@@ -225,8 +227,14 @@ class ExecutionAgent(Strategy):
             self.ledger_account = state.get("account")
             self.pending = dict(state.get("pending", {}))
             self.disposed = dict(state.get("disposed", {}))
-            self.applied = list(state.get("applied_trades", []))
-            self._applied_set = set(self.applied)
+            now = time.time_ns()
+            for entry in state.get("applied_trades", []):
+                if isinstance(entry, str):  # older ledgers: IDs only; kept for the full window from now
+                    self.applied[entry] = [now, None]
+                elif isinstance(entry, list) and len(entry) == 3 and isinstance(entry[0], str):
+                    self.applied[entry[0]] = [int(entry[1]), entry[2]]
+                else:
+                    raise ValueError("invalid applied trade record")
             caps = state.get("daily_caps") or {}
             self.cap_day = date.fromisoformat(caps["day"]) if caps.get("day") else None
             self.cap_orders = int(caps.get("orders", 0))
@@ -600,7 +608,7 @@ class ExecutionAgent(Strategy):
                     "account": self.ledger_account,
                     "pending": self.pending,
                     "disposed": self.disposed,
-                    "applied_trades": self.applied,
+                    "applied_trades": [[t, ts, coid] for t, (ts, coid) in self.applied.items()],
                     # A restart within a session must not reset the day's order and turnover caps.
                     "daily_caps": {
                         "day": self.cap_day.isoformat() if self.cap_day else None,
@@ -1008,7 +1016,7 @@ class ExecutionAgent(Strategy):
     def _apply_fill(self, ev, *, recovered: bool = False) -> bool:
         """Book one broker fill into the ledger, once per trade ID. Returns False for a repeat."""
         trade = str(ev.trade_id)
-        if trade in self._applied_set:
+        if trade in self.applied:
             return False
         qty, px = float(ev.last_qty), float(ev.last_px)
         fee = float(ev.commission.as_double()) if ev.commission is not None else 0.0
@@ -1020,8 +1028,8 @@ class ExecutionAgent(Strategy):
         self.cash += -qty * px - fee if buy else qty * px - fee
         self.commissions += fee
         self.held[ticker] = self.held.get(ticker, 0.0) + (qty if buy else -qty)
-        self.applied.append(trade)
-        self._applied_set.add(trade)
+        self.applied[trade] = [time.time_ns(), str(ev.client_order_id)]
+        self._prune_applied()
         self._save()
         self.publish_message(
             T_FILL,
@@ -1121,6 +1129,14 @@ class ExecutionAgent(Strategy):
             self.disposed = dict(list(self.disposed.items())[-500:])
         self._save()
         path.unlink(missing_ok=True)
+
+    def _prune_applied(self) -> None:
+        """Bounded de-duplication store: forget a trade ID once it is older than the broker re-reports and its
+        order is no longer journaled (a fill of a pending order can still be re-reported at recovery)."""
+        cutoff = time.time_ns() - _KEEP_TRADE_DAYS * 86_400 * 10**9
+        stale = [t for t, (ts, coid) in self.applied.items() if ts < cutoff and coid not in self.pending]
+        for t in stale:
+            del self.applied[t]
 
     def on_order_filled(self, ev):
         coid = str(ev.client_order_id)

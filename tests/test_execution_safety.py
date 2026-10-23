@@ -262,3 +262,20 @@ def test_a_fill_for_a_disposed_order_is_booked_and_halts():
     ExecutionAgent.on_order_filled(agent, SimpleNamespace(client_order_id="X"))
     assert booked and halts[0][0] == "reconciliation_mismatch" and "after it was disposed" in halts[0][1]
     assert not agent.disposed and not agent.pending  # attributed to the lab, then settled
+
+
+def test_the_trade_id_store_is_bounded_but_keeps_ids_of_journaled_orders():
+    """Claude on G009-F27: de-duplication forgets a trade ID only after the broker's re-report window and once
+    its order is no longer journaled."""
+    import time
+    from types import SimpleNamespace
+
+    from lab.agents.execution import _KEEP_TRADE_DAYS, ExecutionAgent
+
+    old = time.time_ns() - (_KEEP_TRADE_DAYS + 1) * 86_400 * 10**9
+    agent = SimpleNamespace(
+        pending={"STILL-OPEN": {}},
+        applied={"T1": [old, "DONE"], "T2": [old, "STILL-OPEN"], "T3": [time.time_ns(), "DONE"]},
+    )
+    ExecutionAgent._prune_applied(agent)
+    assert set(agent.applied) == {"T2", "T3"}
