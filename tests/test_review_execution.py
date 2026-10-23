@@ -241,3 +241,51 @@ def test_reservation_gap_changes_research_identity(goog_lab):
     changed = replace(goog_lab, paper=replace(goog_lab.paper, reservation_gap=0.1))
     assert config_fingerprint(changed) != config_fingerprint(goog_lab)
     assert deployment_context(changed.snapshot()) != deployment_context(goog_lab.snapshot())
+
+
+def test_independent_adverse_marks_cannot_bypass_net_floor(goog_lab):
+    from dataclasses import replace
+
+    from lab.config import MarginSettings
+    from lab.reservations import stressed_openings
+
+    limits = replace(_limits("balanced"), max_weight=1, max_gross=2, max_short_gross=1, min_net=0, max_net=1.5)
+    # Equal marked long and short values look neutral if all prices move together.
+    # A -3% long / +3% short move gives negative net exposure, and must be refused.
+    reason = stressed_openings(
+        {"A": 5, "B": 0}, {"B": -5}, {"A": 100, "B": 100}, 1000, limits, MarginSettings(), goog_lab.costs, 0.03
+    )
+    assert reason and "net limit" in reason
+
+
+def test_stress_bounds_cover_independent_fill_price_and_mark_corners(goog_lab):
+    from dataclasses import replace
+    from itertools import product
+
+    from lab.config import MarginSettings
+    from lab.reservations import stressed_openings
+
+    limits = replace(_limits("balanced"), max_weight=0.8, max_gross=1.2, max_short_gross=0.6, min_net=-0.2, max_net=0.8)
+    held, targets = {"A": 2, "B": -1}, {"A": 4, "B": -2}
+    gap, price, equity = 0.03, 100, 1000
+    margin = MarginSettings()
+    assert (
+        stressed_openings(held, targets, {"A": price, "B": price}, equity, limits, margin, goog_lab.costs, gap) is None
+    )
+    for fractions in product((0, 0.5, 1), repeat=2):
+        for moves in product((-gap, gap), repeat=2):
+            cash = equity - sum(held.values()) * price
+            positions = {}
+            for ticker, fraction in zip("AB", fractions, strict=True):
+                delta = (targets[ticker] - held[ticker]) * fraction
+                fill = price * (1 + gap if delta > 0 else 1 - gap)
+                cash -= delta * fill + abs(delta) * fill * goog_lab.costs.commission_max_pct
+                positions[ticker] = held[ticker] + delta
+            values = [positions[t] * price * (1 + m) for t, m in zip("AB", moves, strict=True)]
+            nav = cash + sum(values)
+            weights = [v / nav for v in values]
+            assert max(map(abs, weights)) <= limits.max_weight
+            assert sum(map(abs, weights)) <= limits.max_gross
+            assert -sum(min(w, 0) for w in weights) <= limits.max_short_gross
+            assert limits.min_net <= sum(weights) <= limits.max_net
+            assert sum(abs(w) * 0.5 for w in weights) * (1 + margin.cushion) <= 1
