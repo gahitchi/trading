@@ -9,8 +9,13 @@ class _Cache:
 
 
 class _Agent:
+    _order_expiry = ExecutionAgent._order_expiry
+
     def __init__(self):
-        self.pending = {"O-123": {"ticker": "GOOG", "side": "BUY", "qty": 10}}
+        from types import SimpleNamespace
+
+        self.config = SimpleNamespace(live=True)
+        self.pending = {"O-123": {"ticker": "GOOG", "side": "BUY", "qty": 10}}  # no submission time: never expires
         self.cache = _Cache()
         self.events = []
         self.halts = []

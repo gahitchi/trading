@@ -132,26 +132,33 @@ def test_dedicated_account_that_never_matched_needs_an_operator(goog_lab, goog, 
 
 
 def test_unreported_journaled_order_cannot_be_erased_by_adoption(goog_lab, goog, tmp_path):
+    import time
+
     h = LiveHarness(goog_lab, [SignalSpec("buy_and_hold")], {"GOOG": goog}, tmp_path / "h", first_day=D0)
     ledger = h.runtime / "ledger.json"
     ledger.parent.mkdir(parents=True, exist_ok=True)
-    ledger.write_text(
-        json.dumps(
-            {
-                "cash": goog_lab.paper.capital,
-                "positions": {},
-                "pending": {"O-20261022-000000-001-EXEC-9": {"ticker": "GOOG", "side": "BUY", "qty": 10, "ts": 1}},
-            }
-        )
-    )
+    coid = "O-20261022-000000-001-EXEC-9"
+    pending = {coid: {"ticker": "GOOG", "side": "BUY", "qty": 10, "ts": time.time_ns()}}
+    ledger.write_text(json.dumps({"cash": goog_lab.paper.capital, "positions": {}, "pending": pending}))
     h.session()
     assert "order_unknown" in _kinds(h) and h.broker().state["orders"] == {}
-    assert read_halt(h.runtime / "HALT")["kind"] == "reconciliation_mismatch"
+    halt = read_halt(h.runtime / "HALT")
+    assert halt["kind"] == "reconciliation_mismatch" and "can no longer fill after" in halt["reason"]
     assert h.ledger()["pending"]  # the intent is kept, so a late fill would still be attributable
     assert _lab(h, "recover", "--reason", "IBKR shows no such order; it never left", "--adopt-broker") == 0
     h.session()
-    assert read_halt(h.runtime / "HALT")["kind"] == "reconciliation_mismatch"
+    assert read_halt(h.runtime / "HALT")["kind"] == "reconciliation_mismatch"  # (ChatGPT, G004-F1)
     assert h.ledger()["pending"] and not h.broker().positions()
+
+    # Days later the order's sessions are over and IBKR never reported it: it can no longer fill. An audited
+    # recover lets the next start dispose of it, and trading resumes (Claude: no journal surgery needed).
+    state = json.loads(ledger.read_text())
+    state["pending"][coid]["ts"] = time.time_ns() - 5 * 86_400 * 10**9
+    ledger.write_text(json.dumps(state))
+    assert _lab(h, "recover", "--reason", "IBKR shows no such order after its sessions ended", "--adopt-broker") == 0
+    h.session()
+    assert "order_expired_unreported" in _kinds(h)
+    assert read_halt(h.runtime / "HALT") is None and h.ledger()["pending"] == {} and h.broker().positions()
 
 
 # ---------------------------------------------------------------------------- F15: who owns the state

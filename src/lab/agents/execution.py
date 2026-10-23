@@ -999,9 +999,28 @@ class ExecutionAgent(Strategy):
                 # acknowledgment, and broker reports may be incomplete/delayed.
                 # Keep the write-ahead intent so a delayed fill remains attributable.
                 # Do not issue a replacement order until the uncertainty is resolved.
+                expiry = self._order_expiry(info)
+                if expiry is not None and self.config.live and self._now() > expiry:
+                    # Every live order is DAY or market-on-open: once the sessions it could fill in are over it
+                    # can never fill. A fill it got is in the broker's positions, which are reconciled before
+                    # every rebalance, so disposing of the intent cannot hide a trade (Claude, on G004-F1).
+                    self._risk_event(
+                        "order_expired_unreported",
+                        f"{info['ticker']}: journaled order {coid} ({info.get('side')} {info.get('qty')}) was never "
+                        f"reported by the broker and could only have filled until {expiry:%Y-%m-%d %H:%M}; "
+                        "disposed (positions are still reconciled)",
+                    )
+                    self._close_pending(coid)
+                    continue
                 detail = (
                     f"{info['ticker']}: journaled order {coid} not confirmed by broker reconciliation; "
                     "possible in-flight order. Preserve intent and require audited investigation"
+                    + (
+                        f". It can no longer fill after {expiry:%Y-%m-%d %H:%M} New York; if IBKR still shows "
+                        "nothing then, `lab recover --reason ... --adopt-broker` lets the next start dispose of it"
+                        if expiry is not None
+                        else ""
+                    )
                 )
                 self._risk_event("order_unknown", detail)
                 halt = self._halt()
@@ -1013,6 +1032,23 @@ class ExecutionAgent(Strategy):
                     self._apply_fill(e, recovered=True)
             if order.is_closed:
                 self._close_pending(coid)
+
+    def _order_expiry(self, info: dict) -> datetime | None:
+        """When a journaled live order can no longer fill: the end of the session it was sent for (the same
+        day before the close, else the next weekday), plus one more weekday for an unannounced holiday.
+        None when the journal has no submission time (then it never expires by itself)."""
+        if not info.get("ts"):
+            return None
+        sent = datetime.fromtimestamp(int(info["ts"]) / 1e9, NY)
+        day = sent
+        if day.weekday() >= 5 or day.hour >= 16:
+            day += timedelta(days=1)
+        while day.weekday() >= 5:
+            day += timedelta(days=1)
+        day += timedelta(days=1)
+        while day.weekday() >= 5:
+            day += timedelta(days=1)
+        return day.replace(hour=17, minute=0, second=0, microsecond=0)
 
     def on_order_filled(self, ev):
         coid = str(ev.client_order_id)
