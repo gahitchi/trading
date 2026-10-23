@@ -232,7 +232,7 @@ def test_one_paper_node_per_runtime_directory(goog_lab):
 @pytest.mark.parametrize(
     "state, reason",
     [
-        ({"account": "IB-DU7777777"}, "belongs to account IB-DU7777777"),
+        ({"account": "IB-DU7777777"}, "broker reports belong to another ledger account"),
         ({"positions": {"TSLA": 10}}, "not in this node's universe"),
     ],
 )
@@ -245,6 +245,10 @@ def test_a_ledger_from_another_account_or_universe_is_refused(goog_lab, goog, tm
     halt = read_halt(h.runtime / "HALT")
     assert halt["kind"] == "reconciliation_mismatch" and reason in halt["reason"]
     assert h.broker().state["orders"] == {}
+    if "account" in state:
+        persisted = json.loads(ledger.read_text())
+        assert persisted["account"] == state["account"]
+        assert persisted["cash"] == goog_lab.paper.capital and persisted["positions"] == {}
     if "positions" in state:
         assert json.loads(ledger.read_text())["positions"].get("TSLA") == 10  # kept, never dropped
 
