@@ -112,3 +112,21 @@ def test_transient_outbox_failure_does_not_kill_worker(tmp_path, monkeypatch):
     with pytest.raises(StopWorker):
         n._run_durable()
     assert delivered == ["[trading-lab] saved alert"] and n.pending() == 0 and n.failed == 1
+
+
+def test_outbox_capacity_and_outage_health_are_visible(tmp_path, monkeypatch):
+    n = _notifier(tmp_path, monkeypatch)
+    n.max_pending = 2
+    n.send("first")
+    assert n.health()["healthy"]
+    n.send("second")
+    n.send("not silently accepted")
+    assert n.pending() == 2 and n.failed == 1 and not n.health()["healthy"]
+    with n._db() as db:
+        db.execute("DELETE FROM notification")
+        db.execute("DELETE FROM notification_time")
+    n.send("recovered")
+    assert n.health()["healthy"]
+    with n._db() as db:
+        db.execute("UPDATE notification_time SET created=0")
+    assert not n.health()["healthy"] and n.health()["oldest_seconds"] > 300

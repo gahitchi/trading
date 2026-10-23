@@ -216,3 +216,13 @@ If ledger persistence fails, the node latches a submission refusal and requests 
 until storage is healthy and the broker reports have been reconciled against the last durable ledger. An atomic
 replacement may already have succeeded when directory fsync failed; inspect the actual file, not assumptions
 about the error. Local injected-fault tests are not power-loss or actual-broker qualification.
+
+
+## Release candidate: operating controls and storage
+
+See [operator-controls.md](docs/operator-controls.md) for autonomous, manual and
+supervised mandates, and [runtime-storage.md](docs/runtime-storage.md) for the
+SQLite migration, private cold backups and broker-attested code upgrade. Restarts
+do not renew the initial 24-hour authority lease. Never edit the diagnostic ledger
+JSON or restore it over the permanent trade history. The default notification
+outage rule blocks new exposure after five minutes of undelivered alerts.

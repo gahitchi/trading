@@ -40,3 +40,30 @@ def check_openings(held, destinations, prices, equity, limits, margin, reserve_c
     if requirement * (1 + margin.cushion) > 1 + 1e-9:
         return "possible fill exceeds initial-margin budget"
     return None
+
+
+def stressed_openings(held, destinations, prices, equity, limits, margin, costs, gap):
+    """Conservative cost/price stress, across all subsets of fills including failed exits.
+
+    Reserve the full configured fee cap on each order (covers fragmented fills),
+    adverse entry slippage and adverse marks on all held inventory. Value exposure
+    at higher absolute marks. This is a specified stress, never a broker guarantee.
+    """
+    if not math.isfinite(gap) or not 0 <= gap <= 0.5:
+        return "invalid price-gap reservation"
+    if any(t not in prices or not math.isfinite(prices[t]) or prices[t] <= 0 for t in set(held) | set(destinations)):
+        return "missing valid reservation mark"
+    costs_reserved = sum(abs(q) * prices[t] * gap for t, q in held.items())
+    for t, target in destinations.items():
+        qty = abs(target - held.get(t, 0))
+        value = qty * prices[t]
+        costs_reserved += value * gap + value * (1 + gap) * costs.commission_max_pct
+    return check_openings(
+        held,
+        destinations,
+        {t: p * (1 + gap) for t, p in prices.items()},
+        equity,
+        limits,
+        margin,
+        reserve_cost=costs_reserved,
+    )

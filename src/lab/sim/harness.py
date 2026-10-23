@@ -98,6 +98,10 @@ class LiveHarness:
 
     def ledger(self) -> dict:
         p = self.runtime / "ledger.json"
+        if p.with_suffix(".sqlite3").exists():
+            from lab.execution_store import ExecutionStore
+
+            return ExecutionStore(p).export()
         return json.loads(p.read_text()) if p.exists() else {}
 
     def journal(self) -> list[dict]:

@@ -14,7 +14,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     TZ=America/New_York
 
-RUN apt-get update && apt-get install -y --no-install-recommends libseccomp2 \
+# Freeze Debian package resolution as well as the parent image and Python graph.
+RUN rm -f /etc/apt/sources.list.d/debian.sources \
+    && printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20261001T000000Z bookworm main' > /etc/apt/sources.list \
+    && apt-get update && apt-get install -y --no-install-recommends libseccomp2=2.5.4-1+deb12u1 \
     && dpkg-query -W > /usr/local/share/trading-lab-os-packages.txt \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 --shell /usr/sbin/nologin lab

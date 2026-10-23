@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 from nautilus_trader.common import DataActor, DataActorConfig
 
-from lab.agents.messages import T_MARK, T_SIGNAL, T_TARGETS, TargetWeights
+from lab.agents.messages import T_MARK, T_RISK, T_SIGNAL, T_TARGETS, TargetWeights
 from lab.persistence import atomic_json, read_json
 
 
@@ -27,6 +27,7 @@ class AllocatorAgentConfig(DataActorConfig):
         leverage: float = 1.0,
         periods_per_year: float = 252.0,
         state_path: str | None = None,
+        bank=None,
         **_kwargs,
     ):
         """sleeves: sleeve id ("signal:TICKER") -> (ticker, weight). Weights are fractions of equity.
@@ -37,6 +38,7 @@ class AllocatorAgentConfig(DataActorConfig):
         (cross-sectional strategies); they are scaled by the group's weight only.
         """
         super().__init__()
+        self.bank = bank
         self.sleeves = sleeves
         self.normalize_active = normalize_active
         self.absolute_groups = set(absolute_groups)
@@ -57,6 +59,8 @@ class AllocatorAgent(DataActor):
         total = sum(w for _, w in config.sleeves.values())
         if total > 1.0 + 1e-9:
             raise ValueError(f"sleeve weights sum to {total:.3f} > 1 (leverage is set by the portfolio, not sleeves)")
+        self.retired = set()
+        self.selection = (None, "disabled")
         self.targets: dict[str, float] = {}
         self.active: set[str] = set()
         self.tickers = sorted({t for t, _ in config.sleeves.values()})
@@ -66,6 +70,7 @@ class AllocatorAgent(DataActor):
             saved = read_json(config.state_path)
             if saved.get("version") != 1 or saved.get("window") != config.vol_window:
                 raise ValueError("allocator state version/window changed; explicit migration required")
+            self.retired = set(saved.get("retired", []))
             for t in self.tickers:
                 rows = saved.get("closes", {}).get(t, [])
                 for ts, price in rows:
@@ -80,11 +85,18 @@ class AllocatorAgent(DataActor):
 
     def on_start(self):
         self.subscribe_topic(T_MARK, self._on_mark)
+        if self.config.bank is not None:
+            self.subscribe_topic(T_RISK, self._on_risk)
         self.subscribe_topic(T_SIGNAL, self._on_signal)
 
     def weights(self) -> dict[str, float]:
         out = dict.fromkeys(self.tickers, 0.0)
+        bank = self.config.bank
+        if bank is not None:
+            self.selection = bank.select(self.closes, self.retired)
         for group, members in self.groups.items():
+            if bank is not None and group != self.selection[0]:
+                continue
             if group in self.config.absolute_groups:
                 group_weight = sum(self.config.sleeves[s][1] for s in members)
                 for s in members:
@@ -136,9 +148,17 @@ class AllocatorAgent(DataActor):
                 {
                     "version": 1,
                     "window": self.config.vol_window,
+                    "retired": sorted(self.retired),
+                    "selection": self.selection,
                     "closes": {t: list(rows) for t, rows in self.closes.items()},
                 },
             )
+
+    def _on_risk(self, event):
+        if event.kind == "signal_failed" and event.detail in self.groups:
+            self.retired.add(event.detail)
+            self._save()
+            self.publish_message(T_TARGETS, TargetWeights(self.weights(), event.ts))
 
     def _on_signal(self, msg):
         if msg.sleeve not in self.config.sleeves:

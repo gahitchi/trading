@@ -152,9 +152,12 @@ def test_unreported_journaled_order_cannot_be_erased_by_adoption(goog_lab, goog,
 
     # Even days later, time cannot prove that an order never filled. Recovery must
     # retain its attribution until broker evidence resolves the uncertainty.
-    state = json.loads(ledger.read_text())
+    from lab.execution_store import ExecutionStore
+
+    store = ExecutionStore(ledger)
+    state = store.load()
     state["pending"][coid]["ts"] = time.time_ns() - 5 * 86_400 * 10**9
-    ledger.write_text(json.dumps(state))
+    store.save(state)
     assert _lab(h, "recover", "--reason", "IBKR shows no such order after its sessions ended", "--adopt-broker") == 0
     h.session()
     assert "order_expired_unreported" not in _kinds(h)

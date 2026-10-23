@@ -88,6 +88,7 @@ class PaperSettings:
     # The lab's book is an ALLOCATION of the paper account (capital) unless dedicated_account: then it owns
     # the account and its cash must match the broker's (small dividend/interest moves are booked, audited).
     dedicated_account: bool = False
+    reservation_gap: float = 0.03  # adverse price stress for entries, not a bound on real market gaps
     cash_tolerance: float = 1.0  # USD, plus 0.1% of equity
     max_external_cash: float = 0.02  # dedicated: largest unexplained cash move booked automatically (of equity)
 
@@ -453,6 +454,7 @@ def _load_config(path: str | Path | None = None) -> LabConfig:
             order_rate=str(pp["order_rate"]),
             dedicated_account=bool(pp.get("dedicated_account", False)),
             cash_tolerance=float(pp.get("cash_tolerance", 1.0)),
+            reservation_gap=float(pp.get("reservation_gap", 0.03)),
             max_external_cash=float(pp.get("max_external_cash", 0.02)),
         ),
         research=research,
@@ -489,6 +491,7 @@ def _check_settings(cfg: LabConfig) -> None:
     bounded("portfolio.target_vol", cfg.portfolio.target_vol, 0)
     for key in ("max_order_value", "max_orders_per_day", "max_daily_turnover", "cash_tolerance"):
         bounded(f"paper.{key}", getattr(cfg.paper, key), 0)
+    bounded("paper.reservation_gap", cfg.paper.reservation_gap, 0, 0.5)
     bounded("paper.max_external_cash", cfg.paper.max_external_cash, 0, 1)
     for key in ("call_timeout_s", "max_llm_calls_per_cycle", "null_samples"):
         bounded(f"research.{key}", getattr(cfg.research, key), 0, strict_low=True)

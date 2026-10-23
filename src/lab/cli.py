@@ -7,6 +7,7 @@ import json
 import sys
 from dataclasses import replace
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pandas as pd
 
@@ -582,7 +583,17 @@ def cmd_paper(cfg, a):
                 resolve(s.name, cfg.research_dir, s.params, require_tradable=True) if s.path is not None else s
                 for s in _specs(cfg, a.signals, a.set)
             ]
-            node = build_node(cfg, specs, tickers, adopt_broker=a.adopt_broker, notifier=notifier)
+            node = build_node(
+                cfg,
+                specs,
+                tickers,
+                adopt_broker=a.adopt_broker,
+                notifier=notifier,
+                operator_control=not a.check_only,
+                bank_path=a.bank,
+                mode=a.mode,
+                authority_hours=a.authority_hours,
+            )
     except (SafetyError, ValueError, SignalNotFound, RuntimeLocked, ApprovalError) as e:
         raise SystemExit(str(e)) from e
     what = "smoke test" if a.smoke else f"{len(a.signals)} signal(s) x {len(tickers)} stocks"
@@ -620,6 +631,43 @@ def cmd_paper(cfg, a):
             print(f"  {'✓' if c['ok'] else '✗'} {name}: {c['detail']}")
         print(f"smoke test {'PASSED' if r['passed'] else 'FAILED'} (report: {report.relative_to(cfg.root)})")
         return 0 if r["passed"] else 1
+    return 0
+
+
+def cmd_runtime(cfg, a):
+    from lab.runtime_ops import run
+
+    try:
+        result = run(cfg, a.action, destination=a.destination, evidence=a.evidence, reason=a.reason)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise SystemExit(str(exc)) from exc
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_control(cfg, a):
+    from lab.authority import Authority
+    from lab.paper import runtime_dir
+    from lab.persistence import read_json
+
+    rt = runtime_dir(cfg)
+    control = Authority(rt, read_json(rt / "identity.json"))
+    if a.action == "status":
+        print(json.dumps({"mandate": control.read(allow_expired=True), "requests": control.requests()}, indent=2))
+    elif a.action == "approve":
+        if not a.request:
+            raise SystemExit("control approve needs --request from control status")
+        control.approve(a.request)
+        print("Approved once, for the exact proposed order and book; expires within one hour.")
+    else:
+        previous = control.read(allow_expired=True)
+        targets = dict(previous["targets"])
+        if a.target:
+            targets = {t.upper(): float(w) for t, w in (item.split("=", 1) for item in a.target)}
+        mode = a.mode or previous["mode"]
+        if a.target and mode != "manual":
+            raise SystemExit("--target requires manual mode")
+        print(json.dumps(control.issue(mode, a.hours, targets), indent=2))
     return 0
 
 
@@ -1032,6 +1080,18 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--signals", nargs="+", default=["sma_trend"])
     pp.add_argument("--tickers", nargs="+")
     pp.add_argument("--set", action="append")
+    pp.add_argument("--bank", help="predeclared daily strategy-bank manifest")
+    pp.add_argument(
+        "--mode",
+        choices=["autonomous", "supervised", "manual"],
+        help="explicitly issue a new operating mandate; default preserves existing mode",
+    )
+    pp.add_argument(
+        "--authority-hours",
+        type=float,
+        default=24,
+        help="new mandate duration, at most 168 hours; restarts never renew",
+    )
     pp.add_argument("--check-only", action="store_true", help="validate the setup without connecting")
     pp.add_argument("--smoke", action="store_true", help="connect, verify account/instruments/data, no trading")
     pp.add_argument(
@@ -1041,6 +1101,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--adopt-broker", action="store_true", help="reset the agents' ledger to the broker's current positions"
     )
     pp.set_defaults(fn=cmd_paper)
+
+    runtime = sub.add_parser("runtime", help="cold backup, upgrade preflight and broker-attested code migration")
+    runtime.add_argument("action", choices=["backup", "preflight", "upgrade"])
+    runtime.add_argument("--destination", type=Path)
+    runtime.add_argument("--evidence", type=Path)
+    runtime.add_argument("--reason", default="")
+    runtime.set_defaults(fn=cmd_runtime)
+
+    control = sub.add_parser("control", help="inspect, approve or renew local paper authority")
+    control.add_argument("action", choices=["status", "approve", "renew"])
+    control.add_argument("--request")
+    control.add_argument("--mode", choices=["autonomous", "supervised", "manual"])
+    control.add_argument("--hours", type=float, default=24)
+    control.add_argument(
+        "--target", action="append", help="manual portfolio weight, e.g. SPY=0.2; unspecified stocks target zero"
+    )
+    control.set_defaults(fn=cmd_control)
 
     sub.add_parser(
         "paper-report", help="paper results, costs and implementation shortfall from the journal"

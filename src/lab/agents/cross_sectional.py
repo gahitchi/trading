@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from nautilus_trader.common import DataActor, DataActorConfig
 
-from lab.agents.messages import T_MARK, T_SIGNAL, PriceMark, SignalUpdate
+from lab.agents.messages import T_MARK, T_RISK, T_SIGNAL, PriceMark, RiskEvent, SignalUpdate
 from lab.agents.schedule import FUTURE_TOLERANCE, MAX_BAR_AGE_DAYS, market_now, next_at, now_ny, parse_clock
 from lab.agents.signal_agent import bar_minute, history_days
 from lab.signals.base import CrossSectionalSignal, Window, clean_weights
@@ -170,6 +170,7 @@ class CrossSectionalAgent(DataActor):
             weights = clean_weights(raw)
         except Exception as e:  # a buggy strategy must never take the system down
             self.errors += 1
+            self.publish_message(T_RISK, RiskEvent(self.clock.timestamp_ns(), "signal_failed", self.signal.name))
             self.log.error(f"{self.signal.name}: weights() raised {type(e).__name__}: {e}; going flat")
             weights = {}
         weights = {t: w for t, w in weights.items() if t in eligible}

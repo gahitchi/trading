@@ -176,6 +176,7 @@ class SignalAgent(DataActor):
                 raise ValueError("signal target must be finite")
         except Exception as e:  # a buggy signal must never take the system down
             self.errors += 1
+            self.publish_message(T_RISK, RiskEvent(bar.ts_event, "signal_failed", self.config.sleeve.split(":", 1)[0]))
             self.log.error(f"{self.config.sleeve}: signal raised {type(e).__name__}: {e}; going flat")
             raw = 0.0
         t = clamp_target(raw)

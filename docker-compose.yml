@@ -16,7 +16,7 @@ services:
   ib-gateway:
     # IB Gateway + IBC for automated login: https://github.com/gnzsnz/ib-gateway-docker
     # Pinned for reproducibility; check that project for newer stable tags.
-    image: ghcr.io/gnzsnz/ib-gateway:10.50.1f
+    image: ghcr.io/gnzsnz/ib-gateway:10.50.1f@sha256:1e2236804ac949b789197c225a048c0c891c9958f948c87166226e5b647ff581
     restart: always
     environment:
       TWS_USERID: ${TWS_USERID:?set TWS_USERID in .env}

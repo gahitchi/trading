@@ -191,3 +191,42 @@ def test_nan_position_cannot_bypass_reservation_limits():
     from lab.reservations import check_openings
 
     assert check_openings({"A": float("nan")}, {"A": 1}, {"A": 100}, 1000, _limits("balanced"), MarginSettings())
+
+
+def test_cost_and_gap_reserves_resize_entry_before_submission(goog_lab):
+    from dataclasses import replace
+
+    from lab.reservations import stressed_openings
+
+    limits = replace(goog_lab.risk, max_weight=1, max_gross=1, max_net=1)
+    agent, sent = _agent({"A": 0}, {"A": 1}, risk_limits=limits)
+    agent.config.reservation_costs = goog_lab.costs
+    agent.config.reservation_gap = 0.03
+    ExecutionAgent.rebalance(agent)
+    assert sent and 0 < sent[0][1] < 10
+    assert (
+        stressed_openings(
+            {"A": 0}, {"A": sent[0][1]}, {"A": 100}, 1000, limits, agent.config.margin, goog_lab.costs, 0.03
+        )
+        is None
+    )
+    assert stressed_openings({"A": 0}, {"A": 10}, {"A": 100}, 1000, limits, agent.config.margin, goog_lab.costs, 0.03)
+
+
+def test_alert_outage_blocks_additions_but_permits_reductions():
+    agent, sent = _agent({"A": 10, "B": 0}, {"A": 0, "B": 1}, risk_limits=_limits("balanced"))
+    agent.config.notification_health = lambda: {"healthy": False}
+    ExecutionAgent.rebalance(agent)
+    assert sent == [("A", -10, False)]
+    assert "notification delivery" in agent.blocked_reason
+
+
+def test_manual_targets_replace_signal_targets_without_bypassing_limits(tmp_path):
+    from lab.authority import Authority
+
+    authority = Authority(tmp_path, {"tickers": ["A", "B"]})
+    authority.issue("manual", targets={"A": 0.1})
+    agent, sent = _agent({"A": 0, "B": 0}, {"A": 0, "B": 0.2}, risk_limits=_limits("balanced"))
+    agent.config.authority = authority
+    ExecutionAgent.rebalance(agent)
+    assert sent == [("A", 1, True)]
