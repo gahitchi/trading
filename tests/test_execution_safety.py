@@ -162,6 +162,56 @@ def test_unreported_journaled_order_cannot_be_erased_by_adoption(goog_lab, goog,
     assert coid in h.ledger()["pending"] and not h.broker().positions()
 
 
+def test_an_unconfirmed_order_is_disposed_only_on_recorded_broker_evidence(goog_lab, goog, tmp_path):
+    """Claude on G010 / G004-F1: the terminal-resolution workflow. The operator reads IBKR's order and trade
+    history and records what it shows; the intent moves to `disposed` (never erased) and trading resumes."""
+    import time
+
+    h = LiveHarness(goog_lab, [SignalSpec("buy_and_hold")], {"GOOG": goog}, tmp_path / "h", first_day=D0)
+    ledger = h.runtime / "ledger.json"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    coid = "O-20261022-000000-001-EXEC-9"
+    pending = {coid: {"ticker": "GOOG", "side": "BUY", "qty": 10, "ts": time.time_ns()}}
+    ledger.write_text(json.dumps({"cash": goog_lab.paper.capital, "positions": {}, "pending": pending}))
+    h.session()
+    assert read_halt(h.runtime / "HALT")["kind"] == "reconciliation_mismatch"
+    with pytest.raises(SystemExit, match="needs --evidence"):
+        _lab(h, "recover", "--reason", "checked", "--dispose-order", coid)
+    evidence = "TWS Trades and Orders for DU1234567, 2026-10-22..23: no order or execution with this ID"
+    assert _lab(h, "recover", "--reason", "never reached IBKR", "--dispose-order", coid, "--evidence", evidence) == 0
+    h.session()
+    kinds = _kinds(h)
+    assert "order_disposed" in kinds and read_halt(h.runtime / "HALT") is None
+    state = h.ledger()
+    assert state["pending"] == {} and state["disposed"][coid]["evidence"] == evidence  # kept, with its evidence
+    assert h.broker().positions()  # trading resumed
+
+
+def test_disposal_is_refused_while_the_position_disagrees():
+    from types import SimpleNamespace
+
+    from lab.agents.execution import ExecutionAgent
+
+    events = []
+    agent = SimpleNamespace(
+        config=SimpleNamespace(dispose_path=None),
+        pending={"X": {"ticker": "GOOG", "side": "BUY", "qty": 10}},
+        disposed={},
+        reconcile=lambda: ["GOOG: ledger 0 vs broker 10"],
+        cache=SimpleNamespace(order=lambda _id: None),
+        _risk_event=lambda kind, detail: events.append(kind),
+        _save=lambda: None,
+    )
+    import tempfile
+    from pathlib import Path
+
+    req = Path(tempfile.mkdtemp()) / "DISPOSE"
+    req.write_text(json.dumps({"orders": ["X"], "evidence": "none seen", "reason": "r"}))
+    agent.config.dispose_path = str(req)
+    ExecutionAgent._consume_dispose(agent)
+    assert events == ["dispose_refused"] and "X" in agent.pending and not agent.disposed and not req.exists()
+
+
 # ---------------------------------------------------------------------------- F15: who owns the state
 
 
@@ -193,3 +243,22 @@ def test_a_ledger_from_another_account_or_universe_is_refused(goog_lab, goog, tm
     assert h.broker().state["orders"] == {}
     if "positions" in state:
         assert json.loads(ledger.read_text())["positions"].get("TSLA") == 10  # kept, never dropped
+
+
+def test_a_fill_for_a_disposed_order_is_booked_and_halts():
+    from types import SimpleNamespace
+
+    from lab.agents.execution import ExecutionAgent
+
+    booked, halts = [], []
+    agent = SimpleNamespace(
+        config=SimpleNamespace(live=True),
+        pending={},
+        disposed={"X": {"ticker": "GOOG", "side": "BUY", "qty": 10, "evidence": "none seen"}},
+        _apply_fill=lambda ev: booked.append(ev),
+        _close_pending=lambda coid: agent.pending.pop(str(coid), None),
+        _hard_halt=lambda kind, reason: halts.append((kind, reason)),
+    )
+    ExecutionAgent.on_order_filled(agent, SimpleNamespace(client_order_id="X"))
+    assert booked and halts[0][0] == "reconciliation_mismatch" and "after it was disposed" in halts[0][1]
+    assert not agent.disposed and not agent.pending  # attributed to the lab, then settled

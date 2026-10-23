@@ -685,7 +685,7 @@ def cmd_recover(cfg, a):
     """Clear a hard halt (lab/halt.py) after an operator has looked at it. Audited."""
     from lab.halt import HARD_KINDS, clear_halt, halt_kinds, read_halt
     from lab.notify import Notifier
-    from lab.paper import adopt_path, halt_path, recoveries_path
+    from lab.paper import adopt_path, dispose_path, halt_path, recoveries_path
 
     halt = read_halt(halt_path(cfg))
     if halt is None:
@@ -698,23 +698,50 @@ def cmd_recover(cfg, a):
     if not a.reason:
         print(
             '\nto clear it: lab recover --reason "what you checked and why it is safe"'
-            + ("  [--adopt-broker]" if "reconciliation_mismatch" in halt_kinds(halt) else "")
+            + (
+                "  [--adopt-broker | --dispose-order ID --evidence ...]"
+                if "reconciliation_mismatch" in halt_kinds(halt)
+                else ""
+            )
         )
         return 1
-    if "reconciliation_mismatch" in halt_kinds(halt) and not a.adopt_broker:
+    if a.dispose_order and not (a.evidence or "").strip():
+        raise SystemExit("--dispose-order needs --evidence: what IBKR's order and trade history shows for it")
+    if "reconciliation_mismatch" in halt_kinds(halt) and not (a.adopt_broker or a.dispose_order):
         raise SystemExit(
             "a reconciliation mismatch is cleared by deciding which book is right: add --adopt-broker to take the "
-            "broker's positions as the truth (after checking the broker account), or fix the cause and re-run"
+            "broker's positions as the truth (after checking the broker account), or, for an order the broker "
+            "never reported, --dispose-order ID --evidence '...' after checking its order and trade history; "
+            "or fix the cause and re-run"
         )
     if halt["kind"] == "paper_guard":
         print("note: the account guard will stop trading again unless the broker now reports the paper account")
+    if a.dispose_order:
+        p = dispose_path(cfg)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            json.dumps(
+                {
+                    "orders": a.dispose_order,
+                    "evidence": a.evidence,
+                    "reason": a.reason,
+                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                }
+            )
+        )
     if a.adopt_broker:
         p = adopt_path(cfg)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(json.dumps({"reason": a.reason, "at": datetime.now(UTC).isoformat(timespec="seconds")}))
     clear_halt(halt_path(cfg), a.reason, audit=recoveries_path(cfg))
-    msg = f"hard halt {halt['kind']} cleared by operator: {a.reason}" + (
-        "; the ledger adopts the broker's positions at the next rebalance" if a.adopt_broker else ""
+    msg = (
+        f"hard halt {halt['kind']} cleared by operator: {a.reason}"
+        + ("; the ledger adopts the broker's positions at the next rebalance" if a.adopt_broker else "")
+        + (
+            f"; at the next start the agents dispose of {', '.join(a.dispose_order)} on evidence: {a.evidence}"
+            if a.dispose_order
+            else ""
+        )
     )
     print(msg + f". Recorded in {recoveries_path(cfg).relative_to(cfg.root)}")
     Notifier().send_now(msg)
@@ -1028,6 +1055,13 @@ def build_parser() -> argparse.ArgumentParser:
     rc.add_argument(
         "--adopt-broker", action="store_true", help="for a mismatch: take the broker's positions as the ledger's truth"
     )
+    rc.add_argument(
+        "--dispose-order",
+        action="append",
+        metavar="CLIENT_ORDER_ID",
+        help="an unconfirmed journaled order the broker's records show never executed (needs --evidence)",
+    )
+    rc.add_argument("--evidence", help="what IBKR's order/trade history shows for the disposed order(s); recorded")
     rc.set_defaults(fn=cmd_recover)
     hl = sub.add_parser("health", help="exit 0 if the agents' heartbeat is fresh (for Docker)")
     hl.add_argument("--max-age", type=int, default=180)
