@@ -1,12 +1,13 @@
 # Release hardening review — 23 October 2026
 
-**Candidate:** `3187947a656d395dca13fa5669c7f0b5d62d6beb` on `chatgpt/risk-adaptive-20261022`.
-**Source tree:** `da19f9987de69ac891abd49aaf1f119ec826852f`.
+**Final tested candidate:** `57fdc50d9f19b211cc677f428c5f16648ed46575` on `chatgpt/risk-adaptive-20261022`.
+**Candidate tree:** `7b1e21696a0718f05306071ed43a674510d746e2`.
+**Runtime implementation:** `3187947a656d395dca13fa5669c7f0b5d62d6beb`, tree `da19f9987de69ac891abd49aaf1f119ec826852f`; the final candidate adds review documents and a strengthened account-refusal test, with no runtime change.
 **Baseline reviewed:** Claude's `8c10e4c05a6ec282858909c91544dfc52f3be320`, including `d5c9791` and `43046ab`.
 **Verdict:** improved development candidate; **not release-qualified**. No real or paper broker connected.
 Only Claude can integrate to `main`; this review does not authorize deployment or live trading.
 
-The exact same tree was committed locally as `2f4e56048fbcda006b9c128d78b0ab00242d358f` before publication.
+The runtime implementation tree was committed locally as `2f4e56048fbcda006b9c128d78b0ab00242d358f` before publication.
 Connector publication changes commit metadata, not file contents. The published tree was independently
 compared with the local tree, then local HEAD aligned without changing source files.
 
@@ -70,3 +71,29 @@ capacity and migration qualification; independent security review. These include
 not only external testing. In particular, terminal-order and trade-ID retention now favors correctness over
 bounded JSON growth, and migration does not automatically reset runtime identity. Do not silently remove
 these requirements or treat simulator evidence as real-broker qualification.
+
+
+## Final validation
+
+[CI run 40010796003](https://github.com/gahitchi/trading/actions/runs/40010796003) passed for
+`57fdc50d9f19b211cc677f428c5f16648ed46575`:
+
+- Python 3.13: **390 passed, 1 deselected, 80 upstream warnings in 566.82 seconds**.
+- Python 3.14: **390 passed, 1 deselected, 80 upstream warnings in 569.26 seconds**.
+- Both offline sample/backtest/null workflows passed (p=.182, no alpha claim).
+- Docker build, container CLI/configuration smoke, unprivileged isolation, compose validation, locked
+  wheel/sdist build, lock-export parity, lint/format and collaboration checks all passed.
+- **61 additional regression cases** relative to main's 329-test suite; final focused group **80 passed**.
+- `PYTHONPATH=. .venv/bin/python docs/audits/reproduce_recovery_permutations.py`: **1,440 permutations passed**
+  across two partial fills, cancellation, duplicate callback, recovery and serialized restart. This exercises
+  real execution methods with a test-double broker cache; it is not a LiveNode or IBKR acceptance run.
+
+A stable intermediate full run on the runtime commit had **389 passed, 1 failed, 1 deselected**. The sole
+failure expected the old wrong-account diagnostic; the new guard correctly refused earlier. The final
+candidate updates that diagnostic assertion and **adds** checks that cash, positions and account identity
+remain unchanged. Both complete CI suites then pass. The earlier failure is not reported as green.
+
+Source fingerprint: `32c22af46a7ce0efbf0664c1ce2fb489b97c40d55d7f6c5e63d5f41f670e2b5f`.
+The final handoff/evidence commit changes no runtime, dependency, deployment or test files relative to the
+tested candidate. Its added standalone evidence script is separately linted/formatted and executed.
+Seven release gates remain blocked. Full machine-readable results: `2026-10-23-release-hardening-validation.json`.

@@ -6,7 +6,7 @@
     {
       "id": "code-review",
       "status": "blocked",
-      "criterion": "Claude independently reviews the final code SHA, answers every G009/G010 blocking finding, and integrates only accepted changes after all supported CI jobs pass.",
+      "criterion": "Claude independently reviews the final code SHA, answers every G009/G010/G011 blocking finding, and integrates only accepted changes after all supported CI jobs pass.",
       "evidence": [
         "docs/audits/2026-10-23-full-system-audit.md",
         "tests/test_release_evidence.py",

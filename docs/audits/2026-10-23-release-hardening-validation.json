@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "date": "2026-10-23",
+  "status": "development; not release-qualified",
+  "runtime_commit": "3187947a656d395dca13fa5669c7f0b5d62d6beb",
+  "review_commit": "57fdc50d9f19b211cc677f428c5f16648ed46575",
+  "review_tree": "7b1e21696a0718f05306071ed43a674510d746e2",
+  "source_sha256": "32c22af46a7ce0efbf0664c1ce2fb489b97c40d55d7f6c5e63d5f41f670e2b5f",
+  "ci": {
+    "run_id": 40010796003,
+    "url": "https://github.com/gahitchi/trading/actions/runs/40010796003",
+    "conclusion": "success",
+    "python": {
+      "3.13": {
+        "passed": 390,
+        "deselected": 1,
+        "warnings": 80,
+        "seconds": 566.82
+      },
+      "3.14": {
+        "passed": 390,
+        "deselected": 1,
+        "warnings": 80,
+        "seconds": 569.26
+      }
+    },
+    "other_jobs": {
+      "package": "success",
+      "docker": "success",
+      "lint": "success",
+      "collab": "success"
+    },
+    "offline_workflows": "both passed; ten-resample null p=.182, not an edge claim"
+  },
+  "baseline_regressions": {
+    "commit": "8c10e4c05a6ec282858909c91544dfc52f3be320",
+    "failed": 10,
+    "passed": 4,
+    "deselected": 12
+  },
+  "new_non_llm_cases": 61,
+  "focused_final": {
+    "passed": 80,
+    "seconds": 0.64
+  },
+  "callback_permutations": {
+    "passed": 1440,
+    "script": "docs/audits/reproduce_recovery_permutations.py",
+    "scope": "real ExecutionAgent methods, test-double broker cache, serialized restart; no actual broker or LiveNode"
+  },
+  "intermediate_failures": {
+    "editing_source": "runtime-identity checks correctly failed when development changed source during a harness run",
+    "frozen_runtime": "389 passed, one old diagnostic expectation failed; corrected assertion adds unchanged-state checks; full final CI then green"
+  },
+  "broker_connected": false,
+  "orders_placed": false,
+  "paid_model_tests_run": false,
+  "blocked_gates": [
+    "code-review",
+    "broker-lifecycle",
+    "research-calibration",
+    "market-data-and-execution",
+    "adaptive-product",
+    "operations-and-build",
+    "independent-security"
+  ],
+  "limitations": [
+    "Unfinished adaptive-bank/manual/supervised authority features remain product work",
+    "Retained JSON order/trade archives still require scalable storage/capacity qualification",
+    "Actual broker gaps, buying power, cash attribution, borrow and adapter parity remain unqualified",
+    "No full statistical calibration, physical power-loss/soak or independent security assessment"
+  ],
+  "handoff": "Later evidence-only commit contains this record; runtime, dependency, deployment and tests unchanged from review_commit"
+}
