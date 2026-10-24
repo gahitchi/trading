@@ -25,15 +25,14 @@ class ScheduledSignal(Signal):
                 sig.close()
 
     def target(self, w):
-        out = 0.0
-        for day, sig in self.schedule:
-            result = float(sig.target(tail(w, sig.lookback)))
-            if not np.isfinite(result):
-                raise ValueError("nonfinite scheduled signal")
-            sig.last = clamp_target(result)
-            if w.dates[-1] >= day:
-                out = sig.last
-        return out
+        active = next((sig for day, sig in reversed(self.schedule) if w.dates[-1] >= day), None)
+        if active is None:
+            return 0.0
+        result = float(active.target(tail(w, active.lookback)))
+        if not np.isfinite(result):
+            raise ValueError("nonfinite scheduled signal")
+        active.last = clamp_target(result)
+        return active.last
 
 
 class ScheduledCrossSectional(CrossSectionalSignal):
@@ -55,12 +54,11 @@ class ScheduledCrossSectional(CrossSectionalSignal):
         if not windows:
             return {}
         now = min(w.dates[-1] for w in windows.values())
-        out = {}
-        for day, sig in self.schedule:
-            raw = sig.weights({t: tail(w, sig.lookback) for t, w in windows.items()})
-            if any(not np.isfinite(float(v)) for v in raw.values()):
-                raise ValueError("nonfinite scheduled weights")
-            sig.last = clean_weights(raw)
-            if now >= day:
-                out = sig.last
-        return out
+        active = next((sig for day, sig in reversed(self.schedule) if now >= day), None)
+        if active is None:
+            return {}
+        raw = active.weights({t: tail(w, active.lookback) for t, w in windows.items()})
+        if any(not np.isfinite(float(v)) for v in raw.values()):
+            raise ValueError("nonfinite scheduled weights")
+        active.last = clean_weights(raw)
+        return active.last
