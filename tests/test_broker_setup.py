@@ -52,6 +52,7 @@ def test_gui_broker_setup_is_strictly_local_and_paper_only(tmp_path, monkeypatch
             "mode": "paper",
             "order_setup_enabled": False,
             "installation": installation,
+            "protocol_version": module.SETUP_PROTOCOL_VERSION,
         }
         assert cors["Access-Control-Allow-Origin"] == headers["Origin"]
         bad = {"username": "DUR7654321", "account": "U1234567", "password": "first-secret"}
@@ -83,6 +84,7 @@ def test_gui_broker_setup_is_strictly_local_and_paper_only(tmp_path, monkeypatch
             "mode": "paper",
             "order_setup_enabled": True,
             "installation": installation,
+            "protocol_version": module.SETUP_PROTOCOL_VERSION,
         }
         assert "first-secret" not in json.dumps(state) and "DUR7654321" not in json.dumps(state)
         assert request("POST", "/connect", good)[0] == 400

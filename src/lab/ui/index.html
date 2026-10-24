@@ -75,12 +75,12 @@
         <fieldset>
           <legend><span class="step">1</span>Paper account</legend>
           <div class="fields">
-            <label>Paper account number (not login username)<input name="account" placeholder="DU1234567" autocomplete="off" spellcheck="false" required></label>
+            <label>Approved paper trading account (DU… only)<input name="account" placeholder="DU1234567" autocomplete="off" spellcheck="false" required></label>
             <label>Capital to allocate (USD)<input name="capital" type="number" min="1000" max="1000000000" step="100" required></label>
           </div>
           <details>
             <summary>Gateway connection</summary>
-            <p class="help">Configure your IBKR paper login above when approval is complete. The local setup helper keeps passwords out of the trading plan.</p>
+            <p class="help">This trading plan requires an approved DU paper account. For a DUR Free Trial account, use the read-only login at the top of the page; do not enter a DUR number here. The local helper keeps passwords out of the trading plan.</p>
             <div class="fields">
               <label>Host<input name="host" spellcheck="false" required></label>
               <label>Paper port<select name="port"><option value="4002">4002, IB Gateway</option><option value="7497">7497, Trader Workstation</option><option value="4004">4004, Docker Gateway</option></select></label>

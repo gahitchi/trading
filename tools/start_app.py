@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -17,6 +18,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 URL = "http://127.0.0.1:8765"
+SETUP_PROTOCOL_VERSION = 2
+SETUP_PORT = 8766
 # Browsers that can open a page as a standalone app window (no tabs or address bar), in order of preference.
 APP_BROWSERS = [
     *(
@@ -186,23 +189,73 @@ def record_launch_failure(exc: Exception) -> Path:
     return path
 
 
+def owned_setup_processes(root: Path) -> list[int]:
+    """Find only our own exact helper argv under Linux; never kill by substring/pkill.
+
+    Older launcher versions started the helper detached without a PID file.
+    /proc identifies it without accidentally matching another user's process.
+    """
+    if sys.platform != "linux":
+        return []
+    script = (root / "tools" / "broker_setup.py").resolve()
+    result = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit() or int(entry.name) == os.getpid():
+            continue
+        try:
+            if entry.stat().st_uid != os.getuid():
+                continue
+            argv = (entry / "cmdline").read_bytes().rstrip(b"\\0").split(b"\\0")
+            if (
+                len(argv) == 4
+                and Path(os.fsdecode(argv[1])).resolve() == script
+                and argv[2] == b"--root"
+                and Path(os.fsdecode(argv[3])).resolve() == root.resolve()
+            ):
+                result.append(int(entry.name))
+        except (OSError, ValueError):
+            continue
+    return result
+
+
 def start_setup_service(root):
-    """The broker installer is a loopback-only, user-owned process; no Docker socket is mounted."""
-    port = 8766
-    url = f"http://127.0.0.1:{port}/status"
-    try:
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(
-            urllib.request.Request(url, headers={"Origin": "http://127.0.0.1:8765"}), timeout=1
-        ) as response:
-            if response.status == 200:
-                state = json.load(response)
-                expected = hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()
-                if state.get("installation") != expected:
-                    raise ValueError("A different Trading Lab installation is using local setup port 8766.")
-                return
-    except OSError:
-        pass
+    """Keep localhost helper upgraded without touching the engine or broker Gateway."""
+    url = f"http://127.0.0.1:{SETUP_PORT}/status"
+    expected = hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def status():
+        try:
+            with opener.open(
+                urllib.request.Request(url, headers={"Origin": URL}), timeout=1
+            ) as response:
+                if response.status != 200:
+                    return None
+                return json.load(response)
+        except (OSError, ValueError):
+            return None
+
+    state = status()
+    if state is not None:
+        if state.get("installation") != expected:
+            raise ValueError("A different Trading Lab installation is using local setup port 8766.")
+        if state.get("protocol_version") == SETUP_PROTOCOL_VERSION:
+            return
+        # An old helper cannot validate Free Trial IDs and must be replaced.
+        matches = owned_setup_processes(root)
+        if len(matches) != 1:
+            raise ValueError(
+                "Outdated broker setup service on port 8766. Its owner could not be verified safely. "
+                "Restart your desktop login session, then open Trading Lab again."
+            )
+        os.kill(matches[0], signal.SIGTERM)
+        for _ in range(30):
+            if status() is None:
+                break
+            time.sleep(0.1)
+        else:
+            raise ValueError("Old broker helper did not release port 8766; restart the desktop login session.")
+
     process_group = (
         {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
     )
@@ -214,6 +267,14 @@ def start_setup_service(root):
         stderr=subprocess.DEVNULL,
         **process_group,
     )
+    for _ in range(40):
+        fresh = status()
+        if fresh is not None:
+            if fresh.get("installation") != expected or fresh.get("protocol_version") != SETUP_PROTOCOL_VERSION:
+                raise ValueError("Port 8766 is served by a different or outdated broker setup helper.")
+            return
+        time.sleep(0.1)
+    raise ValueError("The upgraded broker setup helper did not start. Verify port 8766 is available.")
 
 
 def main():

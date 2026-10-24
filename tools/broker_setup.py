@@ -23,6 +23,7 @@ USER_RE = re.compile(r"[A-Za-z0-9_.@-]{1,100}\Z")
 PAPER_RE = re.compile(r"DU[0-9]{5,}\Z")
 DEMO_RE = re.compile(r"DUR[0-9]{5,}\Z")
 MAX_INPUT = 4096
+SETUP_PROTOCOL_VERSION = 2  # read-only Free Trial (DUR) supported in setup, NOT order submission
 
 
 def private_file(path: Path, value: str) -> None:
@@ -164,6 +165,7 @@ class SetupHandler(BaseHTTPRequestHandler):
                 "mode": "demo" if account and DEMO_RE.fullmatch(account) else "paper",
                 "order_setup_enabled": bool(account and PAPER_RE.fullmatch(account)),
                 "installation": hashlib.sha256(str(self.server.root).encode("utf-8")).hexdigest(),
+                "protocol_version": SETUP_PROTOCOL_VERSION,
             },
         )
 

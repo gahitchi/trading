@@ -33,7 +33,7 @@ The installation can still be performed without launching the GUI:
 bash install-arch.sh --no-launch
 ```
 
-On subsequent launches, the existing GUI is reused; it is not rebuilt while it is running. **After upgrading GUI or broker-setup code** you must recreate the app container and restart the old loopback setup helper process (or reboot the desktop to stop the old helper). Use `docker compose -f compose.app.yml up --build -d lab` to install GUI changes; then launch `bash start-app-arch.sh`. Never delete account credentials simply to force a helper restart.
+On subsequent launches, the existing GUI is reused; it is not rebuilt while it is running. **After upgrading GUI code**, recreate only the app container with `docker compose -f compose.app.yml up --build -d lab`, then run `bash start-app-arch.sh`. The launcher checks its local broker helper protocol and automatically replaces a known outdated helper for this checkout (without changing the Gateway or trading engine). An unexpected or unverifiable listener on port 8766 is never killed; the launcher instead requests a desktop re-login. Never delete account credentials to force a helper restart. If any trading engine is active, do not recreate its container without reviewing and safely stopping its current work.
 The GUI is reachable at `http://127.0.0.1:8765` and the credential helper at
 `127.0.0.1:8766` only; neither is exposed on the network. The Gateway API and VNC,
 once explicitly configured, are likewise published on loopback.
