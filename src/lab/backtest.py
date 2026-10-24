@@ -358,6 +358,8 @@ def run(
                     leverage=p.leverage,
                     periods_per_year=bars_per_year,
                     weighting=cfg.portfolio.weighting,
+                    session_bars=sp.bars_per_session if quick else 1,
+                    flat_at_close=quick and cfg.trading.flat_at_close,
                 )
             )
         )
@@ -435,6 +437,10 @@ def run(
         metrics["impact_costs"] = round(fees.totals["impact"], 2)
         if settlements:
             metrics["delistings_settled"] = settlements
+        # Realized hard-limit breaches at decision marks, reported apart from the limits themselves (G013-F2).
+        kinds = [e.kind for e in recorder.risk]
+        metrics["cap_breach_decisions"] = kinds.count("cap_breach")
+        metrics["cap_breach_unresolved"] = kinds.count("cap_breach_unresolved")
         result = RunResult(
             label=label
             or ", ".join(sorted({s.signal.label() for s in sleeves} | {x[0].label() for x in cross_sectional})),

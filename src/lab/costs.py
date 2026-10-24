@@ -3,8 +3,9 @@
 Simulated fills happen at the real opening print. What a real order pays beyond the print is charged with the
 commission (Gemini audit F-R06), per fill:
 
-  half-spread    Corwin & Schultz (2012) high-low estimator over the last `cost_window` sessions, floored at
-                 `min_half_spread_bps`
+  half-spread    Corwin & Schultz (2012) high-low estimator, the median of the last `cost_window` sessions'
+                 two-day estimates, floored at `min_half_spread_bps`. It errs high for very liquid stocks
+                 (GOOG 2004-2013: about 7 bps against quoted spreads of a few bps): conservative
   market impact  eta x daily volatility x sqrt(order shares / average daily volume) (square-root law)
 
 Every input is known at the decision: the statistics of the sessions completed before the order. Per-share
@@ -66,8 +67,11 @@ class MarketProfile:
         rets = np.log(df["close"]).diff()
         vol = rets.rolling(w, min_periods=2).std().to_numpy()
         adv = df["volume"].rolling(w, min_periods=1).mean().to_numpy()
+        # The median of the two-day estimates: Corwin-Schultz overstates liquid stocks' spreads, and a few
+        # wide-range days (news, a volatility burst) would dominate a mean (GOOG 2004-2013: half-spread mean
+        # 26 bps, median 7 bps).
         hs = pd.Series(corwin_schultz(df["high"].to_numpy(float), df["low"].to_numpy(float)) / 2)
-        hs = hs.rolling(w, min_periods=1).mean().to_numpy()
+        hs = hs.rolling(w, min_periods=1).median().to_numpy()
         floor = c.min_half_spread_bps / 1e4
         closes = (pd.DatetimeIndex(df.index).normalize() + pd.Timedelta(hours=16)).tz_localize(NY).tz_convert("UTC")
         return cls(

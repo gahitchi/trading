@@ -90,9 +90,9 @@ def test_invalid_parameters_are_refused(costs):
     assert replace(M, cushion=0.1).cushion == 0.1
 
 
-@pytest.mark.xfail(strict=True, reason="G013 open: a full book drifts over its cap until the rebalance band trims")
-def test_a_full_book_never_drifts_over_its_cap(goog_lab):
-    """Openings fill to 1.487x of a 1.5x cap; a year of debit interest takes the held book to 1.524x first."""
+def test_a_full_book_drifting_over_its_cap_is_trimmed_back(goog_lab):
+    """G013-F1: openings fill to 1.487x of a 1.5x cap; a year of debit interest pushed the held book to 1.524x
+    because the rebalance band skipped the small reductions. Breaches are now trimmed at the next decision."""
     import pandas as pd
 
     from tests.test_long_short import Constant, _risk, _run
@@ -101,8 +101,80 @@ def test_a_full_book_never_drifts_over_its_cap(goog_lab):
         {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1e7},
         index=pd.bdate_range("2021-01-04", periods=260),
     )
+    from dataclasses import replace
+
+    cfg = replace(goog_lab, costs=replace(goog_lab.costs, slippage=False))  # G013's commission-only scenario
     risk = _risk(max_weight=1.0, max_gross=1.5, max_short_gross=0.0, min_net=0.0, max_net=1.5)
-    r = _run(
-        goog_lab, Constant(x=1.0), {"GOOG": flat}, flat.index[1].date(), None, risk, leverage=1.5, max_leverage=1.5
-    )
-    assert r.gross.max() <= 1.5
+    r = _run(cfg, Constant(x=1.0), {"GOOG": flat}, flat.index[1].date(), None, risk, leverage=1.5, max_leverage=1.5)
+    # Limits bind decisions, not every mark (G013-F2): a breach seen at a decision is reported and corrected.
+    assert r.metrics["cap_breach_decisions"] > 0 and r.metrics["cap_breach_unresolved"] == 0
+    assert r.gross.max() < 1.5 + 0.001  # at most one day of interest past the cap, never the band's 2.4%
+    assert r.gross.iloc[-1] > 1.45
+
+
+def _breach_agent(held, weights, **limits):
+    from lab.config import RiskSettings
+    from tests.test_review_execution import _agent
+
+    events = []
+    agent, sent = _agent(dict(held), weights, risk_limits=RiskSettings(**{"max_drawdown": 0.5, **limits}))
+    agent.config.min_trade_value = 500  # the trim below is worth $100
+    agent.config.rebalance_band = 0.2  # and inside the band
+    agent._risk_event = lambda kind, detail: events.append((kind, detail))
+    return agent, sent, events
+
+
+@pytest.mark.parametrize(
+    "held, weights, limits, trim",
+    [
+        # small book: a $100 trim, below the $500 minimum order and inside the 20% band
+        ({"A": 16}, {"A": 1.5}, {"max_weight": 2.0, "max_gross": 1.5, "max_net": 1.5}, ("A", -1)),
+        # short book drifted past its limit: buy back, though the band would skip it
+        (
+            {"A": -6},
+            {"A": -0.5},
+            {"max_weight": 1.0, "max_gross": 1.0, "max_short_gross": 0.5, "min_net": -1.0},
+            ("A", 1),
+        ),
+        # net ceiling: longs trimmed
+        (
+            {"A": 12, "B": -1},
+            {"A": 1.0, "B": -0.1},
+            {"max_weight": 1.5, "max_gross": 1.5, "max_short_gross": 0.5, "min_net": -1.0, "max_net": 1.0},
+            ("A", -2),
+        ),
+        # net floor: shorts bought back
+        (
+            {"A": 2, "B": -8},
+            {"A": 0.2, "B": -0.7},
+            {"max_weight": 1.0, "max_gross": 1.5, "max_short_gross": 1.0, "min_net": -0.5, "max_net": 1.0},
+            ("B", 1),
+        ),
+    ],
+)
+def test_reductions_that_restore_a_limit_skip_the_band_and_minimum(held, weights, limits, trim):
+    from lab.agents.execution import ExecutionAgent
+
+    agent, sent, events = _breach_agent(held, weights, **limits)
+    ExecutionAgent.rebalance(agent)
+    assert (trim[0], trim[1], False) in sent
+    breach = [d for k, d in events if k == "cap_breach"]
+    assert breach and "held book exceeds" in breach[0] and "gross" in breach[0] and "initial margin" in breach[0]
+    assert "cap_breach_unresolved" not in [k for k, _ in events]
+
+
+def test_a_breach_no_order_can_correct_is_reported_again():
+    from lab.agents.execution import ExecutionAgent
+
+    agent, sent, events = _breach_agent({"A": 16}, {"A": 1.5}, max_weight=2.0, max_gross=1.5, max_net=1.5)
+    agent.pending = {"earlier": {"ticker": "A", "side": "SELL", "qty": 1}}  # an unsettled order for the stock
+    ExecutionAgent.rebalance(agent)
+    assert sent == [] and "cap_breach_unresolved" in [k for k, _ in events]
+
+
+def test_a_book_within_its_limits_keeps_the_band_and_minimum():
+    from lab.agents.execution import ExecutionAgent
+
+    agent, sent, events = _breach_agent({"A": 14}, {"A": 1.3}, max_weight=2.0, max_gross=1.5, max_net=1.5)
+    ExecutionAgent.rebalance(agent)
+    assert sent == [] and not events

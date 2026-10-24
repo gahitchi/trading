@@ -290,3 +290,45 @@ def test_delisting_records_need_a_vendor_and_a_value(goog_lab, tmp_path):
     assert rec["assumed"] and rec["delist_return"] == -0.30
     q = data.quality(goog_lab, ["X"])
     assert "ASSUMED -30%" in data.quality_warning(q)
+
+
+# ----------------------------------------------------------------------------- F-R14
+
+
+def test_walk_forward_runs_only_the_active_window_and_the_next_one_warming_up():
+    from types import SimpleNamespace
+
+    from lab.signals.base import Signal, Window
+    from lab.signals.walk_forward import ScheduledSignal
+
+    class Counting(Signal):
+        name = "test_counting"
+        lookback = 10
+
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+            self.closed = False
+
+        def target(self, w):
+            self.calls += 1
+            return 1.0
+
+        def close(self):
+            self.closed = True
+
+    starts = pd.date_range("2021-01-04", periods=5, freq="91D")
+    policy = ScheduledSignal([(d.date(), SimpleNamespace(make=Counting)) for d in starts])
+    days = pd.bdate_range("2021-01-04", "2022-03-31")
+    for i in range(len(days)):
+        lo = max(0, i - 9)
+        stamps = days[lo : i + 1].to_numpy()
+        ones = np.ones(len(stamps))
+        w = Window(ones, ones, ones, ones, ones, stamps, np.zeros(len(stamps), dtype=int))
+        assert policy.target(w) == 1.0
+    sigs = [s for _, s in policy.schedule]
+    # Each signal ran over its own ~65 sessions plus a warm-up of at most 25 calendar days, never all ~320.
+    assert all(s.calls < 100 for s in sigs[:-1]) and sum(s.calls for s in sigs) < 2 * len(days)
+    assert all(s.closed for s in sigs[:-1]) and not sigs[-1].closed
+    policy.close()
+    assert sigs[-1].closed

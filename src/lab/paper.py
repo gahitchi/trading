@@ -412,6 +412,8 @@ def build_node(
                 leverage=cfg.portfolio.leverage,
                 periods_per_year=252 * sp.bars_per_session,
                 weighting=cfg.portfolio.weighting,
+                session_bars=sp.bars_per_session if session else 1,
+                flat_at_close=bool(session) and cfg.trading.flat_at_close,
                 state_path=str(rt / "allocator.json"),
             )
         )

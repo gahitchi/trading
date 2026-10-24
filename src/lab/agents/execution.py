@@ -61,6 +61,30 @@ def _liquidity_cap(seen, participation: float | None) -> float | None:
     return math.floor(participation * sum(v for _, v in seen) / len(seen))
 
 
+def _held_breach(held: dict, prices: dict, equity: float, limits, margin) -> str | None:
+    """Which hard limit (per stock, gross, short book, net, initial margin) the held book breaks at the
+    current marks, or None. Without risk limits (component tests) nothing is checked."""
+    if limits is None or not any(held.values()):
+        return None
+    from lab.reservations import check_openings
+
+    reason = check_openings(held, {}, prices, equity, limits, margin or MarginSettings())
+    return reason.replace("possible fill exceeds", "held book exceeds") if reason else None
+
+
+def _exposure_note(held: dict, prices: dict, equity: float, margin) -> str:
+    """The book's exposure at the decision marks, for breach reports (G013-F2)."""
+    if equity <= 0:
+        return "no positive equity"
+    w = {t: q * prices.get(t, 0.0) / equity for t, q in held.items() if q}
+    return (
+        f"gross {sum(abs(v) for v in w.values()):.4f}, net {sum(w.values()):.4f}, "
+        f"short {-sum(min(v, 0) for v in w.values()):.4f}, "
+        f"largest {max((abs(v) for v in w.values()), default=0):.4f}, "
+        f"initial margin {mg.initial_requirement(w, margin or MarginSettings()):.4f} of equity"
+    )
+
+
 def _with_opening(current: float, target: float, opening: float) -> float:
     """The target that keeps the order's direction but adds only `opening` shares of new exposure."""
     side = math.copysign(1.0, target)
@@ -822,6 +846,15 @@ class ExecutionAgent(Strategy):
                 self._risk_event("authority_blocked", self.blocked_reason)
                 return
         reduce_only = self.reduce_only or bool(halt_kinds(halt) & {"margin_call", "cash_mismatch"})
+        # A held book past a hard limit at the decision marks (drift from prices, interest or fees): the
+        # reductions that restore it go out whatever their size (G013-F1, Gemini audit F-R13). The limits bind
+        # decisions and submissions; marked holdings can still cross them between decisions, so every breach
+        # is reported with the book's exposure, and one that no order can correct is reported again.
+        margin = getattr(self.config, "margin", None)
+        breach = _held_breach(self.held, self.prices, snap.equity, getattr(self.config, "risk_limits", None), margin)
+        if breach:
+            self._risk_event("cap_breach", f"{breach}; {_exposure_note(self.held, self.prices, snap.equity, margin)}")
+        corrective = 0
         orders = []
         borrow_blocked = False
         for ticker, iid in self.config.instruments.items():
@@ -857,13 +890,15 @@ class ExecutionAgent(Strategy):
             if diff == 0:
                 continue
             value = abs(diff) * price
-            if target != 0 and value < self.config.min_trade_value:
+            restores = bool(breach) and current != 0 and target * current >= 0 and abs(target) < abs(current)
+            if target != 0 and value < self.config.min_trade_value and not restores:
                 continue
             if (
                 target != 0
                 and current != 0
                 and target * current > 0
                 and value < self.config.rebalance_band * snap.equity
+                and not restores
             ):
                 continue  # small drift: not worth the commission
             if self.cache.orders_open_count(instrument_id=iid) > 0:
@@ -873,7 +908,14 @@ class ExecutionAgent(Strategy):
                 self._risk_event("order_pending", f"{ticker}: previous order still unsettled; no new order today")
                 continue
             orders.append((_opening(current, target), target, current, iid, ticker, price))
+            corrective += restores
 
+        if breach and not corrective:
+            self._risk_event(
+                "cap_breach_unresolved",
+                f"{breach}: no corrective order could be sent this decision (pending or open orders, missing "
+                "marks or no reducing target); additions stay blocked",
+            )
         orders.sort(key=lambda o: o[0] > 0)
         # A reduction is not settled until its broker report arrives. Gross-only
         # headroom cannot enforce short/net/margin limits under partial fills (ChatGPT, G009).

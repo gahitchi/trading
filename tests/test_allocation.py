@@ -120,3 +120,98 @@ def test_the_allocator_demands_twenty_shared_returns_whatever_its_window():
     agent.closes = {t: deque(rows) for t, rows in closes.items()}
     agent.targets = {"s:S0": 1.0, "s:S1": 1.0}
     assert agent.weights() == {"S0": 0.5, "S1": 0.5}  # ten returns: still equal
+
+
+# ----------------------------------------------------------------------------- Gemini audit F-R10 to F-R12
+
+
+def test_average_linkage_does_not_chain():
+    """F-R10: on a chain of stocks (each close to its neighbour only), single linkage peels one stock off
+    against all the others at the root; average linkage splits the chain in balanced halves."""
+    from lab.allocation import _average_linkage_tree, _leaves
+
+    pos = np.array([0.0, 1.0, 2.1, 3.3, 4.6, 6.0])  # each gap a little wider than the last
+    dist = np.abs(pos[:, None] - pos[None, :])
+
+    def single_linkage_root(d):  # the previous implementation's merge rule
+        clusters = [[i] for i in range(len(d))]
+        while len(clusters) > 2:
+            pairs = [
+                (min(d[x, y] for x in a for y in b), i, j)
+                for i, a in enumerate(clusters)
+                for j, b in enumerate(clusters)
+                if i < j
+            ]
+            _, i, j = min(pairs)
+            clusters[i] += clusters.pop(j)
+        return sorted(len(c) for c in clusters)
+
+    assert single_linkage_root(dist) == [1, 5]  # the outermost stock alone against the rest
+    left, right = _average_linkage_tree(dist)
+    assert min(len(_leaves(left)), len(_leaves(right))) >= 2
+
+
+def test_correlations_are_shrunk_toward_zero_with_little_history():
+    """F-R10: 25 returns of 8 independent stocks give sample correlations of +/-0.2 by chance alone."""
+    rng = np.random.default_rng(11)
+    rets = rng.normal(0, 0.01, (8, 25))
+    per = {f"S{i}": {(k, k + 1): float(r) for k, r in enumerate(row)} for i, row in enumerate(rets)}
+    cov = allocation.covariance(per, list(per), 20)
+    sd = np.sqrt(np.diag(cov))
+    shrunk = np.abs(cov / np.outer(sd, sd))[~np.eye(8, dtype=bool)].mean()
+    raw = np.abs(np.corrcoef(rets))[~np.eye(8, dtype=bool)].mean()
+    assert shrunk < 0.5 * raw
+    assert np.all(np.linalg.eigvalsh(cov) >= 0)
+
+
+def test_a_newcomer_no_longer_resets_everyone_to_equal_weights():
+    """F-R11: four stocks with 200 returns and one listed 10 returns ago. The intersection of all five had
+    10 returns, so every stock fell back to 1/N; pairwise estimates keep the risk weighting."""
+    rng = np.random.default_rng(12)
+    rets = rng.normal(0, 0.01, (4, 200)) * np.array([[1.0], [2.0], [3.0], [4.0]])
+    closes = _closes(rets)
+    closes["NEW"] = closes["S0"][-11:]  # priced only for the last 10 intervals
+    w = allocation.risk_weights("inverse_vol", closes, ["S0", "S1", "S2", "S3", "NEW"], 20)
+    assert w["S0"] > 2 * w["S3"]  # the calm stock still gets more
+    assert 0 < w["NEW"] < 0.5
+
+
+def _allocator(**kw):
+    from collections import deque
+
+    from lab.agents.allocator import AllocatorAgent, AllocatorAgentConfig
+
+    agent = AllocatorAgent(AllocatorAgentConfig(sleeves={"s:A": ("A", 1.0)}, target_vol=0.2, max_leverage=5, **kw))
+    agent.closes = {"A": deque(maxlen=10_000)}
+    return agent
+
+
+def _session_closes(days=10, bars=26, intra=0.001, gap=0.03, seed=3):
+    import pandas as pd
+
+    rng = np.random.default_rng(seed)
+    price, rows = 100.0, []
+    for d in pd.bdate_range("2026-03-02", periods=days):
+        price *= np.exp(rng.normal(0, gap))  # the overnight move
+        for b in range(bars):
+            price *= np.exp(rng.normal(0, intra))
+            ts = pd.Timestamp(d) + pd.Timedelta(hours=9, minutes=45 + 15 * b)
+            rows.append((int(ts.tz_localize("America/New_York").value), price))
+    return rows
+
+
+def test_intraday_volatility_separates_overnight_from_intrabar_risk():
+    """F-R12: at 15 minutes, one 3% overnight gap per session was counted as a 15-minute return and scaled
+    by 252 x 26: the ex-ante volatility of a book that is flat at the close was far too high."""
+    rows = _session_closes(days=80)
+    flat = _allocator(session_bars=26, flat_at_close=True, periods_per_year=252 * 26, vol_window=3000)
+    held = _allocator(session_bars=26, flat_at_close=False, periods_per_year=252 * 26, vol_window=3000)
+    mixed = _allocator(periods_per_year=252 * 26, vol_window=3000)  # the old estimate: every pair alike
+    for a in (flat, held, mixed):
+        a.closes["A"].extend(rows)
+    s_flat, s_held, s_mixed = (a._vol_scale({"A": 1.0}) for a in (flat, held, mixed))
+    intrabar_vol = 0.001 * np.sqrt(252 * 25)
+    assert s_flat == pytest.approx(min(5, 0.2 / intrabar_vol), rel=0.25)  # only the risk actually held
+    assert s_held < s_flat and s_mixed < 0.5 * s_flat
+    overnight_vol = np.sqrt(0.001**2 * 252 * 25 + 0.03**2 * 252)
+    assert s_held == pytest.approx(0.2 / overnight_vol, rel=0.25)
