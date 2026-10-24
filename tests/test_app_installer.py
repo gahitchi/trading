@@ -21,8 +21,6 @@ def installer():
     return module
 
 
-
-
 def test_upgraded_launcher_replaces_only_matching_old_broker_helper(tmp_path, monkeypatch):
     """An old helper on port 8766 must not outlive a GUI upgrade (Linux regression)."""
     if sys.platform != "linux":
