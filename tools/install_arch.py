@@ -88,7 +88,8 @@ def ensure_system() -> bool:
         return True
     print(
         "Docker is running, but this login session cannot use its socket yet. "
-        "The KDE shortcut can be installed now. Log out of KDE and back in, then launch Trading Lab. "
+        + ("The optional 'sg' command is also unavailable. " if not shutil.which("sg") else "")
+        + "The KDE shortcut can be installed now. Log out of KDE and back in, then launch Trading Lab. "
         "If it still fails, check: id -nG; ls -l /run/docker.sock; docker info."
     )
     return False

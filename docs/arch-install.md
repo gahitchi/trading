@@ -13,7 +13,7 @@ cd "$HOME/Applications/trading-lab"
 bash install-arch.sh
 ```
 
-The installer asks for permission before granting Docker group access. **The `docker` group is equivalent to root access**; decline and configure rootless Docker separately if you do not accept that permission. After accepting, it checks the actual socket: if `sg docker` still cannot connect but `sudo docker info` succeeds, it installs the KDE shortcut and defers the first launch until you log out of KDE and back in. The installer never silently runs the trading app as root. First-time dependencies and image builds require network access.
+The installer asks for permission before granting Docker group access. **The `docker` group is equivalent to root access**; decline and configure rootless Docker separately if you do not accept that permission. On Arch, `sg` is an **optional** convenience and may not be installed. If group membership was just granted but Docker cannot be used from the current KDE session, the installer creates the shortcut and defers launch until a complete KDE logout and login. Check `docker info` without `sudo` after logging back in. The installer never silently runs the trading app as root. First-time dependencies and image builds require network access.
 
 After installation, open **Trading Lab** from KDE's application menu (or run
 `bash start-app-arch.sh --interactive`). The **complete local GUI opens immediately, even before IBKR approves your account**.
@@ -43,14 +43,14 @@ once explicitly configured, are likewise published on loopback.
 
 ```bash
 # See the services and their status
-sg docker -c 'docker compose -f compose.app.yml ps'
+docker compose -f compose.app.yml ps
 # Stop the app and Gateway (does not automatically liquidate broker positions)
-sg docker -c 'docker compose -f compose.app.yml down'
+docker compose -f compose.app.yml down
 # Run the focused offline tests (requires pytest; no Docker or brokerage account)
 python3 -m pytest -q tests/test_arch_install.py
 ```
 
-For an already logged-in Docker user, omit the `sg docker -c` wrapper. The KDE launcher now appends to `~/.local/state/trading-lab/launcher.log` (or `$XDG_STATE_HOME/trading-lab/launcher.log`) **even when started from a terminal**. It rotates when the file reaches 1 MB, keeping three previous files. Python setup exceptions are in `~/.local/state/trading-lab/crash.log` (also rotated). UI/server crashes are in `results/app/app-crash.log` and strategy/engine output in `results/app/engine.log` under the repository if the container uses the default results path; if configured otherwise, check the selected results directory. The application records fatal monitor, HTTP and server exceptions without automatically uploading logs.
+These commands require working Docker access for your desktop user; after granting group membership, log out of KDE and back in before running them. The KDE launcher now appends to `~/.local/state/trading-lab/launcher.log` (or `$XDG_STATE_HOME/trading-lab/launcher.log`) **even when started from a terminal**. It rotates when the file reaches 1 MB, keeping three previous files. Python setup exceptions are in `~/.local/state/trading-lab/crash.log` (also rotated). UI/server crashes are in `results/app/app-crash.log` and strategy/engine output in `results/app/engine.log` under the repository if the container uses the default results path; if configured otherwise, check the selected results directory. The application records fatal monitor, HTTP and server exceptions without automatically uploading logs.
 
 To inspect startup failures without exposing credentials in chat:
 
@@ -58,7 +58,7 @@ To inspect startup failures without exposing credentials in chat:
 tail -n 100 "${XDG_STATE_HOME:-$HOME/.local/state}/trading-lab/launcher.log"
 tail -n 100 "${XDG_STATE_HOME:-$HOME/.local/state}/trading-lab/crash.log"
 # If the app container dies before it writes an app-crash log:
-sg docker -c 'docker compose -f compose.app.yml logs --tail 100 lab'
+docker compose -f compose.app.yml logs --tail 100 lab
 ```
 
 **Security:** all new local diagnostic files are private and rotating, but broker/library output may still include usernames, account details or tokens not recognized by automated masking. Review/redact any log **before** sending it to anyone. Never send `.env`, `secrets/`, raw broker captures, or a complete `results/` directory. If the Docker service cannot start, check `sudo systemctl status docker` and `journalctl -u docker -b`. If an account has already placed paper orders or holds positions, do not treat container shutdown as liquidation: inspect broker positions and perform the documented stop/recovery procedure.

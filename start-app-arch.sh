@@ -11,10 +11,19 @@ launch() {
   if docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then
     python3 tools/start_app.py
   elif id -nG "$(id -un)" | tr ' ' '\n' | grep -qx docker; then
-    # Newly-added group can be used without logging out; both paths run as the desktop user.
-    sg docker -c 'exec python3 tools/start_app.py'
+    # An on-disk group change may not yet be active in the KDE login session.
+    # On minimal Arch installs 'sg' is not installed; it must stay optional.
+    if command -v sg >/dev/null 2>&1; then
+      sg docker -c 'exec python3 tools/start_app.py'
+    else
+      printf "Docker group access is not active in this login, and 'sg' is unavailable.\n" >&2
+      printf 'Log out of KDE completely, log back in, verify: docker info\n' >&2
+      printf 'Then reopen Trading Lab; your existing installation is preserved.\n' >&2
+      return 1
+    fi
   else
-    printf 'No Docker access. Run bash install-arch.sh, then open Trading Lab again.\n' >&2
+    printf 'No Docker access. Check: sudo systemctl status docker; id -nG; docker info\n' >&2
+    printf 'If just added to the docker group, log out of KDE and back in.\n' >&2
     return 1
   fi
 }

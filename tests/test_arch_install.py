@@ -131,6 +131,46 @@ def test_declining_docker_group_is_safe(monkeypatch):
     assert not any("usermod" in a for a in calls)
 
 
+
+def test_missing_sg_gives_actionable_failure_instead_of_command_not_found(tmp_path):
+    """Simulate an Arch login with persisted docker membership but no sg binary."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    source = Path(__file__).parents[1] / "start-app-arch.sh"
+    (root / "start-app-arch.sh").write_text(source.read_text())
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    for executable in ("dirname", "tr", "grep", "mkdir", "chmod", "touch", "date", "tee", "stat"):
+        target = Path("/usr/bin") / executable
+        assert target.exists()
+        (bindir / executable).symlink_to(target)
+    docker = bindir / "docker"
+    docker.write_text("#!/bin/sh\\nexit 1\\n")
+    docker.chmod(0o755)
+    ident = bindir / "id"
+    ident.write_text(
+        '#!/bin/sh\\nif [ "$1" = "-un" ]; then echo desktop-user; else echo "desktop-user docker"; fi\\n'
+    )
+    ident.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": str(bindir),  # No sg available, even if the CI host itself installs one.
+        "HOME": str(tmp_path),
+        "XDG_STATE_HOME": str(tmp_path / "state"),
+    }
+    result = subprocess.run(
+        ["/usr/bin/bash", str(root / "start-app-arch.sh"), "--interactive"],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1, result.stderr
+    assert "sg: command not found" not in result.stdout
+    assert "'sg' is unavailable" in result.stdout
+    assert "Log out of KDE completely" in result.stdout
+    assert "Launcher exit code: 1" in (tmp_path / "state/trading-lab/launcher.log").read_text()
+
 def test_launcher_uses_existing_docker_socket_without_root(tmp_path):
     root = Path(__file__).parents[1]
     fake = tmp_path / "bin"
