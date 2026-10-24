@@ -5,9 +5,9 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
-import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
