@@ -1,16 +1,20 @@
 # Paper operating controls
 
 `lab paper` starts autonomous paper operation on the first run. It creates a local
-24-hour mandate bound to the account, strategy artifacts, universe and implementation
-identity. A restart preserves the mandate and **does not renew it**. Use
-`--authority-hours 168` when explicitly issuing a week-long mandate. Real-money
-accounts remain prohibited.
+mandate bound to the account, strategy artifacts, universe and implementation identity.
+An autonomous mandate is **standing** by default: it does not expire, because unattended,
+continuous trading is the base (Gabriel, C003). A time limit is opt-in: `--authority-hours N`
+(at most 168) issues an autonomous lease, and supervised and manual mandates are always leases
+(default 24 hours). A restart preserves the mandate and never renews an expired lease.
+Revoke a standing mandate by issuing another (`lab control renew --mode supervised`), or stop
+trading with `lab kill`. Real-money accounts remain prohibited.
 
 ```sh
 lab paper --signals sma_trend --tickers SPY QQQ --mode supervised
 lab control status
 lab control approve --request EXACT_REQUEST_ID
-lab control renew --mode autonomous --hours 24
+lab control renew --mode autonomous            # standing (no expiry)
+lab control renew --mode autonomous --hours 24 # opt-in lease
 lab control renew --mode manual --hours 8 --target SPY=0.2 --target QQQ=0.1
 ```
 

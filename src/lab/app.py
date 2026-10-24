@@ -91,9 +91,13 @@ def validate_settings(s, universe):
     if type(s["port"]) is not int:
         raise ValueError("The Gateway port must be a number.")
     check_paper_settings(s["port"], s["account"])
-    for key, low, high in (("capital", 1000, 1e9), ("hours", 0.25, 168)):
+    for key, low, high in (("capital", 1000, 1e9), ("hours", 0, 168)):
         if type(s[key]) not in (int, float) or not math.isfinite(s[key]) or not low <= s[key] <= high:
             raise ValueError(f"{key} must be between {low:g} and {high:g}.")
+    if 0 < s["hours"] < 0.25:
+        raise ValueError("A time limit must be at least 0.25 hours (0: no time limit).")
+    if s["hours"] == 0 and s["mode"] != "autonomous":
+        raise ValueError("Approving each order needs a time limit (0.25 to 168 hours).")
     if s["profile"] not in PROFILES or s["strategy"] not in STRATEGIES:
         raise ValueError("Choose a listed risk profile and strategy.")
     if s["data"] not in ("DELAYED_FROZEN", "REALTIME") or s["mode"] not in ("autonomous", "supervised"):
@@ -125,7 +129,7 @@ class Controller:
             "strategy": "combined",
             "data": p.market_data,
             "mode": "autonomous",
-            "hours": 24,
+            "hours": 0,  # no time limit: unattended, continuous trading is the base
         }
         if self.settings_path.exists():
             record = read_json(self.settings_path)

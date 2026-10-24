@@ -1,4 +1,8 @@
-"""Local operator authority: identity-bound leases and single-use order approvals.
+"""Local operator authority: identity-bound mandates and single-use order approvals.
+
+An autonomous mandate is standing by default (no expiry): unattended, continuous trading is the base
+(Gabriel, C003). A time limit is opt-in (`--authority-hours N`, at most 168), and supervised and manual
+mandates are always leases. Any mandate is revoked at once by issuing another, or stopped by the kill switch.
 
 Authentication is the operating-system account and a 0600 HMAC key, not remote
 identity verification. Generated signal workers cannot access this directory.
@@ -80,23 +84,36 @@ class Authority:
             or payload.get("mode") not in MODES
             or not _hex(payload.get("nonce"), 32)
             or not _finite(payload.get("issued"))
-            or not _finite(payload.get("expires"))
-            or not 0 < payload["expires"] - payload["issued"] <= 168 * 3600
+            or not self._valid_expiry(payload)
             or not self._valid_targets(payload.get("targets"))
         ):
             raise ValueError("invalid operator authority schema")
-        if not allow_expired and not payload["issued"] <= time.time() < payload["expires"]:
+        if not allow_expired and not payload["issued"] <= time.time() < (payload["expires"] or math.inf):
             raise ValueError("operator authority expired or not yet valid")
         return payload
+
+    @staticmethod
+    def _valid_expiry(payload):
+        expires = payload.get("expires")
+        if expires is None:  # a standing mandate: autonomous only
+            return payload.get("mode") == "autonomous"
+        return _finite(expires) and 0 < expires - payload["issued"] <= 168 * 3600
 
     def _valid_targets(self, targets):
         return isinstance(targets, dict) and all(
             t in self.identity["tickers"] and _finite(w) for t, w in targets.items()
         )
 
-    def issue(self, mode, hours=24, targets=None):
-        if mode not in MODES or not _finite(hours) or not 0 < hours <= 168:
-            raise ValueError("mode must be autonomous, supervised or manual; lease must be 0..168 hours")
+    def issue(self, mode, hours=None, targets=None):
+        """hours None or 0: a standing autonomous mandate (no expiry). Supervised and manual mandates are leases
+        (default 24 hours). Any lease is at most 168 hours."""
+        if mode not in MODES:
+            raise ValueError("mode must be autonomous, supervised or manual")
+        if hours in (None, 0) and mode != "autonomous":
+            hours = 24
+        standing = hours in (None, 0)
+        if not standing and (not _finite(hours) or not 0 < hours <= 168):
+            raise ValueError("a lease must be more than 0 and at most 168 hours (0 or none: standing, autonomous)")
         targets = {} if targets is None else targets
         if not self._valid_targets(targets):
             raise ValueError("manual targets must be finite weights for configured tickers")
@@ -109,7 +126,7 @@ class Authority:
                 "binding": self.binding,
                 "mode": mode,
                 "issued": now,
-                "expires": now + hours * 3600,
+                "expires": None if standing else now + hours * 3600,
                 "targets": targets,
                 "nonce": os.urandom(16).hex(),
             }
@@ -175,7 +192,7 @@ class Authority:
                         raise ValueError("approval queue capacity reached")
                     db.execute(
                         "INSERT INTO request(id,payload,expires) VALUES(?,?,?)",
-                        (ident, canonical(payload), min(mandate["expires"], now + 3600)),
+                        (ident, canonical(payload), min(mandate["expires"] or math.inf, now + 3600)),
                     )
                     return False
                 self._request(ident, row)

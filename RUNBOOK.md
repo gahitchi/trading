@@ -31,7 +31,36 @@ git clone https://github.com/gahitchi/trading.git && cd trading
 
 At the daily speed the agents act once a day, but the machine has to be on at 16:10–16:15 New York time (normally
 22:10–22:15 in Italy) and IB Gateway must stay logged in. At a quick speed they trade the whole session, 09:30–16:00
-New York (15:30–22:00 in Italy). A small always-on VPS avoids depending on your PC.
+New York (15:30–22:00 in Italy).
+
+### Two stages: your own computer for testing, then a cloud server
+
+**Testing on your laptop or desktop.** Everything runs the same way in Docker. What differs is that the
+machine must stay awake and online during the windows above:
+- stop it suspending: `systemd-inhibit --what=sleep:idle:handle-lid-switch --why=trading docker compose up`
+  for a session you watch, or set `HandleLidSwitch=ignore` and disable automatic suspend while testing;
+- the stack restarts by itself after a reboot (`restart: always` / `unless-stopped`), and the agents resume
+  from their ledger; a missed decision window is simply skipped, never traded late;
+- IB Gateway restarts itself daily (05:00 New York) and IBKR asks for a full login about weekly; if it
+  asks for a second factor, the gateway waits and retries (`TWOFA_TIMEOUT_ACTION: restart`).
+
+**Moving to a cloud server** for real unattended operation, once the supervised session has passed:
+- any x86-64 Linux VPS with 2 vCPU, 4 GB RAM and 20 GB disk (IB Gateway's Java uses about 1 GB), ideally on
+  the US East coast near IBKR's servers; install Docker as above;
+- SSH with keys only, and a firewall that allows SSH and nothing else. The gateway's API and VNC ports and the
+  setup app are bound to 127.0.0.1 already; reach them through an SSH tunnel, e.g.
+  `ssh -L 5900:127.0.0.1:5900 -L 8765:127.0.0.1:8765 you@server`, never by opening ports;
+- `secrets/` and `.env` are created on the server itself (mode 600), never copied through Git;
+- **one machine trades the account at a time.** The runtime lock only covers one machine: two copies on the
+  same paper account would both trade. To move, stop the agents on your computer (ideally flat, or at least
+  with no working orders), take a cold backup (`lab runtime backup --destination ...`, see
+  docs/runtime-storage.md), copy it to the server with `scp`/`rsync` (it is private: it holds the control
+  key), put its runtime directory at the same place (`results/paper/`) with the same `lab.toml`, check
+  `lab recover` shows no halt, then start the server's stack. Start-up reconciliation compares the restored
+  ledger with IBKR and hard-halts on any difference. Then remove the
+  stack from your computer (`docker compose down`) so it cannot start again on reboot;
+- set up Telegram alerts (§7) before leaving it alone: they are how you hear about halts, and with alerts
+  configured, an alert outage longer than five minutes blocks new exposure (exits still go out).
 
 ## 3. Configure
 
@@ -224,7 +253,8 @@ about the error. Local injected-fault tests are not power-loss or actual-broker 
 
 See [operator-controls.md](docs/operator-controls.md) for autonomous, manual and
 supervised mandates, and [runtime-storage.md](docs/runtime-storage.md) for the
-SQLite migration, private cold backups and broker-attested code upgrade. Restarts
-do not renew the initial 24-hour authority lease. Never edit the diagnostic ledger
+SQLite migration, private cold backups and broker-attested code upgrade. The default
+autonomous mandate is standing (no expiry); an opt-in lease (`--authority-hours N`) or a
+supervised/manual mandate is never renewed by a restart. Never edit the diagnostic ledger
 JSON or restore it over the permanent trade history. The default notification
 outage rule blocks new exposure after five minutes of undelivered alerts.

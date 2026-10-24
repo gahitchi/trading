@@ -208,11 +208,11 @@ cross-sectional strategies are human-written for now.
 Step by step: **[RUNBOOK.md](RUNBOOK.md)**. This is a release candidate pending the
 [external acceptance gates](docs/release-criteria.json), not an approved production release.
 
-The first `lab paper` start creates a **24-hour autonomous mandate**. Supervised and
-manual modes are available with `--mode`. Restarting does not renew authority; use
-`lab control renew --hours 24` (at most 168 hours), or the corresponding command inside
-the running container. Choose and review the authority duration before unattended
-deployment. See [operating controls](docs/operator-controls.md) and
+The first `lab paper` start creates a **standing autonomous mandate**: it does not expire, so
+unattended, continuous paper trading is the default. A time limit is opt-in (`--authority-hours N`,
+at most 168); supervised and manual modes (`--mode`) are always leases, 24 hours by default, and a
+restart never renews an expired lease. `lab control renew --mode supervised` revokes a standing
+mandate; `lab kill` stops trading. See [operating controls](docs/operator-controls.md) and
 [storage and recovery](docs/runtime-storage.md).
 
 Deployment commands:

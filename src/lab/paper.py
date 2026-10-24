@@ -237,7 +237,7 @@ def build_node(
     schedule: Schedule | None = None,
     operator_control: bool = False,
     mode: str | None = None,
-    authority_hours: float = 24,
+    authority_hours: float | None = None,
     bank_path: str | None = None,
 ) -> LiveNode:
     from lab.config import validate_effective
@@ -311,7 +311,7 @@ def build_node(
         authority = Authority(runtime_dir(cfg), identity)
         if mode is not None or not authority.path.exists():
             authority.issue(mode or "autonomous", authority_hours)
-        authority.read()  # Restart never silently renews an expired lease.
+        authority.read()  # A restart never silently renews an expired lease (a standing mandate never expires).
     node, iids = _base_node(cfg, tickers, clients)
     p = cfg.paper
     rt = runtime_dir(cfg)

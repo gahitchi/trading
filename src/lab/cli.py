@@ -1095,8 +1095,9 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument(
         "--authority-hours",
         type=float,
-        default=24,
-        help="new mandate duration, at most 168 hours; restarts never renew",
+        default=None,
+        help="opt-in time limit for a new mandate, at most 168 hours (default: an autonomous mandate is standing, "
+        "supervised and manual last 24 hours); restarts never renew a lease",
     )
     pp.add_argument("--check-only", action="store_true", help="validate the setup without connecting")
     pp.add_argument("--smoke", action="store_true", help="connect, verify account/instruments/data, no trading")
@@ -1119,7 +1120,9 @@ def build_parser() -> argparse.ArgumentParser:
     control.add_argument("action", choices=["status", "approve", "renew"])
     control.add_argument("--request")
     control.add_argument("--mode", choices=["autonomous", "supervised", "manual"])
-    control.add_argument("--hours", type=float, default=24)
+    control.add_argument(
+        "--hours", type=float, default=None, help="lease length (default: standing if autonomous, else 24 hours)"
+    )
     control.add_argument(
         "--target", action="append", help="manual portfolio weight, e.g. SPY=0.2; unspecified stocks target zero"
     )

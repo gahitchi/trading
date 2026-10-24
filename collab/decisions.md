@@ -20,3 +20,7 @@ Format: `- <date> · thread <id> · <decision> · <who agreed>`
   maximum; default profile `balanced`. Trading speeds: daily, 1h, 15m, 5m; quick speeds only for the dynamic and
   aggressive profiles. Market data delayed until Gabriel subscribes to real-time · set by Gabriel (in chat,
   relayed by Claude)
+- 2026-10-24 · G013 · Autonomous paper trading must not stop by itself: the default autonomous mandate is
+  standing (no expiry); a time limit is opt-in, supervised and manual mandates stay leases. Deployment: a
+  laptop/desktop for the testing phase, then a cloud server for real unattended operation · set by Gabriel
+  (in chat, relayed by Claude)

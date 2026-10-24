@@ -176,3 +176,23 @@ def test_signed_but_invalid_mandate_schema_is_rejected(authority, field, value):
     atomic_json(authority.path, rec)
     with pytest.raises(ValueError, match="authority"):
         authority.read(allow_expired=True)
+
+
+def test_an_autonomous_mandate_is_standing_unless_a_time_limit_is_chosen(tmp_path):
+    """Gabriel (C003): unattended, continuous trading is the base, so an autonomous mandate does not expire
+    by default; a time limit is opt-in, and supervised and manual mandates are always leases."""
+    auth = Authority(tmp_path / "rt", {"account": "DU1234567", "tickers": ["A"]})
+    standing = auth.issue("autonomous")
+    assert standing["expires"] is None
+    with patch("lab.authority.time.time", return_value=standing["issued"] + 10 * 365 * 86_400):
+        assert auth.read()["mode"] == "autonomous" and auth.authorize({"ticker": "A", "qty": 1})
+    leased = auth.issue("autonomous", 8)
+    assert leased["expires"] == pytest.approx(leased["issued"] + 8 * 3600)
+    assert auth.issue("supervised")["expires"] is not None  # never standing
+    assert auth.issue("manual", 0, {"A": 0.1})["expires"] is not None
+    rec = read_json(auth.path)
+    rec["payload"].update(mode="supervised", expires=None)
+    rec["hmac"] = auth.sign(rec["payload"])
+    atomic_json(auth.path, rec)
+    with pytest.raises(ValueError, match="schema"):
+        auth.read()  # a forged standing supervised mandate is refused even with a valid signature
