@@ -8,6 +8,15 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($launcher, [ref
 if ($errors.Count) {
     throw ("Invalid PowerShell syntax: " + ($errors | ForEach-Object { $_.Message } | Out-String))
 }
+# Parse the initial bootstrap too; the update smoke only exercises the launcher.
+$installErrors = $null
+$installTokens = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile(
+    (Join-Path $repository "install.ps1"), [ref]$installTokens, [ref]$installErrors
+)
+if ($installErrors.Count) {
+    throw ("Invalid installer script: " + ($installErrors | ForEach-Object { $_.Message } | Out-String))
+}
 foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
     . ([scriptblock]::Create($function.Extent.Text))
 }
