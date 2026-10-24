@@ -39,9 +39,28 @@ def main():
     ap.add_argument("--seed", type=int, default=73000)
     ap.add_argument("--config", type=Path, default=Path("lab.toml"))
     ap.add_argument("--output", type=Path, required=True)
+    ap.add_argument("--stocks", type=int, default=1, help="independent zero-drift stocks in the panel")
+    ap.add_argument(
+        "--late-fraction",
+        type=float,
+        default=0.0,
+        help="share of the stocks listed late (staggered listings exercise the per-stock fallback): 0, 0.1, 0.25, 0.4",
+    )
+    ap.add_argument("--late-start", type=float, default=0.6, help="a late stock's first bar, as a share of --bars")
+    ap.add_argument(
+        "--release",
+        action="store_true",
+        help="refuse cohorts smaller than the audit's bar (F-R04): outer >= 500, inner >= 199",
+    )
     a = ap.parse_args()
     if a.outer < 1 or a.inner < 19 or a.bars < 160:
         ap.error("need outer >= 1, inner >= 19, bars >= 160")
+    if a.release and (a.outer < 500 or a.inner < 199):
+        ap.error("a release calibration needs outer >= 500 and inner >= 199")
+    if a.stocks < 1 or not 0 <= a.late_fraction < 1 or not 0.3 <= a.late_start <= 0.9:
+        ap.error("need stocks >= 1, 0 <= late-fraction < 1, 0.3 <= late-start <= 0.9")
+    tickers = [f"S{i:02d}" for i in range(a.stocks)]
+    late = set(tickers[len(tickers) - round(a.stocks * a.late_fraction) :]) if a.late_fraction else set()
     cfg = load_config(a.config)
     candidates = [SignalSpec("sma_trend"), SignalSpec("rsi_reversion")]
     rows = []
@@ -51,22 +70,26 @@ def main():
             root=Path(tmp),
             results_dir=Path(tmp) / "results",
             research_dir=Path(tmp) / "research",
-            universe={"GOOG": "XNAS"},
+            universe=dict.fromkeys(tickers, "XNAS"),
             trading=replace(cfg.trading, speed="daily"),
         )
         for i in range(a.outer):
-            frame = data.gbm(a.bars, seed=a.seed + i, start="2010-01-04", ann_drift=0, ann_vol=0.25)
+            frames = {}
+            for k, ticker in enumerate(tickers):
+                frame = data.gbm(a.bars, seed=(a.seed + i) * 1000 + k, start="2010-01-04", ann_drift=0, ann_vol=0.25)
+                frames[ticker] = frame.iloc[int(a.bars * a.late_start) :] if ticker in late else frame
+            frame = frames[tickers[0]]
             period = Period("synthetic-calibration", frame.index[120].date(), frame.index[-1].date())
-            comp, _ = experiments.compare(cfg, candidates, ["GOOG"], period, {"GOOG": frame}, register=False)
+            comp, _ = experiments.compare(cfg, candidates, tickers, period, frames, register=False)
             j = max(range(len(candidates)), key=lambda j: comp.rows[j + 1]["sharpe_edge"])
             row = comp.rows[j + 1]
             null = experiments.null_test(
                 cfg,
                 candidates[j],
-                ["GOOG"],
+                tickers,
                 period,
                 a.inner,
-                {"GOOG": frame},
+                frames,
                 workers=1,
                 observed_edge=row["sharpe_edge"],
             )
@@ -80,7 +103,7 @@ def main():
             rows.append(
                 {
                     "seed": a.seed + i,
-                    "data_sha256": hashlib.sha256(frame.to_csv().encode()).hexdigest(),
+                    "data_sha256": hashlib.sha256("".join(frames[k].to_csv() for k in tickers).encode()).hexdigest(),
                     "selected": candidates[j].name,
                     "edge": row["sharpe_edge"],
                     "dsr": row["dsr"],
@@ -94,7 +117,15 @@ def main():
         rejected = sum(r["p_value"] <= 0.05 for r in rows)
         passed = sum(r["training_gate_passed"] for r in rows)
         report = {
-            "scenario": "Zero arithmetic-drift GBM, 25% annual volatility, one stock; choose higher observed Sharpe edge of two fixed candidates, then evaluate its bootstrap p-value and complete training gate. 120 warm-up bars excluded from evaluation.",
+            "scenario": (
+                f"Zero arithmetic-drift GBM, 25% annual volatility, {a.stocks} independent stock(s), "
+                f"{len(late)} listed late at {a.late_start:.0%} of the bars; choose higher observed Sharpe edge of "
+                "two fixed candidates, then evaluate its bootstrap p-value and complete training gate. "
+                "120 warm-up bars excluded from evaluation."
+            ),
+            "stocks": a.stocks,
+            "late_listed": sorted(late),
+            "meets_audit_size": a.outer >= 500 and a.inner >= 199,
             "limitations": [
                 "Small Monte Carlo cohort; interval is wide",
                 "No staggered histories, correlated panel, historical borrow, intraday data, model-generated selection or repeated human selection",

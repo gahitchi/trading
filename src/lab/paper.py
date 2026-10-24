@@ -280,6 +280,7 @@ def build_node(
             if spec.sha256 != digest:
                 raise ApprovalError("paper node requires an approved, digest-bound research SignalSpec")
     from lab.persistence import atomic_json, file_lock
+    from lab.provenance import runtime_digest
     from lab.research.approval import deployment_context
 
     bank = None
@@ -297,6 +298,9 @@ def build_node(
         "signals": [{"name": s.name, "params": s.params, "sha256": s.sha256} for s in specs],
         "deployment": deployment_context(cfg.snapshot(), live=True, tickers=tickers),
         "execution": execution_identity(cfg),
+        # Any code change still stops a runtime until an explicit upgrade; the deployment context above binds
+        # only the simulation code an approval was validated with.
+        "runtime_sha256": runtime_digest(),
     }
     if bank is not None:
         identity["strategy_bank"] = bank.manifest

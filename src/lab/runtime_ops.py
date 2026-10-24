@@ -10,7 +10,7 @@ from lab.authority import digest
 from lab.execution_store import ExecutionStore
 from lab.paper import acquire_runtime_lock, execution_identity, runtime_dir
 from lab.persistence import atomic_json, file_lock, read_json
-from lab.provenance import source_digest
+from lab.provenance import runtime_digest, simulation_digest
 
 
 def file_hash(path):
@@ -73,7 +73,11 @@ def snapshot_locked(runtime, destination):
 def upgrade_plan(runtime, cfg):
     runtime = Path(runtime)
     old = read_json(runtime / "identity.json")
-    new = {**old, "deployment": {**old["deployment"], "implementation_sha256": source_digest()}}
+    new = {
+        **old,
+        "deployment": {**old["deployment"], "implementation_sha256": simulation_digest()},
+        "runtime_sha256": runtime_digest(),
+    }
     ledger_path = runtime / "ledger.json"
     state = (
         ExecutionStore(ledger_path).load()

@@ -262,6 +262,56 @@ def membership(cfg: LabConfig) -> dict[str, list[tuple[date, date | None]]] | No
     return out
 
 
+def risk_free_path(cfg: LabConfig) -> Path:
+    return cfg.data_dir / "risk_free.csv"
+
+
+def save_risk_free(cfg: LabConfig, df: pd.DataFrame, source: str) -> pd.DataFrame:
+    """Store a daily risk-free rate series: columns date and rate, the annual rate in PERCENT (FRED's DTB3
+    convention, 5.25 = 5.25%). Missing values (holidays) are dropped, not filled."""
+    df = df.rename(columns=str.lower)
+    if not {"date", "rate"} <= set(df.columns):
+        raise DataError("risk-free rates need columns date and rate (annual percent)")
+    out = pd.DataFrame(
+        {"date": pd.to_datetime(df["date"], errors="coerce"), "rate": pd.to_numeric(df["rate"], errors="coerce")}
+    ).dropna()
+    if out.empty:
+        raise DataError("risk-free rate file has no valid rows")
+    if not out["rate"].between(-5, 30).all():
+        raise DataError("risk-free rates must be annual percentages between -5 and 30")
+    out = out.drop_duplicates("date").sort_values("date")
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    out.assign(date=out["date"].dt.date.astype(str), source=source).to_csv(risk_free_path(cfg), index=False)
+    return out
+
+
+def risk_free(cfg: LabConfig) -> pd.Series | None:
+    """Annual risk-free rate (fraction) by date, point in time: a day's published rate is used from the next
+    day on, never on the day itself. None without data/risk_free.csv (metrics then assume 0%)."""
+    p = risk_free_path(cfg)
+    if not p.exists():
+        return None
+    df = pd.read_csv(p, parse_dates=["date"])
+    s = pd.Series(df["rate"].to_numpy(dtype=float) / 100, index=pd.DatetimeIndex(df["date"]))
+    s.index = s.index + pd.Timedelta(days=1)
+    return s.sort_index()
+
+
+def fetch_risk_free() -> pd.DataFrame:
+    """3-month Treasury bill secondary-market rate (FRED series DTB3, free, no account)."""
+    import io
+    import urllib.request
+
+    url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DTB3"
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            raw = pd.read_csv(io.BytesIO(response.read()))
+    except Exception as e:
+        raise DataError(f"FRED download failed: {e}") from e
+    raw.columns = ["date", "rate"]
+    return raw
+
+
 # --------------------------------------------------------------------------- sources
 
 
@@ -389,6 +439,12 @@ def block_bootstrap_panel(
     Otherwise *that instrument alone* draws a valid interval from its own history.
     Availability masks are exact: no invented prelisting/postdelisting bars and no
     backfills. Diagnose where fallback sacrifices cross-asset dependence.
+
+    Stationary bootstrap (Politis & Romano, 1994; Gemini audit F-R04): block lengths are geometric with mean
+    `block` sessions, so no period of the resample repeats at multiples of a fixed block, and a donor block
+    never wraps past the last session. The mean stays a fixed parameter rather than a data-driven choice: a
+    length estimated from the panel would change when a stock is added, and an unrelated late listing must
+    not change an established stock's null (G002-F2).
     """
     if not frames:
         raise DataError("joint bootstrap requires at least one instrument")
@@ -404,9 +460,14 @@ def block_bootstrap_panel(
 
     # CRITICAL: sample this before inspecting ANY ticker mask. Otherwise one
     # newly listed instrument narrows older instruments' return distribution.
+    segments = []
+    start = 0
+    while start < n:
+        width = min(int(rng.geometric(1 / block)), n - start)
+        segments.append((start, width))
+        start += width
     global_pick = np.empty(n, dtype=np.int64)
-    for start in range(0, n, block):
-        width = min(block, n - start)
+    for start, width in segments:
         donor_start = int(rng.integers(0, n - width + 1))
         global_pick[start : start + width] = np.arange(donor_start, donor_start + width)
 
@@ -417,8 +478,7 @@ def block_bootstrap_panel(
         mask = masks[t]
         pick = global_pick.copy()
         fallback_blocks = participating_blocks = 0
-        for start in range(0, n, block):
-            width = min(block, n - start)
+        for start, width in segments:
             offsets = np.flatnonzero(mask[start : start + width])
             if not len(offsets):
                 continue
@@ -474,7 +534,8 @@ def block_bootstrap_panel(
         }
 
     diagnostics = {
-        "method": "shared_calendar_with_per_instrument_fallback",
+        "method": "stationary_shared_calendar_with_per_instrument_fallback",
+        "mean_block": block,
         "fallback_blocks": fallback_total,
         "participating_blocks": participating_total,
         "fallback_fraction": fallback_total / participating_total if participating_total else 0.0,

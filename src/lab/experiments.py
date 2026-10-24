@@ -157,6 +157,7 @@ def config_fingerprint(cfg: LabConfig, n_tickers: int = 1) -> str:
         "capital": cfg.capital,
         "warmup_start": str(cfg.warmup_start),
         "membership": file_digest(data.membership_path(cfg)),
+        "risk_free": file_digest(data.risk_free_path(cfg)),
         "borrow": file_digest(cfg.borrow.history),
         "borrow_max_age_days": cfg.borrow.max_age_days,
         "trading": asdict(cfg.trading),
@@ -173,31 +174,72 @@ def register_trial(
     sr, *_ = stats.moments(active.to_numpy())
     cfg.results_dir.mkdir(parents=True, exist_ok=True)
     from lab.persistence import append_json
-    from lab.provenance import source_digest
+    from lab.provenance import simulation_digest
 
+    fingerprint = f"{spec_fingerprint(spec)}:{config_fingerprint(cfg)}:{simulation_digest()}:{data_digest}"
+    # The return stream itself, so correlated trials can be counted as fewer independent ones (F-R02).
+    path = _trial_returns_path(cfg, fingerprint)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stamps = pd.DatetimeIndex(active.index).as_unit("ns").asi8
+    with path.open("wb") as f:
+        np.savez_compressed(f, ts=stamps, r=active.to_numpy(dtype=np.float32))
     append_json(
         _trials_path(cfg),
         {
             "at": datetime.now(UTC).isoformat(timespec="seconds"),
             "dataset": key,
-            "fingerprint": f"{spec_fingerprint(spec)}:{config_fingerprint(cfg)}:{source_digest()}:{data_digest}",
+            "fingerprint": fingerprint,
             "label": label,
             "sharpe_daily": sr,
         },
     )
 
 
-def trial_sharpes(cfg: LabConfig, key: str) -> list[float]:
+def _trial_returns_path(cfg: LabConfig, fingerprint: str) -> Path:
+    return cfg.results_dir / "trial_returns" / f"{hashlib.sha256(fingerprint.encode()).hexdigest()[:32]}.npz"
+
+
+def _latest_trials(cfg: LabConfig) -> dict[str, float]:
     p = _trials_path(cfg)
     if not p.exists():
-        return []
+        return {}
     latest = {}
     for line in p.read_text().splitlines():
         t = json.loads(line)
         # Workspace-wide family: changing labels, dates or universe cannot
         # erase earlier selection. New workspaces are explicit new protocols.
         latest[t["fingerprint"]] = t["sharpe_daily"]
-    return list(latest.values())
+    return latest
+
+
+def trial_sharpes(cfg: LabConfig, key: str) -> list[float]:
+    return list(_latest_trials(cfg).values())
+
+
+TRIAL_MIN_OVERLAP = 60  # shared days before two trials' correlation is estimated; fewer counts as 0
+
+
+def effective_trials(cfg: LabConfig) -> float | None:
+    """N_hat = 1 + (N - 1)(1 - mean pairwise correlation) of every trial's active returns (F-R02).
+
+    A pair without a stored return stream (trials recorded before streams were kept) or with fewer than
+    TRIAL_MIN_OVERLAP shared days counts as uncorrelated: the conservative direction, it never lowers N."""
+    latest = _latest_trials(cfg)
+    n = len(latest)
+    if n < 2:
+        return None
+    series = {}
+    for fp in latest:
+        path = _trial_returns_path(cfg, fp)
+        if path.exists():
+            with np.load(path) as z:
+                series[fp] = pd.Series(z["r"].astype(float), index=pd.DatetimeIndex(z["ts"]))
+    total = 0.0
+    if len(series) >= 2:
+        corr = pd.DataFrame(series).corr(min_periods=TRIAL_MIN_OVERLAP).to_numpy(copy=True)
+        np.fill_diagonal(corr, np.nan)
+        total = float(np.nansum(corr))
+    return stats.effective_trials(n, total / (n * (n - 1)))
 
 
 def compare(
@@ -260,7 +302,9 @@ def _compare(
             from lab.provenance import frame_digest
 
             register_trial(cfg, key, s, r.label, act, frame_digest(frames))
-    trials = trial_sharpes(cfg, key) or [stats.moments(a.to_numpy())[0] for a in actives]
+    trials = trial_sharpes(cfg, key)
+    n_eff = effective_trials(cfg) if trials else None
+    trials = trials or [stats.moments(a.to_numpy())[0] for a in actives]
 
     if any(r.metrics.get("insolvent") for r in results):
         raise ValueError("comparison not qualified: insolvent equity cannot enter significance calculations")
@@ -280,13 +324,14 @@ def _compare(
         m["financing"] = r.financing
         if i > 0:
             act = actives[i - 1].to_numpy()
-            d = stats.dsr(act, trials)
+            d = stats.dsr(act, trials, n_effective=n_eff)
             lo, hi = stats.sharpe_ci(act)
             m.update(
                 active_sharpe=d["sharpe_annual"],
                 psr=d["psr"],
                 dsr=d["dsr"],
                 trials=d["trials"],
+                effective_trials=d["effective_trials"],
                 active_sharpe_ci=[lo, hi],
                 expected_max_sharpe=d["expected_max_sharpe_annual"],
             )
@@ -333,7 +378,17 @@ def pbo_study(
 ) -> dict:
     guard_period(cfg, period)
     m = active_matrix(cfg, specs, tickers, period, frames)
-    out = stats.pbo(m.to_numpy(), splits=splits)
+    # Purge the longest lookback of the family around every boundary (F-R03), capped at a quarter of a block
+    # so the out-of-sample blocks keep most of their days, plus a 1% embargo.
+    lookbacks = []
+    for spec in specs:
+        signal = spec.make()
+        lookbacks.append(int(getattr(signal, "lookback", 0)))
+        if hasattr(signal, "close"):
+            signal.close()
+    purge = min(max(lookbacks, default=0), len(m) // splits // 4)
+    out = stats.pbo(m.to_numpy(), splits=splits, purge=purge, embargo=0.01)
+    out["purge_rule"] = "longest lookback, capped at a quarter of a block; 1% embargo"
     sr = {c: stats.moments(m[c].to_numpy())[0] * stats.math.sqrt(stats.DAYS) for c in m.columns}
     out["active_sharpe_by_config"] = dict(sorted(sr.items(), key=lambda kv: -kv[1]))
     return out
@@ -428,7 +483,7 @@ def walk_forward(
     from lab.provenance import frame_digest
 
     register_trial(cfg, key, policy_spec, "walk_forward_policy", act_all, frame_digest(frames))
-    d = stats.dsr(act_all.to_numpy(), trial_sharpes(cfg, key))
+    d = stats.dsr(act_all.to_numpy(), trial_sharpes(cfg, key), n_effective=effective_trials(cfg))
     lo, hi = stats.sharpe_ci(act_all.to_numpy())
     is_mean = float(np.mean([s["is_active_sharpe"] for s in steps]))
     return {

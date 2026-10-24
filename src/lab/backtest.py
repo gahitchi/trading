@@ -25,6 +25,7 @@ from nautilus_trader.config import BacktestEngineConfig, LoggerConfig
 from nautilus_trader.model import AccountType, ActorId, Money, OmsType, TraderId
 
 from lab import costs, intraday
+from lab import data as lab_data
 from lab.agents import (
     AllocatorAgent,
     AllocatorAgentConfig,
@@ -358,7 +359,7 @@ def run(
             # Prepend the starting capital on the day before the first decision.
             eq = pd.concat([pd.Series([capital], index=[eq.index[0] - pd.Timedelta(days=1)]), eq])
 
-        metrics = summarize(eq, fills=recorder.fills, gross=gross)
+        metrics = summarize(eq, fills=recorder.fills, gross=gross, risk_free=lab_data.risk_free(cfg))
         if quick and len(every) > 2:
             metrics["intraday_max_drawdown"] = max_drawdown(pd.concat([pd.Series([capital]), every]))[0]
         result = RunResult(

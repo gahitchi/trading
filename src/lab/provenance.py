@@ -7,14 +7,58 @@ from pathlib import Path
 
 import pandas as pd
 
+# Modules that cannot change a backtest's numbers: the operator surface, the live paper runtime's plumbing and
+# the language-model orchestration (Gemini audit F-R16). Everything else, including any module added later,
+# counts as simulation code: an unlisted new module invalidates evidence rather than slipping past it.
+NOT_SIMULATION = frozenset(
+    {
+        "app.py",
+        "cli.py",
+        "report.py",
+        "paper_report.py",
+        "notify.py",
+        "capture.py",
+        "runtime_ops.py",
+        "paper.py",
+        "authority.py",
+        "safety.py",
+        "halt.py",
+        "agents/alerts.py",
+        "agents/broker_bars.py",
+        "agents/readiness.py",
+        "agents/smoke.py",
+        "research/orchestrator.py",
+        "research/providers.py",
+        "research/roles.py",
+        "sim/__init__.py",
+        "sim/broker.py",
+        "sim/clients.py",
+        "sim/harness.py",
+        "sim/intraday.py",
+    }
+)
 
-def source_digest():
+
+def _digest(include) -> str:
     root = Path(__file__).parent
     digest = hashlib.sha256()
     for p in sorted(root.rglob("*.py")):
-        digest.update(str(p.relative_to(root)).encode())
-        digest.update(p.read_bytes())
+        name = p.relative_to(root).as_posix()
+        if include(name):
+            digest.update(name.encode())
+            digest.update(p.read_bytes())
     return digest.hexdigest()
+
+
+def runtime_digest() -> str:
+    """Every module: binds a live paper runtime to the exact code it runs (preflight, upgrade)."""
+    return _digest(lambda name: True)
+
+
+def simulation_digest() -> str:
+    """The modules that shape simulated results and validation evidence: trial identity, approvals and the
+    deployment context. A cosmetic edit to the app or the command line no longer invalidates them."""
+    return _digest(lambda name: name not in NOT_SIMULATION)
 
 
 def frame_digest(frames):
@@ -32,5 +76,5 @@ def environment():
         "python": platform.python_version(),
         "platform": platform.platform(),
         "packages": dict(sorted(packages.items())),
-        "source_sha256": source_digest(),
+        "source_sha256": runtime_digest(),
     }

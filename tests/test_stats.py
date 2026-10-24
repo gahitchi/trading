@@ -89,3 +89,92 @@ def test_walk_forward_and_pbo_studies_run(goog_lab):
     assert len(wfa["windows"]) == 3 and math.isfinite(wfa["oos_active_sharpe"])
     p = experiments.pbo_study(goog_lab, specs, ["GOOG"], goog_lab.period("train"), frames, splits=6)
     assert 0 <= p["pbo"] <= 1 and p["configurations"] == 4
+
+
+# ----------------------------------------------------------------- Gemini audit, pillar 1 (F-R01 to F-R04)
+
+
+def _ar1(rng, n, phi, sd=0.01):
+    e = rng.normal(0, sd, n)
+    x = np.empty(n)
+    x[0] = e[0]
+    for i in range(1, n):
+        x[i] = phi * x[i - 1] + e[i]
+    return x
+
+
+def test_sharpe_variance_reduces_to_the_iid_formula_without_lags():
+    r = np.random.default_rng(3).standard_t(5, 3000) * 0.01 + 0.0004
+    mu, sd = r.mean(), r.std()
+    z = (r - mu) / sd
+    sr, skew, kurt = mu / sd, np.mean(z**3), np.mean(z**4)
+    assert stats.sharpe_variance(r, lags=0) == pytest.approx(1 - skew * sr + (kurt - 1) / 4 * sr**2)
+
+
+def test_psr_accounts_for_autocorrelation():
+    """F-R01: zero-mean AR(1) returns (phi 0.5). The i.i.d. variance claimed significance in 15% of samples at
+    the 95% level; the HAC variance brings that close to the nominal 5%."""
+    rng = np.random.default_rng(5)
+    reps = 400
+    false = sum(stats.dsr(_ar1(rng, 1000, 0.5), [0.0])["psr"] > 0.95 for _ in range(reps))
+    assert false / reps < 0.10
+    ar = _ar1(np.random.default_rng(6), 2000, 0.5)
+    assert stats.sharpe_variance(ar) > 1.5 * stats.sharpe_variance(ar, lags=0)
+
+
+def test_one_degenerate_trial_cannot_inflate_the_hurdle():
+    """F-R02: one broken trial at -4 annual Sharpe raised SR0 from 0.87 to 1.84 annual; winsorized, to 1.09."""
+    rng = np.random.default_rng(5)
+    trials = list(rng.normal(0, 0.03, 20))
+    r = rng.normal(0, 0.01, 1000)
+    clean = stats.dsr(r, trials)["expected_max_sharpe_annual"]
+    dirty = stats.dsr(r, [*trials, -0.25])["expected_max_sharpe_annual"]
+    assert clean < dirty < 1.3 * clean
+    assert stats.robust_variance([0.01, 0.02, 0.03]) == pytest.approx(np.var([0.01, 0.02, 0.03], ddof=1))
+
+
+def test_correlated_trials_count_as_fewer_independent_trials():
+    """F-R02: N near-identical runs are one trial, not N."""
+    assert stats.effective_trials(10, 0.95) == pytest.approx(1.45)
+    assert stats.effective_trials(10, 0.0) == 10 and stats.effective_trials(10, -0.3) == 10
+    r = np.random.default_rng(8).normal(0.0005, 0.01, 1500)
+    trials = list(np.random.default_rng(9).normal(0, 0.02, 10))
+    independent = stats.dsr(r, trials)
+    twins = stats.dsr(r, trials, n_effective=stats.effective_trials(10, 0.95))
+    assert twins["effective_trials"] == pytest.approx(1.45) and twins["dsr"] > independent["dsr"]
+    assert stats.dsr(r, trials, n_effective=50)["effective_trials"] == 10  # never more than the trials run
+
+
+def test_pbo_purges_and_embargoes_the_boundaries():
+    """F-R03: persistent (AR 0.98) noise configurations look less overfit than they are when the
+    out-of-sample ranking starts right at an in-sample boundary; purging moves PBO back toward 0.5."""
+
+    def mean_pbo(**kw):
+        out = []
+        for s in range(15):
+            g = np.random.default_rng(100 + s)
+            m = np.column_stack([_ar1(g, 2000, 0.98) for _ in range(10)])
+            out.append(stats.pbo(m, splits=10, **kw)["pbo"])
+        return np.mean(out)
+
+    plain, purged = mean_pbo(), mean_pbo(purge=50, embargo=0.01)
+    assert plain < purged and abs(purged - 0.5) < abs(plain - 0.5)
+    noise = np.random.default_rng(1).normal(0, 0.01, size=(400, 4))
+    assert stats.pbo(noise, splits=4, purge=10)["purge"] == 10
+    with pytest.raises(ValueError, match="fewer than 2"):
+        stats.pbo(noise, splits=4, purge=60)
+
+
+def test_stationary_bootstrap_never_wraps_the_end_onto_the_start():
+    """F-R04: blocks restart at a random point instead of stitching the last date onto the first."""
+    idx = stats.stationary_indices(300, 20.0, 400, np.random.default_rng(2))
+    after_end = idx[:, 1:][idx[:, :-1] == 299]
+    assert len(after_end) > 100 and (after_end == 0).mean() < 0.05  # a fresh random start, not a wrap to 0
+    steps = np.diff(idx, axis=1) == 1
+    assert 15 < 1 / (1 - steps.mean()) < 25  # geometric blocks with the requested mean length
+
+
+def test_block_length_follows_the_dependence():
+    rng = np.random.default_rng(4)
+    assert stats.optimal_block_length(rng.normal(size=2000)) < 3
+    assert stats.optimal_block_length(_ar1(rng, 2000, 0.9)) > 10

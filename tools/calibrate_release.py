@@ -20,7 +20,7 @@ import numpy as np
 from lab import data, experiments
 from lab.config import Period, load_config
 from lab.persistence import atomic_json, read_json
-from lab.provenance import source_digest
+from lab.provenance import runtime_digest
 from lab.signals.registry import SignalSpec
 from tools.calibrate_null import wilson
 
@@ -154,7 +154,7 @@ def main():
         "inner": a.inner,
         "seed_start": 9280000,
         "config_sha256": hashlib.sha256(a.config.read_bytes()).hexdigest(),
-        "source_sha256": source_digest(),
+        "source_sha256": runtime_digest(),
         "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "production_gates": vars(load_config(a.config).research),
         "criteria": {
@@ -271,7 +271,7 @@ def main():
         "stopped_for_power_futility": futile,
         "planned_exposures_per_case": a.outer,
         "protocol_sha256": hashlib.sha256(protocol_path.read_bytes()).hexdigest(),
-        "source_unchanged": source_digest() == protocol["source_sha256"],
+        "source_unchanged": runtime_digest() == protocol["source_sha256"],
         "cases": summaries,
         "runs": rows,
     }

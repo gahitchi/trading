@@ -21,8 +21,38 @@ def max_drawdown(equity: pd.Series) -> tuple[float, int]:
     return float(dd.max()), longest
 
 
-def summarize(equity: pd.Series, *, fills: list | None = None, gross: pd.Series | None = None) -> dict:
-    """equity: daily portfolio value indexed by date, first value = starting capital."""
+def session_closes(equity: pd.Series) -> pd.Series:
+    """One mark per session: the last mark of each date (F-R05), so annualizing by 252 stays right when a
+    curve carries several marks a day."""
+    if not isinstance(equity.index, pd.DatetimeIndex) or not len(equity):
+        return equity
+    day = equity.index.normalize()
+    if day.is_unique:
+        return equity
+    return equity.groupby(day).last()
+
+
+def excess_returns(equity: pd.Series, risk_free: pd.Series | None) -> pd.Series:
+    """Return per mark minus the risk-free return accrued between the two marks (calendar days, the rate known
+    at the earlier mark). Without a rate series, the plain return (a 0% risk-free rate)."""
+    rets = equity.pct_change().dropna()
+    if risk_free is None or rets.empty:
+        return rets
+    rate = risk_free.reindex(equity.index, method="ffill").fillna(0.0).to_numpy()[:-1]
+    days = np.diff(equity.index.to_numpy()).astype("timedelta64[D]").astype(float)
+    return rets - ((1 + rate) ** (days / 365) - 1)
+
+
+def summarize(
+    equity: pd.Series,
+    *,
+    fills: list | None = None,
+    gross: pd.Series | None = None,
+    risk_free: pd.Series | None = None,
+) -> dict:
+    """equity: daily portfolio value indexed by date, first value = starting capital. Sharpe and Sortino use
+    returns in excess of `risk_free` (annual rate by date, lab.data.risk_free) when given, else of 0%."""
+    equity = session_closes(equity)
     values = equity.to_numpy(dtype=float)
     if not np.isfinite(values).all():
         # Fail closed: a missing or non-finite mark means the curve is incomplete, and dropping it would
@@ -45,7 +75,7 @@ def summarize(equity: pd.Series, *, fills: list | None = None, gross: pd.Series 
             "fills": len(fills or []),
             "commissions": sum(f.commission for f in (fills or [])),
         }
-    rets = equity.pct_change().dropna()
+    rets = excess_returns(equity, risk_free)
     years = max((equity.index[-1] - equity.index[0]).days / 365.25, 1e-9)
     total = equity.iloc[-1] / equity.iloc[0] - 1
     vol = rets.std(ddof=1) * math.sqrt(TRADING_DAYS)
@@ -68,6 +98,7 @@ def summarize(equity: pd.Series, *, fills: list | None = None, gross: pd.Series 
         "max_drawdown": mdd,
         "max_drawdown_days": mdd_days,
         "calmar": float(cagr / mdd) if mdd > 0 else 0.0,
+        "risk_free": "series" if risk_free is not None else "zero",
     }
     if gross is not None and len(gross):
         out["avg_exposure"] = float(gross.mean())
