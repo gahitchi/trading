@@ -1,5 +1,6 @@
 """Offline GUI broker onboarding: same-origin restrictions and private paper credentials."""
 
+import hashlib
 import http.client
 import importlib.util
 import json
@@ -44,7 +45,8 @@ def test_gui_broker_setup_is_strictly_local_and_paper_only(tmp_path, monkeypatch
 
     try:
         code, state, cors = request("GET", "/status")
-        assert code == 200 and state == {"configured": False, "account": None}
+        installation = hashlib.sha256(str(tmp_path.resolve()).encode("utf-8")).hexdigest()
+        assert code == 200 and state == {"configured": False, "account": None, "installation": installation}
         assert cors["Access-Control-Allow-Origin"] == headers["Origin"]
         bad = {"username": "paper-user", "account": "U1234567", "password": "first-secret"}
         assert request("POST", "/connect", bad)[0] == 400
@@ -67,7 +69,7 @@ def test_gui_broker_setup_is_strictly_local_and_paper_only(tmp_path, monkeypatch
         assert (tmp_path / "secrets/tws_password").stat().st_mode & 0o777 == 0o600
         assert (tmp_path / "secrets").stat().st_mode & 0o777 == 0o700
         code, state, _ = request("GET", "/status")
-        assert code == 200 and state == {"configured": True, "account": "DU1234567"}
+        assert code == 200 and state == {"configured": True, "account": "DU1234567", "installation": installation}
         assert "first-secret" not in json.dumps(state) and "paper-user" not in json.dumps(state)
         assert request("POST", "/connect", good)[0] == 400
         assert request("POST", "/retry", {})[0] == 200

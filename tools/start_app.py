@@ -1,5 +1,7 @@
 """One-time local Docker setup, then open the app in its own window. Never submit an order."""
 
+import hashlib
+import json
 import logging
 import os
 import re
@@ -194,6 +196,10 @@ def start_setup_service(root):
             urllib.request.Request(url, headers={"Origin": "http://127.0.0.1:8765"}), timeout=1
         ) as response:
             if response.status == 200:
+                state = json.load(response)
+                expected = hashlib.sha256(str(root.resolve()).encode("utf-8")).hexdigest()
+                if state.get("installation") != expected:
+                    raise ValueError("A different Trading Lab installation is using local setup port 8766.")
                 return
     except OSError:
         pass

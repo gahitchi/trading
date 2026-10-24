@@ -7,6 +7,7 @@ credentials. Runs as the desktop user, outside Docker, without Docker socket mou
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -150,7 +151,14 @@ class SetupHandler(BaseHTTPRequestHandler):
         if not self._trusted() or self.path != "/status":
             return self.reply(403, {"error": "Only the local Trading Lab GUI is allowed."})
         account = saved_account(self.server.root)
-        return self.reply(200, {"configured": account is not None, "account": account})
+        return self.reply(
+            200,
+            {
+                "configured": account is not None,
+                "account": account,
+                "installation": hashlib.sha256(str(self.server.root).encode("utf-8")).hexdigest(),
+            },
+        )
 
     def do_POST(self):
         if not self._trusted() or self.path not in ("/connect", "/retry"):
