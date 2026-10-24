@@ -58,6 +58,7 @@ def run_spec(
     period: Period,
     label: str | None = None,
     speed: str = "daily",
+    keep_signals: bool = False,
 ) -> backtest.RunResult:
     """Equal-weight portfolio of `tickers`. With a point-in-time membership file, each day's
     capital is shared among the stocks that were in the universe that day."""
@@ -83,6 +84,7 @@ def run_spec(
         cross_sectional=xs,
         target_vol=cfg.portfolio.target_vol,
         speed=speed,
+        keep_signals=keep_signals,
     )
 
 

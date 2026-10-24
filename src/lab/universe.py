@@ -45,10 +45,16 @@ def bar_type(iid: InstrumentId, spec: str = "1-DAY") -> BarType:
     return BarType.from_str(f"{iid}-{spec}-LAST-EXTERNAL")
 
 
-# Simulated prices keep four decimals (Gemini audit F-R07): split-adjusted histories put pre-split prices at a
-# few dollars or cents, where a one-cent grid moves a price by whole percents. Live instruments keep the
-# broker's cent tick.
-SIM_PRICE_PRECISION = 4
+# Simulated low-priced stocks keep four decimals (Gemini audit F-R07): split-adjusted histories put pre-split
+# prices at a few dollars or cents, where a one-cent grid moves a price by whole percents (exchanges quote
+# sub-dollar stocks in 0.0001 too). Others keep the cent tick, as live instruments do: a cent grid keeps the
+# simulator's average-price accounting and the ledger's per-fill cash exactly equal.
+FINE_TICK_BELOW = 5.0
+
+
+def sim_precision(df: pd.DataFrame) -> int:
+    """Price decimals for a simulated stock: 4 if it ever trades below FINE_TICK_BELOW dollars, else 2."""
+    return 4 if len(df) and float(df["low"].min()) < FINE_TICK_BELOW else 2
 
 
 def equity(iid: InstrumentId, precision: int = 2) -> Equity:
@@ -72,7 +78,7 @@ def to_market_events(df: pd.DataFrame, iid: InstrumentId, open_print_fraction: f
     t_close = (days + pd.Timedelta(hours=16)).tz_convert("UTC").asi8
     if len(t_close) and not (1e18 < t_close[0] < 1e19):
         raise ValueError(f"{iid}: timestamps are not UNIX nanoseconds ({t_close[0]})")
-    d = SIM_PRICE_PRECISION
+    d = sim_precision(df)
     o = df["open"].round(d).to_numpy()
     c = df["close"].round(d).to_numpy()
     h = df["high"].round(d).to_numpy()
@@ -142,7 +148,7 @@ def to_intraday_events(
     t_open, t_end, t_seen = ns(starts) + OPEN_PRINT_LAG_NS, ns(ends), ns(seen)
     if len(t_end) and not (1e18 < t_end[0] < 1e19):
         raise ValueError(f"{iid}: timestamps are not UNIX nanoseconds ({t_end[0]})")
-    d = SIM_PRICE_PRECISION
+    d = sim_precision(df)
     o, h, lo, c = (df[k].round(d).to_numpy() for k in ("open", "high", "low", "close"))
     v = df["volume"].to_numpy()
     sym = ticker_of(iid)

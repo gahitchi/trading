@@ -112,6 +112,11 @@ class Orchestrator:
             if t:
                 entry["train_sharpe_edge_vs_buy_and_hold"] = round(t["rows"][1]["sharpe_edge"], 3)
                 entry["noise_floor_p_value"] = round(t["null"]["p_value"], 3)
+                if t.get("diagnostics"):
+                    from lab.factor_stats import summary
+
+                    # Gemini audit F-R15: what the signal predicts and what costs took, not just the net edge.
+                    entry["signal_diagnostics"] = summary(t["diagnostics"])
             review = h.read("review.json")
             if review:
                 entry["critic"] = review.get("summary")

@@ -11,7 +11,9 @@ import exchange_calendars
 import pandas as pd
 
 
-@lru_cache(maxsize=8)
+# One calendar per year, built once per process: each costs about 0.25 s, and with room for only 8 a run
+# spanning 9 or more years rebuilt them on every backtest, half its run time (Gemini audit F-R18).
+@lru_cache(maxsize=64)
 def calendar(year):
     return exchange_calendars.get_calendar("XNYS", start=f"{year - 1}-01-01", end=f"{year + 1}-12-31")
 

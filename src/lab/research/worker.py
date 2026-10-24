@@ -66,12 +66,16 @@ def main(argv=None) -> int:
             "no signal errors": cand["signal_errors"] == 0,
             "traded at all": cand.get("fills", 0) > 0,
         }
+        from lab.factor_stats import diagnose
+
         out = {
             "validation": validation,
             "period": "train",
             "tickers": tickers,
             "rows": comp.rows,
             "null": null,
+            # Stage-0 diagnostics (F-R15): predictive power, cost drag and turnover apart. Informational only.
+            "diagnostics": diagnose(cfg, spec, tickers, frames, period, cand.get("active_sharpe", float("nan"))),
             "criteria": {"min_sharpe_edge": r.min_sharpe_edge, "max_p_value": r.max_p_value, "min_dsr": r.min_dsr},
             "checks": checks,
             "passed": all(checks.values()),

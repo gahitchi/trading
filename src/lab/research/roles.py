@@ -128,7 +128,9 @@ def researcher_prompt(universe: list[str], train: tuple[str, str], past: list[di
     past_txt = json.dumps(past, indent=1) if past else "none yet"
     return (
         f"Universe: {', '.join(universe)}\nTraining period: {train[0]} to {train[1]}\n\n"
-        f"Hypotheses already tested (training-period results only):\n{past_txt}\n\n"
+        f"Hypotheses already tested (training-period results only; signal_diagnostics separates predictive "
+        f"power (rank IC by horizon in bars, its t-statistic) from cost drag and holding period: a positive IC "
+        f"with a negative edge suggests trading less often, not a wrong mechanism):\n{past_txt}\n\n"
         "Propose the next hypothesis."
     )
 

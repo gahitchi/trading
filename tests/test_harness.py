@@ -18,6 +18,9 @@ from lab.signals.registry import SignalSpec
 from lab.sim.broker import SimBroker
 from lab.sim.harness import LiveHarness
 
+# Real-clock LiveNode runs against the simulated broker: the slow, serial tier (Gemini audit F-R19).
+pytestmark = pytest.mark.harness
+
 # GOOG, 1 Nov 2006: sma_trend(3, 10) enters and then flips three times in seven sessions.
 D0 = 556
 TREND = SignalSpec("sma_trend", {"fast": 3, "slow": 10})

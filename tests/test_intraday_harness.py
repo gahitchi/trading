@@ -13,6 +13,9 @@ from lab.halt import read_halt
 from lab.signals.registry import SignalSpec
 from lab.sim.intraday import IntradayHarness, harness_config
 
+# Real-clock LiveNode runs against the simulated broker: the slow, serial tier (Gemini audit F-R19).
+pytestmark = pytest.mark.harness
+
 
 def _frames(minutes=15, sessions=3):
     idx = [t for d in pd.bdate_range("2026-03-02", periods=sessions) for t in intraday.session_bars(d, minutes)]

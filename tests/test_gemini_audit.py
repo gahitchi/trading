@@ -270,7 +270,7 @@ def test_a_delisting_is_settled_at_its_recorded_value(goog_lab, tmp_path):
     data.save_delistings(cfg, f)
     r = backtest.run(cfg, sleeves, {"A": alive, "D": dying}, alive.index[30].date(), None, risk=risk)
     sells = [x for x in r.fills if x.ticker == "D" and x.side == "SELL"]
-    assert len(sells) == 1 and sells[0].price == pytest.approx(dying["close"].iloc[-1] * 0.5, abs=1e-3)
+    assert len(sells) == 1 and sells[0].price == pytest.approx(dying["close"].iloc[-1] * 0.5, abs=0.005)  # a cent tick
     held = sum(x.qty if x.side == "BUY" else -x.qty for x in r.fills if x.ticker == "D")
     assert held == 0 and r.metrics["delistings_settled"]["D"]["source"] == "test vendor"
 
@@ -332,3 +332,78 @@ def test_walk_forward_runs_only_the_active_window_and_the_next_one_warming_up():
     assert all(s.closed for s in sigs[:-1]) and not sigs[-1].closed
     policy.close()
     assert sigs[-1].closed
+
+
+# ----------------------------------------------------------------------------- F-R15
+
+
+def test_information_coefficient_reads_predictive_power():
+    from lab import factor_stats
+
+    rng = np.random.default_rng(21)
+    days = pd.bdate_range("2020-01-02", periods=400)
+    rets = pd.DataFrame(rng.normal(0, 0.01, (400, 6)), index=days, columns=list("ABCDEF"))
+    closes = 100 * (1 + rets).cumprod()
+    noise = pd.DataFrame(rng.normal(size=(400, 6)), index=days, columns=list("ABCDEF"))
+    oracle = (closes.shift(-1) / closes - 1).fillna(0) + 0.01 * noise  # half-knows tomorrow
+    good = factor_stats.ic_profile(oracle, closes, horizons=(1, 5))
+    bad = factor_stats.ic_profile(noise, closes, horizons=(1,))
+    assert good[1]["ic"] > 0.5 and good[1]["t_stat"] > 10 and good[1]["basis"] == "cross-sectional"
+    assert abs(good[5]["ic"]) < good[1]["ic"]  # the knowledge is about one day only
+    assert abs(bad[1]["ic"]) < 0.05 and abs(bad[1]["t_stat"]) < 3
+    flips = pd.DataFrame(np.tile([1.0, -1.0], (6, 200)).T, index=days, columns=list("ABCDEF"))
+    assert factor_stats.persistence(flips)["autocorrelation_lag1"] == pytest.approx(-1)
+
+
+def test_training_reports_stage_zero_diagnostics(goog_lab):
+    from lab import experiments, factor_stats
+    from lab.signals.registry import SignalSpec
+
+    per = goog_lab.period("train")
+    comp, _ = experiments.compare(goog_lab, [SignalSpec("sma_trend")], ["GOOG"], per)
+    d = factor_stats.diagnose(
+        goog_lab,
+        SignalSpec("sma_trend"),
+        ["GOOG"],
+        {"GOOG": data.load(goog_lab, "GOOG")},
+        per,
+        comp.rows[1]["active_sharpe"],
+    )
+    assert set(d["information_coefficient"]) == {"1", "5", "10", "21"}
+    assert d["information_coefficient"]["5"]["basis"] == "time-series"
+    assert d["cost_drag_sharpe"] > 0  # costs only take away
+    assert d["holding_period_bars"] > 5 and 0 < d["hit_rate"] < 1  # a trend follower holds for weeks
+    brief = factor_stats.summary(d)
+    assert brief["rank_ic_by_horizon"]["5"] is not None and brief["cost_drag_sharpe"] > 0
+    with pytest.raises(experiments.HoldoutUsed):
+        factor_stats.diagnose(goog_lab, SignalSpec("sma_trend"), ["GOOG"], {}, goog_lab.period("holdout"), 0.0)
+
+
+# ----------------------------------------------------------------------------- F-R18, F-R19
+
+
+def test_session_calendars_are_built_once_for_long_runs():
+    """F-R18: the hotspot was not event construction (11 ms for 2,148 daily bars) but rebuilding exchange
+    calendars (about 0.25 s each) once a run spanned more years than the cache held."""
+    from lab import exchange
+
+    exchange.calendar.cache_clear()
+    for year in range(1995, 2027):
+        exchange.is_session(f"{year}-03-02")
+    before = exchange.calendar.cache_info().misses
+    for year in range(1995, 2027):
+        exchange.is_session(f"{year}-03-03")
+    assert exchange.calendar.cache_info().misses == before  # 32 years stay cached
+
+
+def test_real_clock_harness_tests_form_their_own_tier():
+    import tomllib
+    from pathlib import Path
+
+    root = Path(__file__).parents[1]
+    markers = tomllib.loads((root / "pyproject.toml").read_text())["tool"]["pytest"]["ini_options"]["markers"]
+    assert any(m.startswith("harness:") for m in markers)
+    for name in ("test_harness.py", "test_intraday_harness.py", "test_control_harness.py"):
+        assert "pytestmark = pytest.mark.harness" in (root / "tests" / name).read_text()
+    ci = (root / ".github/workflows/ci.yml").read_text()
+    assert '-m "not llm and not harness" -n auto' in ci and '-m "harness"' in ci

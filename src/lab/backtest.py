@@ -47,10 +47,10 @@ from lab.signals.base import Signal
 from lab.universe import (
     NY,
     SIM,
-    SIM_PRICE_PRECISION,
     USD,
     equity,
     instrument_id,
+    sim_precision,
     to_intraday_events,
     to_market_events,
 )
@@ -287,7 +287,7 @@ def run(
             iid = instrument_id(t, "SIM")
             iids[t] = iid
             frames[t] = df
-            engine.add_instrument(equity(iid, SIM_PRICE_PRECISION))
+            engine.add_instrument(equity(iid, sim_precision(df)))
             if quick:
                 engine.add_data(
                     to_intraday_events(df, iid, cfg.costs.open_print_fraction, sp.minutes, sp.bar_spec(), delay_bars)
