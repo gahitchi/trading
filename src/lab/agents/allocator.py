@@ -154,24 +154,26 @@ class AllocatorAgent(DataActor):
         held = [t for t, w in weights.items() if w != 0]
         if not held:
             return 1.0
-        # Each pair of stocks over the intervals they share, both ends priced (F-R11): one stock with gaps no
-        # longer sends the whole book to cash. Before any held stock has enough returns, stay in cash.
+        # Each pair of stocks over the intervals they share, both ends priced (F-R11): one stock with gaps or a
+        # recent listing no longer sends the whole book to cash. A held stock without enough returns of its own
+        # is sized as if it were as volatile as the most volatile known one; before any held stock has enough
+        # returns, stay in cash.
         min_obs = min(20, self.config.vol_window)
         rows = {t: list(self.closes[t]) for t in held}
         w = np.array([weights[t] for t in held])
         if self.config.session_bars <= 1:
-            cov = covariance({t: interval_returns(rows[t]) for t in held}, held, min_obs)
+            cov = covariance({t: interval_returns(rows[t]) for t in held}, held, min_obs, np.max)
             if cov is None:
                 return 0.0
             annual = float(w @ cov @ w) * self.config.periods_per_year
         else:
-            intra = covariance({t: interval_returns(rows[t], _same_session) for t in held}, held, min_obs)
+            intra = covariance({t: interval_returns(rows[t], _same_session) for t in held}, held, min_obs, np.max)
             if intra is None:
                 return 0.0
             annual = float(w @ intra @ w) * 252 * (self.config.session_bars - 1)
             if not self.config.flat_at_close:
                 overnight = covariance(
-                    {t: interval_returns(rows[t], lambda a, b: not _same_session(a, b)) for t in held}, held, 3
+                    {t: interval_returns(rows[t], lambda a, b: not _same_session(a, b)) for t in held}, held, 3, np.max
                 )
                 # A held overnight book needs an overnight estimate; until three nights are seen, stay in cash.
                 if overnight is None:

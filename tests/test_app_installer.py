@@ -33,6 +33,8 @@ def test_installer_creates_only_private_setup_and_launches_fixed_paper_compose(t
     calls = []
     monkeypatch.setattr(tool.subprocess, "run", lambda args, **kw: calls.append((args, kw)))
     opened = []
+    monkeypatch.setattr(tool, "ensure_docker", lambda: None)
+    monkeypatch.setattr(tool, "install_shortcuts", lambda root: None)
     monkeypatch.setattr(tool, "wait_until_ready", lambda url: True)
     monkeypatch.setattr(tool, "open_app", opened.append)
     assert tool.main() == 0
@@ -67,9 +69,9 @@ def test_windows_gets_desktop_and_start_menu_shortcuts_with_the_app_icon(tmp_pat
     tool = installer()
     calls = []
     monkeypatch.setattr(tool.subprocess, "run", lambda args, **kw: calls.append((args, kw)))
-    monkeypatch.setattr(tool.sys, "platform", "linux")
+    monkeypatch.setattr(tool.sys, "platform", "darwin")
     tool.install_shortcuts(tmp_path)
-    assert calls == []  # shortcuts are a Windows convenience; elsewhere nothing is written
+    assert calls == []  # no shortcut on macOS
     monkeypatch.setattr(tool.sys, "platform", "win32")
     tool.install_shortcuts(tmp_path)
     ((args, kw),) = calls
@@ -102,3 +104,34 @@ def test_the_window_waits_for_the_app_to_answer(monkeypatch):
         server.server_close()
     monkeypatch.setattr(tool.time, "sleep", lambda _: None)
     assert not tool.wait_until_ready(f"http://127.0.0.1:{server.server_address[1]}", seconds=0.2)
+
+
+def test_linux_gets_an_application_menu_entry_with_the_icon(tmp_path, monkeypatch):
+    tool = installer()
+    monkeypatch.setattr(tool.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    tool.install_shortcuts(tmp_path / "app")
+    entry = (tmp_path / "share/applications/trading-lab.desktop").read_text()
+    assert "Name=Trading Lab" in entry and "icon-512.png" in entry and "start-app.sh" in entry
+    path = tmp_path / "share/applications/trading-lab.desktop"
+    path.write_text("customised")
+    tool.install_shortcuts(tmp_path / "app")
+    assert path.read_text() == "customised"  # never overwritten
+
+
+def test_a_stopped_docker_desktop_is_started_and_awaited(tmp_path, monkeypatch):
+    tool = installer()
+    app = tmp_path / "Docker Desktop.exe"
+    app.write_text("")
+    states = iter([False, False, True])
+    started = []
+    monkeypatch.setattr(tool, "docker_running", lambda: next(states))
+    monkeypatch.setattr(tool, "DOCKER_DESKTOP", [app])
+    monkeypatch.setattr(tool.subprocess, "Popen", lambda args, **kw: started.append(args))
+    monkeypatch.setattr(tool.time, "sleep", lambda _: None)
+    tool.ensure_docker()
+    assert started == [[str(app)]]
+    monkeypatch.setattr(tool, "docker_running", lambda: False)
+    monkeypatch.setattr(tool, "DOCKER_DESKTOP", [tmp_path / "missing.exe"])
+    with pytest.raises(ValueError, match="systemctl start docker"):
+        tool.ensure_docker()

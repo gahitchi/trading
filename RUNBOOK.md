@@ -20,6 +20,11 @@ Check: log in to the paper account once with IBKR's normal Trader Workstation or
 
 ## 2. Host machine
 
+**Quickest: the one-command installer** (README, Install): on Windows
+`irm https://raw.githubusercontent.com/gahitchi/trading/main/install.ps1 | iex` in PowerShell, on Linux
+`curl -fsSL https://raw.githubusercontent.com/gahitchi/trading/main/install.sh | sh`. It installs Docker and
+Python when missing, asks for the paper login, starts the app and adds its icon. The manual steps follow.
+
 Any Linux machine with Docker (your Arch PC, or an x86-64/ARM64 VPS):
 
 ```bash

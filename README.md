@@ -60,13 +60,36 @@ Two layers of cooperating agents:
 
 ## Install
 
-Python 3.13 or 3.14 (NautilusTrader 2.0 requires it), Linux or macOS. Uses [uv](https://docs.astral.sh/uv/) (`pacman -S uv` on Arch).
+**The app (paper trading on your computer), one command.** It installs what is missing, downloads Trading
+Lab, asks for your IBKR paper login once, starts it and adds a Trading Lab icon. Run the same command again
+to update; your settings, credentials and history are kept. Nothing trades until you press Start.
+
+Windows 10/11, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/gahitchi/trading/main/install.ps1 | iex
+```
+
+Linux (Arch, Debian/Ubuntu, Fedora):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gahitchi/trading/main/install.sh | sh
+```
+
+On Windows it installs Docker Desktop and Python with `winget` if they are missing. Docker Desktop's first
+start asks you to accept its terms and may install WSL 2 and ask for a restart; after the restart, run the
+command again. The first start builds the program (5 to 15 minutes); later starts take seconds. Before
+trading you need an approved IBKR account with a paper account (`DU...`), see [RUNBOOK.md](RUNBOOK.md).
+
+**The research lab (command line).** Python 3.13 or 3.14 (NautilusTrader 2.0 requires it), Linux or macOS.
+Uses [uv](https://docs.astral.sh/uv/) (`pacman -S uv` on Arch).
 
 ```bash
 git clone https://github.com/gahitchi/trading.git && cd trading
 uv sync --frozen --extra dev
 source .venv/bin/activate
-pytest                 # offline suite, including several minutes of recovery scenarios
+pytest -m "not llm and not harness" -n auto   # fast offline suite, in parallel (a few minutes)
+pytest -m harness      # real-clock recovery scenarios against the simulated broker (several minutes)
 lab doctor             # what is ready, what is missing
 ```
 

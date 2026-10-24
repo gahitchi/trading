@@ -58,9 +58,10 @@ def nearest_psd(cov: np.ndarray, floor: float = 1e-12) -> np.ndarray:
     return (vecs * np.maximum(vals, floor)) @ vecs.T
 
 
-def covariance(per: dict[str, dict], tickers: list[str], min_obs: int) -> np.ndarray | None:
+def covariance(per: dict[str, dict], tickers: list[str], min_obs: int, newcomer=np.median) -> np.ndarray | None:
     """Pairwise, shrunk, PSD covariance of the stocks' interval returns (`per`: ticker -> interval_returns).
-    None when no stock has `min_obs` returns of its own."""
+    A stock without `min_obs` returns of its own gets `newcomer` of the known variances (the median for sharing
+    capital; volatility targeting uses the maximum). None when no stock has `min_obs` returns."""
     n = len(tickers)
     var = np.full(n, np.nan)
     for i, t in enumerate(tickers):
@@ -70,7 +71,7 @@ def covariance(per: dict[str, dict], tickers: list[str], min_obs: int) -> np.nda
     known = var[np.isfinite(var) & (var > 0)]
     if not len(known):
         return None
-    var = np.where(np.isfinite(var) & (var > 0), var, float(np.median(known)))  # newcomers: a typical variance
+    var = np.where(np.isfinite(var) & (var > 0), var, float(newcomer(known)))
     corr = np.eye(n)
     noise = signal = 0.0
     for i in range(n):
