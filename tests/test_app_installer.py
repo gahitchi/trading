@@ -143,7 +143,7 @@ def test_a_browser_that_fails_to_launch_falls_through_to_the_next(tmp_path, monk
 
 
 def test_windows_installer_never_trusts_dangling_py_launcher():
-    """Regression for 'Unable to create process using ... OneDrive\Desktop\python.exe'."""
+    r"""Regression for 'Unable to create process using ... OneDrive\Desktop\python.exe'."""
     root = Path(__file__).parents[1]
     bootstrap = (root / "install.ps1").read_text()
     shortcut = (root / "start-app.cmd").read_text()

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 
 import pytest
 
@@ -117,5 +118,9 @@ def test_bundle_exports_the_authoritative_sqlite_ledger_and_sanitize_pseudonymiz
     assert not list(clean.rglob("*.sqlite3"))  # raw databases are never copied
     text = "".join(p.read_text() for p in clean.rglob("*.json"))
     raw_ids = list(h.broker().state["orders"]) + [f["trade_id"] for f in h.broker().state["fills"]]
-    assert raw_ids and not [i for i in raw_ids if i in text]  # every order and trade ID pseudonymized
+    # A two-character broker trade ID can coincidentally occur inside a pseudonym's
+    # SHA256 digest. Check raw IDs as independent tokens, not as substrings of hashes.
+    assert raw_ids and not [
+        i for i in raw_ids if re.search(r"(?<![A-Za-z0-9])" + re.escape(i) + r"(?![A-Za-z0-9])", text)
+    ]
     assert "CLIENT-" in text and "TRADE-" in text
