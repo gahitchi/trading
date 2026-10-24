@@ -61,9 +61,7 @@ def window(last):
 
 def test_single_stock_dispatch_skips_expired_and_future_workers():
     first, second, third = CountedSignal(0.3), CountedSignal(-0.4), CountedSignal(0.8)
-    policy = ScheduledSignal(
-        [("2025-01-02", spec(first)), ("2025-01-05", spec(second)), ("2025-01-08", spec(third))]
-    )
+    policy = ScheduledSignal([("2025-01-02", spec(first)), ("2025-01-05", spec(second)), ("2025-01-08", spec(third))])
     assert policy.target(window("2025-01-03")) == pytest.approx(0.3)
     assert (first.calls, second.calls, third.calls) == (1, 0, 0)
     assert policy.target(window("2025-01-06")) == pytest.approx(-0.4)
