@@ -15,15 +15,29 @@ bash install-arch.sh
 
 The installer asks for permission before granting Docker group access. **The `docker` group is equivalent to root access**; decline and configure rootless Docker separately if you do not accept that permission. After accepting, it checks the actual socket: if `sg docker` still cannot connect but `sudo docker info` succeeds, it installs the KDE shortcut and defers the first launch until you log out of KDE and back in. The installer never silently runs the trading app as root. First-time dependencies and image builds require network access.
 
-On the first launch, the existing guided startup asks for an **IBKR paper username**, **DU-prefixed paper account**, and a hidden paper password. It stores the password in `secrets/tws_password` (mode 0600), not in the Git repository or app form. Then it starts the local paper Gateway and displays Trading Lab in its own Chrome/Chromium/Edge window when available, otherwise in your default browser. Approve any separate IBKR two-factor prompt. Finally, save the trading plan and explicitly choose **Start paper trading** in the app.
+After installation, open **Trading Lab** from KDE's application menu (or run
+`bash start-app-arch.sh --interactive`). The **complete local GUI opens immediately, even before IBKR approves your account**.
+The Docker app runs independently of the Gateway, with paper trading disabled until setup.
 
-If you do not have paper account credentials yet, install the launcher without opening the Gateway:
+When your IBKR paper account becomes available, use the *Interactive Brokers paper account* form at the top of
+the GUI. Supply the IBKR username, **DU-prefixed paper account** and password. The password goes only to a
+user-owned loopback helper on `127.0.0.1:8766`, never to the app's trading engine, and is stored locally
+in `secrets/tws_password` (mode 0600), while `.env` stores only the username and account number.
+The helper starts **only** the IBKR paper Gateway without restarting the GUI. Approve any separate
+IBKR two-factor prompt, then save the trading plan and explicitly choose **Start paper trading**.
+If the Gateway fails to start, select *Retry Gateway connection* in the GUI.
+
+The installation can still be performed without launching the GUI:
 
 ```bash
 bash install-arch.sh --no-launch
 ```
 
-Open **Trading Lab** in KDE's application menu when ready. A Konsole window opens automatically if credentials have not been configured. The app is reachable at `http://127.0.0.1:8765` only; the Gateway API and VNC are also published on loopback.
+On subsequent launches, the existing GUI is reused; it is not rebuilt while it is running.
+The GUI is reachable at `http://127.0.0.1:8765` and the credential helper at
+`127.0.0.1:8766` only; neither is exposed on the network. The Gateway API and VNC,
+once explicitly configured, are likewise published on loopback.
+
 
 ## Test, stop or troubleshoot
 

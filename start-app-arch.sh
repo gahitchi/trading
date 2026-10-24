@@ -5,20 +5,7 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$root"
 interactive="${1:-}"
 
-# A desktop menu launcher has no TTY. First-time credential setup must have a visible prompt.
-if [[ "$interactive" != "--interactive" && ! -t 0 && ( ! -f .env || ! -f secrets/tws_password ) ]]; then
-  if command -v konsole >/dev/null 2>&1; then
-    exec konsole --hold -e bash "$root/start-app-arch.sh" --interactive
-  elif command -v xterm >/dev/null 2>&1; then
-    exec xterm -hold -e bash "$root/start-app-arch.sh" --interactive
-  else
-    printf 'First-run configuration needs a terminal. Run: bash %q\n' "$root/start-app-arch.sh" >&2
-    if command -v kdialog >/dev/null 2>&1; then
-      kdialog --error 'Start Trading Lab from a terminal once to configure the paper account.'
-    fi
-    exit 1
-  fi
-fi
+# Broker login is performed inside the GUI; no terminal is needed on first launch.
 
 launch() {
   if docker info --format '{{.ServerVersion}}' >/dev/null 2>&1; then

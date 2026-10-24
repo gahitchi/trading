@@ -111,7 +111,9 @@ jobs:
         run: |
           mkdir -p secrets && echo x > secrets/tws_password
           TWS_USERID=ci LAB_PAPER_ACCOUNT=DU1234567 docker compose config -q
-          TWS_USERID=ci LAB_PAPER_ACCOUNT=DU1234567 docker compose -f compose.app.yml config -q
+          # Offline GUI must validate and launch with no IBKR credentials.
+          docker compose -f compose.app.yml config -q
+          TWS_USERID=ci LAB_PAPER_ACCOUNT=DU1234567 docker compose -f compose.app.yml -f compose.gateway.yml config -q
       - name: guided app starts without enabling an engine or requiring broker data
         run: |
           docker run -d --name app-ci -p 127.0.0.1:8765:8765 trading-lab:ci app --directory /lab/results/app-ci --host 0.0.0.0 --no-browser

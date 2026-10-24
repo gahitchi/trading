@@ -92,6 +92,13 @@ To check or download without starting the application, from PowerShell:
 The updater requires an internet connection. If GitHub cannot be contacted, the installed version remains
 available. The installer and updater still require qualification on the owner's actual Windows machine.
 
+**IBKR approval can happen after installing:** the full KDE/Windows GUI now starts without
+any broker credentials. The dedicated paper-account form inside Trading Lab submits
+credentials to a user-owned loopback-only helper (port 8766) with strict origin checks,
+stores them privately and starts only the IBKR paper Gateway. The trading engine and
+order authority remain off until you save a valid plan and explicitly start paper
+trading. There is no need to reinstall or to type passwords in a terminal.
+
 **Crash diagnostic files (private; no automatic upload):** On Arch, check
 `~/.local/state/trading-lab/launcher.log` for both terminal and KDE startup errors and
 `~/.local/state/trading-lab/crash.log` for Python exceptions (use `$XDG_STATE_HOME` instead

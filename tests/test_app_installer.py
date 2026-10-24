@@ -24,29 +24,33 @@ def test_password_storage_is_private_and_cannot_replace_existing_secret(tmp_path
     assert secret.read_text() == "local-test-secret"
 
 
-def test_installer_creates_only_private_setup_and_launches_fixed_paper_compose(tmp_path, monkeypatch):
+def test_first_launch_opens_full_gui_without_broker_credentials_or_gateway(tmp_path, monkeypatch):
     tool = installer()
     monkeypatch.setattr(tool, "__file__", str(tmp_path / "tools/start_app.py"))
-    values = iter(["test-user", "DU1234567"])
-    monkeypatch.setattr("builtins.input", lambda _: next(values))
-    monkeypatch.setattr(tool.getpass, "getpass", lambda _: "secret-test-password")
     calls = []
-    monkeypatch.setattr(tool.subprocess, "run", lambda args, **kw: calls.append((args, kw)))
     opened = []
+    helpers = []
+    monkeypatch.setattr(tool.subprocess, "run", lambda args, **kw: calls.append((args, kw)))
     monkeypatch.setattr(tool, "ensure_docker", lambda: None)
     monkeypatch.setattr(tool, "running_app", lambda root: False)
     monkeypatch.setattr(tool, "install_shortcuts", lambda root: None)
+    monkeypatch.setattr(tool, "start_setup_service", helpers.append)
     monkeypatch.setattr(tool, "wait_until_ready", lambda url: True)
     monkeypatch.setattr(tool, "open_app", opened.append)
     assert tool.main() == 0
     assert opened == ["http://127.0.0.1:8765"]
-    assert (tmp_path / ".env").stat().st_mode & 0o777 == 0o600
-    assert "secret-test-password" not in (tmp_path / ".env").read_text()
-    assert (tmp_path / "secrets/tws_password").read_text() == "secret-test-password"
-    assert calls[-1][0] == ["docker", "compose", "-f", "compose.app.yml", "up", "--build", "-d"]
+    assert helpers == [tmp_path]
+    assert not (tmp_path / ".env").exists()
+    assert not (tmp_path / "secrets").exists()
+    assert calls[-1][0] == ["docker", "compose", "-f", "compose.app.yml", "up", "--build", "-d", "lab"]
     assert calls[-1][1]["env"]["LAB_APP_UID"] == str(os.getuid())
-    # Repeat launch reuses credentials without prompting or overwriting them.
+    # Reopening the shortcut does not recreate the running GUI or a Gateway.
+    monkeypatch.setattr(tool, "running_app", lambda root: True)
     assert tool.main() == 0
+    assert len(calls) == 2
+    assert all("ib-gateway" not in cmd for cmd, _ in calls)
+
+
 
 
 def test_the_app_opens_in_its_own_window_when_edge_or_chrome_is_installed(tmp_path, monkeypatch):
@@ -193,6 +197,7 @@ def test_reopening_windows_app_does_not_rebuild_running_docker_node(tmp_path, mo
     monkeypatch.setattr(tool.subprocess, "run", run)
     monkeypatch.setattr(tool, "ensure_docker", lambda: None)
     monkeypatch.setattr(tool, "install_shortcuts", lambda root: None)
+    monkeypatch.setattr(tool, "start_setup_service", lambda root: None)
     monkeypatch.setattr(tool, "wait_until_ready", lambda url: True)
     monkeypatch.setattr(tool, "open_app", lambda url: None)
     assert tool.main() == 0

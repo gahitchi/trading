@@ -188,7 +188,9 @@ def start_setup_service(root):
     port = 8766
     url = f"http://127.0.0.1:{port}/status"
     try:
-        with urllib.request.urlopen(url, timeout=1) as response:
+        with urllib.request.urlopen(
+            urllib.request.Request(url, headers={"Origin": "http://127.0.0.1:8765"}), timeout=1
+        ) as response:
             if response.status == 200:
                 return
     except OSError:
