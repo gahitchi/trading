@@ -6,3 +6,7 @@ services:
     extends:
       file: docker-compose.yml
       service: ib-gateway
+
+secrets:
+  tws_password:
+    file: ./secrets/tws_password
