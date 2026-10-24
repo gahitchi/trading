@@ -15,6 +15,7 @@ def _agent(held, weights, max_gross=None, risk_limits=None):
         max_gross=max_gross,
         risk_limits=risk_limits,
         margin=MarginSettings(),
+        entry_slippage=0.01,
         live=True,
         session=None,
         flat_at_close=False,
@@ -28,6 +29,7 @@ def _agent(held, weights, max_gross=None, risk_limits=None):
         max_daily_turnover=10,
     )
     agent = SimpleNamespace(
+        _reserve=lambda destinations, equity: ExecutionAgent._reserve(agent, destinations, equity),
         config=cfg,
         borrow_error=None,
         borrow_ledger=None,

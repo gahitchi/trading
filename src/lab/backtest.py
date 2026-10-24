@@ -328,6 +328,7 @@ def run(
                 risk_limits=risk,
                 reservation_costs=cfg.costs,
                 reservation_gap=max(cfg.paper.reservation_gap, cfg.trading.limit_collar),
+                entry_slippage=cfg.trading.limit_collar,
                 limit_collar=cfg.trading.limit_collar,
                 **(execution_overrides or {}),
             )
