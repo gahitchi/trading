@@ -184,13 +184,14 @@ def test_fixed_leverage_borrows_and_pays_debit_interest(goog_lab):
         leverage=1.5,
         max_leverage=1.5,
     )
-    # The 1.5x target is a ceiling; stress reserves deliberately keep actual
-    # leverage below it. Verify the reported ratio against the executed cash book.
+    # The 1.5x target is a ceiling, never crossed. With the gap stress applied to funding and margin only
+    # (G013 proposal), a funded book uses the exposure cap up to the entry-slippage reserve.
+    # Verify the reported ratio against the executed cash book.
     shares = sum(f.qty if f.side == "BUY" else -f.qty for f in r.fills)
     cash = 100_000 - sum((1 if f.side == "BUY" else -1) * f.qty * f.price + f.commission for f in r.fills)
     expected_gross = shares * 100 / (cash + shares * 100 - r.financing)
     assert r.gross.iloc[-1] == pytest.approx(expected_gross)
-    assert 1 < r.gross.iloc[-1] < 1.5 * 0.99
+    assert 1.4 < r.gross.iloc[-1] < 1.5 and r.gross.max() <= 1.5
     assert r.min_cash < 0 and r.financing > 0 and r.borrow_fees == 0
     assert r.ledger_vs_account == pytest.approx(0.0, abs=1e-6)
 
