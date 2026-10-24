@@ -177,14 +177,14 @@ def test_reopening_windows_app_does_not_rebuild_running_docker_node(tmp_path, mo
     """A desktop shortcut must not restart an autonomous paper bot when reopening its UI."""
     tool = installer()
     monkeypatch.setattr(tool, "__file__", str(tmp_path / "tools/start_app.py"))
-    (tmp_path / ".env").write_text("TWS_USERID=x\\nLAB_PAPER_ACCOUNT=DU1234567\\n")
+    (tmp_path / ".env").write_text("TWS_USERID=x\nLAB_PAPER_ACCOUNT=DU1234567\n")
     (tmp_path / "secrets").mkdir()
     (tmp_path / "secrets/tws_password").write_text("secret")
     calls = []
 
     class Proc:
         returncode = 0
-        stdout = "lab\\n"
+        stdout = "lab\n"
 
     def run(args, **kwargs):
         calls.append(args)
