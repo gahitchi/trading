@@ -130,6 +130,18 @@ def open_app(url):
     webbrowser.open(url)
 
 
+def running_app(root):
+    """Reopening the window must not rebuild or recreate a running paper app."""
+    result = subprocess.run(
+        ["docker", "compose", "-f", "compose.app.yml", "ps", "--status", "running", "--services"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return "lab" in result.stdout.splitlines()
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     subprocess.run(["docker", "compose", "version"], check=True, cwd=root, capture_output=True)
@@ -155,7 +167,10 @@ def main():
     env = dict(os.environ)
     env["LAB_APP_UID"] = str(os.getuid()) if hasattr(os, "getuid") else "1000"
     env["LAB_APP_GID"] = str(os.getgid()) if hasattr(os, "getgid") else "1000"
-    subprocess.run(["docker", "compose", "-f", "compose.app.yml", "up", "--build", "-d"], check=True, cwd=root, env=env)
+    if running_app(root):
+        print("Trading Lab is already running; opening the existing window without rebuilding the engine.")
+    else:
+        subprocess.run(["docker", "compose", "-f", "compose.app.yml", "up", "--build", "-d"], check=True, cwd=root, env=env)
     install_shortcuts(root)
     print("Complete any IBKR two-factor prompt. Next time, open Trading Lab from its icon.")
     print("Save your plan, then click Start paper trading. No orders are enabled by this installer.")

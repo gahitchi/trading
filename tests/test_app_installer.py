@@ -34,6 +34,7 @@ def test_installer_creates_only_private_setup_and_launches_fixed_paper_compose(t
     monkeypatch.setattr(tool.subprocess, "run", lambda args, **kw: calls.append((args, kw)))
     opened = []
     monkeypatch.setattr(tool, "ensure_docker", lambda: None)
+    monkeypatch.setattr(tool, "running_app", lambda root: False)
     monkeypatch.setattr(tool, "install_shortcuts", lambda root: None)
     monkeypatch.setattr(tool, "wait_until_ready", lambda url: True)
     monkeypatch.setattr(tool, "open_app", opened.append)
@@ -170,3 +171,30 @@ def test_windows_updater_is_version_pinned_and_preserves_private_state():
     assert "Rollback" in script or "rollback" in script
     assert "TradingLab-backup-" in script
     assert "CheckOnly" in script and "UpdateOnly" in script
+
+
+def test_reopening_windows_app_does_not_rebuild_running_docker_node(tmp_path, monkeypatch):
+    """A desktop shortcut must not restart an autonomous paper bot when reopening its UI."""
+    tool = installer()
+    monkeypatch.setattr(tool, "__file__", str(tmp_path / "tools/start_app.py"))
+    (tmp_path / ".env").write_text("TWS_USERID=x\\nLAB_PAPER_ACCOUNT=DU1234567\\n")
+    (tmp_path / "secrets").mkdir()
+    (tmp_path / "secrets/tws_password").write_text("secret")
+    calls = []
+
+    class Proc:
+        returncode = 0
+        stdout = "lab\\n"
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return Proc()
+
+    monkeypatch.setattr(tool.subprocess, "run", run)
+    monkeypatch.setattr(tool, "ensure_docker", lambda: None)
+    monkeypatch.setattr(tool, "install_shortcuts", lambda root: None)
+    monkeypatch.setattr(tool, "wait_until_ready", lambda url: True)
+    monkeypatch.setattr(tool, "open_app", lambda url: None)
+    assert tool.main() == 0
+    assert not any("up" in args for args in calls)
+    assert any(args[-3:] == ["--status", "running", "--services"] for args in calls)
