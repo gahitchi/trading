@@ -48,7 +48,7 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
     def do_GET(self):
-        account_root = str(Path(sys.argv[3]).resolve())
+        account_root = str(Path(sys.argv[2]).resolve())
         data = json.dumps({
             "installation": hashlib.sha256(account_root.encode("utf-8")).hexdigest(),
             "protocol_version": VERSION,
