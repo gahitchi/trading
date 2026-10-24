@@ -46,7 +46,13 @@ def test_gui_broker_setup_is_strictly_local_and_paper_only(tmp_path, monkeypatch
     try:
         code, state, cors = request("GET", "/status")
         installation = hashlib.sha256(str(tmp_path.resolve()).encode("utf-8")).hexdigest()
-        assert code == 200 and state == {"configured": False, "account": None, "mode": "paper", "order_setup_enabled": False, "installation": installation}
+        assert code == 200 and state == {
+            "configured": False,
+            "account": None,
+            "mode": "paper",
+            "order_setup_enabled": False,
+            "installation": installation,
+        }
         assert cors["Access-Control-Allow-Origin"] == headers["Origin"]
         bad = {"username": "DUR7654321", "account": "U1234567", "password": "first-secret"}
         assert request("POST", "/connect", bad)[0] == 400
@@ -71,7 +77,13 @@ def test_gui_broker_setup_is_strictly_local_and_paper_only(tmp_path, monkeypatch
         assert (tmp_path / "secrets/tws_password").stat().st_mode & 0o777 == 0o600
         assert (tmp_path / "secrets").stat().st_mode & 0o777 == 0o700
         code, state, _ = request("GET", "/status")
-        assert code == 200 and state == {"configured": True, "account": "DU1234567", "mode": "paper", "order_setup_enabled": True, "installation": installation}
+        assert code == 200 and state == {
+            "configured": True,
+            "account": "DU1234567",
+            "mode": "paper",
+            "order_setup_enabled": True,
+            "installation": installation,
+        }
         assert "first-secret" not in json.dumps(state) and "DUR7654321" not in json.dumps(state)
         assert request("POST", "/connect", good)[0] == 400
         assert request("POST", "/retry", {})[0] == 200
@@ -164,10 +176,14 @@ def test_trial_account_uses_read_only_gateway_and_never_enables_trading(tmp_path
     thread.start()
     conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=3)
     try:
-        conn.request("GET", "/status", headers={
-            "Host": f"127.0.0.1:{server.server_address[1]}",
-            "Origin": "http://127.0.0.1:8765",
-        })
+        conn.request(
+            "GET",
+            "/status",
+            headers={
+                "Host": f"127.0.0.1:{server.server_address[1]}",
+                "Origin": "http://127.0.0.1:8765",
+            },
+        )
         response = conn.getresponse()
         state = json.loads(response.read())
         assert response.status == 200
@@ -180,4 +196,3 @@ def test_trial_account_uses_read_only_gateway_and_never_enables_trading(tmp_path
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
-
