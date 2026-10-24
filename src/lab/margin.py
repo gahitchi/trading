@@ -41,6 +41,17 @@ def borrowed_cash(cash: float, short_value: float) -> float:
     return max(0.0, short_value - cash)
 
 
+def free_cash(cash: float, short_value: float) -> float:
+    """Cash beyond the short-sale proceeds held as collateral: what earns credit interest."""
+    return max(0.0, cash - short_value)
+
+
+def financing_credit(cash: float, short_value: float, days: float, m: MarginSettings) -> float:
+    """Interest earned over `days`: credit_apr on free cash plus short_rebate_apr on short proceeds (F-R08).
+    ASSUMED rates; zero by default, as before."""
+    return (free_cash(cash, short_value) * m.credit_apr + short_value * m.short_rebate_apr) * days * DAY
+
+
 def financing_cost(
     cash: float, short_value: float, days: float, m: MarginSettings, *, verified_borrow_fee: float | None = None
 ) -> tuple[float, float]:

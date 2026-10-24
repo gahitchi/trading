@@ -20,9 +20,11 @@ def test_orders_fill_at_next_open_never_same_close(goog_lab):
     cfg = dataclasses.replace(goog_lab, warmup_start=date(2024, 1, 1))
     r = backtest.run(cfg, backtest.equal_weight(BuyAndHold, ["X"]), {"X": df}, date(2024, 1, 2), None, risk=NO_RISK)
     first = r.fills[0]
-    # Decision at the close of 2024-01-02 (105) -> fill at 2024-01-03's open (110) + one tick of slippage.
+    # Decision at the close of 2024-01-02 (105) -> fill at 2024-01-03's opening print (110). What a real order
+    # pays beyond the print (half-spread and impact) is charged with the commission (Gemini audit F-R06).
     assert first.side == "BUY"
-    assert first.price == pytest.approx(110.01)
+    assert first.price == pytest.approx(110.0)
+    assert first.commission > 1.0 and r.metrics["spread_costs"] > 0
     assert (
         pd.Timestamp(first.ts, tz="UTC").tz_convert("America/New_York").strftime("%Y-%m-%d %H:%M") == "2024-01-03 09:30"
     )

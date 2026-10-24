@@ -45,9 +45,15 @@ def bar_type(iid: InstrumentId, spec: str = "1-DAY") -> BarType:
     return BarType.from_str(f"{iid}-{spec}-LAST-EXTERNAL")
 
 
-def equity(iid: InstrumentId) -> Equity:
-    """US stock: priced in USD, one-cent tick."""
-    return Equity(iid, Symbol(ticker_of(iid)), USD, 2, Price.from_str("0.01"), 0, 0)
+# Simulated prices keep four decimals (Gemini audit F-R07): split-adjusted histories put pre-split prices at a
+# few dollars or cents, where a one-cent grid moves a price by whole percents. Live instruments keep the
+# broker's cent tick.
+SIM_PRICE_PRECISION = 4
+
+
+def equity(iid: InstrumentId, precision: int = 2) -> Equity:
+    """US stock priced in USD: a one-cent tick, or a finer one for simulated (adjusted) prices."""
+    return Equity(iid, Symbol(ticker_of(iid)), USD, precision, Price(10.0**-precision, precision), 0, 0)
 
 
 def to_market_events(df: pd.DataFrame, iid: InstrumentId, open_print_fraction: float) -> list:
@@ -66,10 +72,11 @@ def to_market_events(df: pd.DataFrame, iid: InstrumentId, open_print_fraction: f
     t_close = (days + pd.Timedelta(hours=16)).tz_convert("UTC").asi8
     if len(t_close) and not (1e18 < t_close[0] < 1e19):
         raise ValueError(f"{iid}: timestamps are not UNIX nanoseconds ({t_close[0]})")
-    o = df["open"].round(2).to_numpy()
-    c = df["close"].round(2).to_numpy()
-    h = df["high"].round(2).to_numpy()
-    lo = df["low"].round(2).to_numpy()
+    d = SIM_PRICE_PRECISION
+    o = df["open"].round(d).to_numpy()
+    c = df["close"].round(d).to_numpy()
+    h = df["high"].round(d).to_numpy()
+    lo = df["low"].round(d).to_numpy()
     v = df["volume"].to_numpy()
     events = []
     sym = ticker_of(iid)
@@ -81,7 +88,7 @@ def to_market_events(df: pd.DataFrame, iid: InstrumentId, open_print_fraction: f
             events.append(
                 TradeTick(
                     iid,
-                    Price(o[i], 2),
+                    Price(o[i], d),
                     Quantity(size, 0),
                     AggressorSide.NO_AGGRESSOR,
                     TradeId(f"{sym}-open-{i}"),
@@ -92,10 +99,10 @@ def to_market_events(df: pd.DataFrame, iid: InstrumentId, open_print_fraction: f
         events.append(
             Bar(
                 bt,
-                Price(o[i], 2),
-                Price(hi, 2),
-                Price(low, 2),
-                Price(c[i], 2),
+                Price(o[i], d),
+                Price(hi, d),
+                Price(low, d),
+                Price(c[i], d),
                 Quantity(int(v[i]), 0),
                 int(t_close[i]),
                 int(t_close[i]),
@@ -135,7 +142,8 @@ def to_intraday_events(
     t_open, t_end, t_seen = ns(starts) + OPEN_PRINT_LAG_NS, ns(ends), ns(seen)
     if len(t_end) and not (1e18 < t_end[0] < 1e19):
         raise ValueError(f"{iid}: timestamps are not UNIX nanoseconds ({t_end[0]})")
-    o, h, lo, c = (df[k].round(2).to_numpy() for k in ("open", "high", "low", "close"))
+    d = SIM_PRICE_PRECISION
+    o, h, lo, c = (df[k].round(d).to_numpy() for k in ("open", "high", "low", "close"))
     v = df["volume"].to_numpy()
     sym = ticker_of(iid)
     events = []
@@ -146,7 +154,7 @@ def to_intraday_events(
             events.append(
                 TradeTick(
                     iid,
-                    Price(o[i], 2),
+                    Price(o[i], d),
                     Quantity(size, 0),
                     AggressorSide.NO_AGGRESSOR,
                     TradeId(f"{sym}-open-{i}"),
@@ -157,10 +165,10 @@ def to_intraday_events(
         events.append(
             Bar(
                 bt,
-                Price(o[i], 2),
-                Price(hi, 2),
-                Price(low, 2),
-                Price(c[i], 2),
+                Price(o[i], d),
+                Price(hi, d),
+                Price(low, d),
+                Price(c[i], d),
                 Quantity(int(v[i]), 0),
                 int(t_end[i]),
                 int(t_seen[i]),

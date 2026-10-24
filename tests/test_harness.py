@@ -5,6 +5,7 @@ clock), so these tests are slow by unit-test standards; they are the tests of wh
 actually runs against the broker.
 """
 
+import dataclasses
 import json
 from datetime import date
 
@@ -97,7 +98,10 @@ def test_sim_broker_partial_fill_cancels_the_auction_remainder(tmp_path):
 
 
 def test_live_node_matches_the_backtest_fill_for_fill(goog_lab, frames, tmp_path):
-    """Same agents, same bars, same costs: the paper path must reproduce the backtest exactly."""
+    """Same agents, same bars, same costs: the paper path must reproduce the backtest exactly. Both sides fill
+    at the print with commissions only: the backtest's modelled spread and impact (F-R06) have no counterpart
+    in the simulated broker, which stands for the real one."""
+    goog_lab = dataclasses.replace(goog_lab, costs=dataclasses.replace(goog_lab.costs, slippage=False))
     days = 7
     h = _harness(goog_lab, frames, tmp_path)
     for _ in range(days):
@@ -278,6 +282,7 @@ def _ls_cfg(cfg):
 
 def test_live_long_short_matches_the_backtest_including_financing(goog_lab, frames, tmp_path):
     cfg = _ls_cfg(goog_lab)
+    cfg = dataclasses.replace(cfg, costs=dataclasses.replace(cfg.costs, slippage=False))  # print fills both sides
     days = 7
     h = LiveHarness(cfg, [LS], frames, tmp_path / "harness", first_day=D0, allow_short=True)
     for _ in range(days):

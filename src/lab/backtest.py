@@ -44,7 +44,16 @@ from lab.borrow import BorrowBook, BorrowUnavailable
 from lab.config import LabConfig, RiskSettings
 from lab.metrics import max_drawdown, summarize
 from lab.signals.base import Signal
-from lab.universe import NY, SIM, USD, equity, instrument_id, to_intraday_events, to_market_events
+from lab.universe import (
+    NY,
+    SIM,
+    SIM_PRICE_PRECISION,
+    USD,
+    equity,
+    instrument_id,
+    to_intraday_events,
+    to_market_events,
+)
 
 
 @dataclass
@@ -108,6 +117,51 @@ def active_windows(frames: dict[str, pd.DataFrame], membership: dict | None) -> 
             )
         out[t] = None if membership is None else [(_ns(a) if a else 0, _ns_close(b) if b else None) for a, b in spells]
     return out
+
+
+def settle_delistings(
+    frames: dict[str, pd.DataFrame], membership: dict | None, delisted: dict | None
+) -> tuple[dict[str, pd.DataFrame], dict | None, dict]:
+    """Settle stocks that delisted inside the run (Gemini audit F-R09, lab.data.delistings).
+
+    A stock's prices must end on its delisting date. Its membership ends that day, and two bars at the
+    settlement value follow: the agents see the stock leave at the delisting close and the exit fills at the
+    settlement price at the next opening print, through the same path as any membership exit, without a
+    prescient exit two days before the delisting. Returns (frames, membership, settlements)."""
+    from lab.data import DataError
+
+    hits = {t: d for t, d in (delisted or {}).items() if t in frames}
+    if not hits:
+        return frames, membership, {}
+    frames = dict(frames)
+    membership = dict(membership) if membership is not None else {t: [(None, None)] for t in frames}
+    settled = {}
+    for t, d in hits.items():
+        df = frames[t]
+        day = pd.Timestamp(d["delist_date"])
+        if day > df.index[-1]:
+            continue  # delisted after this run's data: nothing to settle here
+        if df.index[-1] != day:
+            raise DataError(f"{t}: prices continue past its delisting date {day.date()}; fix the data or the record")
+        last = float(df["close"].iloc[-1])
+        price = d["settlement_price"] if d["settlement_price"] is not None else last * (1 + d["delist_return"])
+        price = max(price, 0.0001)  # a worthless stock still needs a positive print to be sold at
+        after = pd.bdate_range(day + pd.Timedelta(days=1), periods=2)
+        volume = float(df["volume"].max())
+        extra = pd.DataFrame(
+            {"open": price, "high": price, "low": price, "close": price, "volume": volume}, index=after
+        )
+        frames[t] = pd.concat([df, extra])
+        spells = membership.get(t) or [(None, None)]
+        membership[t] = [(a, min(b, d["delist_date"]) if b else d["delist_date"]) for a, b in spells]
+        settled[t] = {
+            "date": str(day.date()),
+            "price": price,
+            "return": price / last - 1,
+            "source": d["source"],
+            "assumed": d["assumed"],
+        }
+    return frames, membership, settled
 
 
 def equal_weight(signal_factory, tickers: list[str]) -> list[Sleeve]:
@@ -187,6 +241,16 @@ def run(
     if "borrow_book" in (execution_overrides or {}):
         raise ValueError("configure borrow history through cfg.borrow, not execution_overrides")
 
+    data, membership, settlements = settle_delistings(
+        {t: data[t] for t in tickers if t in data}, membership, lab_data.delistings(cfg)
+    )
+    manifest = lab_data.manifest(cfg)
+    splits = {
+        t: [(_ns(date.fromisoformat(d)), float(r)) for d, r in manifest.get(t, {}).get("splits", [])] for t in tickers
+    }
+    fees = costs.fee_model(
+        cfg.costs, {t: costs.MarketProfile.from_bars(df, cfg.costs) for t, df in data.items()}, splits
+    )
     engine = BacktestEngine(
         BacktestEngineConfig(trader_id=TraderId("LAB-001"), logging=LoggerConfig(stdout_level=LogLevel.ERROR))
     )
@@ -206,7 +270,7 @@ def run(
             AccountType.MARGIN if margin_book else AccountType.CASH,
             [Money(capital, USD)],
             base_currency=USD,
-            fee_model=costs.fee_model(cfg.costs),
+            fee_model=fees,
             fill_model=costs.fill_model(cfg.costs),
             latency_model=costs.latency_model(),
             **venue_kw,
@@ -223,7 +287,7 @@ def run(
             iid = instrument_id(t, "SIM")
             iids[t] = iid
             frames[t] = df
-            engine.add_instrument(equity(iid))
+            engine.add_instrument(equity(iid, SIM_PRICE_PRECISION))
             if quick:
                 engine.add_data(
                     to_intraday_events(df, iid, cfg.costs.open_print_fraction, sp.minutes, sp.bar_spec(), delay_bars)
@@ -330,6 +394,8 @@ def run(
                 reservation_costs=cfg.costs,
                 reservation_gap=max(cfg.paper.reservation_gap, cfg.trading.limit_collar),
                 limit_collar=cfg.trading.limit_collar,
+                max_participation=cfg.costs.max_participation,
+                participation_window=cfg.costs.cost_window,
                 **(execution_overrides or {}),
             )
         )
@@ -362,6 +428,12 @@ def run(
         metrics = summarize(eq, fills=recorder.fills, gross=gross, risk_free=lab_data.risk_free(cfg))
         if quick and len(every) > 2:
             metrics["intraday_max_drawdown"] = max_drawdown(pd.concat([pd.Series([capital]), every]))[0]
+        # The fills' fees include the modelled spread and impact; report each part (F-R06).
+        metrics["commissions"] = round(fees.totals["commission"], 2)
+        metrics["spread_costs"] = round(fees.totals["spread"], 2)
+        metrics["impact_costs"] = round(fees.totals["impact"], 2)
+        if settlements:
+            metrics["delistings_settled"] = settlements
         result = RunResult(
             label=label
             or ", ".join(sorted({s.signal.label() for s in sleeves} | {x[0].label() for x in cross_sectional})),

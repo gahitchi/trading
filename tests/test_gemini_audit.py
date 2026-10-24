@@ -100,3 +100,193 @@ def test_the_panel_bootstrap_draws_blocks_of_varying_length():
     }
     assert len(counts) > 3  # fixed 20-session blocks always gave 30
     assert all(15 < c < 50 for c in counts)
+
+
+# ----------------------------------------------------------------------------- F-R06 to F-R09: costs, financing
+
+
+def _bars(n=300, price=100.0, volume=1e7, start="2021-01-04", spread=0.01):
+    idx = pd.bdate_range(start, periods=n)
+    close = price * np.exp(np.random.default_rng(3).normal(0, 0.01, n).cumsum())
+    return pd.DataFrame(
+        {
+            "open": close,
+            "high": close * (1 + spread),
+            "low": close * (1 - spread),
+            "close": close,
+            "volume": volume,
+        },
+        index=idx,
+    )
+
+
+def _cfg(goog_lab, **costs):
+    from dataclasses import replace
+
+    return replace(goog_lab, costs=replace(goog_lab.costs, **costs), warmup_start=pd.Timestamp("2021-01-01").date())
+
+
+def test_spread_costs_scale_with_value_not_with_the_price_level(goog_lab):
+    """F-R06: one tick was 20 bps on a $5 stock and 0.2 bps on a $500 stock."""
+    from lab import costs
+
+    cfg = _cfg(goog_lab)
+    cheap, dear = _bars(price=5.0), _bars(price=500.0)
+    fee = costs.fee_model(
+        cfg.costs,
+        {"C": costs.MarketProfile.from_bars(cheap, cfg.costs), "D": costs.MarketProfile.from_bars(dear, cfg.costs)},
+    )
+    ts = int(pd.Timestamp("2021-06-01 10:00", tz="America/New_York").value)
+    a = fee.costs("C", 10_000 / 5.0, 5.0, ts)
+    b = fee.costs("D", 10_000 / 500.0, 500.0, ts)
+    assert a["spread"] == pytest.approx(b["spread"], rel=0.05) and a["spread"] > 0
+
+
+def test_impact_grows_with_the_square_root_of_size():
+    from lab import costs
+    from lab.config import CostSettings
+
+    c = CostSettings(0.005, 1.0, 0.01, True, 0.01, 500.0, 0.02, 0.01)
+    df = _bars(volume=1e6)
+    fee = costs.fee_model(c, {"X": costs.MarketProfile.from_bars(df, c)})
+    ts = int(pd.Timestamp("2021-12-01 10:00", tz="America/New_York").value)
+    small, big = fee.costs("X", 1_000, 100.0, ts), fee.costs("X", 4_000, 100.0, ts)
+    assert big["impact"] / 4_000 == pytest.approx(2 * small["impact"] / 1_000)  # per share, sqrt(4) = 2
+    assert big["spread"] == pytest.approx(4 * small["spread"])
+
+
+def test_corwin_schultz_reads_the_spread_from_highs_and_lows():
+    from lab import costs
+
+    calm = costs.corwin_schultz(np.full(50, 100.2), np.full(50, 99.8))
+    assert np.nanmean(calm) > 0.002  # a 0.4% range every day implies a spread of a few tenths of a percent
+    flat = costs.corwin_schultz(np.full(50, 100.0), np.full(50, 100.0))
+    assert np.nanmax(flat) == 0
+
+
+def test_orders_add_at_most_the_participation_cap(goog_lab):
+    """F-R06: buying $100k of a stock that trades 2,000 shares a day takes many days, not one opening print."""
+    from lab import backtest
+    from lab.config import RiskSettings
+    from lab.signals import BuyAndHold
+
+    df = _bars(volume=2_000)
+    cfg = _cfg(goog_lab)
+    risk = RiskSettings(1.0, 1.0, 0.9999)
+    r = backtest.run(cfg, backtest.equal_weight(BuyAndHold, ["X"]), {"X": df}, df.index[30].date(), None, risk=risk)
+    buys = [f for f in r.fills if f.side == "BUY"]
+    assert max(f.qty for f in buys) <= 100 and len(buys) > 5  # 5% of 2,000
+    assert "liquidity_cap" in {e.kind for e in r.risk_events}
+
+
+def test_commissions_use_the_real_share_count_before_a_split():
+    """F-R07: $25,000 at a split-adjusted $0.50 is 50,000 adjusted shares but 1,250 real ones (40:1 split)."""
+    from lab import costs
+    from lab.config import CostSettings
+
+    c = CostSettings(0.005, 1.0, 0.01, False, 0.01, 500.0, 0.02, 0.01)
+    split_at = int(pd.Timestamp("2021-06-01", tz="America/New_York").value)
+    before = int(pd.Timestamp("2021-01-04 10:00", tz="America/New_York").value)
+    plain = costs.fee_model(c).costs("X", 50_000, 0.50, before)["commission"]
+    real = costs.fee_model(c, splits={"X": [(split_at, 40.0)]}).costs("X", 50_000, 0.50, before)["commission"]
+    assert plain == pytest.approx(250.0) and real == pytest.approx(6.25)
+
+
+def test_simulated_prices_keep_four_decimals(goog_lab):
+    """F-R07: a split-adjusted $0.5123 open is not rounded to $0.51."""
+    from lab import backtest
+    from lab.config import RiskSettings
+    from lab.signals import BuyAndHold
+
+    df = _bars(price=0.5)
+    cfg = _cfg(goog_lab, slippage=False)
+    r = backtest.run(
+        cfg,
+        backtest.equal_weight(BuyAndHold, ["X"]),
+        {"X": df},
+        df.index[30].date(),
+        None,
+        risk=RiskSettings(1.0, 1.0, 0.9999),
+    )
+    day = pd.Timestamp(r.fills[0].ts, tz="UTC").tz_convert("America/New_York").normalize().tz_localize(None)
+    assert r.fills[0].price == pytest.approx(df.loc[day, "open"], abs=1e-4)
+
+
+def test_free_cash_and_short_proceeds_earn_interest():
+    """F-R08: credit on cash beyond the short proceeds, a rebate on the proceeds; zero unless configured."""
+    from lab import margin
+    from lab.config import MarginSettings
+
+    m = MarginSettings(credit_apr=0.04, short_rebate_apr=0.03)
+    assert margin.financing_credit(150_000, 50_000, 365, m) == pytest.approx(100_000 * 0.04 + 50_000 * 0.03)
+    assert margin.financing_credit(150_000, 50_000, 365, MarginSettings()) == 0
+
+
+def test_an_unlevered_book_in_cash_earns_credit_interest(goog_lab):
+    from dataclasses import replace
+
+    from lab import backtest
+    from lab.config import RiskSettings
+    from lab.signals import Signal
+
+    class Cash(Signal):
+        name = "test_cash"
+
+        def target(self, w):
+            return 0.0
+
+    df = _bars()
+    cfg = replace(_cfg(goog_lab), margin=replace(goog_lab.margin, credit_apr=0.05))
+    r = backtest.run(
+        cfg,
+        backtest.equal_weight(Cash, ["X"]),
+        {"X": df},
+        df.index[30].date(),
+        None,
+        risk=RiskSettings(1.0, 1.0, 0.9999),
+    )
+    nights = (df.index[-1] - df.index[30]).days
+    assert r.financing == pytest.approx(-100_000 * 0.05 * nights / 365, rel=0.02)
+    assert r.equity.iloc[-1] > 100_000
+
+
+def test_a_delisting_is_settled_at_its_recorded_value(goog_lab, tmp_path):
+    """F-R09: the stock's prices end on its delisting date; the position settles at close x (1 + return)."""
+    from lab import backtest
+    from lab.config import RiskSettings
+    from lab.signals import BuyAndHold
+
+    alive, dying = _bars(), _bars().iloc[:200]
+    cfg = _cfg(goog_lab, slippage=False)
+    sleeves = backtest.equal_weight(BuyAndHold, ["A", "D"])
+    risk = RiskSettings(1.0, 1.0, 0.9999)
+    with pytest.raises(data.DataError, match="terminal/delisting"):
+        backtest.run(cfg, sleeves, {"A": alive, "D": dying}, alive.index[30].date(), None, risk=risk)
+    f = tmp_path / "delistings.csv"
+    day = dying.index[-1].date()
+    f.write_text(
+        f"ticker,delist_date,delist_type,delist_return,settlement_price,source\nD,{day},merger,-0.5,,test vendor\n"
+    )
+    data.save_delistings(cfg, f)
+    r = backtest.run(cfg, sleeves, {"A": alive, "D": dying}, alive.index[30].date(), None, risk=risk)
+    sells = [x for x in r.fills if x.ticker == "D" and x.side == "SELL"]
+    assert len(sells) == 1 and sells[0].price == pytest.approx(dying["close"].iloc[-1] * 0.5, abs=1e-3)
+    held = sum(x.qty if x.side == "BUY" else -x.qty for x in r.fills if x.ticker == "D")
+    assert held == 0 and r.metrics["delistings_settled"]["D"]["source"] == "test vendor"
+
+
+def test_delisting_records_need_a_vendor_and_a_value(goog_lab, tmp_path):
+    f = tmp_path / "d.csv"
+    head = "ticker,delist_date,delist_type,delist_return,settlement_price,source\n"
+    f.write_text(head + "X,2020-01-02,merger,,,vendor\n")
+    with pytest.raises(data.DataError, match="needs delist_return"):
+        data.save_delistings(goog_lab, f)
+    f.write_text(head + "X,2020-01-02,merger,0.1,,\n")
+    with pytest.raises(data.DataError, match="source"):
+        data.save_delistings(goog_lab, f)
+    f.write_text(head + "X,2020-01-02,bankruptcy,,,vendor\n")
+    data.save_delistings(goog_lab, f)
+    rec = data.delistings(goog_lab)["X"]
+    assert rec["assumed"] and rec["delist_return"] == -0.30
+    q = data.quality(goog_lab, ["X"])
+    assert "ASSUMED -30%" in data.quality_warning(q)

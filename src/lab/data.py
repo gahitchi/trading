@@ -21,6 +21,7 @@ Also provides the two NULL MODELS used by the noise-floor test:
 from __future__ import annotations
 
 import json
+import math
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -144,6 +145,7 @@ def save(
     entry = {
         "source": source,
         "adjusted": adjusted,
+        **({"splits": df.attrs["splits"]} if "splits" in df.attrs else {}),
         "survivorship_free": survivorship_free,
         "note": note,
         "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -191,6 +193,11 @@ def quality(cfg: LabConfig, tickers) -> dict:
         "borrow_model": "historical_close_book" if cfg.borrow.history is not None else "assumed",
         "assumed_borrow_apr": cfg.margin.borrow_apr if shorts and cfg.borrow.history is None else None,
         "assumed_debit_apr": cfg.margin.debit_apr if (shorts or levered) else None,
+        "assumed_credit_apr": cfg.margin.credit_apr or None,
+        "assumed_short_rebate_apr": (cfg.margin.short_rebate_apr or None) if shorts else None,
+        "split_history": all("splits" in e for e in entries) if entries else False,
+        "delistings": {t: d for t, d in (delistings(cfg) or {}).items() if t in set(tickers)},
+        "risk_free": "data/risk_free.csv" if risk_free_path(cfg).exists() else None,
     }
 
 
@@ -219,7 +226,89 @@ def quality_warning(q: dict) -> str | None:
         )
     if q.get("assumed_debit_apr") is not None:
         issues.append(f"interest on borrowed cash ASSUMED at {q['assumed_debit_apr']:.2%}/yr")
+    if q.get("assumed_credit_apr"):
+        issues.append(f"interest on free cash ASSUMED at {q['assumed_credit_apr']:.2%}/yr")
+    if q.get("assumed_short_rebate_apr"):
+        issues.append(f"rebate on short proceeds ASSUMED at {q['assumed_short_rebate_apr']:.2%}/yr")
+    if q.get("adjusted") and not q.get("split_history", True):
+        issues.append(
+            "split history unknown for some adjusted series: per-share commissions on pre-split dates are charged "
+            "on adjusted share counts and overstated (refetch with `lab data fetch` to record splits)"
+        )
+    for ticker, d in (q.get("delistings") or {}).items():
+        if d.get("assumed"):
+            issues.append(f"{ticker} delisting settled at an ASSUMED {d['delist_return']:.0%} return (no vendor value)")
     return "; ".join(issues) or None
+
+
+# --------------------------------------------------------------------------- delistings
+
+DELISTING_COLUMNS = ("ticker", "delist_date", "delist_type", "delist_return", "settlement_price", "source")
+# Shumway (1997): performance-related delistings without a recorded value lose about 30% on average.
+ASSUMED_DISTRESS_RETURN = -0.30
+DISTRESS_TYPES = frozenset({"bankruptcy", "distress", "performance", "liquidation"})
+
+
+def delistings_path(cfg: LabConfig) -> Path:
+    return cfg.data_dir / "delistings.csv"
+
+
+def save_delistings(cfg: LabConfig, path: str | Path) -> pd.DataFrame:
+    """CSV of ticker, delist_date, delist_type, delist_return, settlement_price, source (Gemini audit F-R09).
+
+    Every row needs its vendor (`source`). A delisting is settled at settlement_price, else at the last close
+    x (1 + delist_return). A performance-related one (type bankruptcy, distress, performance, liquidation) with
+    neither value is settled at an ASSUMED -30% (Shumway, 1997) and flagged in every result; any other type
+    needs a value."""
+    df = pd.read_csv(path, dtype=str).rename(columns=str.lower).fillna("")
+    missing = set(DELISTING_COLUMNS) - set(df.columns)
+    if missing:
+        raise DataError(f"{path}: missing columns {sorted(missing)}")
+    df = df[list(DELISTING_COLUMNS)].apply(lambda col: col.str.strip())
+    df["ticker"] = df["ticker"].str.upper()
+    df["delist_type"] = df["delist_type"].str.lower()
+    for i, r in df.iterrows():
+        where = f"{path}: row {i + 2} ({r['ticker'] or '?'})"
+        if not r["ticker"] or not r["source"]:
+            raise DataError(f"{where}: ticker and source (the vendor) are required")
+        try:
+            date.fromisoformat(r["delist_date"])
+            ret = float(r["delist_return"]) if r["delist_return"] else None
+            price = float(r["settlement_price"]) if r["settlement_price"] else None
+        except ValueError as e:
+            raise DataError(f"{where}: {e}") from e
+        if ret is not None and not -1 <= ret <= 10:
+            raise DataError(f"{where}: delist_return must be a fraction between -1 and 10")
+        if price is not None and price < 0:
+            raise DataError(f"{where}: settlement_price cannot be negative")
+        if ret is None and price is None and r["delist_type"] not in DISTRESS_TYPES:
+            raise DataError(
+                f"{where}: a {r['delist_type'] or 'untyped'} delisting needs delist_return or settlement_price"
+            )
+    if df["ticker"].duplicated().any():
+        raise DataError(f"{path}: one delisting per ticker")
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    df.to_csv(delistings_path(cfg), index=False)
+    return df
+
+
+def delistings(cfg: LabConfig) -> dict[str, dict] | None:
+    p = delistings_path(cfg)
+    if not p.exists():
+        return None
+    df = pd.read_csv(p, dtype=str).fillna("")
+    out = {}
+    for _, r in df.iterrows():
+        assumed = not r["delist_return"] and not r["settlement_price"]
+        out[r["ticker"]] = {
+            "delist_date": date.fromisoformat(r["delist_date"]),
+            "delist_type": r["delist_type"],
+            "delist_return": ASSUMED_DISTRESS_RETURN if assumed else float(r["delist_return"] or "nan"),
+            "settlement_price": float(r["settlement_price"]) if r["settlement_price"] else None,
+            "source": r["source"],
+            "assumed": assumed,
+        }
+    return out
 
 
 # --------------------------------------------------------------------------- point-in-time universe
@@ -329,14 +418,21 @@ def fetch_yfinance(ticker: str, start: date, end: date | None = None) -> pd.Data
             end=end.isoformat() if end else None,
             interval="1d",
             auto_adjust=True,
-            actions=False,
+            actions=True,
             raise_errors=True,
         )
     except Exception as e:  # yfinance raises a variety of types
         raise DataError(f"{ticker}: Yahoo Finance download failed: {e}") from e
     if df is None or df.empty:
         raise DataError(f"{ticker}: Yahoo Finance returned no data (check the symbol)")
-    return df.rename(columns=str.lower)[COLUMNS]
+    df = df.rename(columns=str.lower)
+    out = df[COLUMNS]
+    # The split history (date, ratio) lets per-share costs use the real share count (Gemini audit F-R07).
+    ratios = df["stock splits"] if "stock splits" in df else pd.Series(dtype=float)
+    out.attrs["splits"] = [
+        [str(pd.Timestamp(d).date()), float(r)] for d, r in ratios.items() if math.isfinite(r) and r > 0 and r != 1
+    ]
+    return out
 
 
 def import_csv(path: str | Path, date_column: str | None = None, *, keep_time: bool = False) -> pd.DataFrame:

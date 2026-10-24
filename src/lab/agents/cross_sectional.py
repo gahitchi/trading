@@ -131,7 +131,7 @@ class CrossSectionalAgent(DataActor):
         t = str(bar.bar_type.instrument_id.symbol)
         if t not in self.rows or bar.ts_event <= self.last_ts[t]:
             return
-        self.publish_message(T_MARK, PriceMark(t, float(bar.close), bar.ts_event))
+        self.publish_message(T_MARK, PriceMark(t, float(bar.close), bar.ts_event, float(bar.volume)))
         self.last_ts[t] = bar.ts_event
         self.last_bar[t] = bar
         self.rows[t].append(

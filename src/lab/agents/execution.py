@@ -6,6 +6,7 @@ import json
 import math
 import sqlite3
 import time
+from collections import deque
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -18,6 +19,7 @@ from lab.agents.messages import (
     T_APPROVED,
     T_EQUITY,
     T_FILL,
+    T_MARK,
     T_RISK,
     T_SIGNAL,
     EquitySnapshot,
@@ -49,6 +51,14 @@ def _opening(current: float, target: float) -> float:
     if current == 0 or current * target < 0:
         return abs(target)
     return max(0.0, abs(target) - abs(current))
+
+
+def _liquidity_cap(seen, participation: float | None) -> float | None:
+    """Shares of new exposure one order may add: `participation` x the average volume of the bars `seen`
+    ((ts, volume) pairs). None (no cap) without the setting or before five bars of volume are known."""
+    if not participation or not seen or len(seen) < 5:
+        return None
+    return math.floor(participation * sum(v for _, v in seen) / len(seen))
 
 
 def _with_opening(current: float, target: float, opening: float) -> float:
@@ -99,6 +109,8 @@ class ExecutionAgentConfig(StrategyConfig):
         notification_health=None,
         reservation_costs=None,
         reservation_gap: float = 0.0,
+        max_participation: float | None = None,
+        participation_window: int = 20,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. margin: financing rates accrued on short and levered books.
@@ -153,6 +165,8 @@ class ExecutionAgentConfig(StrategyConfig):
         self.authority = authority
         self.reservation_costs = reservation_costs
         self.reservation_gap = reservation_gap
+        self.max_participation = max_participation
+        self.participation_window = participation_window
         if live and borrow_book is not None:
             raise ValueError("historical borrow evidence cannot authorize live paper-broker orders")
         if state_path and borrow_book is not None:
@@ -179,6 +193,7 @@ class ExecutionAgent(Strategy):
         self.authority_nonce = None
         self.weights: dict[str, float] = {}
         self.prices: dict[str, float] = {}
+        self.volumes: dict[str, deque] = {}  # ticker -> recent (bar ts, bar volume): the liquidity cap
         self.price_stamps: dict[str, int] = {}
         self.price_ts = 0
         self.new_data = False
@@ -287,6 +302,8 @@ class ExecutionAgent(Strategy):
     def on_start(self):
         self.subscribe_topic(T_SIGNAL, self._on_signal)
         self.subscribe_topic(T_APPROVED, self._on_approved)
+        if self.config.max_participation:
+            self.subscribe_topic(T_MARK, self._on_mark)
         if self.config.live:
             now = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY)
             previous = self._read_heartbeat()
@@ -341,6 +358,13 @@ class ExecutionAgent(Strategy):
     def on_stop(self):
         if self.config.live:
             self._write_heartbeat(running=False)
+
+    def _on_mark(self, msg):
+        """Bar volumes, warm-up included, for the liquidity cap (Gemini audit F-R06)."""
+        if msg.volume > 0 and msg.ticker in self.config.instruments:
+            seen = self.volumes.setdefault(msg.ticker, deque(maxlen=self.config.participation_window))
+            if not seen or seen[-1][0] < msg.ts:  # several agents may report the same bar
+                seen.append((msg.ts, msg.volume))
 
     def _on_signal(self, msg):
         self.prices[msg.ticker] = msg.price
@@ -575,7 +599,8 @@ class ExecutionAgent(Strategy):
         return long_value, short_value
 
     def _accrue(self) -> None:
-        """Charge borrow fees and debit interest for the calendar days since the last accrual."""
+        """Charge borrow fees and debit interest, and credit interest on free cash and short proceeds, for the
+        calendar days since the last accrual. `financing` is the net cost (negative when credits win)."""
         ts = self.price_ts
         verified_fee = None
         if self.borrow_ledger is not None and ts > self.accrued_to:
@@ -588,8 +613,9 @@ class ExecutionAgent(Strategy):
             borrow, debit = mg.financing_cost(
                 self.cash, short_value, days, self.config.margin, verified_borrow_fee=verified_fee
             )
+            credit = mg.financing_credit(self.cash, short_value, days, self.config.margin)
             self.borrow_fees += borrow
-            self.financing += borrow + debit
+            self.financing += borrow + debit - credit
         if ts and (not self.accrued_to or days > 0):
             self.accrued_to = ts
             self._save()  # persist every accrual: a restart must not re-accrue the span at a different book
@@ -817,6 +843,14 @@ class ExecutionAgent(Strategy):
                 if reason:
                     borrow_blocked = True
                     self._risk_event("borrow_unavailable", reason + "; new short exposure blocked")
+            cap = _liquidity_cap(
+                getattr(self, "volumes", {}).get(ticker), getattr(self.config, "max_participation", None)
+            )
+            if cap is not None and _opening(current, target) > cap:
+                # Gemini audit F-R06: new exposure trades at most max_participation of the average bar volume;
+                # the rest follows on later decisions. Reductions are never held back by liquidity.
+                target = math.trunc(_with_opening(current, target, cap))
+                self._risk_event("liquidity_cap", f"{ticker}: new exposure capped at {cap:,.0f} shares this bar")
             diff = target - current
             if diff == 0:
                 continue
@@ -1084,7 +1118,7 @@ class ExecutionAgent(Strategy):
             c = self.config.limit_collar
             px = self.prices[ticker] * (1 + c if side == OrderSide.BUY else 1 - c)
             order = self.order_factory.limit(
-                iid, side, qty, inst.make_price(round(px, 2)), time_in_force=TimeInForce.DAY
+                iid, side, qty, inst.make_price(round(px, inst.price_precision)), time_in_force=TimeInForce.DAY
             )
         else:
             order = self.order_factory.market(iid, side, qty, time_in_force=TimeInForce.DAY)  # exits must go
@@ -1183,7 +1217,9 @@ class ExecutionAgent(Strategy):
             return False
         if info:
             info["filled"] = info.get("filled", 0.0) + qty
-        self.cash += -qty * px - fee if buy else qty * px - fee
+        # Cash settles in cents, half away from zero, as the broker's (and the simulator's) account does.
+        notional = math.floor(qty * px * 100 + 0.5) / 100
+        self.cash += -notional - fee if buy else notional - fee
         self.commissions += fee
         self.held[ticker] = self.held.get(ticker, 0.0) + (qty if buy else -qty)
         self.applied[trade] = [time.time_ns(), str(ev.client_order_id)]
