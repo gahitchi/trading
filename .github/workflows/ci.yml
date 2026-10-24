@@ -38,6 +38,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uvx ruff check src tests tools
       - run: uvx ruff format --check src tests tools
+      - name: Check browser GUI JavaScript syntax
+        run: node --check src/lab/ui/app.js
 
   test:
     runs-on: ubuntu-latest
