@@ -168,6 +168,7 @@ def test_missing_sg_gives_actionable_failure_instead_of_command_not_found(tmp_pa
     assert "Log out of KDE completely" in result.stdout
     assert "Launcher exit code: 1" in (tmp_path / "state/trading-lab/launcher.log").read_text()
 
+
 def test_launcher_uses_existing_docker_socket_without_root(tmp_path):
     root = Path(__file__).parents[1]
     fake = tmp_path / "bin"
