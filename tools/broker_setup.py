@@ -87,11 +87,13 @@ def save_credentials(root: Path, payload: dict) -> str:
         raise ValueError("Invalid username.")
     if isinstance(account, str) and re.fullmatch(r"DUR[0-9]{5,}", account):
         raise ValueError(
-            "This looks like a paper-login username, not the separate DU-prefixed paper account number. "
-            "Check IBKR Client Portal > Settings > Paper Trading Account."
+            "DUR-prefixed simulation account numbers are not yet supported for broker-connected paper trading. "
+            "This may be an IBKR free-trial/demo account; its broker environment has not been verified. "
+            "Do not change the account number to DU or enter a different account. "
+            "You can continue using Trading Lab's GUI without connecting the account."
         )
     if not isinstance(account, str) or not PAPER_RE.fullmatch(account):
-        raise ValueError("Enter the DU-prefixed paper account number, not the paper-login username.")
+        raise ValueError("Enter the confirmed DU-prefixed paper account number for an approved IBKR paper account.")
     if (
         not isinstance(password, str)
         or not 1 <= len(password) <= 1024

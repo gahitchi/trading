@@ -20,7 +20,7 @@ After installation, open **Trading Lab** from KDE's application menu (or run
 The Docker app runs independently of the Gateway, with paper trading disabled until setup.
 
 When your IBKR paper account becomes available, use the *Interactive Brokers paper account* form at the top of
-the GUI. Supply the IBKR paper-login **username** (which may contain letters such as DUR), a separate **DU-prefixed paper account number** and password. Do not enter the paper-login username in the account number box; verify the account number under IBKR Client Portal > Settings > Paper Trading Account. The password goes only to a
+the GUI. Supply the IBKR paper-login **username**, a separate **DU-prefixed approved paper account number** and password. Verify both fields under IBKR Client Portal > Settings > Paper Trading Account. If IBKR instead displays a **DUR-prefixed simulation identifier**, this version does **not** yet authorize broker-connected paper trading for that identifier. It may belong to the IBKR trial/demo environment, which requires separate classification and API-acceptance testing. Do not strip the R or substitute a different account number; explore the GUI without starting the engine while awaiting a supported account. The password goes only to a
 user-owned loopback helper on `127.0.0.1:8766`, never to the app's trading engine, and is stored locally
 in `secrets/tws_password` (mode 0600), while `.env` stores only the username and account number.
 The helper starts **only** the IBKR paper Gateway without restarting the GUI. Approve any separate

@@ -43,7 +43,7 @@ def record_app_failure(directory: Path, area: str, exc: Exception) -> None:
     log.touch(mode=0o600, exist_ok=True)
     if os.name == "posix":
         log.chmod(0o600)
-    message = re.sub(r"\b(?:IB-)?DU[0-9]{5,}\b", "[PAPER_ACCOUNT]", str(exc), flags=re.IGNORECASE)
+    message = re.sub(r"\b(?:IB-)?DUR?[0-9]{5,}\b", "[PAPER_ACCOUNT]", str(exc), flags=re.IGNORECASE)
     message = re.sub(
         r"(?i)(password|token|api[_-]?key|secret)\s*[=:]\s*[^\s,;]+",
         r"\1=[REDACTED]",

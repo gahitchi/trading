@@ -226,6 +226,17 @@ def test_python_startup_failure_is_private_rotating_and_sanitized(tmp_path, monk
     assert "second" in path.read_text()
 
 
+def test_python_diagnostic_masks_unsupported_simulation_account_ids(tmp_path, monkeypatch):
+    tool = installer()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    try:
+        raise RuntimeError("Broker DUR987654 not allowed")
+    except RuntimeError as exc:
+        log_path = tool.record_launch_failure(exc)
+    assert "DUR987654" not in log_path.read_text()
+    assert "[PAPER_ACCOUNT]" in log_path.read_text()
+
+
 def test_python_crash_log_rejects_symlink(tmp_path, monkeypatch):
     tool = installer()
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))

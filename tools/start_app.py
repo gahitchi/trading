@@ -168,7 +168,7 @@ def record_launch_failure(exc: Exception) -> Path:
     """Capture a bounded traceback without source lines, credentials or environment dumps."""
     path = diagnostic_log()
     line = str(exc)
-    line = re.sub(r"\b(?:IB-)?DU[0-9]{5,}\b", "[PAPER_ACCOUNT]", line, flags=re.IGNORECASE)
+    line = re.sub(r"\b(?:IB-)?DUR?[0-9]{5,}\b", "[PAPER_ACCOUNT]", line, flags=re.IGNORECASE)
     line = re.sub(
         r"(?i)(password|token|api[_-]?key|secret)\s*[=:]\s*[^\s,;]+",
         r"\1=[REDACTED]",

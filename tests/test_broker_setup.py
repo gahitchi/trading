@@ -51,7 +51,9 @@ def test_gui_broker_setup_is_strictly_local_and_paper_only(tmp_path, monkeypatch
         bad = {"username": "DUR7654321", "account": "U1234567", "password": "first-secret"}
         assert request("POST", "/connect", bad)[0] == 400
         code, reason, _ = request("POST", "/connect", {**bad, "account": "DUR7654321"})
-        assert code == 400 and "username" in reason["error"] and "DU-prefixed" in reason["error"]
+        assert code == 400 and "DUR-prefixed simulation account" in reason["error"]
+        assert "not yet supported" in reason["error"]
+        assert "Do not change" in reason["error"]
         assert not (tmp_path / ".env").exists()
         good = {**bad, "account": "DU1234567"}
         for override in [
