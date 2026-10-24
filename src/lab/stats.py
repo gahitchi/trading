@@ -65,6 +65,37 @@ def expected_max_sharpe(n_trials: int, sr_variance: float) -> float:
     )
 
 
+def hac_sharpe_variance(returns: np.ndarray) -> tuple[float, int]:
+    """Conservative HAC variance of the *daily Sharpe estimator*.
+
+    Newey-West Bartlett weights on the joint sample mean and second central
+    moment, then the delta method for mean / standard deviation. The variance
+    never falls below the skew/kurtosis-adjusted iid estimate: negative sample
+    serial correlation must not increase claimed research confidence.
+    """
+    r = np.asarray(returns, dtype=float)
+    sr, skew, kurt, n = moments(r)
+    if n < 3:
+        return float("nan"), 0
+    iid = (1 - skew * sr + (kurt - 1) / 4 * sr**2) / (n - 1)
+    if not math.isfinite(iid) or iid <= 0:
+        return float("nan"), 0
+    center = r - r.mean()
+    variance = float(np.mean(center**2))
+    if variance <= 0:
+        return iid, 0
+    sigma = math.sqrt(variance)
+    g = np.column_stack((center, center**2 - variance))
+    gradient = np.array((1 / sigma, -float(r.mean()) / (2 * sigma**3)))
+    lags = min(n - 1, max(1, int(math.floor(4 * (n / 100) ** (2 / 9)))))
+    long_run = g.T @ g / n
+    for lag in range(1, lags + 1):
+        cross = g[lag:].T @ g[:-lag] / n
+        long_run += (1 - lag / (lags + 1)) * (cross + cross.T)
+    result = float(gradient @ long_run @ gradient / n)
+    return max(iid, result) if math.isfinite(result) else float("nan"), lags
+
+
 def dsr(returns: np.ndarray, trial_sharpes: list[float]) -> dict:
     """Deflated Sharpe Ratio of `returns`, given the daily Sharpe ratios of ALL trials
     run on the same data (including this one)."""
@@ -72,6 +103,11 @@ def dsr(returns: np.ndarray, trial_sharpes: list[float]) -> dict:
     n = max(1, len(trial_sharpes))
     var = float(np.var(trial_sharpes, ddof=1)) if len(trial_sharpes) > 1 else 0.0
     sr0 = expected_max_sharpe(n, var)
+    sr_var, hac_lags = hac_sharpe_variance(returns)
+    if math.isfinite(sr_var) and sr_var > 0:
+        probability = lambda threshold: _N.cdf((sr - threshold) / math.sqrt(sr_var))
+    else:
+        probability = lambda threshold: float("nan")
     return {
         "sharpe_daily": sr,
         "sharpe_annual": sr * math.sqrt(DAYS),
@@ -80,8 +116,10 @@ def dsr(returns: np.ndarray, trial_sharpes: list[float]) -> dict:
         "observations": t,
         "trials": n,
         "expected_max_sharpe_annual": sr0 * math.sqrt(DAYS),
-        "psr": psr(sr, t, skew, kurt, 0.0),
-        "dsr": psr(sr, t, skew, kurt, sr0),
+        "psr": probability(0.0),
+        "dsr": probability(sr0),
+        "sharpe_estimator_variance_hac": sr_var,
+        "hac_lags": hac_lags,
     }
 
 

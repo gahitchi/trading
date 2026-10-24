@@ -89,3 +89,34 @@ def test_walk_forward_and_pbo_studies_run(goog_lab):
     assert len(wfa["windows"]) == 3 and math.isfinite(wfa["oos_active_sharpe"])
     p = experiments.pbo_study(goog_lab, specs, ["GOOG"], goog_lab.period("train"), frames, splits=6)
     assert 0 <= p["pbo"] <= 1 and p["configurations"] == 4
+
+
+def test_hac_sharpe_penalizes_positive_autocorrelation():
+    rng = np.random.default_rng(84)
+    e = rng.normal(0, 0.01, 1800)
+    returns = np.empty_like(e)
+    returns[0] = e[0]
+    for i in range(1, len(e)):
+        returns[i] = 0.002 + 0.85 * (returns[i - 1] - 0.002) + e[i]
+    sr, skew, kurt, n = stats.moments(returns)
+    iid_psr = stats.psr(sr, n, skew, kurt)
+    report = stats.dsr(returns, [sr])
+    assert report["hac_lags"] > 0
+    assert report["sharpe_estimator_variance_hac"] > (1 - skew * sr + (kurt - 1) * sr**2 / 4) / (n - 1)
+    assert report["psr"] < iid_psr
+
+
+def test_hac_sharpe_never_understates_the_iid_variance():
+    rng = np.random.default_rng(99)
+    for _ in range(12):
+        returns = rng.normal(0.001, 0.01, 750)
+        sr, skew, kurt, n = stats.moments(returns)
+        variance, lags = stats.hac_sharpe_variance(returns)
+        assert lags >= 1
+        assert variance >= (1 - skew * sr + (kurt - 1) / 4 * sr**2) / (n - 1) - 1e-12
+
+
+def test_nonfinite_hac_inputs_refuse_confidence():
+    with pytest.raises(ValueError, match="finite"):
+        stats.hac_sharpe_variance(np.array([0.01, float("nan"), 0.02]))
+    assert math.isnan(stats.dsr(np.array([0.01, 0.02]), [0.01])["dsr"])
