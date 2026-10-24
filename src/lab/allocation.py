@@ -25,6 +25,7 @@ from itertools import pairwise
 import numpy as np
 
 METHODS = ("equal", "inverse_vol", "hrp")
+MIN_RISK_RETURNS = 20  # shared returns before a risk-based weighting replaces equal weights
 
 
 def matched_returns(closes: dict[str, list[tuple[int, float]]], tickers: list[str]) -> np.ndarray | None:

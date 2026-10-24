@@ -90,3 +90,33 @@ def test_inverse_vol_backtest_holds_more_of_the_calm_stock(goog_lab):
     ratio_equal = equal_hold["CALM"] / equal_hold["WILD"]
     ratio_risk = risk_hold["CALM"] / risk_hold["WILD"]
     assert ratio_risk > 2 * ratio_equal  # about 4x the volatility gap, damped by price drift since entry
+
+
+@pytest.mark.parametrize("window, ok", [(2, False), (19, False), (20, True)])
+def test_risk_weighting_needs_twenty_returns_of_history(goog_lab, window, ok):
+    """ChatGPT C005-F4: with vol_window 2 the allocator used HRP on two returns despite the stated warm-up."""
+    from lab.config import ConfigError, load_config
+
+    path = goog_lab.root / "lab.toml"
+    text = path.read_text().replace('weighting = "equal"', 'weighting = "hrp"')
+    path.write_text(text.replace("vol_window = 63", f"vol_window = {window}"))
+    if ok:
+        assert load_config(path).portfolio.vol_window == 20
+    else:
+        with pytest.raises(ConfigError, match="vol_window >= 20"):
+            load_config(path)
+
+
+def test_the_allocator_demands_twenty_shared_returns_whatever_its_window():
+    from lab.agents.allocator import AllocatorAgent, AllocatorAgentConfig
+
+    rng = np.random.default_rng(4)
+    closes = _closes(rng.normal(0, 0.01, (2, 10)) * np.array([[1.0], [3.0]]))
+    agent = AllocatorAgent(
+        AllocatorAgentConfig(sleeves={"s:S0": ("S0", 0.5), "s:S1": ("S1", 0.5)}, vol_window=2, weighting="hrp")
+    )
+    from collections import deque
+
+    agent.closes = {t: deque(rows) for t, rows in closes.items()}
+    agent.targets = {"s:S0": 1.0, "s:S1": 1.0}
+    assert agent.weights() == {"S0": 0.5, "S1": 0.5}  # ten returns: still equal

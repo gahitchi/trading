@@ -11,7 +11,7 @@ import numpy as np
 from nautilus_trader.common import DataActor, DataActorConfig
 
 from lab.agents.messages import T_MARK, T_RISK, T_SIGNAL, T_TARGETS, TargetWeights
-from lab.allocation import risk_weights
+from lab.allocation import MIN_RISK_RETURNS, risk_weights
 from lab.persistence import atomic_json, read_json
 
 
@@ -114,7 +114,7 @@ class AllocatorAgent(DataActor):
                     self.config.weighting,
                     {t: list(rows) for t, rows in self.closes.items()},
                     [self.config.sleeves[s][0] for s in live],
-                    min(20, self.config.vol_window),
+                    MIN_RISK_RETURNS,
                 )
                 for s in live:
                     ticker = self.config.sleeves[s][0]

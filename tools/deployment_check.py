@@ -3,7 +3,8 @@
     python3 tools/deployment_check.py            # from the repository root, on the machine that runs it
 
 Checks:
-  - every published Docker port is bound to 127.0.0.1 (the gateway API, VNC and the setup app)
+  - every port Docker will publish is bound to 127.0.0.1, read from `docker compose config` (all compose
+    files and overrides merged), and no running container publishes one publicly
   - the IBKR password file exists, is not empty, and only its owner can read it
   - .env and secrets/ exist locally but are not tracked by Git, and .gitignore covers them
   - the configured account is a paper account (DU...), on a paper port, with TRADING_MODE paper
@@ -15,8 +16,8 @@ independent scanner (for example Strix, RUNBOOK section 2) against it. Exit code
 
 from __future__ import annotations
 
+import json
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -27,20 +28,55 @@ PORTS = {4001, 4002, 4003, 4004, 5900, 7496, 7497, 8765}
 LOCAL = ("127.0.0.1", "localhost", "[::1]", "::1")
 
 
-def _published(compose: Path) -> list[str]:
-    """Port entries under `ports:` keys, as written."""
-    out, in_ports = [], False
-    for raw in compose.read_text().splitlines():
-        line = raw.split("#", 1)[0].rstrip()
-        if re.match(r"^\s*ports:\s*$", line):
-            in_ports, indent = True, len(line) - len(line.lstrip())
-            continue
-        if in_ports:
-            if line.strip().startswith("- "):
-                out.append(line.strip()[2:].strip().strip("'\""))
-            elif line.strip() and len(line) - len(line.lstrip()) <= indent:
-                in_ports = False
-    return out
+def _rendered(root: Path, files: list[str] | None) -> tuple[dict | None, str]:
+    """The configuration Docker will actually run: `docker compose config`, which merges every compose file
+    and override the project uses (compose.yaml, docker-compose.yml, *.override.yaml, inline YAML). Text
+    parsing missed some of those (ChatGPT, C005-F3), so the checker refuses to guess when it cannot render."""
+    docker = shutil.which("docker")
+    if docker is None:
+        return None, "docker is not installed here, so the published ports cannot be verified"
+    args = [docker, "compose"] + [a for f in files or [] for a in ("-f", f)] + ["config", "--format", "json"]
+    proc = subprocess.run(args, cwd=root, capture_output=True, text=True)
+    if proc.returncode != 0:
+        return None, f"docker compose config failed: {proc.stderr.strip()[:300]}"
+    try:
+        return json.loads(proc.stdout), ""
+    except json.JSONDecodeError as exc:
+        return None, f"unreadable docker compose config output: {exc}"
+
+
+def _check_rendered(name: str, config: dict, add) -> None:
+    for service, spec in sorted((config.get("services") or {}).items()):
+        for port in spec.get("ports") or []:
+            host = str(port.get("host_ip") or "")
+            label = f"{name}: {service} port {host or '*'}:{port.get('published')}->{port.get('target')}"
+            if host in LOCAL:
+                add("PASS", label, "bound to this machine only")
+            else:
+                add("FAIL", label, "published on every interface: bind it to 127.0.0.1")
+        mode = (spec.get("environment") or {}).get("TRADING_MODE")
+        if mode is not None:
+            add("PASS" if mode == "paper" else "FAIL", f"{name}: {service} TRADING_MODE", str(mode))
+
+
+def _running_ports(add) -> None:
+    """What the running containers publish right now (needs the Docker daemon)."""
+    docker = shutil.which("docker")
+    proc = subprocess.run([docker, "ps", "--format", "{{.Names}}\t{{.Ports}}"], capture_output=True, text=True)
+    if proc.returncode != 0:
+        add("WARN", "running containers", "Docker daemon not reachable: running ports not checked")
+        return
+    public = []
+    for line in proc.stdout.splitlines():
+        name, _, ports = line.partition("\t")
+        for entry in filter(None, (x.strip() for x in ports.split(","))):
+            if "->" in entry and not entry.startswith(("127.0.0.1:", "[::1]:")):
+                public.append(f"{name} {entry}")
+    add(
+        "FAIL" if public else "PASS",
+        "running containers",
+        f"published publicly: {public}" if public else "no container publishes a port publicly",
+    )
 
 
 def _env(path: Path) -> dict[str, str]:
@@ -59,19 +95,18 @@ def run(root: Path) -> list[tuple[str, str, str]]:
     def add(status, name, detail):
         results.append((status, name, detail))
 
-    for compose in sorted(root.glob("*compose*.yml")):
-        for entry in _published(compose):
-            host = entry.rsplit(":", 2)[0] if entry.count(":") >= 2 else ""
-            ok = host in LOCAL
-            add(
-                "PASS" if ok else "FAIL",
-                f"{compose.name} port {entry}",
-                "bound to this machine only" if ok else "published on every interface: bind it to 127.0.0.1",
-            )
-        text = compose.read_text()
-        if "TRADING_MODE" in text:
-            ok = re.search(r"TRADING_MODE:\s*paper\b", text) is not None
-            add("PASS" if ok else "FAIL", f"{compose.name} TRADING_MODE", "paper" if ok else "not paper")
+    stacks = [("default stack", None)]
+    if (root / "compose.app.yml").exists():
+        main = "docker-compose.yml" if (root / "docker-compose.yml").exists() else "compose.yaml"
+        stacks.append(("setup-app stack", [main, "compose.app.yml"]))
+    for name, files in stacks:
+        config, why = _rendered(root, files)
+        if config is None:
+            add("FAIL", name, why)
+        else:
+            _check_rendered(name, config, add)
+    if shutil.which("docker"):
+        _running_ports(add)
 
     secret = root / "secrets" / "tws_password"
     if not secret.exists():

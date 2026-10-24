@@ -376,6 +376,9 @@ def _load_config(path: str | Path | None = None, *, environ=None) -> LabConfig:
     )
     if portfolio.weighting not in ("equal", "inverse_vol", "hrp"):
         raise ConfigError("portfolio: weighting must be equal, inverse_vol or hrp")
+    if portfolio.weighting != "equal" and portfolio.vol_window < 20:
+        # The allocator keeps vol_window returns; risk weights need 20 shared ones (ChatGPT, C005-F4).
+        raise ConfigError(f"portfolio: weighting = {portfolio.weighting!r} needs vol_window >= 20")
     if not (portfolio.target_vol >= 0 and portfolio.vol_window >= 2):
         raise ConfigError("portfolio: target_vol must be >= 0 and vol_window >= 2")
     if not (0 < portfolio.leverage <= portfolio.max_leverage):
