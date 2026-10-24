@@ -47,7 +47,8 @@ def test_first_launch_opens_full_gui_without_broker_credentials_or_gateway(tmp_p
     # Reopening the shortcut does not recreate the running GUI or a Gateway.
     monkeypatch.setattr(tool, "running_app", lambda root: True)
     assert tool.main() == 0
-    assert len(calls) == 2
+    assert len(calls) == 3  # Compose version is probed at each launch.
+    assert sum("up" in cmd for cmd, _ in calls) == 1
     assert all("ib-gateway" not in cmd for cmd, _ in calls)
 
 

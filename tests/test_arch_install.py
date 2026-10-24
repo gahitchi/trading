@@ -343,7 +343,7 @@ def test_existing_group_membership_is_not_added_twice_and_install_finishes(tmp_p
         calls.append(args)
         if args[:3] == ["id", "-nG", "desktop-user"]:
             return SimpleNamespace(returncode=0, stdout="desktop-user docker")
-        return SimpleNamespace(returncode=0 if args[:2] == ["sudo", "docker"] else 1, stdout="")
+        return SimpleNamespace(returncode=0 if list(args[:2]) == ["sudo", "docker"] else 1, stdout="")
 
     monkeypatch.setattr(m.subprocess, "run", fake_run)
     assert m.main([]) == 0
@@ -365,5 +365,5 @@ def test_daemon_failure_is_not_mistaken_for_group_membership(monkeypatch):
     with pytest.raises(RuntimeError, match="daemon is not responding even with sudo"):
         m.ensure_system()
     assert ["sudo", "systemctl", "enable", "--now", "docker"] in calls
-    assert ["sudo", "docker", "info", "--format", "{{.ServerVersion}}"] in calls
+    assert ["sudo", "docker", "info", "--format", "{{.ServerVersion}}"] in [list(c) for c in calls]
     assert not any("usermod" in args for args in calls)
