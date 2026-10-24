@@ -104,10 +104,12 @@ def dsr(returns: np.ndarray, trial_sharpes: list[float]) -> dict:
     var = float(np.var(trial_sharpes, ddof=1)) if len(trial_sharpes) > 1 else 0.0
     sr0 = expected_max_sharpe(n, var)
     sr_var, hac_lags = hac_sharpe_variance(returns)
+
     def probability(threshold: float) -> float:
         if math.isfinite(sr_var) and sr_var > 0:
             return _N.cdf((sr - threshold) / math.sqrt(sr_var))
         return float("nan")
+
     return {
         "sharpe_daily": sr,
         "sharpe_annual": sr * math.sqrt(DAYS),
