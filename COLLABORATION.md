@@ -12,6 +12,9 @@ survives the review. This file is the contract between them.
 ## 1. The one rule: each agent writes only to its own branches
 
 - An agent never pushes to, rebases, or rewrites a branch it doesn't own, and never edits files on it.
+- **`chatgpt/nicola` is off limits to both agents** (Gabriel, 2026-10-24): no commits, pushes, merges,
+  rebases, resets, deletion, cherry-picks or reviews, and nothing built on it, although its name is under
+  `chatgpt/*`.
 - Reading everything is encouraged: `git fetch origin` and review the other agent's branches and commits.
 - Every commit, merges included, carries exactly one trailer naming its author: `Agent: claude`,
   `Agent: chatgpt` or `Agent: gabriel`. CI rejects a new commit without one, with two, or with an unknown name,
