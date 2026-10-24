@@ -188,9 +188,9 @@ def test_first_gui_launch_works_without_ibkr_or_setup_terminal(tmp_path):
     fake_bin.mkdir()
     output = tmp_path / "gui-command"
     for name, source in {
-        "docker": '#!/bin/sh\\n[ "$1" = info ] && exit 0\\nexit 1\\n',
-        "python3": '#!/bin/sh\\nprintf "%s\\n" "$*" > "$TEST_OUTPUT"\\n',
-        "konsole": '#!/bin/sh\\necho UNEXPECTED > "$TEST_OUTPUT"\\nexit 9\\n',
+        "docker": '#!/bin/sh\n[ "$1" = info ] && exit 0\nexit 1\n',
+        "python3": '#!/bin/sh\nprintf "%s\\n" "$*" > "$TEST_OUTPUT"\n',
+        "konsole": '#!/bin/sh\necho UNEXPECTED > "$TEST_OUTPUT"\nexit 9\n',
     }.items():
         binary = fake_bin / name
         binary.write_text(source)

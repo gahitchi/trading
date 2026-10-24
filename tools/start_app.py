@@ -188,7 +188,8 @@ def start_setup_service(root):
     port = 8766
     url = f"http://127.0.0.1:{port}/status"
     try:
-        with urllib.request.urlopen(
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(
             urllib.request.Request(url, headers={"Origin": "http://127.0.0.1:8765"}), timeout=1
         ) as response:
             if response.status == 200:
