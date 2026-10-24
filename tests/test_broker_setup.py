@@ -196,3 +196,34 @@ def test_trial_account_uses_read_only_gateway_and_never_enables_trading(tmp_path
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
+
+def test_trial_http_onboarding_accepts_dur_in_readonly_status(tmp_path, monkeypatch):
+    module = broker_module()
+    for name in ("compose.app.yml", "compose.gateway.yml", "compose.gateway.demo.yml"):
+        (tmp_path / name).write_text("test")
+    calls = []
+    monkeypatch.setattr(module, "start_gateway", lambda root: calls.append(root) or True)
+    server = module.SetupServer(("127.0.0.1", 0), tmp_path)
+    monkeypatch.setattr(module, "PORT", server.server_address[1])
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    headers = {
+        "Host": f"127.0.0.1:{server.server_address[1]}",
+        "Origin": "http://127.0.0.1:8765",
+        "Content-Type": "application/json",
+    }
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=3)
+        creds = {"username": "free-trial-user", "account": "DUR987654", "password": "test-secret"}
+        conn.request("POST", "/connect", body=json.dumps(creds), headers=headers)
+        response = conn.getresponse()
+        result = json.loads(response.read())
+        assert response.status == 200
+        assert result == {"configured": True, "account": "DUR987654", "mode": "demo", "order_setup_enabled": False}
+        assert calls == [tmp_path]
+        assert (tmp_path / "secrets/tws_password").stat().st_mode & 0o777 == 0o600
+        conn.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)

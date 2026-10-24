@@ -116,6 +116,9 @@ jobs:
           # Offline GUI must validate and launch with no IBKR credentials.
           docker compose -f compose.app.yml config -q
           TWS_USERID=ci LAB_PAPER_ACCOUNT=DU1234567 docker compose -f compose.app.yml -f compose.gateway.yml config -q
+          # A Free Trial must force read-only API access in the Gateway.
+          TWS_USERID=ci LAB_PAPER_ACCOUNT=DUR987654 docker compose -f compose.app.yml -f compose.gateway.yml -f compose.gateway.demo.yml config -q
+          TWS_USERID=ci LAB_PAPER_ACCOUNT=DUR987654 docker compose -f compose.app.yml -f compose.gateway.yml -f compose.gateway.demo.yml config --format json | python3 -c 'import json,sys; x=json.load(sys.stdin)["services"]["ib-gateway"]["environment"]; assert x["TRADING_MODE"] == "paper" and x["READ_ONLY_API"] == "yes"'
       - name: guided app starts without enabling an engine or requiring broker data
         run: |
           docker run -d --name app-ci -p 127.0.0.1:8765:8765 trading-lab:ci app --directory /lab/results/app-ci --host 0.0.0.0 --no-browser
