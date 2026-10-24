@@ -34,6 +34,15 @@ async function brokerApi(path, body) {
   return result;
 }
 function showBroker(data) {
+  if (data.protocol_version !== 2) {
+    brokerReady = false;
+    brokerForm.hidden = true;
+    $("broker-retry").hidden = true;
+    $("broker-status").textContent =
+      "Outdated local broker setup service. Reopen Trading Lab from its KDE/desktop launcher to upgrade it; do not enter credentials until refreshed.";
+    if (last) render(last);
+    return;
+  }
   brokerReady = Boolean(data.configured && data.order_setup_enabled);
   $("broker-status").textContent = data.configured && data.mode === "demo"
     ? "Free Trial simulation login saved. Read-only Gateway startup requested; no API orders permitted. Historical data may be unavailable."

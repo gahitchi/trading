@@ -222,7 +222,13 @@ def test_trial_http_onboarding_accepts_dur_in_readonly_status(tmp_path, monkeypa
         response = conn.getresponse()
         result = json.loads(response.read())
         assert response.status == 200
-        assert result == {"configured": True, "account": "DUR987654", "mode": "demo", "order_setup_enabled": False}
+        assert result == {
+            "configured": True,
+            "account": "DUR987654",
+            "protocol_version": module.SETUP_PROTOCOL_VERSION,
+            "mode": "demo",
+            "order_setup_enabled": False,
+        }
         assert calls == [tmp_path]
         assert (tmp_path / "secrets/tws_password").stat().st_mode & 0o777 == 0o600
         conn.close()

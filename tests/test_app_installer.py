@@ -108,6 +108,13 @@ HTTPServer(("127.0.0.1", PORT), H).serve_forever()
         old.wait(timeout=5)
 
 
+def test_browser_fails_closed_against_pre_upgrade_login_helper():
+    script = (Path(__file__).parents[1] / "src/lab/ui/app.js").read_text()
+    assert "data.protocol_version !== 2" in script
+    assert "brokerForm.hidden = true" in script
+    assert "brokerReady = false" in script
+
+
 def test_password_storage_is_private_and_cannot_replace_existing_secret(tmp_path):
     tool = installer()
     secret = tmp_path / "password"

@@ -208,6 +208,7 @@ class SetupHandler(BaseHTTPRequestHandler):
             {
                 "configured": True,
                 "account": account,
+                "protocol_version": SETUP_PROTOCOL_VERSION,
                 "mode": "demo" if DEMO_RE.fullmatch(account) else "paper",
                 "order_setup_enabled": bool(PAPER_RE.fullmatch(account)),
             },
