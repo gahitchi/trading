@@ -111,6 +111,7 @@ class ExecutionAgentConfig(StrategyConfig):
         reservation_gap: float = 0.0,
         max_participation: float | None = None,
         participation_window: int = 20,
+        entry_slippage: float = 0.0,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. margin: financing rates accrued on short and levered books.
@@ -164,9 +165,10 @@ class ExecutionAgentConfig(StrategyConfig):
         self.notification_health = notification_health
         self.authority = authority
         self.reservation_costs = reservation_costs
-        self.reservation_gap = reservation_gap
         self.max_participation = max_participation
         self.participation_window = participation_window
+        self.reservation_gap = reservation_gap  # adverse move stressed for cash and margin
+        self.entry_slippage = entry_slippage  # worst entry price assumed for exposure caps
         if live and borrow_book is not None:
             raise ValueError("historical borrow evidence cannot authorize live paper-broker orders")
         if state_path and borrow_book is not None:
@@ -923,20 +925,11 @@ class ExecutionAgent(Strategy):
                 )
                 break
             if opening > 0 and getattr(self.config, "risk_limits", None) is not None:
-                from lab.reservations import check_openings, stressed_openings
+                from lab.reservations import check_openings
 
                 candidate = {**reserved, ticker: target}
                 if getattr(self.config, "reservation_costs", None) is not None:
-                    reason = stressed_openings(
-                        self.held,
-                        candidate,
-                        self.prices,
-                        snap.equity,
-                        self.config.risk_limits,
-                        self.config.margin,
-                        self.config.reservation_costs,
-                        self.config.reservation_gap,
-                    )
+                    reason = self._reserve(candidate, snap.equity)
                 else:
                     reason = check_openings(
                         self.held, candidate, self.prices, snap.equity, self.config.risk_limits, self.config.margin
@@ -948,16 +941,7 @@ class ExecutionAgent(Strategy):
                     while lo < hi:
                         mid = (lo + hi + 1) // 2
                         trial = _with_opening(current, target, mid)
-                        refusal = stressed_openings(
-                            self.held,
-                            {**reserved, ticker: trial},
-                            self.prices,
-                            snap.equity,
-                            self.config.risk_limits,
-                            self.config.margin,
-                            self.config.reservation_costs,
-                            self.config.reservation_gap,
-                        )
+                        refusal = self._reserve({**reserved, ticker: trial}, snap.equity)
                         if refusal:
                             hi = mid - 1
                         else:
@@ -965,16 +949,7 @@ class ExecutionAgent(Strategy):
                     if lo and lo * price >= self.config.min_trade_value:
                         target = _with_opening(current, target, lo)
                         opening = lo
-                        reason = stressed_openings(
-                            self.held,
-                            {**reserved, ticker: target},
-                            self.prices,
-                            snap.equity,
-                            self.config.risk_limits,
-                            self.config.margin,
-                            self.config.reservation_costs,
-                            self.config.reservation_gap,
-                        )
+                        reason = self._reserve({**reserved, ticker: target}, snap.equity)
                 if reason:
                     self._risk_event("reservation_blocked", f"{ticker}: {reason}")
                     continue
@@ -990,6 +965,22 @@ class ExecutionAgent(Strategy):
                     self._save()
                 else:
                     self.cap_orders, self.cap_opened = previous_caps
+
+    def _reserve(self, destinations: dict, equity: float) -> str | None:
+        """Exposure caps at decision marks; cash and margin under the adverse gap (lab.reservations)."""
+        from lab.reservations import split_openings
+
+        return split_openings(
+            self.held,
+            destinations,
+            self.prices,
+            equity,
+            self.config.risk_limits,
+            self.config.margin,
+            self.config.reservation_costs,
+            self.config.entry_slippage,
+            self.config.reservation_gap,
+        )
 
     def _now(self) -> datetime:
         return market_now(self.clock, self.config.market_offset_days)

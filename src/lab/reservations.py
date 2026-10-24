@@ -84,3 +84,57 @@ def stressed_openings(held, destinations, prices, equity, limits, margin, costs,
         price_bounds={t: (p * (1 - gap), p * (1 + gap)) for t, p in prices.items()},
         equity_upside=costs_reserved,
     )
+
+
+class _NoCaps:
+    """Exposure caps switched off, so check_openings tests only cash and initial margin."""
+
+    max_weight = max_gross = max_short_gross = max_net = float("inf")
+    min_net = float("-inf")
+
+
+def split_openings(held, destinations, prices, equity, limits, margin, costs, entry_slippage, gap):
+    """Exposure policy and funding stress, judged separately (proposed in G013 by ChatGPT; built by Claude).
+
+    1. Exposure caps (per stock, gross, short book, net) at the DECISION marks, over every subset of fills,
+       with equity reduced by worst entry slippage and the full fee cap on every order. A later price move can
+       breach a cap whatever size was sent; that is observed and corrected at the next decision (reductions
+       first, never financed by unfilled reductions), not pre-empted by under-investing every time.
+    2. Cash and initial margin (with the configured cushion) under the adverse stress: every holding and fill
+       marked `gap` against the book independently per stock, entry at the stressed price, fees reserved.
+       This is the part a gap can actually turn into a margin call, so the stress stays here.
+    """
+    for name, value in (("entry slippage", entry_slippage), ("price-gap", gap)):
+        if not math.isfinite(value) or not 0 <= value <= 0.5:
+            return f"invalid {name} reservation"
+    if any(t not in prices or not math.isfinite(prices[t]) or prices[t] <= 0 for t in set(held) | set(destinations)):
+        return "missing valid reservation mark"
+    traded = {t: abs(target - held.get(t, 0)) * prices[t] for t, target in destinations.items()}
+    fees = sum(v * (1 + max(entry_slippage, gap)) * costs.commission_max_pct for v in traded.values())
+    exposure_reserve = fees + sum(v * entry_slippage for v in traded.values())
+    reason = check_openings(
+        held,
+        destinations,
+        prices,
+        equity,
+        limits,
+        margin,
+        reserve_cost=exposure_reserve,
+        equity_upside=exposure_reserve,
+    )
+    if reason:
+        return reason
+    funding_reserve = fees + sum(abs(q) * prices[t] * gap for t, q in held.items())
+    funding_reserve += sum(2 * v * gap for v in traded.values())
+    reason = check_openings(
+        held,
+        destinations,
+        prices,
+        equity,
+        _NoCaps,
+        margin,
+        reserve_cost=funding_reserve,
+        price_bounds={t: (p * (1 - gap), p * (1 + gap)) for t, p in prices.items()},
+        equity_upside=funding_reserve,
+    )
+    return f"under a {gap:.0%} adverse move: {reason}" if reason else None

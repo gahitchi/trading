@@ -471,6 +471,7 @@ def build_node(
                 notification_health=notifier.health if notifier is not None else None,
                 reservation_costs=cfg.costs,
                 reservation_gap=max(p.reservation_gap, cfg.trading.limit_collar),
+                entry_slippage=cfg.trading.limit_collar,
                 max_order_value=p.max_order_value,
                 max_orders_per_day=p.max_orders_per_day,
                 max_daily_turnover=p.max_daily_turnover,
