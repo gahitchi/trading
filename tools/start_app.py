@@ -205,7 +205,7 @@ def owned_setup_processes(root: Path) -> list[int]:
         try:
             if entry.stat().st_uid != os.getuid():
                 continue
-            argv = (entry / "cmdline").read_bytes().rstrip(b"\\0").split(b"\\0")
+            argv = (entry / "cmdline").read_bytes().rstrip(b"\0").split(b"\0")
             if (
                 len(argv) == 4
                 and Path(os.fsdecode(argv[1])).resolve() == script
