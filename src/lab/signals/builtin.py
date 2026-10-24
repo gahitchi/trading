@@ -280,7 +280,7 @@ def value_area(high, low, volume, bins: int = 50, share: float = 0.70):
     profile = np.zeros(bins)
     for h, l_, v in zip(high, low, volume, strict=True):
         a = int(np.clip(np.searchsorted(edges, l_, side="right") - 1, 0, bins - 1))
-        b = int(np.clip(np.searchsorted(edges, h, side="left") - 1, 0, bins - 1))
+        b = max(a, int(np.clip(np.searchsorted(edges, h, side="left") - 1, 0, bins - 1)))  # a zero-range bar: 1 bin
         profile[a : b + 1] += v / (b - a + 1)
     poc = int(np.argmax(profile))
     left = right = poc
@@ -343,10 +343,15 @@ class ValueAreaReversion(Signal):
         recent, before = closes[-p["confirm"] :], closes[: -p["confirm"]]
         if not np.all((recent >= val) & (recent <= vah)):
             return 0.0
-        if np.any(before < val):
+        outside = np.flatnonzero((before < val) | (before > vah))
+        if len(outside) == 0:
+            return 0.0
+        # The latest excursion is the auction that failed (ChatGPT, C005-F1: an earlier one on the other
+        # side used to decide the direction).
+        if before[outside[-1]] < val:
             self._traded = w.dates[-1]
             return 1.0
-        if np.any(before > vah) and p["short"]:
+        if p["short"]:
             self._traded = w.dates[-1]
             return -1.0
         return 0.0

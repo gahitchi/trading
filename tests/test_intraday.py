@@ -352,3 +352,21 @@ def test_value_area_needs_an_excursion_first():
     from lab.signals.builtin import BUILTIN
 
     assert set(_feed_va(BUILTIN["value_area"](), [100.4, 100.5, 100.6, 100.5])) == {0}
+
+
+def test_value_area_direction_comes_from_the_latest_failed_excursion():
+    """ChatGPT C005-F1: below, then above, then back inside is a failed auction ABOVE: short, not long."""
+    from lab.signals.builtin import BUILTIN
+
+    assert _feed_va(BUILTIN["value_area"](), [99.0, 102.0, 100.5, 100.6])[-1] == -1
+    assert _feed_va(BUILTIN["value_area"](), [102.0, 99.0, 100.5, 100.6])[-1] == 1
+    assert _feed_va(BUILTIN["value_area"](short=0), [99.0, 102.0, 100.5, 100.6])[-1] == 0
+
+
+def test_a_zero_range_bar_keeps_its_volume():
+    """ChatGPT C005-F2: a bar with high == low on a bin boundary lost its volume (and divided by zero)."""
+    from lab.signals.builtin import value_area
+
+    with np.errstate(divide="raise", invalid="raise"):
+        val, poc, vah = value_area(np.array([20.0, 15.0]), np.array([10.0, 15.0]), np.array([1.0, 100.0]), bins=10)
+    assert val <= 15.0 <= vah and abs(poc - 15.0) <= 1.0  # the 100-share print at 15 is the point of control
