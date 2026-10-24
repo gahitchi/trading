@@ -72,10 +72,25 @@ irm https://raw.githubusercontent.com/gahitchi/trading/main/install.ps1 | iex
 
 Arch Linux with KDE: `bash install-arch.sh` from a clone, see [docs/arch-install.md](docs/arch-install.md).
 
-On Windows it installs Docker Desktop and Python with `winget` if they are missing. Docker Desktop's first
-start asks you to accept its terms and may install WSL 2 and ask for a restart; after the restart, run the
-command again. The first start builds the program (5 to 15 minutes); later starts take seconds. Before
-trading you need an approved IBKR account with a paper account (`DU...`), see [RUNBOOK.md](RUNBOOK.md).
+On Windows it installs Docker Desktop and probes for an **actually executable** Python 3.10+ interpreter;
+if none works, it installs Python 3.13 through `winget`. An obsolete `py.exe` registration is not accepted just
+because the launcher file exists. Docker Desktop's first start may require accepting its terms, installing
+WSL 2, and restarting Windows. The first application start builds its Docker image; later starts reuse the
+installed application. Before trading you need an IBKR paper account (`DU...`), see [RUNBOOK.md](RUNBOOK.md).
+
+**Windows version downloader:** opening the desktop icon checks the newest revision of `main` and asks whether
+to download it. Versions are identified by their Git commit SHA until formal releases exist. Updates stage the
+archive first and back up replaced program files; `.env`, `secrets/`, `results/`, `data/`, `research/`
+and `lab.toml` are never overwritten. When Docker's app services are running, or their state cannot be
+confirmed, the launcher postpones updates rather than modifying code under an active trading session.
+
+To check or download without starting the application, from PowerShell:
+```powershell
+& "$env:LOCALAPPDATA\TradingLab\start-app.cmd" -CheckOnly
+& "$env:LOCALAPPDATA\TradingLab\start-app.cmd" -UpdateOnly
+```
+The updater requires an internet connection. If GitHub cannot be contacted, the installed version remains
+available. The installer and updater still require qualification on the owner's actual Windows machine.
 
 **The research lab (command line).** Python 3.13 or 3.14 (NautilusTrader 2.0 requires it), Linux or macOS.
 Uses [uv](https://docs.astral.sh/uv/) (`pacman -S uv` on Arch).
