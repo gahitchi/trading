@@ -170,7 +170,9 @@ def main():
     if running_app(root):
         print("Trading Lab is already running; opening the existing window without rebuilding the engine.")
     else:
-        subprocess.run(["docker", "compose", "-f", "compose.app.yml", "up", "--build", "-d"], check=True, cwd=root, env=env)
+        subprocess.run(
+            ["docker", "compose", "-f", "compose.app.yml", "up", "--build", "-d"], check=True, cwd=root, env=env
+        )
     install_shortcuts(root)
     print("Complete any IBKR two-factor prompt. Next time, open Trading Lab from its icon.")
     print("Save your plan, then click Start paper trading. No orders are enabled by this installer.")
