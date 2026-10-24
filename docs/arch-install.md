@@ -39,6 +39,48 @@ The GUI is reachable at `http://127.0.0.1:8765` and the credential helper at
 once explicitly configured, are likewise published on loopback.
 
 
+## Diagnose Docker DNS failures during image build
+
+If the build reports `Temporary failure resolving snapshot.debian.org` or
+`NameResolutionError ... pypi.org`, the failure is **network/DNS resolution
+inside the image build**, not an unavailable Python package and not IBKR login.
+Docker Hub downloads and `docker info` can succeed while Docker's build
+container still has no working DNS.
+
+Check host and default bridge resolution separately:
+
+```bash
+getent ahostsv4 pypi.org
+getent ahostsv4 snapshot.debian.org
+docker run --rm python:3.13-slim-bookworm python -c 'import socket; print(socket.getaddrinfo("pypi.org", 443)[0][4])'
+docker run --rm --network host python:3.13-slim-bookworm python -c 'import socket; print(socket.getaddrinfo("pypi.org", 443)[0][4])'
+```
+
+If the host lookup fails, fix host DNS/network first. If the host and
+`--network host` tests succeed but the default container test fails, inspect
+Docker DNS and its routing/firewall configuration (especially local resolver
+addresses in `/etc/resolv.conf`). Do not overwrite an existing
+`/etc/docker/daemon.json` or replace organization-provided DNS settings
+blindly. Docker's documented `dns` daemon setting may be appropriate after
+the failing resolver is identified.
+
+For a **one-off build-only workaround** on a trusted machine where the host
+resolver works, use:
+
+```bash
+cd ~/trading
+docker build --network host -t trading-lab:latest .
+docker compose -f compose.app.yml up -d --no-build lab
+python3 tools/start_app.py
+```
+
+The host network option applies only to build-time `RUN` instructions;
+the running GUI continues to use the Compose-defined, loopback-published
+Docker network and **does not start paper trading**. Some custom BuildKit
+builders may require the `network.host` entitlement; prefer fixing Docker
+DNS rather than globally enabling additional build entitlements. Do not use
+`sudo` for the launcher.
+
 ## Test, stop or troubleshoot
 
 ```bash
