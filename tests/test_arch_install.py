@@ -131,7 +131,6 @@ def test_declining_docker_group_is_safe(monkeypatch):
     assert not any("usermod" in a for a in calls)
 
 
-
 def test_missing_sg_gives_actionable_failure_instead_of_command_not_found(tmp_path):
     """Simulate an Arch login with persisted docker membership but no sg binary."""
     root = tmp_path / "repo"
@@ -148,9 +147,7 @@ def test_missing_sg_gives_actionable_failure_instead_of_command_not_found(tmp_pa
     docker.write_text("#!/bin/sh\nexit 1\n")
     docker.chmod(0o755)
     ident = bindir / "id"
-    ident.write_text(
-        '#!/bin/sh\nif [ "$1" = "-un" ]; then echo desktop-user; else echo "desktop-user docker"; fi\n'
-    )
+    ident.write_text('#!/bin/sh\nif [ "$1" = "-un" ]; then echo desktop-user; else echo "desktop-user docker"; fi\n')
     ident.chmod(0o755)
     env = {
         **os.environ,
