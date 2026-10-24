@@ -42,15 +42,15 @@ def record_app_failure(directory: Path, area: str, exc: Exception) -> None:
     log.touch(mode=0o600, exist_ok=True)
     if os.name == "posix":
         log.chmod(0o600)
-    message = re.sub(r"\\b(?:IB-)?DU[0-9]{5,}\\b", "[PAPER_ACCOUNT]", str(exc), flags=re.IGNORECASE)
+    message = re.sub(r"\b(?:IB-)?DU[0-9]{5,}\b", "[PAPER_ACCOUNT]", str(exc), flags=re.IGNORECASE)
     message = re.sub(
-        r"(?i)(password|token|api[_-]?key|secret)\\s*[=:]\\s*[^\\s,;]+",
-        r"\\1=[REDACTED]",
+        r"(?i)(password|token|api[_-]?key|secret)\s*[=:]\s*[^\s,;]+",
+        r"\1=[REDACTED]",
         message,
     )
     frames = traceback.extract_tb(exc.__traceback__)
-    stack = "\\n".join(f"  {frame.filename}:{frame.lineno} in {frame.name}" for frame in frames[-20:])
-    record = f"{datetime.now(UTC).isoformat()} | {area} | {type(exc).__name__}: {message}\\n{stack}"
+    stack = "\n".join(f"  {frame.filename}:{frame.lineno} in {frame.name}" for frame in frames[-20:])
+    record = f"{datetime.now(UTC).isoformat()} | {area} | {type(exc).__name__}: {message}\n{stack}"
     handler = RotatingFileHandler(log, maxBytes=1_000_000, backupCount=2, encoding="utf-8")
     try:
         handler.setFormatter(logging.Formatter("%(message)s"))

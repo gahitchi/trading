@@ -44,6 +44,17 @@ sg docker -c 'docker compose -f compose.app.yml down'
 python3 -m pytest -q tests/test_arch_install.py
 ```
 
-For an already logged-in Docker user, omit the `sg docker -c` wrapper. The KDE launcher writes startup failures to `~/.local/state/trading-lab/launcher.log` (or `$XDG_STATE_HOME/trading-lab/launcher.log`); treat it as private. If the Docker service cannot start, check `sudo systemctl status docker` and `journalctl -u docker -b`. If an account has already placed paper orders or holds positions, do not treat container shutdown as liquidation: inspect broker positions and perform the documented stop/recovery procedure.
+For an already logged-in Docker user, omit the `sg docker -c` wrapper. The KDE launcher now appends to `~/.local/state/trading-lab/launcher.log` (or `$XDG_STATE_HOME/trading-lab/launcher.log`) **even when started from a terminal**. It rotates when the file reaches 1 MB, keeping three previous files. Python setup exceptions are in `~/.local/state/trading-lab/crash.log` (also rotated). UI/server crashes are in `results/app/app-crash.log` and strategy/engine output in `results/app/engine.log` under the repository if the container uses the default results path; if configured otherwise, check the selected results directory. The application records fatal monitor, HTTP and server exceptions without automatically uploading logs.
+
+To inspect startup failures without exposing credentials in chat:
+
+```bash
+tail -n 100 "${XDG_STATE_HOME:-$HOME/.local/state}/trading-lab/launcher.log"
+tail -n 100 "${XDG_STATE_HOME:-$HOME/.local/state}/trading-lab/crash.log"
+# If the app container dies before it writes an app-crash log:
+sg docker -c 'docker compose -f compose.app.yml logs --tail 100 lab'
+```
+
+**Security:** all new local diagnostic files are private and rotating, but broker/library output may still include usernames, account details or tokens not recognized by automated masking. Review/redact any log **before** sending it to anyone. Never send `.env`, `secrets/`, raw broker captures, or a complete `results/` directory. If the Docker service cannot start, check `sudo systemctl status docker` and `journalctl -u docker -b`. If an account has already placed paper orders or holds positions, do not treat container shutdown as liquidation: inspect broker positions and perform the documented stop/recovery procedure.
 
 This remains **paper-account testing software**, not a qualified live-money trading release. Broker acceptance, research calibration and other release gates in `docs/release-criteria.json` remain open. The app currently exposes daily US-stock strategies through the simplified guided UI; FX/crypto, quick-speed selection, and advanced strategy-bank controls are not wired into this launcher.

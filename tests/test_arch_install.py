@@ -230,3 +230,75 @@ def test_gui_launch_failure_creates_private_diagnostic_log(tmp_path):
     log = tmp_path / "state/trading-lab/launcher.log"
     assert "No Docker access" in log.read_text()
     assert log.stat().st_mode & 0o777 == 0o600
+
+
+def test_interactive_launcher_retains_recent_failures_and_appends(tmp_path):
+    """Both terminal and KDE launches must save failures without overwriting history."""
+    launcher = Path(__file__).parents[1] / "start-app-arch.sh"
+    root = tmp_path / "repo"
+    (root / "secrets").mkdir(parents=True)
+    (root / ".env").write_text("fake")
+    (root / "secrets/tws_password").write_text("fake")
+    (root / "start-app-arch.sh").write_text(launcher.read_text())
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text("#!/bin/sh\necho simulated-docker-failure >&2\nexit 1\n")
+    docker.chmod(0o755)
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path),
+        "XDG_STATE_HOME": str(tmp_path / "state"),
+        "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+    }
+    for _ in range(2):
+        result = subprocess.run(
+            ["bash", str(root / "start-app-arch.sh"), "--interactive"],
+            env=env,
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 1
+    log = tmp_path / "state/trading-lab/launcher.log"
+    body = log.read_text()
+    assert body.count("No Docker access") == 2
+    assert body.count("Launcher exit code: 1") == 2
+    assert log.stat().st_mode & 0o777 == 0o600
+
+
+def test_arch_launcher_rolls_large_log_and_refuses_symlink(tmp_path):
+    launcher = Path(__file__).parents[1] / "start-app-arch.sh"
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".env").write_text("fake")
+    (root / "secrets").mkdir()
+    (root / "secrets/tws_password").write_text("fake")
+    (root / "start-app-arch.sh").write_text(launcher.read_text())
+    state = tmp_path / "state/trading-lab"
+    state.mkdir(parents=True)
+    log = state / "launcher.log"
+    log.write_text("X" * 1_000_020)
+    env = {**os.environ, "HOME": str(tmp_path), "XDG_STATE_HOME": str(tmp_path / "state")}
+    first = subprocess.run(
+        ["bash", str(root / "start-app-arch.sh"), "--interactive"],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert first.returncode == 1
+    assert (state / "launcher.log.1").stat().st_size >= 1_000_020
+    assert log.stat().st_size < 1_000_000
+    log.unlink()
+    log.symlink_to(tmp_path / "outside")
+    second = subprocess.run(
+        ["bash", str(root / "start-app-arch.sh"), "--interactive"],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert second.returncode == 1
+    assert "Refusing to follow a symbolic-link" in second.stderr
+    assert not (tmp_path / "outside").exists()

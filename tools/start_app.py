@@ -167,15 +167,15 @@ def record_launch_failure(exc: Exception) -> Path:
     """Capture a bounded traceback without source lines, credentials or environment dumps."""
     path = diagnostic_log()
     line = str(exc)
-    line = re.sub(r"\\b(?:IB-)?DU[0-9]{5,}\\b", "[PAPER_ACCOUNT]", line, flags=re.IGNORECASE)
+    line = re.sub(r"\b(?:IB-)?DU[0-9]{5,}\b", "[PAPER_ACCOUNT]", line, flags=re.IGNORECASE)
     line = re.sub(
-        r"(?i)(password|token|api[_-]?key|secret)\\s*[=:]\\s*[^\\s,;]+",
-        r"\\1=[REDACTED]",
+        r"(?i)(password|token|api[_-]?key|secret)\s*[=:]\s*[^\s,;]+",
+        r"\1=[REDACTED]",
         line,
     )
     frames = traceback.extract_tb(exc.__traceback__)
-    details = "\\n".join(f"  {f.filename}:{f.lineno} in {f.name}" for f in frames[-20:])
-    entry = f"{datetime.now(UTC).isoformat()} | {type(exc).__name__}: {line}\\n{details}"
+    details = "\n".join(f"  {f.filename}:{f.lineno} in {f.name}" for f in frames[-20:])
+    entry = f"{datetime.now(UTC).isoformat()} | {type(exc).__name__}: {line}\n{details}"
     handler = RotatingFileHandler(path, maxBytes=1_000_000, backupCount=2, encoding="utf-8")
     try:
         handler.setFormatter(logging.Formatter("%(message)s"))
