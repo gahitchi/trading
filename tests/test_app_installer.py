@@ -81,7 +81,7 @@ def test_windows_gets_desktop_and_start_menu_shortcuts_with_the_app_icon(tmp_pat
     assert kw["env"]["TRADING_LAB_ICON"] == str(tmp_path / "src/lab/ui/icons/trading-lab.ico")
     root = Path(__file__).parents[1]
     assert (root / "src/lab/ui/icons/trading-lab.ico").read_bytes()[:4] == b"\x00\x00\x01\x00"  # an icon file
-    assert "start_app.py" in (root / "start-app.cmd").read_text()
+    assert "launch_windows.ps1" in (root / "start-app.cmd").read_text()
 
 
 def test_the_window_waits_for_the_app_to_answer(monkeypatch):
@@ -140,3 +140,33 @@ def test_a_browser_that_fails_to_launch_falls_through_to_the_next(tmp_path, monk
     monkeypatch.setattr(tool, "APP_BROWSERS", [str(broken), str(edge)])
     tool.open_app("http://127.0.0.1:8765")
     assert launched == [str(edge)]
+
+
+def test_windows_installer_never_trusts_dangling_py_launcher():
+    """Regression for 'Unable to create process using ... OneDrive\Desktop\python.exe'."""
+    root = Path(__file__).parents[1]
+    bootstrap = (root / "install.ps1").read_text()
+    shortcut = (root / "start-app.cmd").read_text()
+    launcher = (root / "tools/launch_windows.ps1").read_text()
+    assert "py tools\\start_app.py" not in bootstrap + shortcut
+    assert "launch_windows.ps1" in bootstrap and "launch_windows.ps1" in shortcut
+    assert "Find-WorkingPython" in launcher and "sys.executable" in launcher
+    assert 'Get-Command "py.exe"' in launcher and '@("-3.13")' in launcher
+    assert "Python.Python.3.13" in launcher
+    assert "Ensure-Python" in launcher and "start_app.py" in launcher
+
+
+def test_windows_updater_is_version_pinned_and_preserves_private_state():
+    root = Path(__file__).parents[1]
+    script = (root / "tools/launch_windows.ps1").read_text()
+    bootstrap = (root / "install.ps1").read_text()
+    assert "api.github.com/repos/$Repository/commits/main" in script
+    assert "archive/$sha.zip" in script and "archive/$revision.zip" in bootstrap
+    assert ".tradinglab-version" in script and ".tradinglab-version" in bootstrap
+    for path in (".env", "secrets", "results", "data", "research", "lab.toml"):
+        assert ('"' + path + '"') in script
+    assert "App-IsRunning" in script
+    assert "ps --status running --services" in script
+    assert "Rollback" in script or "rollback" in script
+    assert "TradingLab-backup-" in script
+    assert "CheckOnly" in script and "UpdateOnly" in script

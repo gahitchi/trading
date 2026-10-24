@@ -1,4 +1,5 @@
 @echo off
 title Trading Lab
 cd /d "%~dp0"
-py tools\start_app.py || pause
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\launch_windows.ps1" %*
+if errorlevel 1 pause

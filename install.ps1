@@ -36,21 +36,40 @@ if (-not (Have "docker")) {
     throw "Docker Desktop was installed but is not usable yet. Restart Windows, then run the same command again."
 }
 
-# 2. Python (only for this installer and the launcher; the trading engine runs inside Docker)
-if (-not (Have "py")) {
-    Install-Package "Python.Python.3.13" "Python 3.13"
-}
-if (-not (Have "py")) {
-    throw "Python was installed but is not usable yet. Open a new PowerShell window and run the command again."
-}
+# 2. A Python launcher is not proof that its target interpreter exists.
+# tools/launch_windows.ps1 probes actual executables and installs Python if needed.
 
 # 3. Download (or update) Trading Lab, keeping private files
 Step "Downloading Trading Lab into $Home_"
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("tradinglab-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
-    $zip = Join-Path $tmp "main.zip"
-    Invoke-WebRequest "https://github.com/$Repo/archive/refs/heads/main.zip" -OutFile $zip -UseBasicParsing
+    # Resolve one immutable commit for the archive and the launcher version marker.
+    $revision = (Invoke-RestMethod "https://api.github.com/repos/$Repo/commits/main" -Headers @{ "User-Agent" = "TradingLab-Windows-Installer" }).sha
+    if ($revision -notmatch '^[0-9a-f]{40}
+    Expand-Archive $zip -DestinationPath $tmp
+    $src = Get-ChildItem $tmp -Directory | Where-Object { $_.Name -like "trading-*" } | Select-Object -First 1
+    New-Item -ItemType Directory -Force -Path $Home_ | Out-Null
+    foreach ($item in Get-ChildItem $src.FullName -Force) {
+        $dest = Join-Path $Home_ $item.Name
+        if ($Private -contains $item.Name -and (Test-Path $dest)) { continue }
+        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+        Move-Item $item.FullName $dest
+    }
+    Set-Content -LiteralPath (Join-Path $Home_ ".tradinglab-version") -Encoding Ascii -NoNewline -Value $revision
+} finally {
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# 4. Start it: login questions on first run, then the app window and the icons
+Step "Starting Trading Lab (the first start builds it: allow 5 to 15 minutes)"
+Set-Location $Home_
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Home_ "tools\launch_windows.ps1") -SkipUpdate
+if ($LASTEXITCODE -ne 0) { throw "Trading Lab did not start; the message above says why." }
+Write-Host "`nDone. Next time, open Trading Lab from its desktop or Start menu icon." -ForegroundColor Green
+) { throw "Invalid version received from GitHub." }
+    $zip = Join-Path $tmp "source.zip"
+    Invoke-WebRequest "https://github.com/$Repo/archive/$revision.zip" -OutFile $zip -UseBasicParsing
     Expand-Archive $zip -DestinationPath $tmp
     $src = Get-ChildItem $tmp -Directory | Where-Object { $_.Name -like "trading-*" } | Select-Object -First 1
     New-Item -ItemType Directory -Force -Path $Home_ | Out-Null
