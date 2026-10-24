@@ -118,9 +118,13 @@ def test_declining_docker_group_is_safe(monkeypatch):
     monkeypatch.setattr(m.os, "geteuid", lambda: 1000)
     monkeypatch.setenv("USER", "user")
     monkeypatch.setattr(m.shutil, "which", lambda name: "/bin/" + name)
-    monkeypatch.setattr(m, "command_ok", lambda *a: False)
+    monkeypatch.setattr(m, "command_ok", lambda *a: a[:2] == ("sudo", "docker"))
     calls = []
-    monkeypatch.setattr(m.subprocess, "run", lambda argv, **kw: calls.append(argv) or SimpleNamespace(returncode=0))
+    monkeypatch.setattr(
+        m.subprocess,
+        "run",
+        lambda argv, **kw: calls.append(argv) or SimpleNamespace(returncode=0, stdout="user"),
+    )
     monkeypatch.setattr("builtins.input", lambda _: "n")
     with pytest.raises(RuntimeError, match="not enabled"):
         m.ensure_system()

@@ -71,7 +71,7 @@ def ensure_system() -> bool:
     already_member = persisted_groups.returncode == 0 and "docker" in persisted_groups.stdout.split()
     if not already_member:
         print(
-            "Docker access requires membership in the 'docker' group (this grants root-equivalent host access).\\n"
+            "Docker access requires membership in the 'docker' group (this grants root-equivalent host access).\n"
             "The app can instead be configured manually with rootless Docker."
         )
         choice = input("Add this user to the docker group? [y/N] ").strip().lower()
