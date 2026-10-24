@@ -11,6 +11,7 @@ import numpy as np
 from nautilus_trader.common import DataActor, DataActorConfig
 
 from lab.agents.messages import T_MARK, T_RISK, T_SIGNAL, T_TARGETS, TargetWeights
+from lab.allocation import risk_weights
 from lab.persistence import atomic_json, read_json
 
 
@@ -28,6 +29,7 @@ class AllocatorAgentConfig(DataActorConfig):
         periods_per_year: float = 252.0,
         state_path: str | None = None,
         bank=None,
+        weighting: str = "equal",
         **_kwargs,
     ):
         """sleeves: sleeve id ("signal:TICKER") -> (ticker, weight). Weights are fractions of equity.
@@ -36,9 +38,12 @@ class AllocatorAgentConfig(DataActorConfig):
         are currently in the universe (point-in-time membership), instead of a fixed 1/N.
         absolute_groups: signals whose targets are already fractions of the strategy's capital
         (cross-sectional strategies); they are scaled by the group's weight only.
+        weighting: how a per-stock strategy's capital is shared among its stocks (lab.allocation): "equal",
+        "inverse_vol" or "hrp", estimated from the closes this agent has seen (point in time).
         """
         super().__init__()
         self.bank = bank
+        self.weighting = weighting
         self.sleeves = sleeves
         self.normalize_active = normalize_active
         self.absolute_groups = set(absolute_groups)
@@ -101,6 +106,19 @@ class AllocatorAgent(DataActor):
                 group_weight = sum(self.config.sleeves[s][1] for s in members)
                 for s in members:
                     out[self.config.sleeves[s][0]] += group_weight * self.targets.get(s, 0.0)
+            elif self.config.weighting != "equal":
+                # Risk-based shares of the group's capital among its (currently active) stocks.
+                group_weight = sum(self.config.sleeves[s][1] for s in members)
+                live = [s for s in members if s in self.active] if self.config.normalize_active else members
+                shares = risk_weights(
+                    self.config.weighting,
+                    {t: list(rows) for t, rows in self.closes.items()},
+                    [self.config.sleeves[s][0] for s in live],
+                    min(20, self.config.vol_window),
+                )
+                for s in live:
+                    ticker = self.config.sleeves[s][0]
+                    out[ticker] += group_weight * shares[ticker] * self.targets.get(s, 0.0)
             elif self.config.normalize_active:
                 group_weight = sum(self.config.sleeves[s][1] for s in members)
                 live = [s for s in members if s in self.active]

@@ -292,6 +292,7 @@ def run(
                     max_leverage=p.max_leverage,
                     leverage=p.leverage,
                     periods_per_year=bars_per_year,
+                    weighting=cfg.portfolio.weighting,
                 )
             )
         )

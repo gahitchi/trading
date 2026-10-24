@@ -285,3 +285,70 @@ def test_paper_node_refuses_intraday_techniques_at_the_daily_speed(goog_lab):
 
     with pytest.raises(ValueError, match="intraday technique"):
         paper.build_node(goog_lab, [SignalSpec("orb")], ["GOOG"])
+
+
+# ----------------------------------------------------------------------------- volume profile
+
+
+def test_value_area_holds_most_volume_around_the_point_of_control():
+    from lab.signals.builtin import value_area
+
+    # Most volume trades at 100-101; thin tails to 95 and 106.
+    high = np.array([101.0] * 8 + [96.0, 106.0])
+    low = np.array([100.0] * 8 + [95.0, 105.0])
+    vol = np.array([1000.0] * 8 + [50.0, 50.0])
+    val, poc, vah = value_area(high, low, vol)
+    step = (106 - 95) / 50  # one price bin
+    assert val == pytest.approx(100.0, abs=step) and vah == pytest.approx(101.0, abs=step)
+    assert val <= poc <= vah
+    assert value_area(np.array([1.0]), np.array([1.0]), np.array([0.0])) is None
+
+
+def _two_sessions(today_closes):
+    """A previous session with its value at 100-101, then today's bars (15m)."""
+
+    prev_h, prev_l = [101.0] * 24 + [96.0, 106.0], [100.0] * 24 + [95.0, 105.0]
+    c = np.array([100.5] * 26 + list(today_closes))
+    h = np.array(prev_h + [x + 0.1 for x in today_closes])
+    lo = np.array(prev_l + [x - 0.1 for x in today_closes])
+    v = np.array([1000.0] * 24 + [50.0, 50.0] + [500.0] * len(today_closes))
+    dates = np.array([np.datetime64("2026-03-02")] * 26 + [np.datetime64("2026-03-03")] * len(today_closes))
+    minute = np.concatenate([15.0 * np.arange(1, 27), 15.0 * np.arange(1, len(today_closes) + 1)])
+    return c, h, lo, v, dates, minute
+
+
+def _feed_va(sig, today):
+    from lab.signals.base import Window
+
+    c, h, lo, v, dates, minute = _two_sessions(today)
+    out = []
+    for i in range(27, len(c) + 1):
+        t = sig.target(Window(c[:i], h[:i], lo[:i], c[:i], v[:i], dates[:i], minute[:i]))
+        sig.last = t
+        out.append(t)
+    return out
+
+
+def test_value_area_failed_auction_below_goes_long_to_the_far_edge():
+    from lab.signals.builtin import BUILTIN
+
+    # Opens below value (99), comes back inside for two bars (long), then reaches the top edge (out).
+    targets = _feed_va(BUILTIN["value_area"](), [99.0, 99.2, 100.3, 100.5, 100.8, 101.2, 100.5])
+    assert targets[:3] == [0, 0, 0]  # outside, then the first bar back inside: not yet confirmed
+    assert targets[3:5] == [1, 1]  # two closes back in value: long, held inside
+    assert targets[5:] == [0, 0]  # reached the value area high: out, and no second trade today
+
+
+def test_value_area_failed_auction_above_goes_short_and_stops_out():
+    from lab.signals.builtin import BUILTIN
+
+    targets = _feed_va(BUILTIN["value_area"](), [102.0, 100.8, 100.6, 101.6])
+    assert targets[2] == -1  # came back from above: short toward the low edge
+    assert targets[3] == 0  # closed back above the value area: stopped
+    assert _feed_va(BUILTIN["value_area"](short=0), [102.0, 100.8, 100.6])[-1] == 0
+
+
+def test_value_area_needs_an_excursion_first():
+    from lab.signals.builtin import BUILTIN
+
+    assert set(_feed_va(BUILTIN["value_area"](), [100.4, 100.5, 100.6, 100.5])) == {0}

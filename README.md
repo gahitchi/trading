@@ -175,7 +175,10 @@ Built-in intraday techniques (quick speeds only): `orb`, the opening range break
 2023: long above the first 30 minutes' high, short below its low, stop at the midpoint, one trade per session,
 optional "stocks in play" relative-volume filter); `intraday_momentum`, market intraday momentum (Gao, Han, Li &
 Zhou 2018: the first half hour's return predicts the last half hour); `vwap_reversion` (fade a stretch from the
-session VWAP beyond a band of its own deviations, out at VWAP). They are hypotheses like the rest: they earn
+session VWAP beyond a band of its own deviations, out at VWAP); `value_area`, a volume-profile failed auction
+(Steidlmayer's Market Profile; Dalton's "80% rule": when price leaves the previous session's value area, the 70%
+of its volume around the point of control, and closes back inside it, go for the opposite edge; the profile is
+approximated from bars, so finer bars approximate it better). They are hypotheses like the rest: they earn
 trust only through the protocol, on enough sessions.
 
 ## Research swarm
@@ -227,6 +230,16 @@ docker compose up -d                    # agents run daily; health, alerts, jour
 
 Daily cycle (New York time): 16:10 the signal agents fetch completed daily bars from IB; 16:15 the execution agent
 reconciles its ledger with IB and sends **market-on-open** orders; 09:30 they fill in the opening auction.
+
+### Sharing capital among stocks
+
+`[portfolio] weighting` decides how a per-stock strategy's capital is split among its stocks: `equal` (default),
+`inverse_vol` (each position carries a similar risk rather than a similar amount of money) or `hrp`
+(Hierarchical Risk Parity, López de Prado 2016: correlated stocks share one risk budget). Both are estimated only
+from prices the agents have already seen, and fall back to equal weights until 20 shared returns exist. They are
+implemented in numpy (`lab.allocation`) rather than with skfolio, whose scikit-learn/cvxpy dependencies would
+weigh on the locked Docker build for two methods. Compare them like any hypothesis: `lab backtest` with each
+setting on the same period, and keep one only if it beats `equal` out of sample.
 
 ### Long/short, leverage and margin
 

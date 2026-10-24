@@ -159,7 +159,7 @@ def test_intraday_techniques_need_a_quick_speed(goog_lab, goog):
         )
 
 
-@pytest.mark.parametrize("name", ["orb", "intraday_momentum", "vwap_reversion"])
+@pytest.mark.parametrize("name", ["orb", "intraday_momentum", "vwap_reversion", "value_area"])
 def test_intraday_techniques_run_through_the_agents(goog_lab, name):
     rng = np.random.default_rng(7)
     df = frames(5, pd.bdate_range("2026-03-02", periods=8))

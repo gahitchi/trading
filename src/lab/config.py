@@ -69,6 +69,8 @@ class PortfolioSettings:
     vol_window: int
     max_leverage: float = 1.0  # ceiling on the volatility-targeting scale (1 = scales down only)
     leverage: float = 1.0  # fixed exposure multiplier when volatility targeting is off
+    # How a per-stock strategy's capital is shared among its stocks (lab.allocation): equal, inverse_vol or hrp
+    weighting: str = "equal"
 
 
 @dataclass(frozen=True)
@@ -370,7 +372,10 @@ def _load_config(path: str | Path | None = None, *, environ=None) -> LabConfig:
         int(pf.get("vol_window", 63)),
         max_leverage=float(pf.get("max_leverage", 1.0)),
         leverage=float(pf.get("leverage", 1.0)),
+        weighting=str(pf.get("weighting", "equal")),
     )
+    if portfolio.weighting not in ("equal", "inverse_vol", "hrp"):
+        raise ConfigError("portfolio: weighting must be equal, inverse_vol or hrp")
     if not (portfolio.target_vol >= 0 and portfolio.vol_window >= 2):
         raise ConfigError("portfolio: target_vol must be >= 0 and vol_window >= 2")
     if not (0 < portfolio.leverage <= portfolio.max_leverage):

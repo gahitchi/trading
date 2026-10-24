@@ -407,6 +407,7 @@ def build_node(
                 max_leverage=cfg.portfolio.max_leverage,
                 leverage=cfg.portfolio.leverage,
                 periods_per_year=252 * sp.bars_per_session,
+                weighting=cfg.portfolio.weighting,
                 state_path=str(rt / "allocator.json"),
             )
         )

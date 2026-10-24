@@ -227,7 +227,7 @@ def _with_target_vol(cfg, a):
     return dataclasses.replace(cfg, portfolio=dataclasses.replace(cfg.portfolio, target_vol=tv))
 
 
-INTRADAY_DEFAULTS = ["orb", "intraday_momentum", "vwap_reversion"]
+INTRADAY_DEFAULTS = ["orb", "intraday_momentum", "vwap_reversion", "value_area"]
 
 
 def _speed(cfg, a) -> str:

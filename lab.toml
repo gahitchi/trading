@@ -90,6 +90,7 @@ target_vol = 0.0        # annualized volatility target (e.g. 0.15); 0 = off
 vol_window = 63         # trading days used to estimate volatility
 max_leverage = 1.0      # ceiling on the volatility-targeting scale: 1 scales down only, 1.5 may lever up to 1.5x
 leverage = 1.0          # fixed exposure multiplier when target_vol = 0
+weighting = "equal"     # sharing a strategy's capital among its stocks: equal | inverse_vol | hrp (risk-based)
 
 [paper]
 host = "127.0.0.1"

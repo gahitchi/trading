@@ -60,7 +60,16 @@ machine must stay awake and online during the windows above:
   ledger with IBKR and hard-halts on any difference. Then remove the
   stack from your computer (`docker compose down`) so it cannot start again on reboot;
 - set up Telegram alerts (§7) before leaving it alone: they are how you hear about halts, and with alerts
-  configured, an alert outage longer than five minutes blocks new exposure (exits still go out).
+  configured, an alert outage longer than five minutes blocks new exposure (exits still go out);
+- **before leaving it alone, check what is exposed**, on the server itself:
+  1. `python3 tools/deployment_check.py` from the repository: every published port on 127.0.0.1, the password
+     file readable only by you, `.env` and `secrets/` untracked by Git, a `DU` paper account, and no trading
+     port listening on a public address. It exits 1 on any failure;
+  2. from another machine, `nmap -Pn -p 1-65535 <server-ip>` should show SSH and nothing else;
+  3. an independent AI penetration test, e.g. [Strix](https://github.com/usestrix/strix) (needs Docker and an
+     LLM API key: `pipx install strix-agent`, then `strix --target ./` from the repository, and
+     `strix --target https://...` only for something you deliberately expose). Read its findings in
+     `agent_runs/`, fix what is real, and never point it at systems you do not own.
 
 ## 3. Configure
 
