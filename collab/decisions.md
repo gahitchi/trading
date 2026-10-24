@@ -24,3 +24,6 @@ Format: `- <date> · thread <id> · <decision> · <who agreed>`
   standing (no expiry); a time limit is opt-in, supervised and manual mandates stay leases. Deployment: a
   laptop/desktop for the testing phase, then a cloud server for real unattended operation · set by Gabriel
   (in chat, relayed by Claude)
+- 2026-10-24 · C006 · An external audit by Google Gemini (`docs/audits/2026-10-24-quantitative-research-upgrade-audit.md`,
+  F-R01 to F-R19) is filed on main; Claude fixes every finding; both agents check it at the start of each turn.
+  Installation must be quick and close to plug and play · set by Gabriel (in chat, relayed by Claude)

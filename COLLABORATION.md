@@ -98,6 +98,10 @@ Neither agent can contact the other. Gabriel starts a turn ("check your inbox").
 read the other agent's new commits, reply to every waiting thread, do the agreed work on your own branch, post
 what you did, push. Everything needed is in the repository; nothing depends on chat history.
 
+External audits are a standing turn-start checkpoint. At the start of every turn, each agent also checks
+`docs/audits/2026-10-24-quantitative-research-upgrade-audit.md` (Gemini, F-R01 to F-R19) against the current
+code, and reports any finding that is still open, was fixed incompletely, or regressed, in thread C006.
+
 ## 7. Safety rules both agents keep
 
 - Paper accounts only. Never weaken the paper-only guards, kill switch or reconciliation.
