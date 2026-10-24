@@ -454,6 +454,22 @@ class Controller:
             self.process = None
 
 
+UI = Path(__file__).parent / "ui"
+# Every path the app serves, fixed: nothing from the request reaches the filesystem.
+UI_FILES = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("app.js", "text/javascript"),
+    "/app.css": ("app.css", "text/css"),
+    "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
+    "/icons/icon.svg": ("icons/icon.svg", "image/svg+xml"),
+    "/icons/icon-32.png": ("icons/icon-32.png", "image/png"),
+    "/icons/icon-192.png": ("icons/icon-192.png", "image/png"),
+    "/icons/icon-512.png": ("icons/icon-512.png", "image/png"),
+    "/fonts/archivo-latin.woff2": ("fonts/archivo-latin.woff2", "font/woff2"),
+    "/fonts/archivo-latin-ext.woff2": ("fonts/archivo-latin-ext.woff2", "font/woff2"),
+}
+
+
 class AppServer(ThreadingHTTPServer):
     daemon_threads = True
 
@@ -474,7 +490,10 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def reply(self, code, body, content_type="application/json"):
-        raw = body.encode() if isinstance(body, str) else json.dumps(body, allow_nan=False).encode()
+        if isinstance(body, bytes):
+            raw = body
+        else:
+            raw = body.encode() if isinstance(body, str) else json.dumps(body, allow_nan=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(raw)))
@@ -503,17 +522,12 @@ class Handler(BaseHTTPRequestHandler):
             if not self.token_ok():
                 return self.reply(403, {"error": "Reload the app."})
             return self.reply(200, self.server.controller.status())
-        files = {
-            "/": ("index.html", "text/html; charset=utf-8"),
-            "/app.js": ("app.js", "text/javascript"),
-            "/app.css": ("app.css", "text/css"),
-        }
-        if self.path not in files:
+        if self.path not in UI_FILES:
             return self.reply(404, {"error": "Not found."})
-        name, kind = files[self.path]
-        body = (Path(__file__).parent / "ui" / name).read_text()
+        name, kind = UI_FILES[self.path]
+        body = (UI / name).read_bytes()
         if self.path == "/":
-            body = body.replace("APP_TOKEN", self.server.token)
+            body = body.replace(b"APP_TOKEN", self.server.token.encode())
         return self.reply(200, body, kind)
 
     def do_POST(self):

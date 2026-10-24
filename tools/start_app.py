@@ -1,12 +1,46 @@
-"""One-time local Docker setup, then open the app. Never submit an order."""
+"""One-time local Docker setup, then open the app in its own window. Never submit an order."""
 
 import getpass
 import os
 import re
+import shutil
 import subprocess
 import sys
+import time
+import urllib.request
 import webbrowser
 from pathlib import Path
+
+URL = "http://127.0.0.1:8765"
+# Browsers that can open a page as a standalone app window (no tabs or address bar), in order of preference.
+APP_BROWSERS = [
+    *(
+        str(Path(base) / app)
+        for app in (r"Microsoft\Edge\Application\msedge.exe", r"Google\Chrome\Application\chrome.exe")
+        for base in filter(None, map(os.environ.get, ("PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA")))
+    ),
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "microsoft-edge",
+    "google-chrome",
+    "chromium",
+    "chromium-browser",
+]
+# Desktop and Start menu shortcuts with the app icon. Paths arrive through the environment, never the script.
+SHORTCUTS = r"""
+$shell = New-Object -ComObject WScript.Shell
+foreach ($folder in 'Desktop', 'Programs') {
+  $path = Join-Path ([Environment]::GetFolderPath($folder)) 'Trading Lab.lnk'
+  if (Test-Path -LiteralPath $path) { continue }
+  $link = $shell.CreateShortcut($path)
+  $link.TargetPath = $env:TRADING_LAB_TARGET
+  $link.WorkingDirectory = $env:TRADING_LAB_DIR
+  $link.IconLocation = $env:TRADING_LAB_ICON
+  $link.WindowStyle = 7
+  $link.Description = 'Open Trading Lab (paper trading only)'
+  $link.Save()
+}
+"""
 
 
 def private_file(path, value):
@@ -15,6 +49,45 @@ def private_file(path, value):
         file.write(value)
         file.flush()
         os.fsync(file.fileno())
+
+
+def install_shortcuts(root):
+    """Windows: a Trading Lab icon on the desktop and in the Start menu, once. A failure never blocks the app."""
+    if sys.platform != "win32":
+        return
+    env = dict(os.environ)
+    env["TRADING_LAB_TARGET"] = str(root / "start-app.cmd")
+    env["TRADING_LAB_DIR"] = str(root)
+    env["TRADING_LAB_ICON"] = str(root / "src" / "lab" / "ui" / "icons" / "trading-lab.ico")
+    command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", SHORTCUTS]
+    subprocess.run(command, env=env, check=False)
+
+
+def wait_until_ready(url, seconds=120):
+    """The app container answers /health; opening the window earlier shows a connection error."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # local address: never via a proxy
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            with opener.open(url + "/health", timeout=3) as response:
+                if response.status == 200:
+                    return True
+        except OSError:
+            pass
+        time.sleep(1)
+    return False
+
+
+def open_app(url):
+    """Open the app in its own window when Edge or Chrome is installed, otherwise in the default browser."""
+    for candidate in APP_BROWSERS:
+        exe = candidate if Path(candidate).is_file() else shutil.which(candidate)
+        if exe:
+            subprocess.Popen(
+                [exe, f"--app={url}", "--window-size=1280,900"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            return
+    webbrowser.open(url)
 
 
 def main():
@@ -42,9 +115,12 @@ def main():
     env["LAB_APP_UID"] = str(os.getuid()) if hasattr(os, "getuid") else "1000"
     env["LAB_APP_GID"] = str(os.getgid()) if hasattr(os, "getgid") else "1000"
     subprocess.run(["docker", "compose", "-f", "compose.app.yml", "up", "--build", "-d"], check=True, cwd=root, env=env)
-    print("Open http://127.0.0.1:8765 after Gateway login finishes. Complete any IBKR two-factor prompt.")
-    print("Save your risk/capital choices, then click Start paper trading. No orders are enabled by this installer.")
-    webbrowser.open("http://127.0.0.1:8765")
+    install_shortcuts(root)
+    print("Complete any IBKR two-factor prompt. Next time, open Trading Lab from its desktop or Start menu icon.")
+    print("Save your plan, then click Start paper trading. No orders are enabled by this installer.")
+    if not wait_until_ready(URL):
+        print(f"The app is not answering yet. Open {URL} once the container is healthy.")
+    open_app(URL)
     return 0
 
 

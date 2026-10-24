@@ -2,6 +2,7 @@
 
 import http.client
 import json
+import re
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -311,6 +312,17 @@ def test_http_control_rejects_cross_origin_requests_and_requires_token(controlle
         assert request("POST", "/api/exit", "{}")[0] == 400
         assert request("POST", "/api/setup", json.dumps(controller.settings))[0] == 200
         assert request("GET", "/app.js")[0] == 200
+        # Everything the page and its manifest reference is served, with the right type, under the same CSP.
+        page = body.decode()
+        manifest = json.loads(request("GET", "/manifest.webmanifest")[1])
+        refs = set(re.findall(r'(?:href|src)="(/[^"]+)"', page)) | {i["src"] for i in manifest["icons"]}
+        refs |= set(re.findall(r'url\("(/[^"]+)"\)', request("GET", "/app.css")[1].decode()))
+        assert {"/icons/icon.svg", "/fonts/archivo-latin.woff2", "/manifest.webmanifest"} <= refs
+        for ref in refs:
+            code, raw, served = request("GET", ref)
+            assert code == 200 and raw and served["Content-Type"] == app.UI_FILES[ref][1], ref
+            assert served["Content-Security-Policy"].startswith("default-src 'self'")
+        assert request("GET", "/icons/../app.py")[0] == 404 and request("GET", "/fonts/OFL.txt")[0] == 404
     finally:
         server.shutdown()
         server.server_close()

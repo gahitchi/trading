@@ -1,19 +1,140 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="app-token" content="APP_TOKEN"><title>Trading Lab · Control room</title><link rel="stylesheet" href="/app.css"><script src="/app.js" defer></script></head>
-<body><div class="shell">
-<header><a class="brand" href="/">◈ <span>TRADING LAB</span></a><span class="tag">PAPER ACCOUNT · REAL MARKET DATA</span></header>
-<main><div class="intro"><div><p class="eyebrow">YOUR CONTROL ROOM</p><h1>A plan. A connection.<br>You're in control.</h1><p class="sub">Choose your risk budget. The app loads market history, checks your account, and follows your trading schedule.</p></div><div class="session"><span class="dot"></span> US equities <strong>Daily decisions</strong><small><span id="schedule">Schedule loads with your plan</span><br>Orders fill at the next eligible opening</small></div></div>
-<div id="notice" role="alert" hidden></div>
-<div class="grid"><section class="card setup"><div class="section-title"><span class="number">01</span><h2>Connect & choose your plan</h2></div>
-<form id="setup"><fieldset><legend>Paper account</legend><div class="fields"><label>Account ID<input name="account" placeholder="DU1234567" autocomplete="off" required></label><label>Capital to allocate · USD<input name="capital" type="number" min="1000" max="1000000000" step="100" required></label></div>
-<details><summary>Gateway connection</summary><p class="help">Log in to IB Gateway in paper mode. The app never asks for your broker password.</p><div class="fields"><label>Host<input name="host" required></label><label>Paper port<select name="port"><option value="4002">4002 · Gateway</option><option value="7497">7497 · TWS</option><option value="4004">4004 · Docker</option></select></label></div></details></fieldset>
-<fieldset><legend>Trading plan</legend><div class="fields"><label>Risk profile<select name="profile"><option value="calm">Calm</option><option value="cautious">Cautious</option><option value="balanced">Balanced</option><option value="dynamic">Dynamic</option><option value="aggressive">Aggressive</option></select></label><label>Strategy<select name="strategy"><option value="combined">Trend + mean reversion</option><option value="trend">Trend following</option><option value="reversion">Mean reversion</option></select></label></div><p id="risk-note" class="help"></p><label>Markets</label><div id="symbols" class="symbols"></div><p class="help">Built-in strategies are research hypotheses. Cash is a valid outcome when the plan finds no qualifying entry.</p></fieldset>
-<fieldset><legend>Data & control</legend><label>Broker data feed<select name="data"><option value="DELAYED_FROZEN">Delayed data · daily decisions</option><option value="REALTIME">Real-time data · subscription required</option></select></label><p class="help">History and completed bars load automatically from IBKR. No CSV downloads or sample prices are used to authorize trading.</p><div class="fields"><label>Operating mode<select name="mode"><option value="autonomous">Autonomous within my limits</option><option value="supervised">Approve each proposed order</option></select></label><label>Time limit · hours (0 = none)<input name="hours" type="number" min="0" max="168" step="0.25" required></label></div><p class="help">0 keeps autonomous trading going until you stop it. A time limit (required when approving each order) expires at the chosen time, and restarting never silently renews it.</p></fieldset>
-<button class="secondary" id="save" type="submit">Save plan</button><p id="locked" class="help" hidden>The engine is connected. Pause stops new orders; changing the saved plan requires stopping the app service and reviewing any existing trading history.</p></form></section>
-<section class="card operation"><div class="section-title"><span class="number">02</span><h2>Review & start</h2><span id="phase" class="pill">SETUP</span></div><h3 id="status-title">Your plan starts here.</h3><p id="status-message" aria-live="polite">Save your setup to begin.</p><div class="checklist"><div><span>Connection & history</span><strong id="data-status">Not connected</strong></div><div><span>Authority expires</span><strong id="expires">Not issued</strong></div><div><span>Pending orders</span><strong id="pending">—</strong></div><div><span>Ledger cash · USD</span><strong id="cash">—</strong></div></div>
-<div class="actions"><button id="start" class="primary" disabled>Start paper trading</button><button id="pause" class="secondary">Pause new orders</button></div><p class="help">Start first connects and prepares real data with orders paused. Trading activates only when preparation passes. Your plan then runs on its schedule. <span id="decision-note"></span></p><div id="block" class="block" hidden></div>
-<div class="positions"><h3>Position snapshot</h3><p id="snapshot-age" class="help">No current account snapshot.</p><pre id="positions">No current account snapshot.</pre></div><button id="exit" class="danger">Request exit from all positions</button><p class="help">Pause keeps positions. Exit requests liquidation; neither action means orders are already cancelled or positions already closed.</p>
-<div id="approvals"></div><details class="logs"><summary>Engine activity</summary><pre id="log">No activity yet.</pre></details></section></div>
-<footer><span>Local control · Your broker password stays on this machine</span><span>Release candidate · Paper-only validation in progress</span></footer>
-</main></div></body></html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="app-token" content="APP_TOKEN">
+<meta name="theme-color" content="#1F5C4A">
+<title>Trading Lab</title>
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/icons/icon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="preload" href="/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="/"><img src="/icons/icon.svg" alt="" width="30" height="30"><span>Trading Lab</span></a>
+  <span class="paper-only">Paper trading only</span>
+</header>
+
+<main>
+  <div id="notice" role="alert" hidden></div>
+
+  <section class="front" id="front" data-phase="setup" aria-label="Engine status and controls">
+    <div class="display">
+      <div class="readout-main">
+        <div class="phase-line"><span class="lamp" aria-hidden="true"></span><span id="phase">Setup</span></div>
+        <div class="status-text">
+          <h1 id="status-title">Your plan starts here.</h1>
+          <p id="status-message" aria-live="polite">Save your setup to begin.</p>
+        </div>
+      </div>
+      <dl class="readouts">
+        <div><dt>Market data</dt><dd id="data-status">Not connected</dd></div>
+        <div><dt>Time limit</dt><dd id="expires">Not issued</dd></div>
+        <div><dt>Pending orders</dt><dd id="pending">None</dd></div>
+        <div><dt>Ledger cash</dt><dd id="cash">Not available</dd></div>
+      </dl>
+      <p class="schedule" id="schedule">The schedule loads with your plan.</p>
+    </div>
+    <div id="block" class="block" role="status" hidden></div>
+    <div class="controls">
+      <button id="start" class="primary" disabled>Start paper trading</button>
+      <button id="pause" class="secondary">Pause new orders</button>
+      <button id="exit" class="danger">Exit all positions</button>
+    </div>
+    <p class="help controls-help">Start connects to the broker and checks market history with orders paused. Trading begins only when those checks pass, then follows your schedule.</p>
+  </section>
+
+  <div class="columns">
+    <section class="panel plan" aria-labelledby="plan-title">
+      <h2 id="plan-title">Your plan</h2>
+      <form id="setup">
+        <fieldset>
+          <legend><span class="step">1</span>Paper account</legend>
+          <div class="fields">
+            <label>Account ID<input name="account" placeholder="DU1234567" autocomplete="off" spellcheck="false" required></label>
+            <label>Capital to allocate (USD)<input name="capital" type="number" min="1000" max="1000000000" step="100" required></label>
+          </div>
+          <details>
+            <summary>Gateway connection</summary>
+            <p class="help">Log in to IB Gateway in paper mode first. This app never asks for your broker password.</p>
+            <div class="fields">
+              <label>Host<input name="host" spellcheck="false" required></label>
+              <label>Paper port<select name="port"><option value="4002">4002, IB Gateway</option><option value="7497">7497, Trader Workstation</option><option value="4004">4004, Docker Gateway</option></select></label>
+            </div>
+          </details>
+        </fieldset>
+
+        <fieldset>
+          <legend><span class="step">2</span>Risk profile</legend>
+          <div class="segmented" role="radiogroup" aria-label="Risk profile">
+            <label><input type="radio" name="profile" value="calm"><span>Calm</span></label>
+            <label><input type="radio" name="profile" value="cautious"><span>Cautious</span></label>
+            <label><input type="radio" name="profile" value="balanced"><span>Balanced</span></label>
+            <label><input type="radio" name="profile" value="dynamic"><span>Dynamic</span></label>
+            <label><input type="radio" name="profile" value="aggressive"><span>Aggressive</span></label>
+          </div>
+          <p id="risk-note" class="help"></p>
+        </fieldset>
+
+        <fieldset>
+          <legend><span class="step">3</span>Strategy and markets</legend>
+          <label>Strategy<select name="strategy"><option value="combined">Trend and mean reversion</option><option value="trend">Trend following</option><option value="reversion">Mean reversion</option></select></label>
+          <p class="label">Stocks to trade</p>
+          <div id="symbols" class="symbols"></div>
+          <p class="help">The built-in strategies are research hypotheses. Holding cash is a valid outcome when nothing qualifies.</p>
+        </fieldset>
+
+        <fieldset>
+          <legend><span class="step">4</span>Data and control</legend>
+          <label>Market data<select name="data"><option value="DELAYED_FROZEN">Delayed data, daily decisions</option><option value="REALTIME">Real-time data, subscription required</option></select></label>
+          <div class="fields">
+            <label>Operating mode<select name="mode"><option value="autonomous">Autonomous within my limits</option><option value="supervised">I approve each order</option></select></label>
+            <label>Time limit in hours<input name="hours" type="number" min="0" max="168" step="0.25" required></label>
+          </div>
+          <p class="help">0 means no time limit: autonomous trading runs until you pause it. Approving each order needs a time limit. A time limit is never renewed silently on restart.</p>
+        </fieldset>
+
+        <div class="form-end">
+          <button class="secondary" id="save" type="submit">Save plan</button>
+          <p id="locked" class="help" hidden>The plan is locked while the engine is connected. Pause stops new orders. To change the plan, stop the app service and review any trading history first.</p>
+        </div>
+      </form>
+    </section>
+
+    <div class="side">
+      <section class="panel" aria-labelledby="positions-title">
+        <h2 id="positions-title">Positions</h2>
+        <div id="positions"><p class="empty">No account snapshot yet.</p></div>
+        <p id="snapshot-age" class="help">No current account snapshot.</p>
+      </section>
+      <section class="panel" id="approvals" aria-live="polite" hidden></section>
+      <section class="panel">
+        <details class="logs">
+          <summary>Engine activity</summary>
+          <pre id="log">No activity yet.</pre>
+        </details>
+      </section>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span>Runs on this computer. Your broker password never reaches this page.</span>
+  <span>Release candidate, paper validation in progress</span>
+</footer>
+
+<dialog id="exit-dialog" aria-labelledby="exit-title">
+  <h2 id="exit-title">Exit all positions?</h2>
+  <p>This asks the engine to sell or cover every position this plan manages and stops new entries. Orders can stay pending until the market and the broker allow them to fill.</p>
+  <div class="dialog-actions">
+    <button class="secondary" id="exit-cancel" autofocus>Keep positions</button>
+    <button class="danger solid" id="exit-confirm">Request exit</button>
+  </div>
+</dialog>
+</body>
+</html>
