@@ -39,10 +39,34 @@ if (-not (Have "docker")) {
 # 2. The downloaded launcher validates an executable Python interpreter.
 # A stale py.exe registration may point to a missing file from another account.
 
+# Existing installs with the version-aware launcher use its staged updater.
+# Do not destructively replace a running Docker application.
+$installedLauncher = Join-Path $Home_ "tools\launch_windows.ps1"
+if (Test-Path -LiteralPath $installedLauncher) {
+    Step "Checking installed Trading Lab version"
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installedLauncher -UpdateOnly
+    if ($LASTEXITCODE -ne 0) { throw "Update failed; the previous installed version was preserved." }
+    Step "Opening Trading Lab"
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installedLauncher -SkipUpdate
+    if ($LASTEXITCODE -ne 0) { throw "Trading Lab did not start; review the launcher error above." }
+    return
+}
+# Upgrading an older installation must not overwrite code during active trading.
+if (Test-Path -LiteralPath (Join-Path $Home_ ".env")) {
+    try {
+        $services = & docker.exe compose -f (Join-Path $Home_ "compose.app.yml") ps --status running --services 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "Cannot inspect running Docker services." }
+        if ($services) { throw "Stop the paper-trading Docker app before upgrading." }
+    } catch { throw "Cannot safely upgrade an older installation: $_" }
+}
+
 # 3. Download (or update) Trading Lab, keeping private files
 Step "Downloading Trading Lab into $Home_"
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("tradinglab-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
+$backup = Join-Path $tmp "backup"
+New-Item -ItemType Directory -Path $backup | Out-Null
+$replacements = New-Object System.Collections.ArrayList
 try {
     $revision = [string](Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/commits/main" -Headers @{ "User-Agent" = "TradingLab-Windows-Installer" }).sha
     if ($revision -notmatch '^[0-9a-f]{40}$') { throw "Invalid version received from GitHub." }
@@ -54,12 +78,29 @@ try {
     foreach ($item in Get-ChildItem $src.FullName -Force) {
         $dest = Join-Path $Home_ $item.Name
         if ($Private -contains $item.Name -and (Test-Path $dest)) { continue }
-        if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-        Move-Item $item.FullName $dest
+        $old = Join-Path $backup $item.Name
+        $present = Test-Path -LiteralPath $dest
+        if ($present) { Move-Item -LiteralPath $dest -Destination $old }
+        [void]$replacements.Add(@{ Dest = $dest; Old = $old; Present = $present })
+        Move-Item -LiteralPath $item.FullName -Destination $dest
     }
     Set-Content -LiteralPath (Join-Path $Home_ ".tradinglab-version") -Encoding ASCII -NoNewline -Value $revision
+} catch {
+    $failure = $_
+    $rollbackFailed = $false
+    for ($i = $replacements.Count - 1; $i -ge 0; $i--) {
+        $item = $replacements[$i]
+        try {
+            if (Test-Path -LiteralPath $item.Dest) {
+                Remove-Item -LiteralPath $item.Dest -Recurse -Force
+            }
+            if ($item.Present) { Move-Item -LiteralPath $item.Old -Destination $item.Dest }
+        } catch { $rollbackFailed = $true }
+    }
+    if ($rollbackFailed) { throw "Installer rollback failed: backup remains at $backup. Details: $failure" }
+    throw "Installer failed; prior program files restored. Details: $failure"
 } finally {
-    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    if (-not $rollbackFailed) { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 # 4. Start it: login questions on first run, then the app window and the icons
