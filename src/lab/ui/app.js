@@ -67,6 +67,53 @@ function positions(hb) {
   }
   box.replaceChildren(table);
 }
+const pct = (v) => (v * 100).toFixed(1) + "%";
+const times = (v) => v.toFixed(2) + "x";
+function riskTable(r) {
+  const box = $("risk");
+  if (!r || !r.marks_current || r.gross == null) {
+    box.replaceChildren(el("p", r && !r.marks_current ? "Unknown: a held stock has no current price." : "Shown while the engine runs with current prices.", "empty"));
+    return;
+  }
+  const lim = r.limits || {};
+  const rows = [
+    ["Gross exposure", times(r.gross), lim.max_gross != null ? "at most " + times(lim.max_gross) : "", lim.max_gross != null && r.gross > lim.max_gross + 1e-9],
+    ["Net exposure", times(r.net), lim.max_net != null ? `${times(lim.min_net)} to ${times(lim.max_net)}` : "", lim.max_net != null && (r.net > lim.max_net + 1e-9 || r.net < lim.min_net - 1e-9)],
+    ["Short book", times(r.short), lim.max_short_gross != null ? "at most " + times(lim.max_short_gross) : "", lim.max_short_gross != null && r.short > lim.max_short_gross + 1e-9],
+    ["Largest position", pct(r.largest), lim.max_weight != null ? "at most " + pct(lim.max_weight) : "", lim.max_weight != null && r.largest > lim.max_weight + 1e-9],
+    ["Initial margin", pct(r.initial_margin), "of equity", false],
+  ];
+  const table = el("table"), head = el("tr");
+  for (const name of ["Measure", "Now", "Limit"]) head.append(el("th", name));
+  table.append(el("thead"), el("tbody"));
+  table.tHead.append(head);
+  for (const [name, now, limit, over] of rows) {
+    const row = el("tr");
+    row.append(el("td", name), el("td", now, over ? "over" : null), el("td", limit));
+    table.tBodies[0].append(row);
+  }
+  box.replaceChildren(table);
+}
+function alarms(state, hb) {
+  const box = $("alarms"), out = [];
+  const held = Object.entries(hb.positions || {}).filter(([, q]) => q);
+  const r = hb.risk;
+  if (!state.engine_alive && held.length) {
+    out.push(["red", "The engine is not running, and the broker may still hold positions: " + held.map(([t, q]) => `${t} ${shares.format(q)}`).join(", ") + ".",
+      "Start paper trading to reconnect: the engine reconciles with the broker before anything else. Exit all positions works once it is running."]);
+  }
+  if (state.engine_alive && r && r.breach) {
+    out.push(["red", "A limit is breached: " + r.breach + ".", "New positions are blocked; the engine trims the book back at its next decision."]);
+  }
+  if (state.engine_alive && r && !r.marks_current && held.length) {
+    out.push(["amber", "Exposure unknown: prices for held stocks are missing or stale.", "No orders go out until every held stock has a current price."]);
+  }
+  box.replaceChildren(...out.map(([tone, text, note]) => {
+    const div = el("div", text, "alarm " + tone);
+    div.append(el("small", note));
+    return div;
+  }));
+}
 function approvals(requests) {
   const box = $("approvals");
   box.hidden = !requests.length;
@@ -112,6 +159,13 @@ function render(state) {
   $("expires").textContent = timeLimit(state.authority);
   $("pending").textContent = hb.pending_orders == null ? "None" : String(hb.pending_orders);
   $("cash").textContent = Number.isFinite(hb.cash) ? usd.format(hb.cash) : "Not available";
+  const r = hb.risk;
+  const live = state.engine_alive && r && r.marks_current && r.gross != null;
+  $("equity").textContent = live && Number.isFinite(r.equity) ? usd.format(r.equity) : "Not available";
+  $("exposure").textContent = live ? `${times(r.gross)} gross, ${times(r.net)} net` : (state.engine_alive && r && !r.marks_current ? "Unknown" : "Not available");
+  $("exposure").classList.toggle("warn", Boolean(state.engine_alive && r && (r.breach || !r.marks_current)));
+  riskTable(state.engine_alive ? r : null);
+  alarms(state, hb);
   $("snapshot-age").textContent = hb.at
     ? (state.snapshot_current ? "Live engine snapshot from " : "Older snapshot, not verified, from ") + new Date(hb.at).toLocaleString()
     : "No current account snapshot.";

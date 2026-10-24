@@ -283,3 +283,30 @@ def test_the_trade_id_store_is_bounded_but_keeps_ids_of_journaled_orders():
     )
     ExecutionAgent._prune_applied(agent)
     assert set(agent.applied) == {"T2", "T3"}
+
+
+def test_the_heartbeat_reports_engine_computed_risk_against_the_limits():
+    """ChatGPT G014-F1: the operator sees equity, exposure, the limits and any breach, computed by the engine
+    from the reconciled ledger; unknown when a held mark is missing."""
+    from types import SimpleNamespace
+
+    from lab.agents.execution import ExecutionAgent
+    from lab.config import MarginSettings, RiskSettings
+
+    limits = RiskSettings(0.5, 1.5, 0.3, max_short_gross=0.5, min_net=-0.5, max_net=1.5)
+    agent = SimpleNamespace(
+        config=SimpleNamespace(risk_limits=limits, live=False, dedicated_account=False, margin=MarginSettings()),
+        cash=-52_400.0,
+        held={"A": 800, "B": 724},
+        prices={"A": 100.0, "B": 100.0},
+        financing=0.0,
+        _unsafe_held_marks=lambda: [],
+    )
+    agent._book = lambda: ExecutionAgent._book(agent)
+    view = ExecutionAgent._risk_view(agent)
+    assert view["equity"] == 100_000 and view["gross"] == pytest.approx(1.524)
+    assert view["largest"] == pytest.approx(0.8) and "held book exceeds" in view["breach"]
+    assert view["limits"]["max_gross"] == 1.5 and view["marks_current"]
+    agent._unsafe_held_marks = lambda: ["B: no current price"]
+    unknown = ExecutionAgent._risk_view(agent)
+    assert not unknown["marks_current"] and "gross" not in unknown and "equity" not in unknown

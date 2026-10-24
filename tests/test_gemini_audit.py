@@ -439,3 +439,47 @@ def test_a_backtest_charges_pre_split_commissions_on_real_shares(goog_lab):
     real = first_commission()
     assert real.commission == pytest.approx(max(1.0, real.qty / 40 * 0.005), abs=0.01)
     assert real.commission < plain.commission / 20
+
+
+def test_a_warming_walk_forward_entry_never_vetoes_the_active_one():
+    """ChatGPT G014: an entry that is not selected yet must not abort the policy; its state still builds."""
+    from types import SimpleNamespace
+
+    from lab.signals.base import Signal, Window
+    from lab.signals.walk_forward import ScheduledSignal
+
+    class Good(Signal):
+        name = "test_good"
+        lookback = 5
+
+        def target(self, w):
+            return 0.5
+
+    class Broken(Signal):
+        name = "test_broken"
+        lookback = 5
+
+        def target(self, w):
+            raise RuntimeError("bad model")
+
+    class Stateful(Signal):
+        name = "test_stateful"
+        lookback = 5
+
+        def target(self, w):
+            return 0.25
+
+    days = pd.bdate_range("2021-01-04", periods=40)
+    policy = ScheduledSignal(
+        [
+            (days[0].date(), SimpleNamespace(make=Good)),
+            (days[10].date(), SimpleNamespace(make=Stateful)),
+            (days[30].date(), SimpleNamespace(make=Broken)),
+        ]
+    )
+    for i in range(5, 30):  # Broken is warming (inside its 17-day warm-up) for the last sessions
+        stamps = days[i - 4 : i + 1].to_numpy()
+        ones = np.ones(5)
+        out = policy.target(Window(ones, ones, ones, ones, ones, stamps, np.zeros(5, dtype=int)))
+        assert out == (0.5 if i < 10 else 0.25)
+    assert policy.schedule[1][1].last == 0.25

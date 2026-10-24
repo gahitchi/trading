@@ -15,6 +15,28 @@ def warm_up(lookback: int) -> np.timedelta64:
     return np.timedelta64(int(lookback * 1.5) + 10, "D")
 
 
+def _warm(sig, call, finish) -> None:
+    """Run an entry that is not active yet so its state (including `last`) builds up. A failure or a nonfinite
+    output is ignored: an entry that is not selected must not veto the one that is (ChatGPT, G014)."""
+    try:
+        sig.last = finish(call())
+    except Exception:  # an unselected entry's failure is not the policy's
+        return
+
+
+def _finish_target(result):
+    value = float(result)
+    if not np.isfinite(value):
+        raise ValueError("nonfinite")
+    return clamp_target(value)
+
+
+def _finish_weights(raw):
+    if any(not np.isfinite(float(v)) for v in raw.values()):
+        raise ValueError("nonfinite")
+    return clean_weights(raw)
+
+
 class _Schedule:
     """Only the active entry and, inside its warm-up, the next one are evaluated on a bar (Gemini audit F-R14):
     a 15-window study no longer runs 15 signals (15 sandboxed workers for research signals) on every bar.
@@ -68,12 +90,14 @@ class ScheduledSignal(Signal):
         out = 0.0
         for i in run:
             sig = self.schedule[i][1]
+            if i != active:
+                _warm(sig, lambda s=sig: s.target(tail(w, s.lookback)), _finish_target)  # output not used yet
+                continue
             result = float(sig.target(tail(w, sig.lookback)))
             if not np.isfinite(result):
                 raise ValueError("nonfinite scheduled signal")
             sig.last = clamp_target(result)
-            if i == active:
-                out = sig.last
+            out = sig.last
         return out
 
 
@@ -98,10 +122,14 @@ class ScheduledCrossSectional(CrossSectionalSignal):
         out = {}
         for i in run:
             sig = self.schedule[i][1]
+            if i != active:
+                _warm(
+                    sig, lambda s=sig: s.weights({t: tail(w, s.lookback) for t, w in windows.items()}), _finish_weights
+                )
+                continue
             raw = sig.weights({t: tail(w, sig.lookback) for t, w in windows.items()})
             if any(not np.isfinite(float(v)) for v in raw.values()):
                 raise ValueError("nonfinite scheduled weights")
             sig.last = clean_weights(raw)
-            if i == active:
-                out = sig.last
+            out = sig.last
         return out

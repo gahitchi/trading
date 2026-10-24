@@ -122,3 +122,21 @@ def test_a_stopped_docker_desktop_is_started_and_awaited(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "DOCKER_DESKTOP", [tmp_path / "missing.exe"])
     with pytest.raises(ValueError, match="systemctl start docker"):
         tool.ensure_docker()
+
+
+def test_a_browser_that_fails_to_launch_falls_through_to_the_next(tmp_path, monkeypatch):
+    tool = installer()
+    broken, edge = tmp_path / "broken.exe", tmp_path / "msedge.exe"
+    broken.write_text("")
+    edge.write_text("")
+    launched = []
+
+    def popen(args, **kw):
+        if args[0] == str(broken):
+            raise OSError("not a valid application")
+        launched.append(args[0])
+
+    monkeypatch.setattr(tool.subprocess, "Popen", popen)
+    monkeypatch.setattr(tool, "APP_BROWSERS", [str(broken), str(edge)])
+    tool.open_app("http://127.0.0.1:8765")
+    assert launched == [str(edge)]

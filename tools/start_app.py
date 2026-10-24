@@ -118,10 +118,15 @@ def open_app(url):
     for candidate in APP_BROWSERS:
         exe = candidate if Path(candidate).is_file() else shutil.which(candidate)
         if exe:
-            subprocess.Popen(
-                [exe, f"--app={url}", "--window-size=1280,900"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-            return
+            try:
+                subprocess.Popen(
+                    [exe, f"--app={url}", "--window-size=1280,900"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return
+            except OSError:
+                continue  # a broken install: try the next browser (ChatGPT G014-F4)
     webbrowser.open(url)
 
 

@@ -350,8 +350,13 @@ experiments/LOG.md          your lab notebook
 
 - The optional daily strategy bank is experimental and has no whole-policy promotion claim.
   The bounded synthetic power pilot does not qualify research power or false-positive control.
+- **US stocks only.** Forex and crypto are not supported: instruments, ticks, sessions, funding and broker
+  lifecycle are equity-specific (ChatGPT C005-F7). Adding them is a scope decision for Gabriel.
 - **Free data is survivorship-biased** and unofficial; see [Data](#data).
-- Idle cash and short-sale proceeds earn no interest (conservative).
+- Idle cash and short-sale proceeds earn no interest unless `[margin] credit_apr` / `short_rebate_apr` are set
+  (ASSUMED rates).
+- Backtests execute at split- and dividend-adjusted prices; per-share commissions use the recorded split history,
+  but fully unadjusted execution prices are not modelled yet.
 - Intraday: free history is short (weeks for 15m/5m), so intraday statistics are much weaker than daily ones.
   Backtests round data delay up to whole bars and replay sparse opening prints; this is an approximation,
   not a guaranteed conservative execution model. The pinned exchange calendar handles regular holidays and

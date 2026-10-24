@@ -526,6 +526,7 @@ class ExecutionAgent(Strategy):
                     "blocked": self.blocked_reason or None,
                     "orders_sent": self.orders_sent,
                     "account": self._account_id(),
+                    "risk": self._risk_view(),
                 }
             )
         )
@@ -618,6 +619,52 @@ class ExecutionAgent(Strategy):
             "ledger_reset", f"adopted broker positions {adopted}; ledger cash now {self.cash:,.2f} ({basis})"
         )
         return True
+
+    def _risk_view(self) -> dict:
+        """The book's exposure at the engine's marks, for the operator (ChatGPT G014-F1): equity, gross, net,
+        short, largest position and initial margin against the configured limits, and any breach. Computed
+        here, from the reconciled ledger, never in the browser; marked unknown when a held mark is missing or
+        stale, rather than shown from old prices."""
+        unsafe = self._unsafe_held_marks()
+        limits = getattr(self.config, "risk_limits", None)
+        view = {
+            "marks_current": not unsafe,
+            "unsafe_marks": unsafe,
+            "limits": (
+                {
+                    "max_weight": limits.max_weight,
+                    "max_gross": limits.max_gross,
+                    "max_short_gross": limits.max_short_gross,
+                    "min_net": limits.min_net,
+                    "max_net": limits.max_net,
+                }
+                if limits is not None
+                else None
+            ),
+        }
+        if unsafe:
+            return view
+        long_value, short_value = self._book()
+        actual_in_cash = self.config.live and self.config.dedicated_account
+        equity = self.cash + long_value - short_value - (0.0 if actual_in_cash else self.financing)
+        if not math.isfinite(equity) or equity <= 0:
+            return {
+                **view,
+                "equity": round(equity, 2) if math.isfinite(equity) else None,
+                "breach": "no positive equity",
+            }
+        weights = {t: q * self.prices.get(t, 0.0) / equity for t, q in self.held.items() if q}
+        margin = self.config.margin or MarginSettings()
+        return {
+            **view,
+            "equity": round(equity, 2),
+            "gross": sum(abs(w) for w in weights.values()),
+            "net": sum(weights.values()),
+            "short": -sum(min(w, 0) for w in weights.values()),
+            "largest": max((abs(w) for w in weights.values()), default=0.0),
+            "initial_margin": mg.initial_requirement(weights, margin),
+            "breach": _held_breach(self.held, self.prices, equity, limits, margin),
+        }
 
     def _book(self) -> tuple[float, float]:
         long_value = sum(q * self.prices.get(t, 0.0) for t, q in self.held.items() if q > 0)

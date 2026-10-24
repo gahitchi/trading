@@ -33,13 +33,14 @@
         </div>
       </div>
       <dl class="readouts">
+        <div><dt>Equity</dt><dd id="equity">Not available</dd></div>
+        <div><dt>Exposure</dt><dd id="exposure">Not available</dd></div>
         <div><dt>Market data</dt><dd id="data-status">Not connected</dd></div>
         <div><dt>Time limit</dt><dd id="expires">Not issued</dd></div>
-        <div><dt>Pending orders</dt><dd id="pending">None</dd></div>
-        <div><dt>Ledger cash</dt><dd id="cash">Not available</dd></div>
       </dl>
       <p class="schedule" id="schedule">The schedule loads with your plan.</p>
     </div>
+    <div id="alarms" class="alarms" role="alert"></div>
     <div id="block" class="block" role="status" hidden></div>
     <div class="controls">
       <button id="start" class="primary" disabled>Start paper trading</button>
@@ -110,6 +111,12 @@
       <section class="panel" aria-labelledby="positions-title">
         <h2 id="positions-title">Positions</h2>
         <div id="positions"><p class="empty">No account snapshot yet.</p></div>
+        <dl class="facts">
+          <div><dt>Ledger cash</dt><dd id="cash">Not available</dd></div>
+          <div><dt>Pending orders</dt><dd id="pending">None</dd></div>
+        </dl>
+        <h3 class="sub">Risk against your limits</h3>
+        <div id="risk"><p class="empty">Shown while the engine runs with current prices.</p></div>
         <p id="snapshot-age" class="help">No current account snapshot.</p>
       </section>
       <section class="panel" id="approvals" aria-live="polite" hidden></section>
