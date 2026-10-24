@@ -23,6 +23,14 @@ jobs:
         if: github.event_name == 'pull_request'
         run: python3 tools/collab.py check --base origin/${{ github.base_ref }}
 
+  windows-launcher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native PowerShell launcher and offline update smoke
+        shell: pwsh
+        run: ./tests/windows_launcher.ps1
+
   lint:
     runs-on: ubuntu-latest
     steps:
