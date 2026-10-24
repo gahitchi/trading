@@ -68,7 +68,25 @@ try {
             throw "Updater overwrote private state: $($item[0])"
         }
     }
-    Write-Host "Windows launcher parse, Python probe and staged update/preservation smoke passed."
+    # Inject a failure *after* installing files but before the version marker.
+    # The updater must restore every previous program file and keep the old SHA.
+    function Set-Content {
+        param($LiteralPath, $Encoding, [switch]$NoNewline, $Value)
+        if ($LiteralPath -eq $VersionFile) { throw "injected version-write failure" }
+        Microsoft.PowerShell.Management\Set-Content -LiteralPath $LiteralPath -Value $Value -Encoding $Encoding -NoNewline:$NoNewline
+    }
+    $failed = $false
+    try {
+        Install-Version ("b" * 40)
+    } catch {
+        if ($_ -notmatch "previous code restored") { throw }
+        $failed = $true
+    }
+    if (-not $failed -or (Get-Content $VersionFile -Raw).Trim() -ne $sha -or
+        (Get-Content (Join-Path $Root "tools\start_app.py") -Raw).Trim() -ne "new program") {
+        throw "Updater did not roll back correctly after injected failure."
+    }
+    Write-Host "Windows launcher parse, executable Python, staged update and rollback smoke passed."
 } finally {
     Remove-Item -LiteralPath $testing -Recurse -Force -ErrorAction SilentlyContinue
 }
