@@ -30,7 +30,7 @@ def command_ok(*args: str) -> bool:
     return subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0
 
 
-def ensure_system() -> None:
+def ensure_system() -> bool:
     if not arch_family() or not shutil.which("pacman"):
         raise RuntimeError("This installer supports Arch Linux and Arch-based distributions with pacman.")
     if os.geteuid() == 0:
@@ -54,26 +54,44 @@ def ensure_system() -> None:
         # The supported default is system Docker, not an unconfigured rootless context.
         subprocess.run(["sudo", "systemctl", "enable", "--now", "docker"], check=True)
     if command_ok("docker", "info", "--format", "{{.ServerVersion}}"):
-        return
+        return True
 
-    # A fresh group membership is visible to 'sg docker' immediately, without a logout.
+    # Distinguish an unhealthy daemon from a missing unprivileged socket grant.
+    # A service that has just started can still be unable to answer docker info.
+    if not command_ok("sudo", "docker", "info", "--format", "{{.ServerVersion}}"):
+        raise RuntimeError(
+            "The Docker daemon is not responding even with sudo. "
+            "Check: sudo systemctl status docker; sudo journalctl -u docker -b --no-pager."
+        )
+
     user = os.environ.get("USER") or os.environ.get("LOGNAME")
     if not user or user == "root":
         raise RuntimeError("Cannot identify the desktop user for Docker permissions.")
-    print(
-        "Docker access requires membership in the 'docker' group (this grants root-equivalent host access).\n"
-        "The app can instead be configured manually with rootless Docker."
-    )
-    choice = input("Add this user to the docker group? [y/N] ").strip().lower()
-    if choice not in {"y", "yes"}:
-        raise RuntimeError("Docker access was not enabled. Nothing will be started.")
-    subprocess.run(["sudo", "usermod", "-aG", "docker", user], check=True)
-    if not shutil.which("sg") or not command_ok("sg", "docker", "-c", "docker info --format '{{.ServerVersion}}'"):
-        raise RuntimeError(
-            "Docker group membership was added, but is not usable in this session. "
-            "Log out and log back in before opening Trading Lab."
+    persisted_groups = subprocess.run(["id", "-nG", user], capture_output=True, text=True, check=False)
+    already_member = persisted_groups.returncode == 0 and "docker" in persisted_groups.stdout.split()
+    if not already_member:
+        print(
+            "Docker access requires membership in the 'docker' group (this grants root-equivalent host access).\\n"
+            "The app can instead be configured manually with rootless Docker."
         )
-    print("Docker permission is ready through 'sg docker'; a logout is not required for this launcher.")
+        choice = input("Add this user to the docker group? [y/N] ").strip().lower()
+        if choice not in {"y", "yes"}:
+            raise RuntimeError("Docker access was not enabled. Nothing will be started.")
+        subprocess.run(["sudo", "usermod", "-aG", "docker", user], check=True)
+    else:
+        print("Docker group membership is already recorded for this user.")
+
+    # Some sessions need a fresh login, even after the user database is updated.
+    # Do not assume the group grant succeeded merely because usermod returned 0.
+    if shutil.which("sg") and command_ok("sg", "docker", "-c", "docker info --format '{{.ServerVersion}}'"):
+        print("Docker access is ready through 'sg docker'; no logout is required for the launcher.")
+        return True
+    print(
+        "Docker is running, but this login session cannot use its socket yet. "
+        "The KDE shortcut can be installed now. Log out of KDE and back in, then launch Trading Lab. "
+        "If it still fails, check: id -nG; ls -l /run/docker.sock; docker info."
+    )
+    return False
 
 
 def desktop_exec(path: Path) -> str:
@@ -128,11 +146,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not (ROOT / "tools/start_app.py").is_file() or not (ROOT / "compose.app.yml").is_file():
         raise RuntimeError("Run from a complete trading-lab repository checkout.")
-    ensure_system()
+    docker_ready = ensure_system()
     launcher = install_shortcuts()
     print(f"Trading Lab application-menu entry installed: {launcher}")
     print("Paper accounts only. This installer never grants trading authority or submits an order.")
-    if not args.no_launch:
+    if docker_ready is False:
+        print("Installation complete; first launch deferred until Docker access is available after re-login.")
+    elif not args.no_launch:
         subprocess.run(["bash", str(ROOT / "start-app-arch.sh"), "--interactive"], cwd=ROOT, check=True)
     else:
         print("Open Trading Lab from the KDE application menu to finish paper-account setup.")

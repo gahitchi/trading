@@ -13,7 +13,7 @@ cd "$HOME/Applications/trading-lab"
 bash install-arch.sh
 ```
 
-The installer asks for permission before granting Docker group access. **The `docker` group is equivalent to root access**; decline and configure rootless Docker separately if you do not accept that permission. When you accept, the new launcher can use `sg docker` before you next log in. First-time dependencies and image builds require network access.
+The installer asks for permission before granting Docker group access. **The `docker` group is equivalent to root access**; decline and configure rootless Docker separately if you do not accept that permission. After accepting, it checks the actual socket: if `sg docker` still cannot connect but `sudo docker info` succeeds, it installs the KDE shortcut and defers the first launch until you log out of KDE and back in. The installer never silently runs the trading app as root. First-time dependencies and image builds require network access.
 
 On the first launch, the existing guided startup asks for an **IBKR paper username**, **DU-prefixed paper account**, and a hidden paper password. It stores the password in `secrets/tws_password` (mode 0600), not in the Git repository or app form. Then it starts the local paper Gateway and displays Trading Lab in its own Chrome/Chromium/Edge window when available, otherwise in your default browser. Approve any separate IBKR two-factor prompt. Finally, save the trading plan and explicitly choose **Start paper trading** in the app.
 

@@ -100,7 +100,8 @@ def test_missing_docker_provisions_only_needed_packages_and_asks_about_root_equi
 
     def fake_run(args, **kwargs):
         runs.append(args)
-        return SimpleNamespace(returncode=0 if list(args[:2]) == ["sg", "docker"] else 1)
+        success = list(args[:2]) in (["sg", "docker"], ["sudo", "docker"])
+        return SimpleNamespace(returncode=0 if success else 1)
 
     monkeypatch.setattr(m.subprocess, "run", fake_run)
     monkeypatch.setattr("builtins.input", lambda _: "yes")
@@ -305,3 +306,49 @@ def test_arch_launcher_rolls_large_log_and_refuses_symlink(tmp_path):
     assert second.returncode == 1
     assert "Refusing to follow a symbolic-link" in second.stderr
     assert not (tmp_path / "outside").exists()
+
+
+def test_existing_group_membership_is_not_added_twice_and_install_finishes(tmp_path, monkeypatch):
+    """A stale KDE login should not trigger another usermod or prevent installing the icon."""
+    m = installer()
+    root = tmp_path / "repo"
+    (root / "tools").mkdir(parents=True)
+    (root / "tools/start_app.py").write_text("")
+    (root / "compose.app.yml").write_text("")
+    monkeypatch.setattr(m, "ROOT", root)
+    monkeypatch.setattr(m, "arch_family", lambda: True)
+    monkeypatch.setattr(m.os, "geteuid", lambda: 1000)
+    monkeypatch.setenv("USER", "desktop-user")
+    monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr("builtins.input", lambda _: pytest.fail("Already a member: no prompt permitted"))
+    monkeypatch.setattr(m, "install_shortcuts", lambda path=root: root / "Trading Lab.desktop")
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args[:3] == ["id", "-nG", "desktop-user"]:
+            return SimpleNamespace(returncode=0, stdout="desktop-user docker")
+        return SimpleNamespace(returncode=0 if args[:2] == ["sudo", "docker"] else 1, stdout="")
+
+    monkeypatch.setattr(m.subprocess, "run", fake_run)
+    assert m.main([]) == 0
+    assert not any(args[:2] == ["sudo", "usermod"] for args in calls)
+    assert not any(args and args[0] == "bash" for args in calls)
+
+
+def test_daemon_failure_is_not_mistaken_for_group_membership(monkeypatch):
+    m = installer()
+    monkeypatch.setattr(m, "arch_family", lambda: True)
+    monkeypatch.setattr(m.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/" + name)
+    calls = []
+    monkeypatch.setattr(
+        m.subprocess,
+        "run",
+        lambda args, **kwargs: calls.append(args) or SimpleNamespace(returncode=1),
+    )
+    with pytest.raises(RuntimeError, match="daemon is not responding even with sudo"):
+        m.ensure_system()
+    assert ["sudo", "systemctl", "enable", "--now", "docker"] in calls
+    assert ["sudo", "docker", "info", "--format", "{{.ServerVersion}}"] in calls
+    assert not any("usermod" in args for args in calls)
