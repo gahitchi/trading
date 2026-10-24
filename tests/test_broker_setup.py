@@ -197,6 +197,7 @@ def test_trial_account_uses_read_only_gateway_and_never_enables_trading(tmp_path
         server.server_close()
         thread.join(timeout=3)
 
+
 def test_trial_http_onboarding_accepts_dur_in_readonly_status(tmp_path, monkeypatch):
     module = broker_module()
     for name in ("compose.app.yml", "compose.gateway.yml", "compose.gateway.demo.yml"):
