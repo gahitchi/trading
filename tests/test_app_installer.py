@@ -152,7 +152,7 @@ def test_windows_installer_never_trusts_dangling_py_launcher():
     assert "py tools\\start_app.py" not in bootstrap + shortcut
     assert "launch_windows.ps1" in bootstrap and "launch_windows.ps1" in shortcut
     assert "Find-WorkingPython" in launcher and "sys.executable" in launcher
-    assert 'Get-Command "py.exe"' in launcher and '@("-3.13")' in launcher
+    assert "Get-Command py.exe" in launcher and '@("-3.13")' in launcher
     assert "Python.Python.3.13" in launcher
     assert "Ensure-Python" in launcher and "start_app.py" in launcher
 
