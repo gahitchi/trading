@@ -25,6 +25,7 @@ tool never reports a case as passed.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -32,6 +33,7 @@ import os
 import platform
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -348,29 +350,90 @@ _RUNTIME_PATTERNS = (
 _NEVER_COPY = ("authority.key",)  # a private signing key is not evidence
 
 
+def _sqlite_row(table: str, row: dict) -> dict:
+    """One exported row. TEXT that holds JSON is parsed, so the sanitizer can reach nested IDs; the execution
+    store's history rows are labelled by what their key is (a trade ID, or a client order ID)."""
+    parsed = {}
+    for k, v in row.items():
+        if isinstance(v, str) and v[:1] in ("[", "{"):
+            with contextlib.suppress(json.JSONDecodeError):
+                v = json.loads(v)
+        parsed[k] = v
+    if table == "history" and {"bucket", "id", "value"} <= set(parsed):
+        if parsed["bucket"] == "applied":
+            ts, coid = (parsed["value"] + [None, None])[:2] if isinstance(parsed["value"], list) else (None, None)
+            return {"bucket": "applied", "trade_id": parsed["id"], "client_order_id": coid, "applied_ns": ts}
+        return {"bucket": parsed["bucket"], "client_order_id": parsed["id"], "intent": parsed["value"]}
+    return parsed
+
+
+def sqlite_export(path: Path) -> dict:
+    """Deterministic, read-only export of every table: schema, row counts and rows in primary-key order, with
+    the database's version and integrity check. Run it on a consistent copy (bundle makes one)."""
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        out = {
+            "file": path.name,
+            "sha256": _sha256(path),
+            "user_version": con.execute("PRAGMA user_version").fetchone()[0],
+            "integrity": con.execute("PRAGMA quick_check").fetchone()[0],
+            "tables": {},
+        }
+        for name, sql in con.execute("SELECT name, sql FROM sqlite_master WHERE type='table' ORDER BY name"):
+            cols = [r[1] for r in con.execute(f'PRAGMA table_info("{name}")')]
+            order = ", ".join(f'"{c}"' for c in cols)
+            rows = con.execute(f'SELECT * FROM "{name}" ORDER BY {order}').fetchall()
+            out["tables"][name] = {
+                "schema": sql,
+                "row_count": len(rows),
+                "rows": [_sqlite_row(name, dict(zip(cols, r, strict=True))) for r in rows],
+            }
+        return out
+    finally:
+        con.close()
+
+
 def bundle(cfg: LabConfig, out: Path, phase: str) -> Path:
-    from lab.paper import runtime_dir
+    """Copy the lab's runtime records for a phase. Takes the runtime lock, so `lab paper` must be stopped (a
+    cold copy: ChatGPT, C004-F3); SQLite databases are copied with SQLite's backup API and exported as
+    deterministic JSON next to the copy (C004-F1), so `sanitize` can produce a reviewable version."""
+    from lab.paper import acquire_runtime_lock, runtime_dir
 
     out = check_outside_repo(cfg, out)
-    d = phase_dir(out, phase) / f"runtime-{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}"
-    d.mkdir(parents=True, mode=0o700)
-    rt = runtime_dir(cfg)
-    copied = []
-    for pattern in _RUNTIME_PATTERNS:
-        for src in sorted(rt.glob(pattern)):
-            if src.is_file() and src.name not in _NEVER_COPY and not src.name.endswith(".tmp"):
+    lock = acquire_runtime_lock(cfg)
+    try:
+        d = phase_dir(out, phase) / f"runtime-{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}"
+        d.mkdir(parents=True, mode=0o700)
+        rt = runtime_dir(cfg)
+        copied = []
+        for src in sorted({p for pattern in _RUNTIME_PATTERNS for p in rt.glob(pattern)} | set(rt.glob("*.sqlite3"))):
+            if not src.is_file() or src.name in _NEVER_COPY or src.name.endswith((".tmp", "-journal", "-wal", "-shm")):
+                continue
+            if src.suffix == ".sqlite3":
+                source, copy = sqlite3.connect(f"file:{src}?mode=ro", uri=True), sqlite3.connect(d / src.name)
+                try:
+                    source.backup(copy)  # a consistent snapshot, whatever the journal mode
+                finally:
+                    source.close()
+                    copy.close()
+                _write(d / f"{src.name}.export.json", sqlite_export(d / src.name))
+                copied += [src.name, f"{src.name}.export.json"]
+            else:
                 shutil.copy2(src, d / src.name)
                 copied.append(src.name)
-    _write(d / "identity.json", identity(cfg))
-    _write(d / "NOTE.json", {"note": GRADING_NOTE, "files": copied})
-    return d
+        _write(d / "identity.json", identity(cfg))
+        _write(d / "NOTE.json", {"note": GRADING_NOTE, "files": copied})
+        return d
+    finally:
+        lock.close()
 
 
 # ----------------------------------------------------------------------------- sanitize (for the repository)
 
 _ACCOUNT = re.compile(r"\b(?:IB-)?[DU][A-Z]?\d{5,9}\b")  # DU1234567, U1234567, IB-DU1234567
 _SECRET_KEYS = re.compile(r"(?i)(password|passwd|token|secret|api[_-]?key|hmac|chat_id|userid)")
-_ID_KEYS = ("client_order_id", "venue_order_id", "trade_id", "order_id", "account_id", "account")
+_ID_KEYS = ("client_order_id", "venue_order_id", "trade_id", "order_id", "account_id", "account", "coid")
+_KEYED_BY_ORDER = ("pending", "terminal", "disposed")  # maps whose keys are client order IDs
 
 
 def _key(path: Path) -> bytes:
@@ -392,6 +455,8 @@ def _redact_text(key: bytes, text: str) -> str:
 
 
 def _redact(key: bytes, value, field: str | None = None):
+    if isinstance(value, dict) and field in _KEYED_BY_ORDER:
+        return {_pseudo(key, "CLIENT", str(k)): _redact(key, v) for k, v in value.items()}
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
@@ -458,10 +523,15 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
             "lab.capture.sanitize: account IDs (DU…/U…, IB-…) and order/trade/account ID fields pseudonymized "
             "with HMAC-SHA256 under a private key kept outside Git (same key for every phase, so joins hold); "
             "fields named like password/token/secret/api key/hmac/chat id/user id replaced by [REDACTED]; "
-            "authority.key never copied; non-JSON files listed but not copied"
+            "authority.key never copied; SQLite databases are represented by their deterministic JSON export; "
+            "non-JSON files (raw databases included) listed with their hash but not copied. Free text (operator "
+            "reasons, broker messages) is only checked for account-number patterns: it is NOT verified clean"
         ),
         "key_fingerprint": hashlib.sha256(key).hexdigest()[:16],
-        "reviewer_attestation": None,  # filled in by the reviewer: same pseudonymous paper account throughout
+        # ChatGPT, C004-F2: a person reads every sanitized file before publication and records it here; an empty
+        # attestation means the bundle is not publishable yet.
+        "manual_review_required": True,
+        "reviewer_attestation": None,
         "note": GRADING_NOTE,
         "files": entries,
     }

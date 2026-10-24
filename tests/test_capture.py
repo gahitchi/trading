@@ -83,3 +83,39 @@ def test_secrets_are_redacted_and_ids_pseudonymized():
     assert "DU7654321" not in json.dumps(out)
     assert out["account_id"] == capture._pseudo(key, "ACCT", "DU7654321") == out["note"].split()[1]
     assert out["client_order_id"].startswith("CLIENT-") and out["nested"][0]["trade_id"].startswith("TRADE-")
+
+
+def test_bundle_exports_the_authoritative_sqlite_ledger_and_sanitize_pseudonymizes_it(
+    goog_lab, goog, tmp_path, tmp_path_factory
+):
+    """ChatGPT C004-F1/F2/F3: the SQLite store is authoritative, so the shareable evidence needs a reviewable,
+    pseudonymized export of it; the copy must be cold (runtime lock) and consistent (backup API)."""
+    from lab.paper import acquire_runtime_lock
+
+    h = LiveHarness(goog_lab, [SignalSpec("buy_and_hold")], {"GOOG": goog}, tmp_path / "h", first_day=D0)
+    h.session()
+    out = tmp_path_factory.mktemp("evidence")
+
+    held = acquire_runtime_lock(h.cfg)  # a running paper node holds this lock
+    try:
+        with pytest.raises(Exception, match="another paper node"):
+            capture.bundle(h.cfg, out, "B03")
+    finally:
+        held.close()
+
+    d = capture.bundle(h.cfg, out, "B03")
+    export = json.loads((d / "ledger.sqlite3.export.json").read_text())
+    assert export["integrity"] == "ok" and {"snapshot", "history"} <= set(export["tables"])
+    history = export["tables"]["history"]
+    assert history["row_count"] == len(history["rows"]) > 0
+    assert any(r["bucket"] == "applied" and r["trade_id"] for r in history["rows"])
+    assert (d / "ledger.sqlite3").exists()  # the raw copy stays in the private store
+
+    clean = tmp_path_factory.mktemp("clean")
+    manifest = capture.sanitize(out / "B03", clean, tmp_path_factory.mktemp("k") / "key")
+    assert manifest["manual_review_required"] is True and manifest["reviewer_attestation"] is None
+    assert not list(clean.rglob("*.sqlite3"))  # raw databases are never copied
+    text = "".join(p.read_text() for p in clean.rglob("*.json"))
+    raw_ids = list(h.broker().state["orders"]) + [f["trade_id"] for f in h.broker().state["fills"]]
+    assert raw_ids and not [i for i in raw_ids if i in text]  # every order and trade ID pseudonymized
+    assert "CLIENT-" in text and "TRADE-" in text
