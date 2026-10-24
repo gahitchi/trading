@@ -92,6 +92,16 @@ To check or download without starting the application, from PowerShell:
 The updater requires an internet connection. If GitHub cannot be contacted, the installed version remains
 available. The installer and updater still require qualification on the owner's actual Windows machine.
 
+**Crash diagnostic files (private; no automatic upload):** On Arch, check
+`~/.local/state/trading-lab/launcher.log` for both terminal and KDE startup errors and
+`~/.local/state/trading-lab/crash.log` for Python exceptions (use `$XDG_STATE_HOME` instead
+of `~/.local/state` if configured). The container writes application errors to
+`results/app/app-crash.log` and paper engine output to `results/app/engine.log`.
+On Windows, the version launcher writes `%LOCALAPPDATA%\\TradingLab\\logs\\launcher.log`
+and Python startup writes `%LOCALAPPDATA%\\TradingLab\\logs\\crash.log`. Logs are locally
+retained and rotated; review them for remaining sensitive information before sharing.
+Never send `.env`, the `secrets/` folder, or raw broker records.
+
 **The research lab (command line).** Python 3.13 or 3.14 (NautilusTrader 2.0 requires it), Linux or macOS.
 Uses [uv](https://docs.astral.sh/uv/) (`pacman -S uv` on Arch).
 
