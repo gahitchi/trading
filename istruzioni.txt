@@ -1,0 +1,160 @@
+TRADING LAB - ISTRUZIONI DI AVVIO SU WINDOWS
+Aggiornate il 25 ottobre 2026
+
+Queste istruzioni riguardano la tua installazione in:
+%LOCALAPPDATA%\TradingLab
+
+
+1. AVVIO NORMALE
+
+Apri Docker Desktop e aspetta che sia pronto. Il programma di avvio prova
+comunque ad aprirlo automaticamente se non è già in funzione.
+
+Apri Windows PowerShell, incolla questa singola riga e premi Invio:
+
+& "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe" "$env:LOCALAPPDATA\TradingLab\tools\start_app.py"
+
+Il comando funziona da qualsiasi cartella, anche da C:\WINDOWS\system32.
+Non devi reinstallare Python o scaricare nuovamente la repository.
+
+Se sul desktop o nel menu Start trovi l'icona "Trading Lab", puoi usare
+quella. Se l'icona non funziona, usa il comando PowerShell qui sopra.
+
+Quando copi un comando, non includere "PS C:\...>" o i simboli ">>".
+Se PowerShell rimane sul prompt ">>", premi Ctrl+C e incolla nuovamente
+la riga completa, senza andare a capo nel mezzo.
+
+
+2. CREDENZIALI IBKR: RICHIESTE SOLTANTO ALLA PRIMA CONFIGURAZIONE
+
+Se le credenziali sono già state salvate, il programma riutilizza quelle
+presenti sul computer e normalmente non te le richiede.
+
+Se invece compaiono queste richieste:
+
+IBKR username:
+Inserisci lo username che usi per accedere al conto paper di Interactive
+Brokers, poi premi Invio. Non usare le credenziali del simulatore TradingView.
+
+Paper account ID (DU...):
+Inserisci l'identificativo completo del conto paper mostrato da IBKR.
+Mantieni tutte le lettere e tutte le cifre: se comincia con DUR, includi
+anche la R. Non trasformare manualmente il numero di un conto reale.
+
+IBKR password (hidden):
+Digita la password relativa a quell'accesso e premi Invio. È normale che
+durante la digitazione non compaiano caratteri o asterischi.
+
+La tua installazione locale è stata corretta per riconoscere anche gli
+identificativi DUR. Questo file non contiene username, numero conto o password.
+
+
+3. ATTESA DELL'AVVIO E APERTURA DELLA FINESTRA
+
+Al primo avvio Docker scarica e prepara i componenti: possono servire
+diversi minuti. Le righe "Pulling", "Building" e "exporting layers"
+indicano attività in corso; non sono di per sé errori.
+
+Nel testo che hai fornito, il secondo tentativo arriva a:
+- immagine trading-lab costruita;
+- servizio ib-gateway indicato come Healthy;
+- servizio lab indicato come Started.
+
+Questo conferma l'avvio dei servizi Docker. Non conferma, da solo, che
+il broker abbia completato l'accesso o che il trading sia già operativo.
+
+Completa eventuali richieste di autenticazione a due fattori di IBKR.
+La finestra di Trading Lab dovrebbe aprirsi automaticamente.
+
+Se non si apre, oppure vuoi riaprirla mentre i servizi sono già accesi,
+visita nel browser:
+
+http://127.0.0.1:8765
+
+In alternativa, apri la stessa pagina da PowerShell:
+
+Start-Process "http://127.0.0.1:8765"
+
+Se la pagina non risponde, verifica i servizi come spiegato al punto 5.
+
+
+4. AVVIARE IL TRADING SIMULATO NELL'INTERFACCIA
+
+L'avvio del programma apre il pannello: non equivale a premere il pulsante
+che abilita il trading.
+
+Nella finestra di Trading Lab:
+1) Controlla che sia selezionato il tuo conto PAPER.
+2) Controlla titoli, capitale simulato, profilo di rischio e le altre
+   impostazioni del piano.
+3) Alla prima configurazione premi "Save plan".
+4) Quando sei pronto, premi "Start paper trading".
+5) Attendi i controlli di connessione e dei dati storici. Durante questa
+   preparazione gli ordini rimangono in pausa. Se un controllo fallisce,
+   leggi il messaggio mostrato nel pannello.
+
+Una volta pronto, il motore segue l'orario e le condizioni della strategia:
+non è detto che invii subito un ordine.
+
+
+5. CONTROLLI SE QUALCOSA NON PARTE
+
+Apri PowerShell ed entra nella cartella dell'installazione:
+
+Set-Location "$env:LOCALAPPDATA\TradingLab"
+
+Controlla lo stato dei servizi:
+
+docker compose -f compose.app.yml ps
+
+Leggi gli ultimi messaggi del pannello:
+
+docker compose -f compose.app.yml logs --tail 80 lab
+
+Leggi gli ultimi messaggi di IB Gateway:
+
+docker compose -f compose.app.yml logs --tail 80 ib-gateway
+
+Questi tre comandi controllano lo stato e mostrano i messaggi: non avviano
+nuovi ordini. Usa il file compose.app.yml indicato, che corrisponde al
+pannello grafico avviato dal programma.
+
+Se Docker non viene trovato:
+Apri Docker Desktop, poi chiudi e riapri PowerShell e riprova.
+
+Se Docker richiede di completare WSL o riavviare Windows:
+Completa i passaggi richiesti da Docker e poi ripeti il comando del punto 1.
+
+Se ricompare "Invalid username or paper account ID":
+Il programma sta rifiutando il formato, prima di controllare la password
+con IBKR. La correzione DUR è locale e un aggiornamento potrebbe
+sovrascriverla. Non togliere lettere dal tuo numero conto per aggirare
+l'errore: conserva il messaggio per far controllare la versione installata.
+
+Se il pannello si apre ma il collegamento IBKR fallisce:
+Controlla il messaggio nell'app e i log di ib-gateway. Un numero conto
+accettato dal programma non dimostra che username e password siano corretti.
+
+
+6. PAUSA E CHIUSURA
+
+Per mettere in pausa i nuovi ordini usa "Pause new orders" nel pannello.
+Questo non equivale a chiudere tutte le posizioni.
+
+"Exit all positions" richiede invece l'uscita dalle posizioni gestite dal
+piano; l'esecuzione dipende dalla disponibilità del mercato e del broker.
+
+Chiudere la finestra del browser, la finestra dell'app o PowerShell non
+garantisce l'arresto del motore: i servizi Docker possono continuare
+a funzionare in background. Per operare il sistema necessita del PC
+acceso, di Docker attivo e della connessione al broker.
+
+
+7. INSTALLAZIONE DI PYTHON: GIÀ COMPLETATA SU QUESTO PC
+
+Il comando usato in precedenza era:
+
+winget install --exact --id Python.Python.3.13 --accept-package-agreements --accept-source-agreements
+
+Serve a installare Python, non ad avviare Trading Lab. Non va ripetuto
+a ogni avvio. Per l'uso normale basta il comando del punto 1.
