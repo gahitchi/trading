@@ -145,11 +145,11 @@ def test_missing_sg_gives_actionable_failure_instead_of_command_not_found(tmp_pa
         assert target.exists()
         (bindir / executable).symlink_to(target)
     docker = bindir / "docker"
-    docker.write_text("#!/bin/sh\\nexit 1\\n")
+    docker.write_text("#!/bin/sh\nexit 1\n")
     docker.chmod(0o755)
     ident = bindir / "id"
     ident.write_text(
-        '#!/bin/sh\\nif [ "$1" = "-un" ]; then echo desktop-user; else echo "desktop-user docker"; fi\\n'
+        '#!/bin/sh\nif [ "$1" = "-un" ]; then echo desktop-user; else echo "desktop-user docker"; fi\n'
     )
     ident.chmod(0o755)
     env = {
