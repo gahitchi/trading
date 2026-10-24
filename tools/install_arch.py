@@ -43,6 +43,8 @@ def ensure_system() -> None:
         packages.append("docker")
     if not shutil.which("docker") or not command_ok("docker", "compose", "version"):
         packages.append("docker-compose")
+    if not shutil.which("docker") or not command_ok("docker", "buildx", "version"):
+        packages.append("docker-buildx")
     if not shutil.which("xdg-open"):
         packages.append("xdg-utils")
     if packages:
