@@ -1,5 +1,12 @@
 import importlib.util
+import json
 import os
+import signal
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -12,6 +19,95 @@ def installer():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+
+
+def test_upgraded_launcher_replaces_only_matching_old_broker_helper(tmp_path, monkeypatch):
+    """An old helper on port 8766 must not outlive a GUI upgrade (Linux regression)."""
+    if sys.platform != "linux":
+        pytest.skip("Linux process ownership check uses /proc")
+    tool = installer()
+    root = tmp_path / "own-installation"
+    script = root / "tools/broker_setup.py"
+    script.parent.mkdir(parents=True)
+
+    with socket.socket() as free:
+        free.bind(("127.0.0.1", 0))
+        port = free.getsockname()[1]
+    monkeypatch.setattr(tool, "SETUP_PORT", port)
+
+    source = """
+import hashlib
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+VERSION = __VERSION__
+PORT = __PORT__
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *_args):
+        pass
+    def do_GET(self):
+        account_root = str(Path(sys.argv[3]).resolve())
+        data = json.dumps({
+            "installation": hashlib.sha256(account_root.encode("utf-8")).hexdigest(),
+            "protocol_version": VERSION,
+        }).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+HTTPServer(("127.0.0.1", PORT), H).serve_forever()
+"""
+
+    def write_helper(version):
+        script.write_text(source.replace("__VERSION__", str(version)).replace("__PORT__", str(port)))
+
+    write_helper(1)
+    old = subprocess.Popen(
+        [sys.executable, str(script), "--root", str(root)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    url = f"http://127.0.0.1:{port}/status"
+    try:
+        for _ in range(80):
+            try:
+                with opener.open(url, timeout=0.1) as response:
+                    assert '"protocol_version": 1' in response.read().decode()
+                break
+            except OSError:
+                time.sleep(0.05)
+        else:
+            raise AssertionError("legacy helper did not start")
+
+        assert old.pid in tool.owned_setup_processes(root)
+        assert old.pid not in tool.owned_setup_processes(tmp_path / "wrong-installation")
+
+        # New code lives on disk while the old process still serves its loaded version.
+        write_helper(tool.SETUP_PROTOCOL_VERSION)
+        tool.start_setup_service(root)
+        assert old.wait(timeout=5) == -signal.SIGTERM
+        with opener.open(url, timeout=1) as response:
+            state = json.load(response)
+        assert state["protocol_version"] == tool.SETUP_PROTOCOL_VERSION
+
+        # Same-version launch must reuse the helper, never terminate or restart it.
+        running = tool.owned_setup_processes(root)
+        assert len(running) == 1
+        tool.start_setup_service(root)
+        assert tool.owned_setup_processes(root) == running
+    finally:
+        for pid in tool.owned_setup_processes(root):
+            os.kill(pid, signal.SIGTERM)
+        if old.poll() is None:
+            old.terminate()
+        old.wait(timeout=5)
 
 
 def test_password_storage_is_private_and_cannot_replace_existing_secret(tmp_path):

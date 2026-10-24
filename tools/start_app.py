@@ -226,9 +226,7 @@ def start_setup_service(root):
 
     def status():
         try:
-            with opener.open(
-                urllib.request.Request(url, headers={"Origin": URL}), timeout=1
-            ) as response:
+            with opener.open(urllib.request.Request(url, headers={"Origin": URL}), timeout=1) as response:
                 if response.status != 200:
                     return None
                 return json.load(response)
