@@ -203,13 +203,16 @@ def start_setup_service(root):
                 return
     except OSError:
         pass
+    process_group = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
+    )
     subprocess.Popen(
         [sys.executable, str(root / "tools" / "broker_setup.py"), "--root", str(root)],
         cwd=root,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=True,
+        **process_group,
     )
 
 
