@@ -53,8 +53,16 @@ def start_gateway(root: Path) -> bool:
     try:
         process = subprocess.run(
             [
-                "docker", "compose", "-f", "compose.app.yml",
-                "-f", "compose.gateway.yml", "up", "-d", "--no-deps", "ib-gateway",
+                "docker",
+                "compose",
+                "-f",
+                "compose.app.yml",
+                "-f",
+                "compose.gateway.yml",
+                "up",
+                "-d",
+                "--no-deps",
+                "ib-gateway",
             ],
             cwd=root,
             check=False,
@@ -78,7 +86,11 @@ def save_credentials(root: Path, payload: dict) -> str:
         raise ValueError("Invalid username.")
     if not isinstance(account, str) or not PAPER_RE.fullmatch(account):
         raise ValueError("Only approved DU-prefixed IBKR paper accounts are supported.")
-    if not isinstance(password, str) or not 1 <= len(password) <= 1024 or any(c in password for c in ("\r", "\n", "\x00")):
+    if (
+        not isinstance(password, str)
+        or not 1 <= len(password) <= 1024
+        or any(c in password for c in ("\r", "\n", "\x00"))
+    ):
         raise ValueError("Invalid password.")
     secret_dir = root / "secrets"
     secret_dir.mkdir(mode=0o700, exist_ok=True)
@@ -171,7 +183,9 @@ class SetupHandler(BaseHTTPRequestHandler):
             except OSError:
                 return self.reply(500, {"error": "Could not store the private broker configuration."})
         if not ready:
-            return self.reply(503, {"error": "Credentials saved, but Gateway startup failed. Check Docker and Retry Gateway."})
+            return self.reply(
+                503, {"error": "Credentials saved, but Gateway startup failed. Check Docker and Retry Gateway."}
+            )
         return self.reply(200, {"configured": True, "account": account})
 
 

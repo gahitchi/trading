@@ -51,8 +51,6 @@ def test_first_launch_opens_full_gui_without_broker_credentials_or_gateway(tmp_p
     assert all("ib-gateway" not in cmd for cmd, _ in calls)
 
 
-
-
 def test_the_app_opens_in_its_own_window_when_edge_or_chrome_is_installed(tmp_path, monkeypatch):
     tool = installer()
     edge = tmp_path / "msedge.exe"

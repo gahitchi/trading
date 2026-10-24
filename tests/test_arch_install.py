@@ -213,8 +213,6 @@ def test_first_gui_launch_works_without_ibkr_or_setup_terminal(tmp_path):
     assert output.read_text().strip() == "tools/start_app.py"
 
 
-
-
 def test_gui_launch_failure_creates_private_diagnostic_log(tmp_path):
     launcher = Path(__file__).parents[1] / "start-app-arch.sh"
     root = tmp_path / "repo"
