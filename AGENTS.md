@@ -27,6 +27,9 @@ agents; this file is how each one works. Gabriel's decisions in `collab/decision
   account check before every order), and never add a code path that builds a live configuration.
 - **Branches:** Claude writes to `main` and `claude/*`; ChatGPT to `chatgpt/*` and `hardening/*`. Work in
   turns; Gabriel starts each turn. Every commit, merges included, carries exactly one `Agent:` trailer.
+- **Hands off `chatgpt/nicola`.** Neither agent touches it: no commits, pushes, merges, rebases, resets,
+  deletion, cherry-picks or reviews, and nothing built on top of it. That includes ChatGPT, although the name
+  is under `chatgpt/*`. Only Gabriel decides what happens to it.
 - **Never commit secrets or raw broker evidence:** `.env`, `secrets/`, account numbers, tokens, IBKR
   captures (only `lab.capture.sanitize` output belongs in Git).
 - **No look-ahead, ever.** A signal sees only closed bars; research respects the train/test/holdout split
