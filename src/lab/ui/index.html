@@ -31,12 +31,12 @@
     <form id="broker-connect" autocomplete="off">
       <div class="fields">
         <label>IBKR paper-login username<input name="username" maxlength="100" autocomplete="off" spellcheck="false" required></label>
-        <label>Approved paper account number (DU…; not login username)<input name="account" placeholder="DU1234567" maxlength="40" autocomplete="off" spellcheck="false" required></label>
+        <label>Simulation account number (DU… or DUR…; not login username)<input name="account" placeholder="DU1234567 or DUR123456" maxlength="40" autocomplete="off" spellcheck="false" required></label>
       </div>
       <label>IBKR password<input name="password" type="password" autocomplete="new-password" required></label>
-      <p class="help">Your paper-login username and account number are different identifiers. Standard IBKR paper accounts have DU-prefixed numbers. If IBKR shows a DUR-prefixed simulation account number, this release cannot connect it for automated paper orders; do not alter or truncate the ID to bypass the restriction. Free-trial/demo accounts may have different API and market-data capabilities.</p>
+      <p class="help">Your broker login username and account number are separate. DU-prefixed paper accounts can use the existing paper-trading workflow. DUR-prefixed Free Trial simulation accounts can connect through an API <strong>read-only</strong> Gateway: order submission stays disabled, and historical market data may be unavailable. Never alter a DUR number to DU.</p>
       <p class="help">The password is sent only to the local setup service on this computer and stored in a private Docker Gateway secret. It is not sent to Trading Lab's trading engine.</p>
-      <button class="primary" id="broker-connect-btn" type="submit">Save paper login and start Gateway</button>
+      <button class="primary" id="broker-connect-btn" type="submit">Save simulation login and start Gateway</button>
     </form>
     <button class="secondary" id="broker-retry" type="button" hidden>Retry Gateway connection</button>
   </section>

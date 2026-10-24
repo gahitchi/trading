@@ -1,0 +1,10 @@
+# Free Trial accounts can authenticate to the TWS API with limited data access.
+# Selected ONLY for a DUR simulation account by broker_setup.py.
+# IB Gateway explicitly disables API order submission/modification/cancellation.
+# Trading Lab's execution engine separately rejects DUR account identifiers.
+name: trading-lab-app
+services:
+  ib-gateway:
+    environment:
+      READ_ONLY_API: "yes"
+      TRADING_MODE: paper

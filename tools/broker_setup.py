@@ -21,6 +21,7 @@ PORT = 8766
 PAGE_ORIGIN = "http://127.0.0.1:8765"
 USER_RE = re.compile(r"[A-Za-z0-9_.@-]{1,100}\Z")
 PAPER_RE = re.compile(r"DU[0-9]{5,}\Z")
+DEMO_RE = re.compile(r"DUR[0-9]{5,}\Z")
 MAX_INPUT = 4096
 
 
@@ -42,15 +43,18 @@ def saved_account(root: Path) -> str | None:
     for line in env.read_text(encoding="utf-8").splitlines():
         if line.startswith("LAB_PAPER_ACCOUNT="):
             account = line.split("=", 1)[1].strip()
-            if PAPER_RE.fullmatch(account):
+            if PAPER_RE.fullmatch(account) or DEMO_RE.fullmatch(account):
                 return account
     return None
 
 
 def start_gateway(root: Path) -> bool:
     """Only create the paper Gateway. Never restart the GUI or start the engine."""
-    if not saved_account(root):
+    account = saved_account(root)
+    if not account:
         return False
+    # Trial/demo credentials never start an order-enabled Gateway.
+    overlay = ["-f", "compose.gateway.demo.yml"] if DEMO_RE.fullmatch(account) else []
     try:
         process = subprocess.run(
             [
@@ -60,6 +64,7 @@ def start_gateway(root: Path) -> bool:
                 "compose.app.yml",
                 "-f",
                 "compose.gateway.yml",
+                *overlay,
                 "up",
                 "-d",
                 "--no-deps",
@@ -81,19 +86,12 @@ def save_credentials(root: Path, payload: dict) -> str:
     if saved_account(root) or (root / ".env").exists() or (root / "secrets" / "tws_password").exists():
         raise ValueError("Paper credentials are already stored; use Retry Gateway or review the local setup files.")
     if not isinstance(payload, dict) or set(payload) != {"username", "account", "password"}:
-        raise ValueError("Supply paper-login username, separate DU paper account number and password.")
+        raise ValueError("Supply broker-login username, separate simulation account number and password.")
     username, account, password = payload["username"], payload["account"], payload["password"]
     if not isinstance(username, str) or not USER_RE.fullmatch(username):
         raise ValueError("Invalid username.")
-    if isinstance(account, str) and re.fullmatch(r"DUR[0-9]{5,}", account):
-        raise ValueError(
-            "DUR-prefixed simulation account numbers are not yet supported for broker-connected paper trading. "
-            "This may be an IBKR free-trial/demo account; its broker environment has not been verified. "
-            "Do not change the account number to DU or enter a different account. "
-            "You can continue using Trading Lab's GUI without connecting the account."
-        )
-    if not isinstance(account, str) or not PAPER_RE.fullmatch(account):
-        raise ValueError("Enter the confirmed DU-prefixed paper account number for an approved IBKR paper account.")
+    if not isinstance(account, str) or not (PAPER_RE.fullmatch(account) or DEMO_RE.fullmatch(account)):
+        raise ValueError("Only DU paper account numbers or DUR Free Trial simulation numbers are supported.")
     if (
         not isinstance(password, str)
         or not 1 <= len(password) <= 1024
@@ -163,6 +161,8 @@ class SetupHandler(BaseHTTPRequestHandler):
             {
                 "configured": account is not None,
                 "account": account,
+                "mode": "demo" if account and DEMO_RE.fullmatch(account) else "paper",
+                "order_setup_enabled": bool(account and PAPER_RE.fullmatch(account)),
                 "installation": hashlib.sha256(str(self.server.root).encode("utf-8")).hexdigest(),
             },
         )
@@ -201,7 +201,15 @@ class SetupHandler(BaseHTTPRequestHandler):
             return self.reply(
                 503, {"error": "Credentials saved, but Gateway startup failed. Check Docker and Retry Gateway."}
             )
-        return self.reply(200, {"configured": True, "account": account})
+        return self.reply(
+            200,
+            {
+                "configured": True,
+                "account": account,
+                "mode": "demo" if DEMO_RE.fullmatch(account) else "paper",
+                "order_setup_enabled": bool(PAPER_RE.fullmatch(account)),
+            },
+        )
 
 
 class SetupServer(ThreadingHTTPServer):

@@ -34,13 +34,15 @@ async function brokerApi(path, body) {
   return result;
 }
 function showBroker(data) {
-  brokerReady = Boolean(data.configured);
-  $("broker-status").textContent = data.configured
-    ? "Paper login saved locally. Gateway startup was requested; complete any IBKR two-factor prompt."
-    : "Not connected. IBKR approval can be completed later.";
+  brokerReady = Boolean(data.configured && data.order_setup_enabled);
+  $("broker-status").textContent = data.configured && data.mode === "demo"
+    ? "Free Trial simulation login saved. Read-only Gateway startup requested; no API orders permitted. Historical data may be unavailable."
+    : data.configured
+      ? "Paper login saved locally. Gateway startup was requested; complete any IBKR two-factor prompt."
+      : "Not connected. Configure a paper account or a read-only Free Trial simulation.";
   brokerForm.hidden = Boolean(data.configured);
   $("broker-retry").hidden = !data.configured;
-  if (data.configured && data.account && form.elements.account && !form.elements.account.value) {
+  if (brokerReady && data.account && form.elements.account && !form.elements.account.value) {
     form.elements.account.value = data.account;
     form.elements.host.value = "ib-gateway";
     form.elements.port.value = "4004";
@@ -67,10 +69,14 @@ brokerForm.addEventListener("submit", async event => {
     const result = await brokerApi("/connect", payload);
     brokerForm.elements.password.value = "";
     showBroker(result);
-    if (form.elements.account) form.elements.account.value = result.account;
-    form.elements.host.value = "ib-gateway";
-    form.elements.port.value = "4004";
-    notice("Paper credentials saved locally. Gateway is starting; complete IBKR 2FA if requested. Save your plan before starting paper trading.");
+    if (result.mode === "demo") {
+      notice("Free Trial credentials saved. Read-only API Gateway is starting. Trading orders remain disabled; availability of market data and actual API authentication still need verification.");
+    } else {
+      if (form.elements.account) form.elements.account.value = result.account;
+      form.elements.host.value = "ib-gateway";
+      form.elements.port.value = "4004";
+      notice("Paper credentials saved locally. Gateway is starting; complete IBKR 2FA if requested. Save your plan before starting paper trading.");
+    }
   } catch (err) {
     notice(err.message);
   } finally {
@@ -80,7 +86,7 @@ brokerForm.addEventListener("submit", async event => {
 $("broker-retry").onclick = async () => {
   try {
     showBroker(await brokerApi("/retry", {}));
-    notice("Gateway startup requested. Check the connection and IBKR two-factor prompt.");
+    notice("Gateway startup requested. Check the connection and IBKR two-factor prompt. Free Trial accounts remain API read-only.");
   } catch (err) {
     notice(err.message);
   }

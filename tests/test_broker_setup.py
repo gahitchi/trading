@@ -46,14 +46,11 @@ def test_gui_broker_setup_is_strictly_local_and_paper_only(tmp_path, monkeypatch
     try:
         code, state, cors = request("GET", "/status")
         installation = hashlib.sha256(str(tmp_path.resolve()).encode("utf-8")).hexdigest()
-        assert code == 200 and state == {"configured": False, "account": None, "installation": installation}
+        assert code == 200 and state == {"configured": False, "account": None, "mode": "paper", "order_setup_enabled": False, "installation": installation}
         assert cors["Access-Control-Allow-Origin"] == headers["Origin"]
         bad = {"username": "DUR7654321", "account": "U1234567", "password": "first-secret"}
         assert request("POST", "/connect", bad)[0] == 400
-        code, reason, _ = request("POST", "/connect", {**bad, "account": "DUR7654321"})
-        assert code == 400 and "DUR-prefixed simulation account" in reason["error"]
-        assert "not yet supported" in reason["error"]
-        assert "Do not change" in reason["error"]
+        # DUR free-trial simulation IDs are tested in a separate read-only onboarding test.
         assert not (tmp_path / ".env").exists()
         good = {**bad, "account": "DU1234567"}
         for override in [
@@ -74,7 +71,7 @@ def test_gui_broker_setup_is_strictly_local_and_paper_only(tmp_path, monkeypatch
         assert (tmp_path / "secrets/tws_password").stat().st_mode & 0o777 == 0o600
         assert (tmp_path / "secrets").stat().st_mode & 0o777 == 0o700
         code, state, _ = request("GET", "/status")
-        assert code == 200 and state == {"configured": True, "account": "DU1234567", "installation": installation}
+        assert code == 200 and state == {"configured": True, "account": "DU1234567", "mode": "paper", "order_setup_enabled": True, "installation": installation}
         assert "first-secret" not in json.dumps(state) and "DUR7654321" not in json.dumps(state)
         assert request("POST", "/connect", good)[0] == 400
         assert request("POST", "/retry", {})[0] == 200
@@ -125,3 +122,62 @@ def test_partial_or_symlinked_credentials_never_overwritten(tmp_path):
         raise AssertionError("Expected symlinked secret to block")
     assert external.read_text() == "do not change"
     assert not (tmp_path / ".env").exists()
+
+
+def test_trial_account_uses_read_only_gateway_and_never_enables_trading(tmp_path, monkeypatch):
+    module = broker_module()
+    for name in ("compose.app.yml", "compose.gateway.yml", "compose.gateway.demo.yml"):
+        (tmp_path / name).write_text("test")
+    demo = {"username": "trial-login", "account": "DUR987654", "password": "trial-secret"}
+    assert module.save_credentials(tmp_path, demo) == "DUR987654"
+    assert module.saved_account(tmp_path) == "DUR987654"
+
+    commands = []
+
+    class Result:
+        returncode = 0
+
+    def fake_run(args, **kwargs):
+        commands.append(list(args))
+        return Result()
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    assert module.start_gateway(tmp_path)
+    assert "-f" in commands[0]
+    assert "compose.gateway.demo.yml" in commands[0]
+    assert commands[0][-2:] == ["--no-deps", "ib-gateway"]
+    assert "trial-secret" not in str(commands)
+    # The runtime trading guard remains DU-only irrespective of GUI onboarding.
+    from lab.safety import SafetyError, check_paper_settings, is_paper_account
+
+    assert not is_paper_account("IB-DUR987654")
+    try:
+        check_paper_settings(4004, "DUR987654")
+    except SafetyError:
+        pass
+    else:
+        raise AssertionError("Demo identifier bypassed the paper-account safety guard")
+
+    server = module.SetupServer(("127.0.0.1", 0), tmp_path)
+    monkeypatch.setattr(module, "PORT", server.server_address[1])
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=3)
+    try:
+        conn.request("GET", "/status", headers={
+            "Host": f"127.0.0.1:{server.server_address[1]}",
+            "Origin": "http://127.0.0.1:8765",
+        })
+        response = conn.getresponse()
+        state = json.loads(response.read())
+        assert response.status == 200
+        assert state["configured"] is True and state["mode"] == "demo"
+        assert state["order_setup_enabled"] is False
+        assert "trial-login" not in json.dumps(state)
+        assert "trial-secret" not in json.dumps(state)
+    finally:
+        conn.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
