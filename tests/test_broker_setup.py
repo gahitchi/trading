@@ -48,8 +48,11 @@ def test_gui_broker_setup_is_strictly_local_and_paper_only(tmp_path, monkeypatch
         installation = hashlib.sha256(str(tmp_path.resolve()).encode("utf-8")).hexdigest()
         assert code == 200 and state == {"configured": False, "account": None, "installation": installation}
         assert cors["Access-Control-Allow-Origin"] == headers["Origin"]
-        bad = {"username": "paper-user", "account": "U1234567", "password": "first-secret"}
+        bad = {"username": "DUR7654321", "account": "U1234567", "password": "first-secret"}
         assert request("POST", "/connect", bad)[0] == 400
+        code, reason, _ = request("POST", "/connect", {**bad, "account": "DUR7654321"})
+        assert code == 400 and "username" in reason["error"] and "DU-prefixed" in reason["error"]
+        assert not (tmp_path / ".env").exists()
         good = {**bad, "account": "DU1234567"}
         for override in [
             {"Origin": "https://evil.example"},
@@ -63,14 +66,14 @@ def test_gui_broker_setup_is_strictly_local_and_paper_only(tmp_path, monkeypatch
         assert request("OPTIONS", "/connect")[0] == 204
         assert request("POST", "/connect", good)[0] == 200
         assert gateway_calls == [tmp_path]
-        assert (tmp_path / ".env").read_text() == "TWS_USERID=paper-user\nLAB_PAPER_ACCOUNT=DU1234567\n"
+        assert (tmp_path / ".env").read_text() == "TWS_USERID=DUR7654321\nLAB_PAPER_ACCOUNT=DU1234567\n"
         assert (tmp_path / "secrets/tws_password").read_text() == "first-secret"
         assert (tmp_path / ".env").stat().st_mode & 0o777 == 0o600
         assert (tmp_path / "secrets/tws_password").stat().st_mode & 0o777 == 0o600
         assert (tmp_path / "secrets").stat().st_mode & 0o777 == 0o700
         code, state, _ = request("GET", "/status")
         assert code == 200 and state == {"configured": True, "account": "DU1234567", "installation": installation}
-        assert "first-secret" not in json.dumps(state) and "paper-user" not in json.dumps(state)
+        assert "first-secret" not in json.dumps(state) and "DUR7654321" not in json.dumps(state)
         assert request("POST", "/connect", good)[0] == 400
         assert request("POST", "/retry", {})[0] == 200
         assert gateway_calls == [tmp_path, tmp_path]

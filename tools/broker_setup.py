@@ -81,12 +81,17 @@ def save_credentials(root: Path, payload: dict) -> str:
     if saved_account(root) or (root / ".env").exists() or (root / "secrets" / "tws_password").exists():
         raise ValueError("Paper credentials are already stored; use Retry Gateway or review the local setup files.")
     if not isinstance(payload, dict) or set(payload) != {"username", "account", "password"}:
-        raise ValueError("Supply username, DU paper account and password.")
+        raise ValueError("Supply paper-login username, separate DU paper account number and password.")
     username, account, password = payload["username"], payload["account"], payload["password"]
     if not isinstance(username, str) or not USER_RE.fullmatch(username):
         raise ValueError("Invalid username.")
+    if isinstance(account, str) and re.fullmatch(r"DUR[0-9]{5,}", account):
+        raise ValueError(
+            "This looks like a paper-login username, not the separate DU-prefixed paper account number. "
+            "Check IBKR Client Portal > Settings > Paper Trading Account."
+        )
     if not isinstance(account, str) or not PAPER_RE.fullmatch(account):
-        raise ValueError("Only approved DU-prefixed IBKR paper accounts are supported.")
+        raise ValueError("Enter the DU-prefixed paper account number, not the paper-login username.")
     if (
         not isinstance(password, str)
         or not 1 <= len(password) <= 1024

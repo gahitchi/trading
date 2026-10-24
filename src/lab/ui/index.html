@@ -30,10 +30,11 @@
     Nothing connects or trades until you explicitly configure your paper account.</p>
     <form id="broker-connect" autocomplete="off">
       <div class="fields">
-        <label>IBKR username<input name="username" maxlength="100" autocomplete="off" spellcheck="false" required></label>
-        <label>Paper account ID<input name="account" placeholder="DU1234567" maxlength="40" autocomplete="off" required></label>
+        <label>IBKR paper-login username<input name="username" maxlength="100" autocomplete="off" spellcheck="false" required></label>
+        <label>Paper account number (different from username)<input name="account" placeholder="DU1234567" maxlength="40" autocomplete="off" spellcheck="false" required></label>
       </div>
       <label>IBKR password<input name="password" type="password" autocomplete="new-password" required></label>
+      <p class="help">Your IBKR paper-login username can contain letters such as DUR; enter it in the username field. The account number is a separate DU-prefixed identifier found under IBKR Client Portal &gt; Settings &gt; Paper Trading Account. Never substitute the username for the account number.</p>
       <p class="help">The password is sent only to the local setup service on this computer and stored in a private Docker Gateway secret. It is not sent to Trading Lab's trading engine.</p>
       <button class="primary" id="broker-connect-btn" type="submit">Save paper login and start Gateway</button>
     </form>
@@ -74,7 +75,7 @@
         <fieldset>
           <legend><span class="step">1</span>Paper account</legend>
           <div class="fields">
-            <label>Account ID<input name="account" placeholder="DU1234567" autocomplete="off" spellcheck="false" required></label>
+            <label>Paper account number (not login username)<input name="account" placeholder="DU1234567" autocomplete="off" spellcheck="false" required></label>
             <label>Capital to allocate (USD)<input name="capital" type="number" min="1000" max="1000000000" step="100" required></label>
           </div>
           <details>
