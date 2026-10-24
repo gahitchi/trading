@@ -178,18 +178,30 @@ def test_launcher_uses_sg_after_new_group_membership(tmp_path):
     assert outfile.read_text().strip() == "tools/start_app.py"
 
 
-def test_first_gui_launch_opens_a_real_setup_terminal(tmp_path):
+def test_first_gui_launch_works_without_ibkr_or_setup_terminal(tmp_path):
+    """A KDE shortcut must open the offline GUI, not demand a password prompt."""
     launcher = Path(__file__).parents[1] / "start-app-arch.sh"
     fake_root = tmp_path / "repo"
     fake_root.mkdir()
     (fake_root / "start-app-arch.sh").write_text(launcher.read_text())
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
-    konsole = fake_bin / "konsole"
-    konsole.write_text('#!/bin/sh\nprintf "%s\\n" "$*" > "$TEST_OUTPUT"\n')
-    konsole.chmod(0o755)
-    dest = tmp_path / "gui-command"
-    env = {**os.environ, "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"], "TEST_OUTPUT": str(dest)}
+    output = tmp_path / "gui-command"
+    for name, source in {
+        "docker": '#!/bin/sh\\n[ "$1" = info ] && exit 0\\nexit 1\\n',
+        "python3": '#!/bin/sh\\nprintf "%s\\n" "$*" > "$TEST_OUTPUT"\\n',
+        "konsole": '#!/bin/sh\\necho UNEXPECTED > "$TEST_OUTPUT"\\nexit 9\\n',
+    }.items():
+        binary = fake_bin / name
+        binary.write_text(source)
+        binary.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+        "TEST_OUTPUT": str(output),
+        "HOME": str(tmp_path),
+        "XDG_STATE_HOME": str(tmp_path / "state"),
+    }
     result = subprocess.run(
         ["bash", str(fake_root / "start-app-arch.sh")],
         env=env,
@@ -198,8 +210,9 @@ def test_first_gui_launch_opens_a_real_setup_terminal(tmp_path):
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    assert "--hold -e bash" in dest.read_text()
-    assert "--interactive" in dest.read_text()
+    assert output.read_text().strip() == "tools/start_app.py"
+
+
 
 
 def test_gui_launch_failure_creates_private_diagnostic_log(tmp_path):
