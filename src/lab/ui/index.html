@@ -23,6 +23,23 @@
 <main>
   <div id="notice" role="alert" hidden></div>
 
+  <section class="panel" id="broker-panel" aria-labelledby="broker-title">
+    <h2 id="broker-title">Interactive Brokers paper account</h2>
+    <p id="broker-status" role="status">Checking local setup service…</p>
+    <p class="help">You can explore the full Trading Lab GUI while IBKR approval is pending.
+    Nothing connects or trades until you explicitly configure your paper account.</p>
+    <form id="broker-connect" autocomplete="off">
+      <div class="fields">
+        <label>IBKR username<input name="username" maxlength="100" autocomplete="off" spellcheck="false" required></label>
+        <label>Paper account ID<input name="account" placeholder="DU1234567" maxlength="40" autocomplete="off" required></label>
+      </div>
+      <label>IBKR password<input name="password" type="password" autocomplete="new-password" required></label>
+      <p class="help">The password is sent only to the local setup service on this computer and stored in a private Docker Gateway secret. It is not sent to Trading Lab's trading engine.</p>
+      <button class="primary" id="broker-connect-btn" type="submit">Save paper login and start Gateway</button>
+    </form>
+    <button class="secondary" id="broker-retry" type="button" hidden>Retry Gateway connection</button>
+  </section>
+
   <section class="front" id="front" data-phase="setup" aria-label="Engine status and controls">
     <div class="display">
       <div class="readout-main">
@@ -62,7 +79,7 @@
           </div>
           <details>
             <summary>Gateway connection</summary>
-            <p class="help">Log in to IB Gateway in paper mode first. This app never asks for your broker password.</p>
+            <p class="help">Configure your IBKR paper login above when approval is complete. The local setup helper keeps passwords out of the trading plan.</p>
             <div class="fields">
               <label>Host<input name="host" spellcheck="false" required></label>
               <label>Paper port<select name="port"><option value="4002">4002, IB Gateway</option><option value="7497">7497, Trader Workstation</option><option value="4004">4004, Docker Gateway</option></select></label>
@@ -131,7 +148,7 @@
 </main>
 
 <footer>
-  <span>Runs on this computer. Your broker password never reaches this page.</span>
+  <span>Runs on this computer. Broker credentials are handled only by the local setup helper.</span>
   <span>Release candidate, paper validation in progress</span>
 </footer>
 

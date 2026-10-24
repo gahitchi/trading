@@ -20,6 +20,72 @@ const shares = new Intl.NumberFormat(undefined, {maximumFractionDigits: 4});
 const when = (seconds) => new Date(seconds * 1000).toLocaleString(undefined, {dateStyle: "medium", timeStyle: "short"});
 
 function notice(message) { const el = $("notice"); el.textContent = message; el.hidden = !message; }
+const brokerForm = $("broker-connect");
+const brokerHost = "http://127.0.0.1:8766";
+let brokerReady = false;
+async function brokerApi(path, body) {
+  const response = await fetch(brokerHost + path, {
+    method: body ? "POST" : "GET",
+    headers: body ? {"Content-Type": "application/json"} : {},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const result = await response.json();
+  if (!response.ok) throw Error(result.error || "Broker setup failed.");
+  return result;
+}
+function showBroker(data) {
+  brokerReady = Boolean(data.configured);
+  $("broker-status").textContent = data.configured
+    ? "Paper login saved locally. Gateway startup was requested; complete any IBKR two-factor prompt."
+    : "Not connected. IBKR approval can be completed later.";
+  brokerForm.hidden = Boolean(data.configured);
+  $("broker-retry").hidden = !data.configured;
+  if (data.configured && data.account && form.elements.account && !form.elements.account.value) {
+    form.elements.account.value = data.account;
+    form.elements.host.value = "ib-gateway";
+    form.elements.port.value = "4004";
+  }
+  if (last) render(last);
+}
+async function refreshBroker() {
+  try {
+    showBroker(await brokerApi("/status"));
+  } catch (_err) {
+    brokerReady = false;
+    $("broker-status").textContent = "Local broker setup service unavailable. Reopen Trading Lab from its launcher.";
+    if (last) render(last);
+  }
+}
+brokerForm.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!brokerForm.reportValidity()) return;
+  const button = $("broker-connect-btn");
+  button.disabled = true;
+  notice("");
+  const payload = Object.fromEntries(new FormData(brokerForm));
+  try {
+    const result = await brokerApi("/connect", payload);
+    brokerForm.elements.password.value = "";
+    showBroker(result);
+    if (form.elements.account) form.elements.account.value = result.account;
+    form.elements.host.value = "ib-gateway";
+    form.elements.port.value = "4004";
+    notice("Paper credentials saved locally. Gateway is starting; complete IBKR 2FA if requested. Save your plan before starting paper trading.");
+  } catch (err) {
+    notice(err.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+$("broker-retry").onclick = async () => {
+  try {
+    showBroker(await brokerApi("/retry", {}));
+    notice("Gateway startup requested. Check the connection and IBKR two-factor prompt.");
+  } catch (err) {
+    notice(err.message);
+  }
+};
+
 async function api(path, body) {
   const res = await fetch(path, {
     method: body ? "POST" : "GET",
@@ -176,7 +242,7 @@ function render(state) {
   $("block").hidden = !block;
   for (const field of form.querySelectorAll("input,select,button")) field.disabled = state.engine_alive || busy;
   $("locked").hidden = !state.engine_alive;
-  $("start").disabled = busy || ["running", "preparing"].includes(state.phase);
+  $("start").disabled = busy || !brokerReady || ["running", "preparing"].includes(state.phase);
   $("pause").disabled = busy || !state.engine_alive;
   $("exit").disabled = busy || !state.engine_alive;
   approvals(state.requests);
@@ -191,6 +257,7 @@ async function action(fn) {
 form.addEventListener("submit", e => { e.preventDefault(); action(() => api("/api/setup", settings())); });
 form.addEventListener("change", e => { if (e.target.name === "profile") riskNote(); });
 $("start").onclick = () => action(async () => {
+  if (!brokerReady) throw Error("Configure an approved IBKR paper account first.");
   if (!last.engine_alive) {
     if (!form.reportValidity()) throw Error("Complete the required setup fields.");
     await api("/api/setup", settings());
@@ -208,4 +275,6 @@ async function refresh() {
   catch (e) { notice("Lost the connection to the local app. The engine may still be running: check the service before assuming trading stopped."); }
 }
 refresh();
+refreshBroker();
 setInterval(refresh, 2000);
+setInterval(refreshBroker, 15000);

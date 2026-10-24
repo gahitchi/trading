@@ -1,9 +1,7 @@
 """One-time local Docker setup, then open the app in its own window. Never submit an order."""
 
-import getpass
 import logging
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -185,26 +183,30 @@ def record_launch_failure(exc: Exception) -> Path:
     return path
 
 
+def start_setup_service(root):
+    """The broker installer is a loopback-only, user-owned process; no Docker socket is mounted."""
+    port = 8766
+    url = f"http://127.0.0.1:{port}/status"
+    try:
+        with urllib.request.urlopen(url, timeout=1) as response:
+            if response.status == 200:
+                return
+    except OSError:
+        pass
+    subprocess.Popen(
+        [sys.executable, str(root / "tools" / "broker_setup.py"), "--root", str(root)],
+        cwd=root,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     subprocess.run(["docker", "compose", "version"], check=True, cwd=root, capture_output=True)
     ensure_docker()
-    if not (root / ".env").exists():
-        print("Connect IB Gateway in PAPER mode. Credentials are saved only on this computer.")
-        username = input("IBKR username: ").strip()
-        account = input("Paper account ID (DU...): ").strip().upper()
-        if not re.fullmatch(r"[A-Za-z0-9_.@-]{1,100}", username) or not re.fullmatch(r"DU\d{5,}", account):
-            raise ValueError("Invalid username or paper account ID.")
-        secret = root / "secrets" / "tws_password"
-        if not secret.exists():
-            password = getpass.getpass("IBKR password (hidden): ")
-            if not password:
-                raise ValueError("A Gateway password is required.")
-            secret.parent.mkdir(mode=0o700, exist_ok=True)
-            private_file(secret, password)
-        private_file(root / ".env", f"TWS_USERID={username}\nLAB_PAPER_ACCOUNT={account}\n")
-    elif not (root / "secrets" / "tws_password").is_file():
-        raise ValueError("Existing .env found, but secrets/tws_password is missing. Complete Gateway setup first.")
     for name in ("results", "research", "data"):
         (root / name).mkdir(exist_ok=True)
     env = dict(os.environ)
@@ -214,11 +216,12 @@ def main():
         print("Trading Lab is already running; opening the existing window without rebuilding the engine.")
     else:
         subprocess.run(
-            ["docker", "compose", "-f", "compose.app.yml", "up", "--build", "-d"], check=True, cwd=root, env=env
+            ["docker", "compose", "-f", "compose.app.yml", "up", "--build", "-d", "lab"], check=True, cwd=root, env=env
         )
     install_shortcuts(root)
-    print("Complete any IBKR two-factor prompt. Next time, open Trading Lab from its icon.")
-    print("Save your plan, then click Start paper trading. No orders are enabled by this installer.")
+    start_setup_service(root)
+    print("Trading Lab is ready without IBKR. Connect a paper account later in the GUI.")
+    print("No orders are enabled by the installer.")
     if not wait_until_ready(URL):
         print(f"The app is not answering yet. Open {URL} once the container is healthy.")
     open_app(URL)

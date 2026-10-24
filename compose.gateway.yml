@@ -1,0 +1,8 @@
+# Add this overlay ONLY after the user saves approved IBKR paper credentials
+# via the loopback GUI setup helper. It shares the app's Docker project/network.
+name: trading-lab-app
+services:
+  ib-gateway:
+    extends:
+      file: docker-compose.yml
+      service: ib-gateway

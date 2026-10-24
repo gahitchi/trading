@@ -537,7 +537,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+            "default-src 'self'; script-src 'self'; style-src 'self'; "
+            "connect-src 'self' http://127.0.0.1:8766; "
+            "frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
         )
         self.end_headers()
         self.wfile.write(raw)
