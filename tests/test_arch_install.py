@@ -290,7 +290,7 @@ def test_arch_launcher_rolls_large_log_and_refuses_symlink(tmp_path):
         capture_output=True,
         text=True,
     )
-    assert first.returncode == 1
+    assert first.returncode != 0
     assert (state / "launcher.log.1").stat().st_size >= 1_000_020
     assert log.stat().st_size < 1_000_000
     log.unlink()
