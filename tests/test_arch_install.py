@@ -245,6 +245,9 @@ def test_interactive_launcher_retains_recent_failures_and_appends(tmp_path):
     docker = bin_dir / "docker"
     docker.write_text("#!/bin/sh\necho simulated-docker-failure >&2\nexit 1\n")
     docker.chmod(0o755)
+    ident = bin_dir / "id"
+    ident.write_text('#!/bin/sh\\nif [ "$1" = "-un" ]; then echo desktop-user; else echo desktop-user; fi\\n')
+    ident.chmod(0o755)
     env = {
         **os.environ,
         "HOME": str(tmp_path),

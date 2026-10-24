@@ -21,6 +21,21 @@ foreach ($function in $ast.FindAll({ param($node) $node -is [System.Management.A
     . ([scriptblock]::Create($function.Extent.Text))
 }
 
+# The PowerShell launcher saves pre-Python failures into a local file.
+$oldLocal = $env:LOCALAPPDATA
+$env:LOCALAPPDATA = Join-Path ([IO.Path]::GetTempPath()) ("trading-log-test-" + [guid]::NewGuid().ToString("N"))
+try {
+    $failureLog = Record-LauncherFailure "DU1234567 password=never-log-this"
+    $saved = Get-Content -LiteralPath $failureLog -Raw
+    if ($saved -notmatch "PAPER_ACCOUNT" -or $saved -notmatch "REDACTED" -or
+        $saved -match "DU1234567|never-log-this") {
+        throw "Windows diagnostic launcher log did not redact account/password."
+    }
+} finally {
+    Remove-Item -LiteralPath $env:LOCALAPPDATA -Recurse -Force -ErrorAction SilentlyContinue
+    $env:LOCALAPPDATA = $oldLocal
+}
+
 # A working interpreter wins over the stale py.exe registry mapping.
 $python = Find-WorkingPython
 if (-not $python) { throw "Windows CI runner had no working Python to exercise the launcher." }

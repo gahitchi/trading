@@ -198,3 +198,37 @@ def test_reopening_windows_app_does_not_rebuild_running_docker_node(tmp_path, mo
     assert tool.main() == 0
     assert not any("up" in args for args in calls)
     assert any(args[-3:] == ["--status", "running", "--services"] for args in calls)
+
+
+def test_python_startup_failure_is_private_rotating_and_sanitized(tmp_path, monkeypatch):
+    tool = installer()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    try:
+        raise RuntimeError("Paper DU1234567 password=dont-share-this")
+    except RuntimeError as exc:
+        path = tool.record_launch_failure(exc)
+    content = path.read_text()
+    assert "RuntimeError" in content and "test_python_startup_failure" in content
+    assert "[PAPER_ACCOUNT]" in content and "password=[REDACTED]" in content
+    assert "DU1234567" not in content and "dont-share-this" not in content
+    assert path.stat().st_mode & 0o777 == 0o600
+    # A stale large log is rotated on the next crash.
+    path.write_text("X" * 1_000_000)
+    try:
+        raise RuntimeError("second")
+    except RuntimeError as exc:
+        tool.record_launch_failure(exc)
+    assert (path.parent / "crash.log.1").exists()
+    assert "second" in path.read_text()
+
+
+def test_python_crash_log_rejects_symlink(tmp_path, monkeypatch):
+    tool = installer()
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    path = tool.diagnostic_log()
+    path.unlink()
+    outside = tmp_path / "private"
+    path.symlink_to(outside)
+    with pytest.raises(OSError, match="symbolic link"):
+        tool.record_launch_failure(RuntimeError("should not write"))
+    assert not outside.exists()

@@ -13,14 +13,6 @@ cd "$HOME/Applications/trading-lab"
 bash install-arch.sh
 ```
 
-Before Claude merges the installer to `main`, use this review branch instead:
-
-```bash
-git fetch origin chatgpt/arch-installer-20261024
-git switch --track origin/chatgpt/arch-installer-20261024
-bash install-arch.sh
-```
-
 The installer asks for permission before granting Docker group access. **The `docker` group is equivalent to root access**; decline and configure rootless Docker separately if you do not accept that permission. When you accept, the new launcher can use `sg docker` before you next log in. First-time dependencies and image builds require network access.
 
 On the first launch, the existing guided startup asks for an **IBKR paper username**, **DU-prefixed paper account**, and a hidden paper password. It stores the password in `secrets/tws_password` (mode 0600), not in the Git repository or app form. Then it starts the local paper Gateway and displays Trading Lab in its own Chrome/Chromium/Edge window when available, otherwise in your default browser. Approve any separate IBKR two-factor prompt. Finally, save the trading plan and explicitly choose **Start paper trading** in the app.

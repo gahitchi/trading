@@ -33,6 +33,7 @@ from lab.persistence import atomic_json, read_json
 from lab.risk_profiles import PROFILES
 from lab.safety import check_paper_settings, clear_kill_switch, read_kill_switch, set_kill_switch
 
+
 def record_app_failure(directory: Path, area: str, exc: Exception) -> None:
     """Record UI/monitor failures, with bounded private logs and no raw secrets."""
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)

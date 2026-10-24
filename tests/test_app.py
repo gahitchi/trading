@@ -364,3 +364,16 @@ def test_simulated_live_node_readiness_cannot_masquerade_as_broker_data(goog_lab
     assert evidence["binding"] == digest(read_json(h.runtime / "identity.json"))
     assert len(evidence["history"]["GOOG"]) == goog_lab.portfolio.vol_window + 1
     assert evidence["signals"]["buy_and_hold:GOOG"]["active"]
+
+
+def test_app_crash_log_persists_redacted_exception_without_source_lines(tmp_path):
+    try:
+        raise RuntimeError("Broker DU1234567 token=not-for-chat")
+    except RuntimeError as exc:
+        app.record_app_failure(tmp_path / "app", "monitor", exc)
+    path = tmp_path / "app/app-crash.log"
+    body = path.read_text()
+    assert "monitor | RuntimeError" in body
+    assert "PAPER_ACCOUNT" in body and "token=[REDACTED]" in body
+    assert "DU1234567" not in body and "not-for-chat" not in body
+    assert path.stat().st_mode & 0o777 == 0o600

@@ -5,6 +5,26 @@ $Root = Split-Path -Parent $PSScriptRoot
 $VersionFile = Join-Path $Root ".tradinglab-version"
 $Repository = "gahitchi/trading"
 
+function Record-LauncherFailure([string]$detail) {
+    # Pre-Python failures (e.g. stale py mappings, Docker failures) need a
+    # persistent local record. Never copy environment variables or passwords.
+    $directory = Join-Path $env:LOCALAPPDATA "TradingLab\logs"
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    $path = Join-Path $directory "launcher.log"
+    if (Test-Path -LiteralPath $path) {
+        if ((Get-Item -LiteralPath $path).Length -ge 1000000) {
+            $old = $path + ".1"
+            if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Force }
+            Move-Item -LiteralPath $path -Destination $old
+        }
+    }
+    $safe = $detail -replace '(?i)(?:IB-)?DU[0-9]{5,}', '[PAPER_ACCOUNT]'
+    $safe = $safe -replace '(?i)(password|token|api[_-]?key|secret)\s*[=:]\s*[^\s,;]+', '$1=[REDACTED]'
+    $at = [DateTime]::UtcNow.ToString("o")
+    Add-Content -LiteralPath $path -Value "$at | launcher | $safe" -Encoding UTF8
+    return $path
+}
+
 function Find-WorkingPython {
     # A valid py.exe can still point at an interpreter deleted from another user.
     $candidates = New-Object System.Collections.ArrayList
@@ -156,8 +176,14 @@ try {
     $python = Ensure-Python
     $prefix = $python.Prefix
     & $python.File @prefix (Join-Path $Root "tools\start_app.py")
-    exit $LASTEXITCODE
+    if ($LASTEXITCODE -ne 0) { throw "Python startup failed (exit code $LASTEXITCODE); inspect crash.log." }
+    exit 0
 } catch {
-    Write-Host "Trading Lab launcher failed: $_" -ForegroundColor Red
+    try {
+        $log = Record-LauncherFailure ([string]$_)
+        Write-Host "Trading Lab launcher failed. Diagnostic log: $log" -ForegroundColor Red
+    } catch {
+        Write-Host "Trading Lab launcher failed; could not write diagnostic log." -ForegroundColor Red
+    }
     exit 1
 }
