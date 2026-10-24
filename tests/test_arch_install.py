@@ -105,7 +105,7 @@ def test_missing_docker_provisions_only_needed_packages_and_asks_about_root_equi
     monkeypatch.setattr(m.subprocess, "run", fake_run)
     monkeypatch.setattr("builtins.input", lambda _: "yes")
     m.ensure_system()
-    assert ["sudo", "pacman", "-S", "--needed", "docker", "docker-compose", "xdg-utils"] in runs
+    assert ["sudo", "pacman", "-S", "--needed", "docker", "docker-compose", "docker-buildx", "xdg-utils"] in runs
     assert ["sudo", "systemctl", "enable", "--now", "docker"] in runs
     assert ["sudo", "usermod", "-aG", "docker", "desktop-user"] in runs
     assert not any("paper" in repr(cmd) for cmd in runs)
