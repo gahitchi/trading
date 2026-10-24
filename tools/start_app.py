@@ -1,14 +1,18 @@
 """One-time local Docker setup, then open the app in its own window. Never submit an order."""
 
 import getpass
+import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
 import time
+import traceback
 import urllib.request
 import webbrowser
+from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 URL = "http://127.0.0.1:8765"
@@ -142,6 +146,45 @@ def running_app(root):
     return "lab" in result.stdout.splitlines()
 
 
+def diagnostic_log() -> Path:
+    """Keep startup exceptions outside install files, in user-only rotating logs."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+        directory = base / "TradingLab" / "logs"
+    else:
+        directory = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "trading-lab"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = directory / "crash.log"
+    if path.is_symlink():
+        raise OSError("Refusing to write diagnostics to a symbolic link")
+    path.touch(mode=0o600, exist_ok=True)
+    if os.name == "posix":
+        path.chmod(0o600)
+    return path
+
+
+def record_launch_failure(exc: Exception) -> Path:
+    """Capture a bounded traceback without source lines, credentials or environment dumps."""
+    path = diagnostic_log()
+    line = str(exc)
+    line = re.sub(r"\\b(?:IB-)?DU[0-9]{5,}\\b", "[PAPER_ACCOUNT]", line, flags=re.IGNORECASE)
+    line = re.sub(
+        r"(?i)(password|token|api[_-]?key|secret)\\s*[=:]\\s*[^\\s,;]+",
+        r"\\1=[REDACTED]",
+        line,
+    )
+    frames = traceback.extract_tb(exc.__traceback__)
+    details = "\\n".join(f"  {f.filename}:{f.lineno} in {f.name}" for f in frames[-20:])
+    entry = f"{datetime.now(UTC).isoformat()} | {type(exc).__name__}: {line}\\n{details}"
+    handler = RotatingFileHandler(path, maxBytes=1_000_000, backupCount=2, encoding="utf-8")
+    try:
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.emit(logging.LogRecord("launcher", logging.ERROR, "", 0, entry, (), None))
+    finally:
+        handler.close()
+    return path
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     subprocess.run(["docker", "compose", "version"], check=True, cwd=root, capture_output=True)
@@ -185,6 +228,10 @@ def main():
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-        print(f"Setup stopped: {exc}", file=sys.stderr)
+    except Exception as exc:
+        try:
+            path = record_launch_failure(exc)
+            print(f"Setup stopped. Crash details: {path}", file=sys.stderr)
+        except OSError:
+            print(f"Setup stopped: {type(exc).__name__} (diagnostic log unavailable)", file=sys.stderr)
         raise SystemExit(1) from exc

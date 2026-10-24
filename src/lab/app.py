@@ -16,6 +16,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import webbrowser
 from collections import deque
 from datetime import UTC, datetime, timedelta
@@ -31,6 +32,32 @@ from lab.paper import acquire_runtime_lock, runtime_dir
 from lab.persistence import atomic_json, read_json
 from lab.risk_profiles import PROFILES
 from lab.safety import check_paper_settings, clear_kill_switch, read_kill_switch, set_kill_switch
+
+def record_app_failure(directory: Path, area: str, exc: Exception) -> None:
+    """Record UI/monitor failures, with bounded private logs and no raw secrets."""
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    log = directory / "app-crash.log"
+    if log.is_symlink():
+        raise OSError("Diagnostic file cannot be a symlink")
+    log.touch(mode=0o600, exist_ok=True)
+    if os.name == "posix":
+        log.chmod(0o600)
+    message = re.sub(r"\\b(?:IB-)?DU[0-9]{5,}\\b", "[PAPER_ACCOUNT]", str(exc), flags=re.IGNORECASE)
+    message = re.sub(
+        r"(?i)(password|token|api[_-]?key|secret)\\s*[=:]\\s*[^\\s,;]+",
+        r"\\1=[REDACTED]",
+        message,
+    )
+    frames = traceback.extract_tb(exc.__traceback__)
+    stack = "\\n".join(f"  {frame.filename}:{frame.lineno} in {frame.name}" for frame in frames[-20:])
+    record = f"{datetime.now(UTC).isoformat()} | {area} | {type(exc).__name__}: {message}\\n{stack}"
+    handler = RotatingFileHandler(log, maxBytes=1_000_000, backupCount=2, encoding="utf-8")
+    try:
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.emit(logging.LogRecord("app", logging.ERROR, "", 0, record, (), None))
+    finally:
+        handler.close()
+
 
 STRATEGIES = {"trend": ["sma_trend"], "reversion": ["rsi_reversion"], "combined": ["sma_trend", "rsi_reversion"]}
 CONNECTION_ENV = ("LAB_IB_HOST", "LAB_IB_PORT", "LAB_IB_CLIENT_ID", "LAB_PAPER_ACCOUNT")
@@ -473,6 +500,14 @@ UI_FILES = {
 class AppServer(ThreadingHTTPServer):
     daemon_threads = True
 
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if exc is not None:
+            try:
+                record_app_failure(self.controller.directory, "http", exc)
+            except OSError:
+                logging.exception("Unable to record an HTTP handler failure")
+
     def __init__(self, address, controller):
         super().__init__(address, Handler)
         self.controller = controller
@@ -585,7 +620,11 @@ def serve(args):
             while not controller.closed.wait(1):
                 try:
                     controller.tick()
-                except Exception:
+                except Exception as exc:
+                    try:
+                        record_app_failure(controller.directory, "monitor", exc)
+                    except OSError:
+                        logging.error("Could not save monitor crash record")
                     try:
                         controller.pause()
                     except Exception:
@@ -611,6 +650,12 @@ def serve(args):
             server.serve_forever()
         except KeyboardInterrupt:
             pass
+        except Exception as exc:
+            try:
+                record_app_failure(controller.directory, "server", exc)
+            except OSError:
+                logging.error("Could not save application crash record")
+            raise
         finally:
             server.server_close()
             controller.close()
