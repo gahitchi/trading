@@ -32,10 +32,15 @@ class Notifier:
         chat_id: str | None = None,
         prefix: str = "trading-lab",
         spool_path: str | None = None,
+        max_pending: int = 10000,
     ):
         self.token = token if token is not None else os.environ.get("LAB_TELEGRAM_TOKEN", "")
         self.chat_id = chat_id if chat_id is not None else os.environ.get("LAB_TELEGRAM_CHAT_ID", "")
         self.prefix = prefix
+        if type(max_pending) is not int or max_pending < 1:
+            raise ValueError("notification capacity must be positive")
+        self.max_pending = max_pending
+        self.enqueue_error = False
         self.sent = 0
         self.failed = 0
         self._q: queue.Queue = queue.Queue(maxsize=500)
@@ -44,7 +49,22 @@ class Notifier:
         if spool_path:
             Path(spool_path).parent.mkdir(parents=True, exist_ok=True)
             with self._db() as db:
-                db.execute("CREATE TABLE IF NOT EXISTS notification (id INTEGER PRIMARY KEY, text TEXT)")
+                # Serialize migration with other notifier instances. AUTOINCREMENT prevents an old
+                # worker acknowledgement deleting a new message which reused the last deleted ID.
+                db.execute("BEGIN IMMEDIATE")
+                schema = db.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='notification'"
+                ).fetchone()
+                if schema is not None and "AUTOINCREMENT" not in schema[0].upper():
+                    db.execute("ALTER TABLE notification RENAME TO notification_legacy")
+                db.execute("CREATE TABLE IF NOT EXISTS notification (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT)")
+                if schema is not None and "AUTOINCREMENT" not in schema[0].upper():
+                    db.execute("INSERT INTO notification(id,text) SELECT id,text FROM notification_legacy")
+                    db.execute("DROP TABLE notification_legacy")
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS notification_time (id INTEGER PRIMARY KEY, created REAL NOT NULL)"
+                )
+                db.execute("INSERT OR IGNORE INTO notification_time SELECT id,0 FROM notification")
         self._worker = None
         if self.enabled:
             self._worker = threading.Thread(target=self._run, name="notifier", daemon=True)
@@ -59,8 +79,18 @@ class Notifier:
         if not self.enabled:
             return
         if self.spool_path:
-            with self._db() as db:
-                db.execute("INSERT INTO notification(text) VALUES(?)", (f"[{self.prefix}] {text}"[:4000],))
+            try:
+                with self._db() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    if db.execute("SELECT COUNT(*) FROM notification").fetchone()[0] >= self.max_pending:
+                        raise queue.Full
+                    row = db.execute("INSERT INTO notification(text) VALUES(?)", (f"[{self.prefix}] {text}"[:4000],))
+                    db.execute("INSERT INTO notification_time VALUES(?,?)", (row.lastrowid, time.time()))
+                self.enqueue_error = False
+            except (sqlite3.Error, OSError, queue.Full):
+                self.failed += 1
+                self.enqueue_error = True
+                log.error("notification could not be queued; new exposure will be blocked until delivery recovers")
             self._wake.set()
             return
         try:
@@ -108,6 +138,27 @@ class Notifier:
         with self._db() as db:
             return db.execute("SELECT COUNT(*) FROM notification").fetchone()[0]
 
+    def health(self):
+        if not self.enabled:
+            return {"enabled": False, "healthy": True, "pending": 0, "oldest_seconds": 0}
+        try:
+            if self.spool_path:
+                with self._db() as db:
+                    count, oldest = db.execute(
+                        "SELECT COUNT(*),MIN(COALESCE(t.created,0)) FROM notification n LEFT JOIN notification_time t ON n.id=t.id"
+                    ).fetchone()
+            else:
+                count, oldest = self.pending(), None
+            age = max(0, time.time() - oldest) if oldest is not None else 0
+            return {
+                "enabled": True,
+                "healthy": not self.enqueue_error and count < self.max_pending and age < 300,
+                "pending": count,
+                "oldest_seconds": age,
+            }
+        except (sqlite3.Error, OSError):
+            return {"enabled": True, "healthy": False, "error": "outbox unavailable"}
+
     def _run(self):
         if self.spool_path:
             return self._run_durable()
@@ -123,23 +174,29 @@ class Notifier:
 
     def _run_durable(self):
         while True:
-            with self._db() as db:
-                row = db.execute("SELECT id,text FROM notification ORDER BY id LIMIT 1").fetchone()
-            if row is None:
-                self._wake.wait(1)
-                self._wake.clear()
-                continue
             try:
-                success = self._post(row[1])
-            except Exception:
-                success = False
-            if success:
                 with self._db() as db:
-                    db.execute("DELETE FROM notification WHERE id=?", (row[0],))
-            else:
+                    row = db.execute("SELECT id,text FROM notification ORDER BY id LIMIT 1").fetchone()
+                if row is None:
+                    self._wake.wait(1)
+                    self._wake.clear()
+                    continue
+                try:
+                    success = self._post(row[1])
+                except Exception:
+                    success = False
+                if success:
+                    with self._db() as db:
+                        db.execute("DELETE FROM notification WHERE id=?", (row[0],))
+                        db.execute("DELETE FROM notification_time WHERE id=?", (row[0],))
+                    continue
                 log.error("notification remains in durable outbox after delivery failure")
-                self._wake.wait(30)
-                self._wake.clear()
+            except (sqlite3.Error, OSError):
+                # A transient lock/I/O failure must not silently kill the only delivery worker.
+                self.failed += 1
+                log.error("notification outbox unavailable; delivery worker will retry")
+            self._wake.wait(30)
+            self._wake.clear()
 
     def _post(self, text: str) -> bool:
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"

@@ -147,3 +147,145 @@ def test_live_financing_is_carried_by_the_estimate_unless_the_broker_cash_books_
 
     assert equity(dedicated=False) == pytest.approx(10_000 - 1_000 - 12.5)
     assert equity(dedicated=True) == pytest.approx(10_000 - 1_000)
+
+
+def test_daily_caps_are_reserved_before_order_submission():
+    agent, _ = _agent({"A": 0}, {"A": 0.2}, risk_limits=_limits("balanced"))
+    saved_before_send = []
+
+    def crash_after_send(*args, **kwargs):
+        saved_before_send.append((agent.cap_orders, agent.cap_opened))
+        raise OSError("process interrupted immediately after transmission")
+
+    agent._submit = crash_after_send
+    with pytest.raises(OSError):
+        ExecutionAgent.rebalance(agent)
+    assert saved_before_send == [(1, 200)]
+    assert agent.cap_orders == 1 and agent.cap_opened == 200
+
+
+def test_local_submission_refusal_does_not_consume_daily_caps():
+    agent, _ = _agent({"A": 0}, {"A": 0.2}, risk_limits=_limits("balanced"))
+    agent._submit = lambda *args, **kwargs: False
+    ExecutionAgent.rebalance(agent)
+    assert agent.cap_orders == 0 and agent.cap_opened == 0
+
+
+@pytest.mark.parametrize("quantity", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_broker_positions_never_reconcile(quantity):
+    a, _ = _agent({"A": 0}, {"A": 0})
+    a._broker_position = lambda ticker: quantity
+    assert ExecutionAgent.reconcile(a)
+
+
+@pytest.mark.parametrize("cost", [float("nan"), float("inf"), -1])
+def test_invalid_cost_reservations_fail_closed(cost):
+    from lab.config import MarginSettings
+    from lab.reservations import check_openings
+
+    assert check_openings({}, {"A": 1}, {"A": 100}, 1000, _limits("balanced"), MarginSettings(), cost)
+
+
+def test_nan_position_cannot_bypass_reservation_limits():
+    from lab.config import MarginSettings
+    from lab.reservations import check_openings
+
+    assert check_openings({"A": float("nan")}, {"A": 1}, {"A": 100}, 1000, _limits("balanced"), MarginSettings())
+
+
+def test_cost_and_gap_reserves_resize_entry_before_submission(goog_lab):
+    from dataclasses import replace
+
+    from lab.reservations import stressed_openings
+
+    limits = replace(goog_lab.risk, max_weight=1, max_gross=1, max_net=1)
+    agent, sent = _agent({"A": 0}, {"A": 1}, risk_limits=limits)
+    agent.config.reservation_costs = goog_lab.costs
+    agent.config.reservation_gap = 0.03
+    ExecutionAgent.rebalance(agent)
+    assert sent and 0 < sent[0][1] < 10
+    assert (
+        stressed_openings(
+            {"A": 0}, {"A": sent[0][1]}, {"A": 100}, 1000, limits, agent.config.margin, goog_lab.costs, 0.03
+        )
+        is None
+    )
+    assert stressed_openings({"A": 0}, {"A": 10}, {"A": 100}, 1000, limits, agent.config.margin, goog_lab.costs, 0.03)
+
+
+def test_alert_outage_blocks_additions_but_permits_reductions():
+    agent, sent = _agent({"A": 10, "B": 0}, {"A": 0, "B": 1}, risk_limits=_limits("balanced"))
+    agent.config.notification_health = lambda: {"healthy": False}
+    ExecutionAgent.rebalance(agent)
+    assert sent == [("A", -10, False)]
+    assert "notification delivery" in agent.blocked_reason
+
+
+def test_manual_targets_replace_signal_targets_without_bypassing_limits(tmp_path):
+    from lab.authority import Authority
+
+    authority = Authority(tmp_path, {"tickers": ["A", "B"]})
+    authority.issue("manual", targets={"A": 0.1})
+    agent, sent = _agent({"A": 0, "B": 0}, {"A": 0, "B": 0.2}, risk_limits=_limits("balanced"))
+    agent.config.authority = authority
+    ExecutionAgent.rebalance(agent)
+    assert sent == [("A", 1, True)]
+
+
+def test_reservation_gap_changes_research_identity(goog_lab):
+    from dataclasses import replace
+
+    from lab.experiments import config_fingerprint
+    from lab.research.approval import deployment_context
+
+    changed = replace(goog_lab, paper=replace(goog_lab.paper, reservation_gap=0.1))
+    assert config_fingerprint(changed) != config_fingerprint(goog_lab)
+    assert deployment_context(changed.snapshot()) != deployment_context(goog_lab.snapshot())
+
+
+def test_independent_adverse_marks_cannot_bypass_net_floor(goog_lab):
+    from dataclasses import replace
+
+    from lab.config import MarginSettings
+    from lab.reservations import stressed_openings
+
+    limits = replace(_limits("balanced"), max_weight=1, max_gross=2, max_short_gross=1, min_net=0, max_net=1.5)
+    # Equal marked long and short values look neutral if all prices move together.
+    # A -3% long / +3% short move gives negative net exposure, and must be refused.
+    reason = stressed_openings(
+        {"A": 5, "B": 0}, {"B": -5}, {"A": 100, "B": 100}, 1000, limits, MarginSettings(), goog_lab.costs, 0.03
+    )
+    assert reason and "net limit" in reason
+
+
+def test_stress_bounds_cover_independent_fill_price_and_mark_corners(goog_lab):
+    from dataclasses import replace
+    from itertools import product
+
+    from lab.config import MarginSettings
+    from lab.reservations import stressed_openings
+
+    limits = replace(_limits("balanced"), max_weight=0.8, max_gross=1.2, max_short_gross=0.6, min_net=-0.2, max_net=0.8)
+    held, targets = {"A": 2, "B": -1}, {"A": 4, "B": -2}
+    gap, price, equity = 0.03, 100, 1000
+    margin = MarginSettings()
+    assert (
+        stressed_openings(held, targets, {"A": price, "B": price}, equity, limits, margin, goog_lab.costs, gap) is None
+    )
+    for fractions in product((0, 0.5, 1), repeat=2):
+        for moves in product((-gap, gap), repeat=2):
+            cash = equity - sum(held.values()) * price
+            positions = {}
+            for ticker, fraction in zip("AB", fractions, strict=True):
+                delta = (targets[ticker] - held[ticker]) * fraction
+                fill = price * (1 + gap if delta > 0 else 1 - gap)
+                cash -= delta * fill + abs(delta) * fill * goog_lab.costs.commission_max_pct
+                positions[ticker] = held[ticker] + delta
+            values = [positions[t] * price * (1 + m) for t, m in zip("AB", moves, strict=True)]
+            nav = cash + sum(values)
+            weights = [v / nav for v in values]
+            assert max(map(abs, weights)) <= limits.max_weight
+            assert sum(map(abs, weights)) <= limits.max_gross
+            assert -sum(min(w, 0) for w in weights) <= limits.max_short_gross
+            assert limits.min_net <= sum(weights) <= limits.max_net
+            assert sum(abs(w) * 0.5 for w in weights) * (1 + margin.cushion) <= 1

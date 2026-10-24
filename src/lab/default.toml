@@ -1,0 +1,125 @@
+# trading-lab configuration. Every run records a copy of the settings it used.
+
+[paths]
+data = "data"          # one validated Parquet file per ticker + manifest.json
+results = "results"    # backtest outputs, holdout ledger, paper-trading journal
+research = "research"  # the research swarm's blackboard: one folder per hypothesis
+
+# Ticker = primary listing venue (ISO 10383 MIC code).
+# Backtests trade every ticker through one simulated broker account; paper trading
+# uses these venues to match Interactive Brokers instruments.
+# XNAS = Nasdaq, XNYS = New York Stock Exchange, ARCX = NYSE Arca (most ETFs)
+[universe]
+SPY = "ARCX"
+QQQ = "XNAS"
+AAPL = "XNAS"
+MSFT = "XNAS"
+JPM = "XNYS"
+XOM = "XNYS"
+JNJ = "XNYS"
+KO = "XNYS"
+
+[periods]
+warmup_start = "2009-01-01"         # history used only to warm up indicators, never traded
+train = ["2010-01-01", "2018-12-31"]  # develop and optimize here
+test = ["2019-01-01", "2022-12-31"]   # check what survived training
+holdout = ["2023-01-01", ""]          # "" = up to the latest data. One run per hypothesis, logged.
+
+[backtest]
+capital = 100000.0
+commission_per_share = 0.005  # IBKR Pro Fixed pricing
+commission_min = 1.0          # per order
+commission_max_pct = 0.01     # cap: 1% of trade value
+slippage = true               # every fill one tick against you
+open_print_fraction = 0.01    # liquidity at the opening print, as a fraction of daily volume
+min_trade_value = 500.0       # never send an order smaller than this
+rebalance_band = 0.02         # resize a held position only if the change exceeds 2% of equity
+cash_buffer = 0.01            # size buys on 99% of equity: next-open fills can gap above the close
+
+[risk]
+# The risk profile decides how the agents trade (exposure, shorts, leverage, volatility, drawdown):
+#   calm       long only, 30% invested at most, 6% volatility target, 8% drawdown limit
+#   cautious   long only, 50%, 10% volatility, 12% drawdown
+#   balanced   long only, unlevered, 14% volatility, 18% drawdown                      (default)
+#   dynamic    shorts up to 30%, leverage up to 1.35x, 20% volatility, 25% drawdown
+#   aggressive shorts up to 75%, leverage up to 1.8x, 28% volatility, 30% drawdown
+#   custom     exactly the limits below in this section, nothing else
+# A named profile is bounded only by [limits] (default: the broker's maximum); `lab risk-profile` shows what applies.
+profile = "balanced"
+# --- the custom profile's limits (fractions of equity; weights are signed, negative = short) ---
+max_weight = 0.25       # max |weight| of one stock
+max_gross = 1.0         # max sum of |weights|; above 1 is leverage
+max_short_gross = 0.0   # max sum of short |weights|; 0 forbids shorting
+min_net = 0.0           # net exposure (longs - shorts) must stay within [min_net, max_net]
+max_net = 1.0
+max_drawdown = 0.35     # circuit breaker: flatten and halt if equity drops 35% from its peak
+
+[trading]
+# How fast the agents trade. daily: decide after the close, fill at the next open (any profile).
+# 1h | 15m | 5m: decide on every bar of the regular session as soon as the (delayed) data has it; these quick
+# speeds need the dynamic or aggressive profile. Built-in intraday techniques: orb, intraday_momentum,
+# vwap_reversion. The research swarm stays on daily bars. Intraday history is short (Yahoo: ~2 years of 1h, ~60 days of
+# 15m/5m), so their backtests rest on far less data than daily ones.
+speed = "daily"
+flat_at_close = true    # quick speeds: exit everything before the close, hold nothing overnight
+data_delay_min = 15     # IBKR paper without a real-time subscription sees US stocks 15 minutes late; 0 if real-time
+limit_collar = 0.01     # quick speeds, live: new exposure as limits 1% through the last price, re-priced after a bar; exits at market
+intraday_holdout = 0.2  # quick speeds: the last 20% of stored sessions are the holdout (lab holdout --speed ...)
+# intraday_holdout_start = "2026-09-01"  # explicit holdout start; never after an intraday holdout already run
+
+[limits]
+# Absolute ceilings for every named profile. Unset keys default to the broker's maximum: gross 2x at Reg T
+# (1 / the initial margin below), shorts up to the same, net from -2 to 2, a whole position in one stock.
+# Tighten any of them to cap every profile, e.g. max_short_gross = 0.5.
+# max_gross = 2.0
+# max_short_gross = 2.0
+
+[margin]
+# Requirements as fractions of position value: Reg T / FINRA minimums. IBKR's house rules can be stricter.
+initial_long = 0.50
+initial_short = 0.50
+maintenance_long = 0.25
+maintenance_short = 0.30
+cushion = 0.10          # deleverage once equity is within 10% of the maintenance requirement
+# Financing, charged daily in the ledger. ASSUMPTIONS where no point-in-time data exists; every run reports them.
+borrow_apr = 0.005      # stock-borrow fee for easy-to-borrow names; hard-to-borrow stocks cost far more
+debit_apr = 0.06        # interest on borrowed cash (IBKR: benchmark rate + spread). Set the current rate.
+
+[portfolio]
+target_vol = 0.0        # annualized volatility target (e.g. 0.15); 0 = off
+vol_window = 63         # trading days used to estimate volatility
+max_leverage = 1.0      # ceiling on the volatility-targeting scale: 1 scales down only, 1.5 may lever up to 1.5x
+leverage = 1.0          # fixed exposure multiplier when target_vol = 0
+
+[paper]
+host = "127.0.0.1"
+port = 4002              # IB Gateway paper port (TWS paper: 7497). Live ports are refused.
+client_id = 7
+account_id = ""          # your IB paper account ID; paper accounts start with "DU"
+market_data = "DELAYED_FROZEN"  # REALTIME needs IB market data subscriptions
+capital = 100000.0       # how much of the paper account the agents may allocate
+rebalance_time = "16:15" # New York time; orders go out as market-on-open for the next session
+signal_time = "16:10"    # New York time; agents fetch the completed daily bars
+max_order_value = 30000.0   # fat-finger guard: no single buy above this (USD)
+max_orders_per_day = 40
+max_daily_turnover = 1.0    # buys per day, as a fraction of equity
+order_rate = "10/00:00:01"  # NautilusTrader risk engine: at most 10 order submissions per second
+# Environment variables override these (used by the Docker deployment):
+#   LAB_IB_HOST, LAB_IB_PORT, LAB_IB_CLIENT_ID, LAB_PAPER_ACCOUNT
+
+[research]
+provider = "claude_code"   # "claude_code" (your Claude subscription) or "ollama" (local, free)
+model = "sonnet"           # claude_code: haiku | sonnet | opus.  ollama: e.g. "qwen2.5-coder:7b"
+ollama_url = "http://127.0.0.1:11434"
+call_timeout_s = 600
+max_llm_calls_per_cycle = 10  # hard budget per research cycle
+max_fix_attempts = 3          # engineer retries when generated code fails checks
+null_samples = 30             # bootstrap resamples of real data for the noise-floor test
+min_sharpe_edge = 0.10        # train Sharpe must beat buy-and-hold by at least this
+max_p_value = 0.05            # and beat at least 95% of the noise-floor samples
+min_dsr = 0.95                # and its active return's Deflated Sharpe Ratio (all trials counted) >= this
+
+# Optional historical short eligibility/fees for research (not a paper-broker locate).
+# [borrow]
+# history = "data/borrow.csv"
+# max_age_days = 3

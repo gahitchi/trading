@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -14,7 +15,23 @@ def read_json(path):
     def invalid(value):
         raise ValueError(f"nonfinite JSON number: {value}")
 
-    return json.loads(Path(path).read_text(), parse_constant=invalid)
+    def finite_float(value):
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("JSON number overflows finite float")
+        return result
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    return json.loads(
+        Path(path).read_text(), parse_constant=invalid, parse_float=finite_float, object_pairs_hook=unique_object
+    )
 
 
 def atomic_json(path, value):

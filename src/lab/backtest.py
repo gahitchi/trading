@@ -132,6 +132,7 @@ def run(
     cross_sectional: list | None = None,
     target_vol: float = 0.0,
     speed: str = "daily",
+    bank=None,
 ) -> RunResult:
     """sleeves: per-stock signals. cross_sectional: [(CrossSectionalSignal, weight, tickers)].
     speed: "daily" (data: daily frames) or a quick speed (data: lab.intraday frames of that bar size)."""
@@ -151,6 +152,8 @@ def run(
     )
     sp = intraday.speed(speed)
     quick = not sp.daily
+    if bank is not None and quick:
+        raise ValueError("strategy bank supports daily policy evaluation only")
     if quick:
         try:
             intraday.check_speed_allowed(speed, cfg.risk.profile)
@@ -282,7 +285,10 @@ def run(
                     absolute_groups={sig.name for sig, _, _ in cross_sectional},
                     target_vol=target_vol,
                     # Intraday: at least five sessions of bars, so one quiet morning cannot lever the book up.
-                    vol_window=max(cfg.portfolio.vol_window, 5 * sp.bars_per_session if quick else 0),
+                    vol_window=max(
+                        cfg.portfolio.vol_window, bank.window if bank else 0, 5 * sp.bars_per_session if quick else 0
+                    ),
+                    bank=bank,
                     max_leverage=p.max_leverage,
                     leverage=p.leverage,
                     periods_per_year=bars_per_year,
@@ -319,6 +325,8 @@ def run(
                 flat_at_close=quick and cfg.trading.flat_at_close,
                 max_gross=risk.max_gross,
                 risk_limits=risk,
+                reservation_costs=cfg.costs,
+                reservation_gap=max(cfg.paper.reservation_gap, cfg.trading.limit_collar),
                 limit_collar=cfg.trading.limit_collar,
                 **(execution_overrides or {}),
             )

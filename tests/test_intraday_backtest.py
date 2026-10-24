@@ -91,7 +91,10 @@ def test_flat_at_close_exits_in_the_last_interval_and_re_enters_next_session(goo
         by_day.setdefault(ny(f.ts).date(), []).append(f)
     assert len(by_day) == len(DAYS)
     for fills in by_day.values():
-        assert [f.side for f in fills] == ["BUY", "SELL"]
+        # Conservative entry reserves can allow a later top-up; every purchase
+        # must still precede the one complete liquidation at the close.
+        assert fills[0].side == "BUY" and fills[-1].side == "SELL"
+        assert all(f.side == "BUY" for f in fills[:-1])
         assert ny(fills[-1].ts).strftime("%H:%M") == "15:45"  # the session's last bar fills the exit
         assert sum(f.qty if f.side == "BUY" else -f.qty for f in fills) == 0  # flat every night
     assert "flat_at_close" in {e.kind for e in r.risk_events}
@@ -112,7 +115,15 @@ def test_overnight_shorts_pay_borrow_per_night_and_flat_books_pay_nothing(goog_l
     assert held.borrow_fees == pytest.approx(short_value * goog_lab.margin.borrow_apr * nights * DAY, rel=0.3)
     flat = run(lab(goog_lab), Short(), df)
     assert flat.borrow_fees == 0 and flat.financing == 0
-    assert all(f.side in ("SELL", "BUY") for f in flat.fills) and len(flat.fills) == 2 * len(DAYS)
+    by_day = {}
+    for f in flat.fills:
+        by_day.setdefault(ny(f.ts).date(), []).append(f)
+    assert set(by_day) == {day.date() for day in DAYS}
+    for fills in by_day.values():
+        assert fills[0].side == "SELL" and fills[-1].side == "BUY"
+        assert all(f.side == "SELL" for f in fills[:-1])
+        assert ny(fills[-1].ts).strftime("%H:%M") == "15:45"
+        assert sum(f.qty if f.side == "BUY" else -f.qty for f in fills) == 0
 
 
 def test_caps_count_every_rebalance_of_the_session(goog_lab):

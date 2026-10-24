@@ -14,10 +14,15 @@ class _Agent:
 
         self.config = SimpleNamespace(live=True)
         self.pending = {"O-123": {"ticker": "GOOG", "side": "BUY", "qty": 10}}  # no submission time: never expires
+        self.disposed = {}
+        self.terminal = {}
         self.cache = _Cache()
         self.events = []
         self.halts = []
         self.active_halt = None
+
+    def _recovery_account_ok(self):
+        return True
 
     def _risk_event(self, kind, detail):
         self.events.append((kind, detail))

@@ -152,9 +152,12 @@ def test_unreported_journaled_order_cannot_be_erased_by_adoption(goog_lab, goog,
 
     # Even days later, time cannot prove that an order never filled. Recovery must
     # retain its attribution until broker evidence resolves the uncertainty.
-    state = json.loads(ledger.read_text())
+    from lab.execution_store import ExecutionStore
+
+    store = ExecutionStore(ledger)
+    state = store.load()
     state["pending"][coid]["ts"] = time.time_ns() - 5 * 86_400 * 10**9
-    ledger.write_text(json.dumps(state))
+    store.save(state)
     assert _lab(h, "recover", "--reason", "IBKR shows no such order after its sessions ended", "--adopt-broker") == 0
     h.session()
     assert "order_expired_unreported" not in _kinds(h)
@@ -194,7 +197,11 @@ def test_disposal_is_refused_while_the_position_disagrees():
 
     events = []
     agent = SimpleNamespace(
-        config=SimpleNamespace(dispose_path=None),
+        config=SimpleNamespace(dispose_path=None, live=True),
+        _paper_guard=lambda: True,
+        _account_id=lambda: "IB-DU1234567",
+        ledger_account="IB-DU1234567",
+        applied={},
         pending={"X": {"ticker": "GOOG", "side": "BUY", "qty": 10}},
         disposed={},
         reconcile=lambda: ["GOOG: ledger 0 vs broker 10"],
@@ -228,7 +235,7 @@ def test_one_paper_node_per_runtime_directory(goog_lab):
 @pytest.mark.parametrize(
     "state, reason",
     [
-        ({"account": "IB-DU7777777"}, "belongs to account IB-DU7777777"),
+        ({"account": "IB-DU7777777"}, "broker reports belong to another ledger account"),
         ({"positions": {"TSLA": 10}}, "not in this node's universe"),
     ],
 )
@@ -241,27 +248,22 @@ def test_a_ledger_from_another_account_or_universe_is_refused(goog_lab, goog, tm
     halt = read_halt(h.runtime / "HALT")
     assert halt["kind"] == "reconciliation_mismatch" and reason in halt["reason"]
     assert h.broker().state["orders"] == {}
+    if "account" in state:
+        persisted = json.loads(ledger.read_text())
+        assert persisted["account"] == state["account"]
+        assert persisted["cash"] == goog_lab.paper.capital and persisted["positions"] == {}
     if "positions" in state:
         assert json.loads(ledger.read_text())["positions"].get("TSLA") == 10  # kept, never dropped
 
 
-def test_a_fill_for_a_disposed_order_is_booked_and_halts():
-    from types import SimpleNamespace
-
+def test_a_fill_for_a_disposed_order_is_booked_and_halts(tmp_path):
     from lab.agents.execution import ExecutionAgent
+    from tests.test_disposal_review import _agent, _fill
 
-    booked, halts = [], []
-    agent = SimpleNamespace(
-        config=SimpleNamespace(live=True),
-        pending={},
-        disposed={"X": {"ticker": "GOOG", "side": "BUY", "qty": 10, "evidence": "none seen"}},
-        _apply_fill=lambda ev: booked.append(ev),
-        _close_pending=lambda coid: agent.pending.pop(str(coid), None),
-        _hard_halt=lambda kind, reason: halts.append((kind, reason)),
-    )
-    ExecutionAgent.on_order_filled(agent, SimpleNamespace(client_order_id="X"))
-    assert booked and halts[0][0] == "reconciliation_mismatch" and "after it was disposed" in halts[0][1]
-    assert not agent.disposed and not agent.pending  # attributed to the lab, then settled
+    agent = _agent(tmp_path)
+    ExecutionAgent.on_order_filled(agent, _fill("T1", 4))
+    assert agent.held["A"] == 4 and agent.halts[0][0] == "reconciliation_mismatch"
+    assert "X" in agent.disposed and "X" in agent.pending  # remaining quantity still attributable
 
 
 def test_the_trade_id_store_is_bounded_but_keeps_ids_of_journaled_orders():
@@ -275,6 +277,8 @@ def test_the_trade_id_store_is_bounded_but_keeps_ids_of_journaled_orders():
     old = time.time_ns() - (_KEEP_TRADE_DAYS + 1) * 86_400 * 10**9
     agent = SimpleNamespace(
         pending={"STILL-OPEN": {}},
+        disposed={},
+        terminal={},
         applied={"T1": [old, "DONE"], "T2": [old, "STILL-OPEN"], "T3": [time.time_ns(), "DONE"]},
     )
     ExecutionAgent._prune_applied(agent)

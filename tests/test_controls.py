@@ -52,7 +52,8 @@ def test_health_distinguishes_alive_stopped_future_and_not_ready(goog_lab, capsy
     capsys.readouterr()
 
 
-def test_a_journaled_client_order_id_is_never_sent_again():
+@pytest.mark.parametrize("bucket", ["pending", "disposed", "terminal"])
+def test_a_journaled_client_order_id_is_never_sent_again(bucket):
     from lab.agents.execution import ExecutionAgent
 
     events, submitted = [], []
@@ -65,9 +66,14 @@ def test_a_journaled_client_order_id_is_never_sent_again():
         config=SimpleNamespace(live=False, session=None),
         cache=SimpleNamespace(instrument=lambda iid: SimpleNamespace(make_qty=lambda q: q)),
         order_factory=Factory(),
+        persistence_failed=False,
+        disposed={},
+        terminal={},
         pending={"O-REUSED": {"ticker": "GOOG", "side": "BUY", "qty": 1, "ts": 0}},
         _risk_event=lambda kind, detail: events.append(kind),
         submit_order=submitted.append,
     )
+    intent = agent.pending.pop("O-REUSED")
+    getattr(agent, bucket)["O-REUSED"] = intent
     assert ExecutionAgent._submit(agent, "GOOG.XNAS", "GOOG", 5) is False
     assert submitted == [] and events == ["blocked"]

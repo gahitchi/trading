@@ -23,7 +23,7 @@ cleared halts), journal-YYYYMM.jsonl, smoke-*.json
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -65,6 +65,17 @@ from lab.signals.registry import SignalSpec
 from lab.universe import instrument_id
 
 IB = "IB"
+
+
+def execution_identity(cfg):
+    return {
+        "paper": {
+            key: value
+            for key, value in asdict(cfg.paper).items()
+            if key not in {"host", "port", "client_id", "account_id"}
+        },
+        "entry_gap": max(cfg.paper.reservation_gap, cfg.trading.limit_collar),
+    }
 
 
 def runtime_dir(cfg: LabConfig) -> Path:
@@ -224,6 +235,10 @@ def build_node(
     notifier: Notifier | None = None,
     clients: Clients | None = None,
     schedule: Schedule | None = None,
+    operator_control: bool = False,
+    mode: str | None = None,
+    authority_hours: float = 24,
+    bank_path: str | None = None,
 ) -> LiveNode:
     from lab.config import validate_effective
 
@@ -267,6 +282,13 @@ def build_node(
     from lab.persistence import atomic_json, file_lock
     from lab.research.approval import deployment_context
 
+    bank = None
+    if bank_path:
+        from lab.strategy_bank import StrategyBank
+
+        if session is not None:
+            raise ValueError("strategy bank v1 is qualified for daily policy evaluation only")
+        bank = StrategyBank.load(bank_path, specs, tickers)
     identity_path = runtime_dir(cfg) / "identity.json"
     identity = {
         "version": 1,
@@ -274,11 +296,22 @@ def build_node(
         "tickers": sorted(tickers),
         "signals": [{"name": s.name, "params": s.params, "sha256": s.sha256} for s in specs],
         "deployment": deployment_context(cfg.snapshot(), live=True, tickers=tickers),
+        "execution": execution_identity(cfg),
     }
+    if bank is not None:
+        identity["strategy_bank"] = bank.manifest
     with file_lock(runtime_dir(cfg) / "identity.lock"):
         if identity_path.exists() and read_json(identity_path) != identity:
             raise ValueError("runtime identity changed; reconcile existing state before an explicit migration")
         atomic_json(identity_path, identity)
+    authority = None
+    if operator_control:
+        from lab.authority import Authority
+
+        authority = Authority(runtime_dir(cfg), identity)
+        if mode is not None or not authority.path.exists():
+            authority.issue(mode or "autonomous", authority_hours)
+        authority.read()  # Restart never silently renews an expired lease.
     node, iids = _base_node(cfg, tickers, clients)
     p = cfg.paper
     rt = runtime_dir(cfg)
@@ -312,6 +345,7 @@ def build_node(
                         session_close=sc.session_close,
                         eval_delay_s=sc.xs_eval_delay_s,
                         market_offset_days=sc.market_offset_days,
+                        warmup_bars=max(cfg.portfolio.vol_window + 1, bank.window + 1 if bank else 0),
                         **speed_kw,
                     )
                 )
@@ -335,11 +369,30 @@ def build_node(
                         signal_time=sc.signal_time,
                         session_close=sc.session_close,
                         market_offset_days=sc.market_offset_days,
+                        warmup_bars=max(cfg.portfolio.vol_window + 1, bank.window + 1 if bank else 0),
                         **speed_kw,
                     )
                 )
             )
             k += 1
+    import os
+
+    if app_session := os.environ.get("LAB_APP_SESSION"):
+        from lab.agents.readiness import ReadinessAgent, ReadinessConfig
+        from lab.authority import digest
+
+        node.add_actor(
+            ReadinessAgent(
+                ReadinessConfig(
+                    path=str(rt / "data-readiness.json"),
+                    session=app_session,
+                    binding=digest(identity),
+                    sleeves={s: t for s, (t, _) in sleeves.items()},
+                    window=cfg.portfolio.vol_window,
+                    source="ibkr" if clients is None else "simulated",
+                )
+            )
+        )
     node.add_actor(
         AllocatorAgent(
             AllocatorAgentConfig(
@@ -347,7 +400,10 @@ def build_node(
                 sleeves=sleeves,
                 absolute_groups=absolute,
                 target_vol=cfg.portfolio.target_vol,
-                vol_window=max(cfg.portfolio.vol_window, 5 * sp.bars_per_session if session else 0),
+                vol_window=max(
+                    cfg.portfolio.vol_window, bank.window if bank else 0, 5 * sp.bars_per_session if session else 0
+                ),
+                bank=bank,
                 max_leverage=cfg.portfolio.max_leverage,
                 leverage=cfg.portfolio.leverage,
                 periods_per_year=252 * sp.bars_per_session,
@@ -406,6 +462,10 @@ def build_node(
                 limit_collar=cfg.trading.limit_collar,
                 max_gross=cfg.risk.max_gross,
                 risk_limits=cfg.risk,
+                authority=authority,
+                notification_health=notifier.health if notifier is not None else None,
+                reservation_costs=cfg.costs,
+                reservation_gap=max(p.reservation_gap, cfg.trading.limit_collar),
                 max_order_value=p.max_order_value,
                 max_orders_per_day=p.max_orders_per_day,
                 max_daily_turnover=p.max_daily_turnover,

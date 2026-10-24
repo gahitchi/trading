@@ -99,7 +99,9 @@ Offline check on real prices: `cd examples/goog-offline && lab data sample && la
 | `lab holdout <signal> [--speed]` | the one-time final exam (ledgered; intraday has its own) |
 | `lab research run / list / show / retry / promote` | the AI research swarm |
 | `lab llm-check`, `lab notify-test`, `lab doctor` | provider check, alert check, pre-flight check |
-| `lab paper [--smoke] [--test-order] [--check-only] [--adopt-broker]` | paper trading on Interactive Brokers |
+| `lab paper [--mode autonomous/supervised/manual] [--bank] [--smoke] [--check-only]` | paper trading on Interactive Brokers |
+| `lab control status / approve / renew` | inspect expiring authority, approve an exact proposal, or set manual targets |
+| `lab runtime backup / preflight / upgrade` | cold backups and broker-evidenced code upgrades |
 | `lab kill [--flatten]`, `lab resume`, `lab health [--ready]` | kill switch, liveness (Docker) / readiness |
 | `lab recover [--reason] [--adopt-broker]` | show or clear a hard halt (audited) |
 
@@ -110,7 +112,7 @@ The lab is designed to make self-deception hard.
 - **Three periods**: *train* to develop, *test* checked once by the gate, *holdout* for a final exam
   (`lab holdout`, once per signal and parameter set, every use ledgered; `lab backtest` refuses it).
 - **A control**: every result is shown against buy-and-hold on the same stocks with the same costs.
-- **Noise floor**: the comparison repeated on block-bootstrapped copies of the real data; p = how often noise did as well.
+- **Conditional bootstrap comparison**: repeats the comparison on block-resampled histories and reports an empirical tail probability under that model; general false-positive and power qualification remains open.
 - **Deflated Sharpe Ratio** (Bailey & López de Prado, "The Deflated Sharpe Ratio", 2014): every
   configuration ever evaluated on a dataset is logged in `results/trials.jsonl`; the DSR of the active return
   charges for all of them. The research gate requires DSR ≥ 0.95.
@@ -203,7 +205,17 @@ cross-sectional strategies are human-written for now.
 
 ## Paper trading and deployment
 
-Step by step: **[RUNBOOK.md](RUNBOOK.md)**. In short:
+Step by step: **[RUNBOOK.md](RUNBOOK.md)**. This is a release candidate pending the
+[external acceptance gates](docs/release-criteria.json), not an approved production release.
+
+The first `lab paper` start creates a **24-hour autonomous mandate**. Supervised and
+manual modes are available with `--mode`. Restarting does not renew authority; use
+`lab control renew --hours 24` (at most 168 hours), or the corresponding command inside
+the running container. Choose and review the authority duration before unattended
+deployment. See [operating controls](docs/operator-controls.md) and
+[storage and recovery](docs/runtime-storage.md).
+
+Deployment commands:
 
 ```bash
 cp .env.example .env                    # TWS_USERID, LAB_PAPER_ACCOUNT (DU...), optional Telegram
@@ -268,9 +280,10 @@ exceed about 50: at 5m that is 25 stock-strategy pairs.
   live configuration.
 - **Kill switch**: `lab kill` stops new orders and cancels open ones within a minute; `--flatten` also exits all
   positions at the next open; `lab resume` clears it. An unreadable kill file still halts.
-- **Unattended by default, with two kinds of stop**: transient trouble (disconnects, restarts, late data, rejects)
+- **Unattended within an active authority mandate**: transient trouble (disconnects, restarts, late data, rejects)
   resumes by itself once the start-up checks pass again; hard halts (drawdown breaker, wrong account, an unexplained
   ledger/broker difference) survive restarts until `lab recover --reason ...` clears them (RUNBOOK §9).
+  Authority expiry requires explicit renewal and cannot be reset by a supervisor restart.
 - **Reconciliation**: every order is journaled before it is sent; fills that happen while the agents are down are
   booked from IB's reports at start-up, once per trade ID. Before every rebalance the ledger must match IB's
   positions, or it is a hard halt. `lab recover --adopt-broker` can take IB's positions only after all
@@ -280,7 +293,7 @@ exceed about 50: at 5m that is 25 stock-strategy pairs.
   (lab.sim), including a week of trading that must match the backtest fill for fill.
 - **Limits**: per-order notional cap, orders per day, daily buy turnover, NautilusTrader's order-rate limit, risk
   agent position/gross caps and drawdown circuit breaker.
-- **Alerts** (Telegram) for every risk event, fills and a daily equity report; heartbeat-based Docker health check.
+- **Alerts** (Telegram) for selected risk events, fills and a daily equity report; heartbeat-based Docker health check.
 
 ## Layout
 
@@ -303,13 +316,15 @@ experiments/LOG.md          your lab notebook
 
 ## Known limitations
 
+- The optional daily strategy bank is experimental and has no whole-policy promotion claim.
+  The bounded synthetic power pilot does not qualify research power or false-positive control.
 - **Free data is survivorship-biased** and unofficial; see [Data](#data).
 - Idle cash and short-sale proceeds earn no interest (conservative).
 - Intraday: free history is short (weeks for 15m/5m), so intraday statistics are much weaker than daily ones.
   Backtests round data delay up to whole bars and replay sparse opening prints; this is an approximation,
   not a guaranteed conservative execution model. The pinned exchange calendar handles regular holidays and
   early closes; unscheduled halts and actual broker-adapter timestamp parity still need acceptance evidence.
-- Borrow fees use one assumed rate for every stock: there is no free historical borrow data, so hard-to-borrow
+- Without configured historical borrow evidence, borrow fees use one assumed rate for every stock: there is no free historical borrow data, so hard-to-borrow
   names are underpriced in backtests. In paper trading IBKR charges the real fee; the ledger's estimate is
   reported next to it. The simulated broker refuses shorts without borrowable shares but does not liquidate
   positions itself: the agents' own deleveraging and margin-call halt are what is tested.

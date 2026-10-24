@@ -153,6 +153,7 @@ def config_fingerprint(cfg: LabConfig, n_tickers: int = 1) -> str:
         "margin": asdict(cfg.margin),
         "portfolio": asdict(cfg.portfolio),
         "costs": asdict(cfg.costs),
+        "entry_reservation_gap": max(cfg.paper.reservation_gap, cfg.trading.limit_collar),
         "capital": cfg.capital,
         "warmup_start": str(cfg.warmup_start),
         "membership": file_digest(data.membership_path(cfg)),

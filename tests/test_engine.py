@@ -113,6 +113,10 @@ def test_circuit_breaker_flattens_and_halts(goog_lab):
         None,
         risk=RiskSettings(1.0, 1.0, 0.2),
     )
-    assert [e.kind for e in r.risk_events] == ["circuit_breaker"]
+    breakers = [e for e in r.risk_events if e.kind == "circuit_breaker"]
+    assert len(breakers) == 1
+    assert {e.kind for e in r.risk_events} <= {"circuit_breaker", "reservation_blocked"}
     assert r.gross.iloc[-1] == 0.0  # stayed flat through the recovery
-    assert [f.side for f in r.fills] == ["BUY", "SELL"]
+    assert r.fills[0].side == "BUY" and r.fills[-1].side == "SELL"
+    assert all(f.side == "SELL" for f in r.fills if f.ts > breakers[0].ts)
+    assert sum(f.qty if f.side == "BUY" else -f.qty for f in r.fills) == 0
