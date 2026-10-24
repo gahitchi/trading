@@ -88,3 +88,21 @@ def test_invalid_parameters_are_refused(costs):
     assert split_openings({}, {"A": 1}, {"A": 100}, 1000, BALANCED, M, costs, -0.1, GAP)
     assert split_openings({}, {"A": 1}, {}, 1000, BALANCED, M, costs, SLIP, GAP)
     assert replace(M, cushion=0.1).cushion == 0.1
+
+
+@pytest.mark.xfail(strict=True, reason="G013 open: a full book drifts over its cap until the rebalance band trims")
+def test_a_full_book_never_drifts_over_its_cap(goog_lab):
+    """Openings fill to 1.487x of a 1.5x cap; a year of debit interest takes the held book to 1.524x first."""
+    import pandas as pd
+
+    from tests.test_long_short import Constant, _risk, _run
+
+    flat = pd.DataFrame(
+        {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1e7},
+        index=pd.bdate_range("2021-01-04", periods=260),
+    )
+    risk = _risk(max_weight=1.0, max_gross=1.5, max_short_gross=0.0, min_net=0.0, max_net=1.5)
+    r = _run(
+        goog_lab, Constant(x=1.0), {"GOOG": flat}, flat.index[1].date(), None, risk, leverage=1.5, max_leverage=1.5
+    )
+    assert r.gross.max() <= 1.5
