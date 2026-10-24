@@ -87,7 +87,7 @@ def hac_sharpe_variance(returns: np.ndarray) -> tuple[float, int]:
     sigma = math.sqrt(variance)
     g = np.column_stack((center, center**2 - variance))
     gradient = np.array((1 / sigma, -float(r.mean()) / (2 * sigma**3)))
-    lags = min(n - 1, max(1, int(math.floor(4 * (n / 100) ** (2 / 9)))))
+    lags = min(n - 1, max(1, math.floor(4 * (n / 100) ** (2 / 9))))
     long_run = g.T @ g / n
     for lag in range(1, lags + 1):
         cross = g[lag:].T @ g[:-lag] / n
