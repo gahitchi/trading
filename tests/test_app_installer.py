@@ -106,19 +106,6 @@ def test_the_window_waits_for_the_app_to_answer(monkeypatch):
     assert not tool.wait_until_ready(f"http://127.0.0.1:{server.server_address[1]}", seconds=0.2)
 
 
-def test_linux_gets_an_application_menu_entry_with_the_icon(tmp_path, monkeypatch):
-    tool = installer()
-    monkeypatch.setattr(tool.sys, "platform", "linux")
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
-    tool.install_shortcuts(tmp_path / "app")
-    entry = (tmp_path / "share/applications/trading-lab.desktop").read_text()
-    assert "Name=Trading Lab" in entry and "icon-512.png" in entry and "start-app.sh" in entry
-    path = tmp_path / "share/applications/trading-lab.desktop"
-    path.write_text("customised")
-    tool.install_shortcuts(tmp_path / "app")
-    assert path.read_text() == "customised"  # never overwritten
-
-
 def test_a_stopped_docker_desktop_is_started_and_awaited(tmp_path, monkeypatch):
     tool = installer()
     app = tmp_path / "Docker Desktop.exe"

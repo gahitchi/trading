@@ -51,34 +51,9 @@ def private_file(path, value):
         os.fsync(file.fileno())
 
 
-DESKTOP_ENTRY = """[Desktop Entry]
-Type=Application
-Name=Trading Lab
-Comment=Local control for paper trading
-Exec="{launcher}"
-Icon={icon}
-Terminal=true
-Categories=Office;Finance;
-"""
-
-
 def install_shortcuts(root):
-    """A Trading Lab icon, once: on Windows on the desktop and in the Start menu, on Linux in the application
-    menu. A failure never blocks the app."""
-    if sys.platform.startswith("linux"):
-        entry = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "applications"
-        path = entry / "trading-lab.desktop"
-        if not path.exists():
-            try:
-                entry.mkdir(parents=True, exist_ok=True)
-                path.write_text(
-                    DESKTOP_ENTRY.format(
-                        launcher=root / "start-app.sh", icon=root / "src" / "lab" / "ui" / "icons" / "icon-512.png"
-                    )
-                )
-            except OSError as exc:
-                print(f"No menu entry ({exc}); start Trading Lab with {root / 'start-app.sh'}")
-        return
+    """Windows: a Trading Lab icon on the desktop and in the Start menu, once. A failure never blocks the app.
+    (Arch Linux and KDE: tools/install_arch.py installs the menu entry.)"""
     if sys.platform != "win32":
         return
     env = dict(os.environ)

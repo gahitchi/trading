@@ -7,34 +7,21 @@ from pathlib import Path
 
 import pandas as pd
 
-# Modules that cannot change a backtest's numbers: the operator surface, the live paper runtime's plumbing and
-# the language-model orchestration (Gemini audit F-R16). Everything else, including any module added later,
-# counts as simulation code: an unlisted new module invalidates evidence rather than slipping past it.
+# The operator surface only: modules that cannot change a simulated result, a validation verdict or how the
+# agents behave (Gemini audit F-R16, narrowed after ChatGPT C006-F1). Configuration, accounting, execution
+# state, safety, authority, notifications (an alert outage blocks additions) and every module added later
+# count as simulation code, so a change to any of them invalidates trials and approvals. The live runtime is
+# bound to all code through runtime_digest().
 NOT_SIMULATION = frozenset(
     {
-        "app.py",
-        "cli.py",
-        "report.py",
-        "paper_report.py",
-        "notify.py",
-        "capture.py",
-        "runtime_ops.py",
-        "paper.py",
-        "authority.py",
-        "safety.py",
-        "halt.py",
-        "agents/alerts.py",
-        "agents/broker_bars.py",
-        "agents/readiness.py",
-        "agents/smoke.py",
-        "research/orchestrator.py",
+        "app.py",  # the local control panel's HTTP server (it starts the engine through the CLI)
+        "cli.py",  # argument parsing and printing
+        "report.py",  # HTML reports of finished runs
+        "paper_report.py",  # summaries of the paper journal
+        "capture.py",  # read-only evidence snapshots
+        "research/orchestrator.py",  # how the language models are asked; validation runs in worker.py
         "research/providers.py",
         "research/roles.py",
-        "sim/__init__.py",
-        "sim/broker.py",
-        "sim/clients.py",
-        "sim/harness.py",
-        "sim/intraday.py",
     }
 )
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import math
 import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
@@ -334,6 +335,7 @@ def _compare(
                 dsr=d["dsr"],
                 trials=d["trials"],
                 effective_trials=d["effective_trials"],
+                dsr_adjusted=d["dsr_adjusted"],  # reported only; the gate uses dsr (ChatGPT C006-F4)
                 active_sharpe_ci=[lo, hi],
                 expected_max_sharpe=d["expected_max_sharpe_annual"],
             )
@@ -380,17 +382,17 @@ def pbo_study(
 ) -> dict:
     guard_period(cfg, period)
     m = active_matrix(cfg, specs, tickers, period, frames)
-    # Purge the longest lookback of the family around every boundary (F-R03), capped at a quarter of a block
-    # so the out-of-sample blocks keep most of their days, plus a 1% embargo.
-    lookbacks = []
-    for spec in specs:
-        signal = spec.make()
-        lookbacks.append(int(getattr(signal, "lookback", 0)))
-        if hasattr(signal, "close"):
-            signal.close()
-    purge = min(max(lookbacks, default=0), len(m) // splits // 4)
-    out = stats.pbo(m.to_numpy(), splits=splits, purge=purge, embargo=0.01)
-    out["purge_rule"] = "longest lookback, capped at a quarter of a block; 1% embargo"
+    # Purge the serial dependence of the realized returns themselves around every boundary (F-R03): that is
+    # what can carry in-sample information across it. A signal's lookback is not: an out-of-sample indicator
+    # may use earlier prices (ChatGPT C006-F3). The dependence length is the largest Politis-White block length
+    # of any configuration's returns or their size, capped at a quarter block; plus a 1% embargo.
+    values = m.to_numpy()
+    dependence = max(stats.block_length(values[:, j]) for j in range(values.shape[1]))
+    purge = min(math.ceil(dependence), len(m) // splits // 4)
+    out = stats.pbo(values, splits=splits, purge=purge, embargo=0.01)
+    out["purge_rule"] = (
+        "dependence length of the realized returns (Politis-White), capped at a quarter block; 1% embargo"
+    )
     sr = {c: stats.moments(m[c].to_numpy())[0] * stats.math.sqrt(stats.DAYS) for c in m.columns}
     out["active_sharpe_by_config"] = dict(sorted(sr.items(), key=lambda kv: -kv[1]))
     return out

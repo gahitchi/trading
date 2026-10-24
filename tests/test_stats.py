@@ -123,13 +123,15 @@ def test_psr_accounts_for_autocorrelation():
 
 
 def test_one_degenerate_trial_cannot_inflate_the_hurdle():
-    """F-R02: one broken trial at -4 annual Sharpe raised SR0 from 0.87 to 1.84 annual; winsorized, to 1.09."""
+    """F-R02: one broken trial at -4 annual Sharpe raised SR0 from 0.87 to 1.84 annual; winsorized, to 1.09.
+    The gate keeps the conservative raw variance until the adjusted hurdle is calibrated (ChatGPT C006-F4)."""
     rng = np.random.default_rng(5)
     trials = list(rng.normal(0, 0.03, 20))
     r = rng.normal(0, 0.01, 1000)
-    clean = stats.dsr(r, trials)["expected_max_sharpe_annual"]
-    dirty = stats.dsr(r, [*trials, -0.25])["expected_max_sharpe_annual"]
-    assert clean < dirty < 1.3 * clean
+    clean = stats.dsr(r, trials)["expected_max_sharpe_adjusted_annual"]
+    dirty = stats.dsr(r, [*trials, -0.25])
+    assert clean < dirty["expected_max_sharpe_adjusted_annual"] < 1.3 * clean
+    assert dirty["expected_max_sharpe_annual"] > 2 * clean and dirty["dsr"] <= dirty["dsr_adjusted"]
     assert stats.robust_variance([0.01, 0.02, 0.03]) == pytest.approx(np.var([0.01, 0.02, 0.03], ddof=1))
 
 
@@ -141,7 +143,8 @@ def test_correlated_trials_count_as_fewer_independent_trials():
     trials = list(np.random.default_rng(9).normal(0, 0.02, 10))
     independent = stats.dsr(r, trials)
     twins = stats.dsr(r, trials, n_effective=stats.effective_trials(10, 0.95))
-    assert twins["effective_trials"] == pytest.approx(1.45) and twins["dsr"] > independent["dsr"]
+    assert twins["effective_trials"] == pytest.approx(1.45) and twins["dsr_adjusted"] > independent["dsr_adjusted"]
+    assert twins["dsr"] == independent["dsr"]  # the gate still charges all ten (ChatGPT C006-F4)
     assert stats.dsr(r, trials, n_effective=50)["effective_trials"] == 10  # never more than the trials run
 
 

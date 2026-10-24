@@ -136,12 +136,18 @@ def effective_trials(n: int, mean_correlation: float) -> float:
 
 def dsr(returns: np.ndarray, trial_sharpes: list[float], *, n_effective: float | None = None) -> dict:
     """Deflated Sharpe Ratio of `returns`, given the daily Sharpe ratios of ALL trials
-    run on the same data (including this one). `n_effective` (<= the number of trials) discounts trials whose
-    returns are correlated; the variance of the unskilled Sharpe ratios is winsorized."""
+    run on the same data (including this one).
+
+    The gate (`dsr`) charges every trial at the sample variance of their Sharpe ratios: the conservative
+    bound. `dsr_adjusted` discounts correlated trials (`n_effective`, at most N) and winsorizes that variance
+    (Gemini audit F-R02). It is reported, not used by any gate, until it is calibrated under correlated nulls
+    (ChatGPT C006-F4)."""
     sr, skew, kurt, t = moments(returns)
     n = max(1, len(trial_sharpes))
     n_eff = n if n_effective is None else min(float(n), max(1.0, float(n_effective)))
-    sr0 = expected_max_sharpe(n_eff, robust_variance(trial_sharpes))
+    raw_var = float(np.var(trial_sharpes, ddof=1)) if len(trial_sharpes) > 1 else 0.0
+    sr0 = expected_max_sharpe(n, raw_var)
+    sr0_adjusted = expected_max_sharpe(n_eff, robust_variance(trial_sharpes))
     variance = sharpe_variance(returns) if t >= 3 and sr != 0 else None
     return {
         "sharpe_daily": sr,
@@ -152,8 +158,10 @@ def dsr(returns: np.ndarray, trial_sharpes: list[float], *, n_effective: float |
         "trials": n,
         "effective_trials": n_eff,
         "expected_max_sharpe_annual": sr0 * math.sqrt(DAYS),
+        "expected_max_sharpe_adjusted_annual": sr0_adjusted * math.sqrt(DAYS),
         "psr": psr(sr, t, skew, kurt, 0.0, variance=variance),
         "dsr": psr(sr, t, skew, kurt, sr0, variance=variance),
+        "dsr_adjusted": psr(sr, t, skew, kurt, sr0_adjusted, variance=variance),
     }
 
 

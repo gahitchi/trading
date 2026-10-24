@@ -63,6 +63,10 @@ def test_a_cosmetic_app_edit_keeps_the_simulation_digest(tmp_path, monkeypatch):
     assert provenance.simulation_digest() == sim and provenance.runtime_digest() != run
     (package / "costs.py").write_text((package / "costs.py").read_text() + "\n# changes a result\n")
     assert provenance.simulation_digest() != sim
+    for behavioural in ("config.py", "execution_state.py", "safety.py", "notify.py", "agents/readiness.py"):
+        before = provenance.simulation_digest()
+        (package / behavioural).write_text((package / behavioural).read_text() + "\n# changes behaviour\n")
+        assert provenance.simulation_digest() != before, behavioural  # ChatGPT C006-F1
     (package / "brand_new_module.py").write_text("X = 1\n")  # unlisted modules count as simulation code
     changed = provenance.simulation_digest()
     (package / "brand_new_module.py").write_text("X = 2\n")
@@ -407,3 +411,31 @@ def test_real_clock_harness_tests_form_their_own_tier():
         assert "pytestmark = pytest.mark.harness" in (root / "tests" / name).read_text()
     ci = (root / ".github/workflows/ci.yml").read_text()
     assert '-m "not llm and not harness" -n auto' in ci and '-m "harness"' in ci
+
+
+def test_a_backtest_charges_pre_split_commissions_on_real_shares(goog_lab):
+    """F-R07 / ChatGPT C006-F2: the split history recorded with the data (vendor events, not an invented price
+    floor) turns split-adjusted share counts back into real ones for per-share commissions."""
+    from lab import backtest
+    from lab.config import RiskSettings
+    from lab.signals import BuyAndHold
+
+    df = _bars(price=0.5)  # a 40:1-split stock before its split, in adjusted prices
+    split_day = str(df.index[-1].date())
+    cfg = _cfg(goog_lab, slippage=False)
+    sleeves = backtest.equal_weight(BuyAndHold, ["X"])
+    risk = RiskSettings(1.0, 1.0, 0.9999)
+
+    def first_commission():
+        r = backtest.run(cfg, sleeves, {"X": df}, df.index[30].date(), None, risk=risk)
+        return r.fills[0]
+
+    data.save(cfg, "X", df, source="test", adjusted=True)
+    plain = first_commission()
+    assert plain.commission == pytest.approx(min(plain.qty * 0.005, 0.01 * plain.qty * plain.price), rel=0.01)
+    with_splits = df.copy()
+    with_splits.attrs["splits"] = [[split_day, 40.0]]
+    data.save(cfg, "X", with_splits, source="test", adjusted=True)
+    real = first_commission()
+    assert real.commission == pytest.approx(max(1.0, real.qty / 40 * 0.005), abs=0.01)
+    assert real.commission < plain.commission / 20

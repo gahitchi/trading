@@ -70,11 +70,7 @@ Windows 10/11, in PowerShell:
 irm https://raw.githubusercontent.com/gahitchi/trading/main/install.ps1 | iex
 ```
 
-Linux (Arch, Debian/Ubuntu, Fedora):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/gahitchi/trading/main/install.sh | sh
-```
+Arch Linux with KDE: `bash install-arch.sh` from a clone, see [docs/arch-install.md](docs/arch-install.md).
 
 On Windows it installs Docker Desktop and Python with `winget` if they are missing. Docker Desktop's first
 start asks you to accept its terms and may install WSL 2 and ask for a restart; after the restart, run the
