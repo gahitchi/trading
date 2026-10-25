@@ -332,7 +332,7 @@ def test_invalid_trade_does_not_poison_duplicate_state_or_ledger() -> None:
         sim.on_trade(bad)
     assert sim.last_ns == 1_000_000_000
     assert sim.last_trade_id == "t1"
-    assert "reused" not in sim._trade_ids_at_timestamp
+    assert "reused" not in sim._seen_trade_ids
     good = Trade("reused", 2_000_000_000, 2_000_000_000, D("100"), D("10"))
     assert sim.on_trade(good) == ()
     assert sim.last_trade_id == "reused"
