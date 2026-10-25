@@ -160,6 +160,29 @@ def read_confirmed_partition(manifest_path: Path) -> tuple[PublicCandle, ...]:
             or manifest_path.name != f"{sha}.json"
         ):
             raise MarketDataError("unsupported or inconsistent catalog manifest")
+        if (
+            set(meta)
+            != {
+                "schema",
+                "source",
+                "instrument_id",
+                "utc_date",
+                "start_ns",
+                "end_ns",
+                "rows",
+                "missing_minutes_between_observations",
+                "parquet_sha256",
+                "price_encoding",
+                "complete_history_claimed",
+                "execution_feed_qualified",
+            }
+            or meta["complete_history_claimed"] is not False
+            or meta["execution_feed_qualified"] is not False
+            or meta["price_encoding"] != "exact_decimal_string"
+            or manifest_path.parent.name != meta["utc_date"]
+            or manifest_path.parent.parent.name != meta["instrument_id"]
+        ):
+            raise MarketDataError("catalog manifest qualification or location mismatch")
         parquet_path = manifest_path.with_suffix(".parquet")
         if parquet_path.is_symlink():
             raise MarketDataError("catalog payload symbolic link forbidden")

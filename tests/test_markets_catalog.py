@@ -64,9 +64,10 @@ def test_untrusted_manifest_and_symbol_rejected(tmp_path) -> None:
     path = write_confirmed_candles(tmp_path, (candle(0),))[0]
     metadata = json.loads(path.read_text())
     metadata["complete_history_claimed"] = True
-    # A tampered manifest is not signed; data hash alone protects parquet, not
-    # metadata trust. Strict file equivalence is a separate future requirement.
-    assert metadata["complete_history_claimed"] is True
+    # False certification is never silently accepted, even when parquet is intact.
+    path.write_text(json.dumps(metadata))
+    with pytest.raises(MarketDataError, match="qualification"):
+        read_confirmed_partition(path)
     with pytest.raises(MarketDataError, match="unqualified"):
         write_confirmed_candles(
             tmp_path,
