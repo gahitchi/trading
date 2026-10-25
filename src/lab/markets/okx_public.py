@@ -75,6 +75,8 @@ def parse_confirmed_candles(payload: dict, instrument_id: str) -> tuple[PublicCa
                 raise MarketDataError("duplicate completed candle")
             seen.add(start_ms)
             values = [decimal(str(x)) for x in row[1:6]]
+        except MarketDataError:
+            raise
         except (ValueError, TypeError, ArithmeticError) as exc:
             raise MarketDataError("malformed OKX candle data") from exc
         output.append(
