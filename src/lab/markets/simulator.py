@@ -169,8 +169,12 @@ class OfflineSimulator:
                 f"intent:{intent.client_order_id}",
                 "intent",
                 intent.created_ns,
-                {"instrument": intent.instrument_id, "side": str(intent.side), "quantity": str(intent.quantity),
-                 "reduce_only": intent.reduce_only},
+                {
+                    "instrument": intent.instrument_id,
+                    "side": str(intent.side),
+                    "quantity": str(intent.quantity),
+                    "reduce_only": intent.reduce_only,
+                },
             )
         self.used_ids.add(intent.client_order_id)
         self.pending[intent.client_order_id] = _Pending(intent, intent.quantity)
@@ -262,8 +266,13 @@ class OfflineSimulator:
                 f"fill:{order.client_order_id}:{trade.trade_id}",
                 "fill",
                 trade.exchange_ns,
-                {"side": str(order.side), "quantity": str(qty), "price": str(px),
-                 "fee": str(fee), "realized_pnl": str(realized)},
+                {
+                    "side": str(order.side),
+                    "quantity": str(qty),
+                    "price": str(px),
+                    "fee": str(fee),
+                    "realized_pnl": str(realized),
+                },
             )
         self.position = new_pos
         self.entry = avg
@@ -306,8 +315,7 @@ class OfflineSimulator:
                 f"trade:{trade.trade_id}",
                 "mark",
                 trade.exchange_ns,
-                {"price": str(trade.price), "quantity": str(trade.quantity),
-                 "received_ns": trade.received_ns},
+                {"price": str(trade.price), "quantity": str(trade.quantity), "received_ns": trade.received_ns},
             )
         day = trade.exchange_ns // DAY_NS
         if self.day_index != day:
@@ -346,7 +354,9 @@ class OfflineSimulator:
         payment = self.position * self.mark * self.instrument.multiplier * rate
         if self.journal is not None:
             self.journal.append(
-                f"funding:{funding_id}", "funding", timestamp_ns,
+                f"funding:{funding_id}",
+                "funding",
+                timestamp_ns,
                 {"rate": str(rate), "payment": str(payment), "position": str(self.position)},
             )
         self.balance -= payment
