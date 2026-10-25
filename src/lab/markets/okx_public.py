@@ -157,9 +157,7 @@ def latest_confirmed_candles(instrument_id: str, *, limit: int = 100) -> tuple[P
     return bars
 
 
-def historical_confirmed_candles(
-    instrument_id: str, *, pages: int = 5, limit: int = 100
-) -> tuple[PublicCandle, ...]:
+def historical_confirmed_candles(instrument_id: str, *, pages: int = 5, limit: int = 100) -> tuple[PublicCandle, ...]:
     """Bounded, rate-limited read-only historical 1m observation retrieval.
 
     Uses the provider's documented `after` (strictly earlier) timestamp
