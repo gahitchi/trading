@@ -1,6 +1,6 @@
 # Trading Lab 2 — multi-market architecture decision record
 
-**Status:** DESIGN APPROVED FOR IMPLEMENTATION ON THIS BRANCH ONLY (not an authorization to trade money).  
+**Status:** REVISED AFTER TECHNICAL REVIEW — incremental implementation only, no authorization to trade money.  
 **Date:** 2026-10-25 · **Owner:** Gabriel · **Author:** ChatGPT · **Base:** main at e65502961b5957c56821644cf04df7b7787b2d00.  
 **Scope:** crypto first (24/7), then forex (24/5), then listed securities; free/open-source tools preferred; installed program usable without a broker login; externally hosted demo before small-capital live, weeks later.
 
@@ -22,7 +22,7 @@ The current code is a **US-stock IBKR paper** implementation:
 * `src/lab/agents/messages.py` uses ticker strings and equity/stock quantity semantics; typed instrument IDs and contract multipliers are needed at an adapter boundary rather than reusing stock assumptions.
 * Several quantitative and release findings remain open in `docs/release-criteria.json` and `docs/audits/2026-10-24-quantitative-research-upgrade-audit.md`; this new work does not close them.
 
-**Migration strategy:** "strangler" architecture: add `lab.markets` separately, use normalized domain events and a reference simulation, validate it offline, then incrementally adapt Nautilus market-data and execution clients. Do not retarget the existing equity paper strategy by config aliasing. Existing `lab paper` must remain exactly as restrictive as it is today.
+**Migration strategy:** "strangler" architecture: add `lab.markets` solely as a narrow typed domain, pure accounting oracle and data-conversion boundary, validate it offline, then integrate its **same** accounting functions into Nautilus market-data and execution agents. Never duplicate strategy, allocator or risk-policy agents. Do not retarget the existing equity paper strategy by config aliasing. Existing `lab paper` must remain exactly as restrictive as it is today.
 
 ## 2. Layered system
 
@@ -64,18 +64,18 @@ No adapter returns `supported=True` merely because a broker advertises the produ
 
 A usable **offline, zero-credential** account with explicit simulated starting balance and no real broker dependencies. This is our first deliverable and regression oracle, *not* evidence of live profitability.
 
-* Decimal money, quantity and contract arithmetic. Linear contracts only in first build. Do **not** model inverse futures using stock share equations. No free capital from opening a short; margin is reserved, PnL and fees accounted against equity.
-* Explicit FIFO/weighted-average rule and a funding cashflow event at the stated venue timestamp. Unknown funding -> do not pretend validated economics; refuse futures-performance qualification without funding history.
+* Small pure Decimal accounting source (`lab.markets.accounting`) shared by simulation and future Nautilus bridge; no independent portfolio/agent subsystem. Linear contracts only in first build. Do **not** model inverse futures using stock share equations. No free capital from opening a short; margin is reserved, PnL and fees accounted against equity.
+* Explicit weighted-average position transition and **signed, bidirectional** funding cashflow at the exact venue settlement timestamp. `payment = signed_position × mark × multiplier × funding_rate`, with a positive result debiting collateral. Positive rate charges longs and credits shorts; negative reverses this. Unknown funding -> do not pretend validated economics; refuse futures-performance qualification without funding history.
 * Fee model with maker/taker distinction and venue fee tier, minimum tick/quantity/contract size. Conservative slippage and marketable-order rules; no passive fill solely because the bar touched the limit. Include order rejection, partial fills, disconnection and restart injection.
-* Equity = settled collateral + realized PnL + open mark-to-market PnL - charges; required initial/maintenance margin recomputed on every mark, with protection BEFORE exchange liquidation conditions. Stale/invalid/nonpositive marks block risk-increasing orders.
-* Minute bars derived only from timestamped trades, aligned to `floor(UTC second / 60) * 60`, emitted after the window closes under a configured watermark; report gaps and late data; never synthesize OHLCV for minutes with no trades. For low-latency exits, process quotes/ticks, not only closed candles.
+* **Dual-price accounting is mandatory:** independent `MarkPrice` events determine unrealized PnL, equity, initial/maintenance risk and funding; observed trades/bid-ask determine execution (with explicitly adverse assumptions). A last-trade wick alone cannot trip mark-based liquidation or drawdown. If marks are missing/stale, reject increases; never fabricate a mark from last price for market-validated runs. Equity = settled collateral + realized PnL + open mark-to-market PnL - charges. Stale/invalid/nonpositive marks block risk-increasing orders.
+* Streaming minute bars derived only from timestamped trades, aligned to `floor(UTC second / 60) * 60`, emitted after the window closes under a configured watermark; report gaps and late data; never synthesize OHLCV for minutes with no trades. Historical years of crypto minute research use `lab.markets.minute_batch.aggregate_trades` columnar NumPy reductions (later Arrow/Parquet catalogs), **not** one Python event object per candle. Float arrays for feature extraction; exact Decimal for accounting. For low-latency exits, process quotes/ticks, not only closed candles.
 * Separate `spot`, `linear_swap`, `dated_future`, `forex`, `equity` instruments. Spot shorts disallowed unless authenticated margin borrowing supports them. Simulation defaults to explicitly labelled `linear_swap` assumptions for long/short demonstration.
 * Replay two independent paths, using the SAME decisions and cost data: strategy-level replay and broker-event replay. Compare fills, equity and exposure to tolerance; never claim market replay parity from simplistic OHLC fills.
 
 ## 4. Broker rollout
 
 **Candidate 1: OKX EEA**, because its official EEA v5 API documents `x-simulated-trading: 1` REST demo and distinct `wseeapap` demo WebSocket endpoints, and NautilusTrader's OKX adapter documents `OKXRegion.EEA` and `OKXEnvironment.DEMO`. Explicit qualification tasks:
-- Verify `nautilus_trader==2.0.0rc7` actually contains the required region/environment enums, symbols and account mode; documentation for "latest" must not be assumed compatible with pinned rc7.
+- **D0 probe completed** in pinned `nautilus_trader==2.0.0rc7`: `OKXRegion.EEA`, `OKXEnvironment.DEMO`, `OKXDataClientConfig` exist; *the guessed name* `OKXExecClientConfig` does **not** exist. IBKR adapter import succeeds; `nautilus_trader.adapters.alpaca` and `.ctrader` are not importable in this pinned wheel. This proves exports only, **not** EEA X-Perps order-mode compatibility. CI runs `python -m lab.markets.capability_probe` before tests; inspect correct execution factory/config class names and demo API behavior before D2 integration.
 - Verify demo API credentials in EEA, eligible demo X-Perps instrument IDs, venue min notional, position mode, reduce-only and funding/settlement. Verify zero withdrawal permission and correct regional hostname **before any order**.
 - First read-only public feed, then account/positions read-only, then supervised demo round trip; reconcile all fills, fees, funding and cancellations after forced restart.
 - No global production API key accepted by demo code. No automatic fallback from unavailable EEA demo to global or live. If unsupported, choose another externally hosted demo after structured evaluation.
@@ -120,11 +120,11 @@ Cross-platform Arch and Windows. Offline SIM usable without GPU, a paid LLM, sub
 
 ## 9. Phased implementation & exact completion gates
 
-**D0. Documentation:** this ADR, transition boundaries and runnable skeleton. Gate: design reconciled with existing invariants and known open audits.
+**D0. Documentation and pinned-dependency probe:** this ADR, transition boundaries, locally verified 2.0.0rc7 import surface and runnable skeleton. Gate: design reconciled with existing invariants and known open audits. Probe evidence above and in GitHub Actions test output.
 
-**D1. Standalone reference simulation:** typed contract/capabilities/order events, precise 1-minute UTC bar builder, linear short/long margin/PnL accounting, funding, fee, deterministic price execution, file/CSV replay, CLI, tests. Gate: passing local unit/property scenarios on finite/duplicate/late timestamps, margin, short, reversal, fees, funding, crash behavior; no network orders. Note: a tiny reference simulator is *not yet* a broker-grade realistic matching engine.
+**D1. Shared accounting oracle + minimal offline reference:** typed contract/capabilities/order events, vectorized historical and streaming 1-minute UTC builders, shared `lab.markets.accounting` linear short/long margin/PnL/funding math, explicit independent mark prices, deterministic approximate trade execution, file/CSV replay, CLI, tests. **No new strategy/allocator/risk agent stack.** Gate: passing local unit/property scenarios on finite/duplicate/late timestamps, margin, short, reversal, fees, funding, crash behavior; no network orders. Note: a tiny reference simulator is *not yet* a broker-grade realistic matching engine.
 
-**D2. Nautilus bridge & market data:** register typed crypto instruments in Nautilus, a verified EEA read-only public feed, replay-catalog adapters and data manifests; new crypto agents use same allocator/risk/execution policies through typed boundaries. Gate: identical sequence/snapshot semantics and no look-ahead.
+**D2. Nautilus bridge & market data:** register typed crypto instruments in Nautilus, a verified EEA public trade/mark/bid-ask feed, replay-catalog adapters and data manifests. Existing AllocatorAgent/RiskAgent/ExecutionAgent policies apply with venue-aware instrument/margin bridges calling the **same** pure accounting oracle; no parallel agent framework. Gate: identical sequence/snapshot semantics and no look-ahead.
 
 **D3. External demo:** verify real pinned Nautilus OKX adapter, supported region, demo account type, encrypted/OS-protected credentials and actual order lifecycle on OKX EEA demo. Gate: restart, partial fills, out-of-order updates, reconciliation, HMAC signing validation, min-size/precision, support for order and stop types tested against venue. No live API accepted.
 
@@ -151,3 +151,28 @@ Verified 2026-10-25 against:
 ## 12. Implementation boundary for this coding turn
 
 Implement D1 additive, strictly local and paper/sim only; no network-capable production order connector; do not change existing IBKR protections or main. File system and tests must be usable via an explicit `python -m lab.markets` entrypoint once project dependencies are installed. All other phases remain concrete, **unimplemented** future gates; success of D1 does not qualify D3 or D6.
+
+## 13. Review amendment — 2026-10-25 (C001-F13 recurrence prevention)
+
+The D1/D2 split is a **test boundary, not an architectural division**. The execution engine remains NautilusTrader and the original agents. The `lab.markets` package is permitted only for small reusable: (a) Decimal instrument accounting, (b) normalized typed interfaces, (c) market-data ingestion/columnar transforms, (d) an offline reference fill harness, (e) journal and verification utilities. Do **not** recreate a strategy evaluator, portfolio allocator, autonomous risk-management service or long-running parallel execution stack under `lab.markets`. In D2 the stock and crypto workflows will share existing actor infrastructure with market-appropriate instrument/ledger adapters; no separate production-grade simulation engine should grow here.
+
+**Pinned wheel probe evidence (GitHub Actions on 2026-10-25, Python 3.13, NautilusTrader 2.0.0rc7):**
+
+| Adapter | Observed in pinned environment | Next action |
+|---|---|---|
+| OKX | Module loads; `OKXRegion.EEA`, `OKXEnvironment.DEMO` and `OKXDataClientConfig` present | Resolve actual execution-client factory/config names; independently verify regional X-Perps demo order support |
+| IBKR | Module loads; known data/execution config names present | Preserve existing paper-only use |
+| Alpaca | `nautilus_trader.adapters.alpaca` not importable | Qualify a supported external adapter or dependency when equities expansion starts |
+| cTrader | `nautilus_trader.adapters.ctrader` not importable | Qualify a compatible adapter independently when forex expansion starts |
+
+**Cost realism:** a hypothetical 5 bps taker fee each way creates 10 bps round-trip costs *before* spread/slippage/funding. Do not assume a fixed BTC/ETH minute volatility number: estimate empirical volatility and cost distributions for the specific venue, instrument, fee tier, size and date, and abstain when expected net edge is insufficient. The alpha/decision clock defaults to 1h; 1m is an execution/monitoring clock, not an instruction to open a new position every minute. Protect exits at tick/quote resolution where available.
+
+**Throughput:** a 365-day crypto year contains 525,600 minutes *per instrument*. Raw message streams can be far larger; use NumPy columnar historical reductions plus planned Arrow/Parquet manifests and batch/group operators. Streaming `MinuteBuilder` handles bounded real-time event state, not millions of historical Python `Trade` allocations. Batch research does not use floating-point money for PnL.
+
+**Valuation versus execution:** the v1 reference takes explicit `MarkPrice` and `Trade` streams; old example CSV must supply `mark_price` as an independent field. A synthetic CSV is *not* an exchange-validated mark source. Signed funding must be tested for both longs and shorts with both positive and negative rates, settled at explicit monotonic funding timestamps. Stale marks fail closed on risk increases. A last-price flash wick with healthy independent mark is not a maintenance breach. Future engine integration needs venue-specific mark/index contracts, funding schedules, collateral conversion and separate best-bid/ask for execution.
+
+**Provenance and legacy approvals:** `simulation_digest(market="equity")` intentionally **excludes `lab/markets/**`** so subsequent crypto-only changes do not change equity research implementation identity; `simulation_digest(market="crypto")` includes it. `runtime_digest()` continues to cover every module. Note the unavoidable migration caveat: modifying `provenance.py` itself changes the old calculated SHA at least once. Do not represent this as zero-impact on previously signed approvals; invalidate/requalify legacy approvals as required unless a separately audited migration reconstructs the old exact implementation identity. Changing shared agents/accounting later also invalidates affected approval contexts. `deployment_context()` currently defaults to equity; a proper crypto evidence namespace and schema will be introduced before D2.
+
+**New binding test gates:** (1) no new duplicate actor stack, (2) four-way signed funding matrix, (3) flash last-price wick cannot trigger mark-based halt while a mark move can, (4) offline entry requires non-stale independent mark, (5) historical 525,600-minute vectorized aggregation without fabricated bars, (6) probe pinned exports in CI and fail regional integration if unsupported, (7) crypto file edits do not change current equity simulation digest, and (8) *existing* IBKR live-account prohibitions remain intact. These are **necessary but not sufficient** for exchange demo approval.
+
+**Current status:** D1 is a proof-of-concept. Journal recovery, mark-feed verification, effective order-book fills, vectorized long-history source provenance, EEA demo execution and real-money order routing are not qualified. D3-D6 remain blocked.
