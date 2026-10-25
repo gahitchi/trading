@@ -73,6 +73,7 @@ def test_flat_and_safe_pending_order_are_allowed_only_as_preflight() -> None:
     assert good.allowed
     assert good.tested_scenarios == 3
     assert good.worst_gross == D("300")
+    assert good.execution_authorized is False
     good.require_safe()
 
 
@@ -214,3 +215,24 @@ def test_unsupported_collateral_and_invalid_caps_do_not_default_to_optimism() ->
         RiskCeilings(fee_bps=0.1)
     with pytest.raises(ValueError, match="gap"):
         RiskCeilings(price_gap_bps=D("6000"))
+
+
+def test_offline_adapter_assesses_its_real_pending_book_without_order_routing() -> None:
+    from lab.markets.adapters import OfflineAdapter
+    from lab.markets.domain import MarkPrice
+    from lab.markets.simulator import OfflineSimulator
+
+    sim = OfflineSimulator(instrument(), taker_fee_bps=D("0"), slippage_bps=D("0"))
+    adapter = OfflineAdapter(sim)
+    with pytest.raises(ValueError, match="mark evidence"):
+        adapter.preview_pending_risk(asof_ns=100, ceilings=caps())
+    sim.on_mark(MarkPrice("mark1", 100, 100, D("100")))
+    sim.submit(order("entry", "BTC-USDT-SWAP", Side.BUY, "6"))
+    verdict = adapter.preview_pending_risk(asof_ns=100, ceilings=caps())
+    assert verdict.tested_scenarios == 3
+    assert not verdict.allowed and not verdict.execution_authorized
+    assert "gross_leverage" in verdict.breaches
+    assert sim.position == 0
+    assert len(sim.pending) == 1
+    with pytest.raises(ValueError, match="non-rewound"):
+        adapter.preview_pending_risk(asof_ns=99, ceilings=caps())
