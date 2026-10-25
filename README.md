@@ -47,6 +47,17 @@ a gap-free streaming L2 feed, confirmed account funding cashflows, verified make
 The history command retrieves up to 50 bounded pages of confirmed 1-minute bars through the EEA history
 endpoint, enforcing chronological cursors without silently forward-filling gaps; it cannot claim complete
 historical coverage or point-in-time quote/fee/funding provenance.
+The broker-neutral pure risk preflight (`lab.markets.portfolio_risk`) screens pending
+orders against stressed positions, shared collateral, initial margin, drawdown,
+daily/absolute loss, funding buffers and three fill fractions per order (up to
+six simultaneous orders). It is a **bounded screening oracle**, not proof
+that every arbitrary partial fill or exchange margin tier is safe. The
+offline adapter exposes its current pending book to this preflight without
+bypassing mandatory fill-time risk. A separate pure **demo-only**
+reconciliation checker (`lab.markets.reconciliation`) compares unknown,
+partially filled and cancelled orders, positions, and exact collateral by
+currency. It does not authenticate venue data, settle money, authorize
+orders, or qualify a live/demo exchange connection.
 A typed, offline-only conversion boundary can encode actual observations as NautilusTrader `TradeTick`
 events and confirmed candles as `Bar` events, preserving receipt time so late-fetched bars cannot leak into
 earlier decisions. **This is not yet a running crypto Nautilus strategy, order-management service or broker.**
