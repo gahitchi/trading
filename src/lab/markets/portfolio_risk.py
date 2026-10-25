@@ -116,6 +116,9 @@ class RiskVerdict:
     worst_equity: Decimal
     worst_margin: Decimal
     worst_gross: Decimal
+    # A sampled risk screen is not exchange execution authority. The shared
+    # Nautilus live/demo gates must independently verify broker capabilities.
+    execution_authorized: bool = False
 
     def require_safe(self) -> None:
         if not self.allowed:
