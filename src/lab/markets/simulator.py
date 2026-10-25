@@ -242,12 +242,11 @@ class OfflineSimulator:
         if required > projected_equity * (1 - self.limits.initial_margin_buffer):
             raise ValueError("insufficient buffered initial margin")
 
-    def _execute(self, pending: _Pending, trade: Trade) -> Fill | None:
+    def _execute(self, pending: _Pending, trade: Trade, available_quantity: Decimal) -> Fill | None:
         order = pending.intent
         if trade.exchange_ns <= order.created_ns:
             return None
-        tradable = (trade.quantity * self.limits.participation) // self.instrument.quantity_step
-        qty = min(pending.remaining, tradable * self.instrument.quantity_step)
+        qty = min(pending.remaining, available_quantity)
         if qty == 0:
             return None
         delta = Decimal(order.side.sign) * qty
@@ -334,19 +333,19 @@ class OfflineSimulator:
     def on_trade(self, trade: Trade) -> tuple[Fill, ...]:
         if trade.exchange_ns < self.last_event_ns:
             raise ValueError("out-of-order trade or funding event timestamp")
-        if trade.exchange_ns != self.last_ns:
-            self._trade_ids_at_timestamp.clear()
-        if trade.trade_id in self._trade_ids_at_timestamp:
+        if trade.exchange_ns == self.last_ns and trade.trade_id in self._trade_ids_at_timestamp:
             raise ValueError("duplicate trade ID at timestamp")
-        self._trade_ids_at_timestamp.add(trade.trade_id)
         self.instrument.check_price(trade.price)
         if self.journal is not None:
             self.journal.append(
                 f"trade:{trade.trade_id}",
-                "mark",
+                "trade",
                 trade.exchange_ns,
                 {"price": str(trade.price), "quantity": str(trade.quantity), "received_ns": trade.received_ns},
             )
+        if trade.exchange_ns != self.last_ns:
+            self._trade_ids_at_timestamp.clear()
+        self._trade_ids_at_timestamp.add(trade.trade_id)
         day = trade.exchange_ns // DAY_NS
         if self.day_index != day:
             self.day_index = day
@@ -356,12 +355,16 @@ class OfflineSimulator:
         self.last_event_ns = trade.exchange_ns
         self.last_trade_id = trade.trade_id
         # A last-trade wick must not alter valuation, drawdown or liquidation.
+        # A single market trade has ONE participation budget across all orders;
+        # independently granting the full budget to each order invents liquidity.
+        steps = (trade.quantity * self.limits.participation) // self.instrument.quantity_step
+        available = steps * self.instrument.quantity_step
         results = []
         for order_id, pending in tuple(self.pending.items()):
             if order_id not in self.pending:
                 continue
             try:
-                result = self._execute(pending, trade)
+                result = self._execute(pending, trade, available)
             except ValueError as exc:
                 if self.journal is not None:
                     self.journal.append(
@@ -375,6 +378,7 @@ class OfflineSimulator:
             else:
                 if result is not None:
                     results.append(result)
+                    available -= result.quantity
         self._risk_update()
         return tuple(results)
 
