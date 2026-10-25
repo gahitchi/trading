@@ -26,7 +26,7 @@ In this repository the implementation identity used by `research/approval.py` is
 
 The accounting oracle currently powers the **offline** simulator; the real Nautilus AllocatorAgent/RiskAgent/ExecutionAgent integration is D2, deliberately not claimed here.
 
-Completed D1 regression suites at `b3761ed6` and `62891e16` report **615 pass / 1 fail** on Python 3.13 (and the existing failing test is exactly `test_collab.py::test_repository_conversations_are_valid`, caused by inherited malformed G014); the new accounting and provenance-isolation tests all pass. Separate Python 3.14 runs on `b9d04fbd` reported **613 pass / 1 fail** (same inherited G014). Lint, package, Docker and collaboration CI check jobs pass; **full CI is not green** due to G014. Further revisions are undergoing CI as of this audit.
+Completed D1 regression suites at `b3761ed6` and `62891e16` report **615 pass / 1 fail** on Python 3.13 (and the only failed test was `test_collab.py::test_repository_conversations_are_valid`, caused by the Python CI job's shallow checkout hiding cross-branch G014 history); the new accounting and provenance-isolation tests all pass. Separate Python 3.14 runs on `b9d04fbd` reported **613 pass / 1 fail** (same shallow-checkout G014 artifact). Lint, package, Docker and collaboration CI check jobs pass; **full CI was not green** because the test job lacked the complete collaboration history. The checkout has been corrected to `fetch-depth: 0`; new CI results are pending. Further revisions are undergoing CI as of this audit.
 
 ## Remaining blocked requirements
 
