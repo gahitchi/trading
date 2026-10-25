@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
-from lab.markets.journal import EventJournal, JournalError
 from lab.markets.domain import (
     AssetClass,
     Capabilities,
@@ -24,6 +23,7 @@ from lab.markets.domain import (
     decimal,
     positive,
 )
+from lab.markets.journal import EventJournal, JournalError
 
 DAY_NS = 86_400_000_000_000
 
