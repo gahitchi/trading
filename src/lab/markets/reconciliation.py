@@ -169,7 +169,9 @@ def reconcile_demo(
                 problems.add("missing_terminal_fill_evidence")
         else:
             if (expected.instrument_id, expected.side, expected.original) != (
-                actual.instrument_id, actual.side, actual.original
+                actual.instrument_id,
+                actual.side,
+                actual.original,
             ):
                 problems.add("order_identity_or_quantity_conflict")
             if expected.filled != actual.filled:
