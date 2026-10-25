@@ -54,7 +54,7 @@ def _immutable_file(path: Path, blob: bytes) -> None:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
         if path.is_symlink() or not path.is_file() or path.read_bytes() != blob:
-            raise MarketDataError("immutable catalog content differs from existing file")
+            raise MarketDataError("immutable catalog content differs from existing file") from None
         return
     try:
         with os.fdopen(fd, "wb") as handle:
