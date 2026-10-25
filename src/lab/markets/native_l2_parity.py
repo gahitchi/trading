@@ -196,7 +196,21 @@ def run_native_l2_partial_parity(
         engine.add_data(list(depth))
         engine.run()
         if probe.failures or probe.depth_seen != 4 or len(probe.order_ids) != 2 or len(probe.fills) != 3:
-            raise NativeL2Error("native engine did not produce the expected depth partial-fill lifecycle")
+            observed_fills = tuple(
+                (
+                    str(fill.client_order_id),
+                    str(fill.order_side),
+                    str(fill.last_qty),
+                    str(fill.last_px),
+                    str(fill.liquidity_side),
+                )
+                for fill in probe.fills
+            )
+            raise NativeL2Error(
+                "native L2 lifecycle mismatch: "
+                f"depth={probe.depth_seen}, orders={len(probe.order_ids)}, "
+                f"fills={observed_fills}, errors={probe.failures}"
+            )
         expected_qty = (Decimal("0.400"), Decimal("0.600"), Decimal("1.000"))
         expected_px = (Decimal("100.2"), Decimal("100.3"), Decimal("101.0"))
         if (
