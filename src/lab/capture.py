@@ -480,7 +480,9 @@ def _redact_text(key: bytes, text: str, ids: dict[str, str] | None = None) -> st
     if ids:
         # One substitution pass prevents replacing substrings of previously emitted pseudonyms.
         pattern = re.compile(
-            r"(?<![A-Za-z0-9])(?:" + "|".join(re.escape(raw) for raw in sorted(ids, key=len, reverse=True)) + r")(?![A-Za-z0-9])"
+            r"(?<![A-Za-z0-9])(?:"
+            + "|".join(re.escape(raw) for raw in sorted(ids, key=len, reverse=True))
+            + r")(?![A-Za-z0-9])"
         )
         result = pattern.sub(lambda match: ids[match.group(0)], result)
     return result
@@ -518,7 +520,9 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
     # Evidence references broker IDs across journal, SQLite export and notes. A single
     # record's typed ID is not enough: scrub its free-text copies in every file.
     for source in files:
-        if source.name in _NEVER_COPY or (source.suffix not in (".json", ".jsonl") and source.name not in ("HALT", "KILL")):
+        if source.name in _NEVER_COPY or (
+            source.suffix not in (".json", ".jsonl") and source.name not in ("HALT", "KILL")
+        ):
             continue
         try:
             raw_text = source.read_text()
@@ -574,7 +578,8 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
             "fields named like password/token/secret/api key/hmac/chat id/user id replaced by [REDACTED]; "
             "authority.key never copied; SQLite databases are represented by their deterministic JSON export; "
             "non-JSON files (raw databases included) listed with their hash but not copied. Free text (operator "
-            "reasons, broker messages) is only checked for account-number patterns: it is NOT verified clean"
+            "reasons, broker messages) has account and known typed ID patterns removed, but remains "
+            "unverified for other private information and MUST be manually reviewed before publication"
         ),
         "key_fingerprint": hashlib.sha256(key).hexdigest()[:16],
         # ChatGPT, C004-F2: a person reads every sanitized file before publication and records it here; an empty
