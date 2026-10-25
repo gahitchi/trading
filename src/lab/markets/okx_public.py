@@ -43,13 +43,22 @@ class PublicCandle:
             raise MarketDataError("one-minute candle must start on UTC minute boundary")
         if self.end_ns != self.start_ns + 60_000_000_000:
             raise MarketDataError("one-minute candle has invalid end")
-        for name in ("open", "high", "low", "close"):
-            if decimal(getattr(self, name)) <= 0:
-                raise MarketDataError("invalid nonpositive price")
+        for name in ("open", "high", "low", "close", "volume_native"):
+            value = getattr(self, name)
+            if not isinstance(value, Decimal):
+                raise MarketDataError(f"{name} must be an exact Decimal")
+            try:
+                decimal(value)
+            except ValueError as exc:
+                raise MarketDataError(f"nonfinite {name}") from exc
+        if any(getattr(self, name) <= 0 for name in ("open", "high", "low", "close")):
+            raise MarketDataError("invalid nonpositive price")
+        if self.volume_native < 0:
+            raise MarketDataError("negative volume")
         if self.low > min(self.open, self.close) or self.high < max(self.open, self.close):
             raise MarketDataError("OHLC inconsistent with bounds")
-        if self.high < self.low or self.volume_native < 0:
-            raise MarketDataError("negative volume or inverted candle")
+        if self.high < self.low:
+            raise MarketDataError("inverted OHLC candle")
 
 
 def parse_confirmed_candles(payload: dict, instrument_id: str) -> tuple[PublicCandle, ...]:
@@ -61,7 +70,7 @@ def parse_confirmed_candles(payload: dict, instrument_id: str) -> tuple[PublicCa
     seen = set()
     output = []
     for row in rows:
-        if not isinstance(row, list) or len(row) < 9:
+        if not isinstance(row, list) or len(row) != 9:
             raise MarketDataError("unexpected OKX candle schema")
         if row[8] not in ("0", "1"):
             raise MarketDataError("unknown OKX candle confirmation flag")
