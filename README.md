@@ -58,9 +58,14 @@ reconciliation checker (`lab.markets.reconciliation`) compares unknown,
 partially filled and cancelled orders, positions, and exact collateral by
 currency. It does not authenticate venue data, settle money, authorize
 orders, or qualify a live/demo exchange connection.
-A typed, offline-only conversion boundary can encode actual observations as NautilusTrader `TradeTick`
-events and confirmed candles as `Bar` events, preserving receipt time so late-fetched bars cannot leak into
-earlier decisions. **This is not yet a running crypto Nautilus strategy, order-management service or broker.**
+The offline-only Nautilus bridge now constructs native `CryptoPerpetual` instruments from explicit,
+scenario-supplied contract metadata (including multiplier, minimum notional, margins and fee rates),
+and converts observed trades, independently priced marks, and confirmed candles into native `TradeTick`,
+`MarkPriceUpdate`, and `Bar` objects. It preserves each source receipt timestamp and refuses
+duplicate or time-regressing observations in its read-only causal tape. Mark prices retain their
+own precision instead of being rounded to the tradable order tick. These are *model/data boundaries*:
+their assumptions are not qualified venue schedules or connected accounts.
+**This is not yet a running crypto Nautilus strategy, order-management service or broker.**
 The browser app has a **Try crypto without a broker** synthetic-sample panel and a separate
 **Inspect public crypto market data** read-only panel with token-protected access, before IBKR setup.
 Neither panel starts autonomous trading. The paper-trading plan and its broker-dependent Start button
