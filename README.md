@@ -17,6 +17,7 @@ uv run python -m lab.markets demo
 uv run python -m lab.markets demo --side buy --quantity 0.001 --balance 1000
 uv run python -m lab.markets demo --journal ./results/offline-reference.sqlite3
 uv run python -m lab.markets recover --journal ./results/offline-reference.sqlite3
+uv run python -m lab.markets native-demo
 ```
 
 Both commands run a **synthetic** trade fixture and a next-observed-trade simulator, demonstrating long/short
@@ -58,6 +59,13 @@ reconciliation checker (`lab.markets.reconciliation`) compares unknown,
 partially filled and cancelled orders, positions, and exact collateral by
 currency. It does not authenticate venue data, settle money, authorize
 orders, or qualify a live/demo exchange connection.
+The `native-demo` command also runs the bundled **synthetic, credential-free** trade and independent
+mark fixture through the real Nautilus BacktestEngine, with a margin account, explicitly configured
+nonzero maker/taker fees at the native venue (the model's required location for trading fees) and a
+read-only Nautilus DataActor that verifies every event was delivered at its receipt timestamp.
+This pilot has **no strategy, order routing, filled orders, fees actually charged or broker connection**.
+Neither the native runtime nor its fixture proves a profitable strategy or execution-cost parity.
+
 The offline-only Nautilus bridge now constructs native `CryptoPerpetual` instruments from explicit,
 scenario-supplied contract metadata (including multiplier, minimum notional and margin
 assumptions; maker/taker BPS are retained separately because pinned Nautilus 2.0.0rc7
@@ -67,7 +75,8 @@ and converts observed trades, independently priced marks, and confirmed candles 
 duplicate or time-regressing observations in its read-only causal tape. Mark prices retain their
 own precision instead of being rounded to the tradable order tick. These are *model/data boundaries*:
 their assumptions are not qualified venue schedules or connected accounts.
-**This is not yet a running crypto Nautilus strategy, order-management service or broker.**
+**This is a running read-only Nautilus crypto data-engine pilot, not yet a crypto Nautilus
+trading strategy, order-management service or qualified broker.**
 The browser app has a **Try crypto without a broker** synthetic-sample panel and a separate
 **Inspect public crypto market data** read-only panel with token-protected access, before IBKR setup.
 Neither panel starts autonomous trading. The paper-trading plan and its broker-dependent Start button
