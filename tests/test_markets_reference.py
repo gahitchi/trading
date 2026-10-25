@@ -47,6 +47,7 @@ def event(idx: int, px: str = "100", *, timestamp: int | None = None) -> Trade:
 def order(id_: str, side: Side, qty: str, ts: int, *, reduce_only: bool = False) -> OrderIntent:
     return OrderIntent(id_, instrument().instrument_id, side, D(qty), ts, reduce_only=reduce_only)
 
+
 def observed(sim: OfflineSimulator, trade: Trade, *, mark: str | None = None):
     """Explicitly provide the independent synthetic valuation feed in fixture tests."""
     sim.on_mark(
