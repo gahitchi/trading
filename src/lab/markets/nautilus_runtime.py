@@ -15,11 +15,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from nautilus_trader.backtest import BacktestEngine
-from nautilus_trader.common import LogLevel
+from nautilus_trader.common import DataActor, DataActorConfig, LogLevel
 from nautilus_trader.config import BacktestEngineConfig, LoggerConfig
 from nautilus_trader.execution import MakerTakerFeeModel
 from nautilus_trader.model import AccountType, Currency, InstrumentId, Money, OmsType, Venue
-from nautilus_trader.trading import Actor
 
 from lab.markets.domain import decimal, positive
 from lab.markets.nautilus_data import CausalNautilusTape
@@ -28,11 +27,11 @@ from lab.markets.nautilus_instruments import LinearContractDefinition, to_nautil
 _MAX_EVENTS = 10_000
 
 
-class _ReadOnlyTapeObserver(Actor):
+class _ReadOnlyTapeObserver(DataActor):
     """Native actor used only to verify true exchange/clock event delivery."""
 
     def __init__(self, instrument_id: InstrumentId) -> None:
-        super().__init__()
+        super().__init__(DataActorConfig())
         self._instrument_id = instrument_id
         self.trades = 0
         self.marks = 0
