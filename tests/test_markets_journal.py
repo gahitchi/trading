@@ -29,6 +29,13 @@ def test_corrupted_evidence_rejected_on_restart(tmp_path) -> None:
     with EventJournal(path) as journal:
         journal.append("fillA", "fill", 100, {"qty": "1"})
     with sqlite3.connect(path) as db:
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            db.execute("UPDATE events SET payload=? WHERE event_id=?", ('{"qty":"9"}', "fillA"))
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            db.execute("DELETE FROM events WHERE event_id=?", ("fillA",))
+        # Simulate a privileged tamperer bypassing the local SQLite trigger;
+        # the hash chain must still refuse the corrupted database at open.
+        db.execute("DROP TRIGGER events_no_update")
         db.execute("UPDATE events SET payload=? WHERE event_id=?", ('{"qty":"9"}', "fillA"))
     with pytest.raises(JournalError, match="digest mismatch"):
         EventJournal(path)
