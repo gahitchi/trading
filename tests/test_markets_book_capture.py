@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -57,6 +59,38 @@ def test_byte_bound_capture_accepts_only_reconstructable_seq_chain(tmp_path):
     assert not evidence.feed_complete
     assert not evidence.market_data_execution_qualified
     assert not evidence.broker_execution_enabled
+
+
+def test_offline_capture_cli_never_claims_exchange_authority(tmp_path):
+    path, digest = save(tmp_path)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "lab.markets",
+            "verify-book-capture",
+            "--input",
+            str(path),
+            "--sha256",
+            digest,
+            "--instrument",
+            "BTC-USD-SWAP",
+        ],
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=40,
+    )
+    data = json.loads(completed.stdout)
+    assert data["frames_verified"] == 2
+    assert data["sha256"] == digest
+    assert data["first_sequence"] == 10
+    assert data["last_sequence"] == 11
+    assert not data["source_authenticated"]
+    assert not data["feed_complete"]
+    assert not data["market_data_execution_qualified"]
+    assert not data["broker_execution_enabled"]
+    assert not data["qualified_for_live_trading"]
 
 
 def test_mutations_cannot_reuse_prior_recording_fingerprint(tmp_path):
