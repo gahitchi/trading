@@ -99,8 +99,15 @@ def test_maximum_length_provider_trade_and_mark_ids_survive_recovery(tmp_path) -
 
     d = Decimal
     contract = Instrument(
-        "SIM", "BTC-USD-LINEAR", AssetClass.CRYPTO, ContractKind.LINEAR_DERIVATIVE,
-        "USD", d("0.1"), d("0.001"), d("0.001"), d("5"),
+        "SIM",
+        "BTC-USD-LINEAR",
+        AssetClass.CRYPTO,
+        ContractKind.LINEAR_DERIVATIVE,
+        "USD",
+        d("0.1"),
+        d("0.001"),
+        d("0.001"),
+        d("5"),
     )
     mark_id = "m" * 128
     first_trade_id = "6" * 128
