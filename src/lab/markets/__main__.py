@@ -155,6 +155,8 @@ def native_demo(balance: Decimal = Decimal("1000")) -> dict:
         "maker_fee_rate": str(result.maker_fee_rate),
         "taker_fee_rate": str(result.taker_fee_rate),
         "native_data_engine_used": result.native_data_engine_used,
+        "event_integrity_verified": result.event_integrity_verified,
+        "clock_receipt_verified": result.clock_receipt_verified,
         "fees_charged_verified": result.fees_charged_verified,
         "strategies_qualified": result.strategies_qualified,
         "orders_routed": False,
