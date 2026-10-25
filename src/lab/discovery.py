@@ -91,6 +91,8 @@ class InsiderFiling:
     direct_ownership: bool
     plan_10b5_1: bool | None
     source: str = "sec_edgar_form4"
+    transaction_line: str = "1"
+    filing_form: str = "4"
 
     def __post_init__(self) -> None:
         if not _SYMBOL.fullmatch(self.ticker) or not _ACCESSION.fullmatch(self.accession):
@@ -104,7 +106,11 @@ class InsiderFiling:
         if type(self.price) is not Decimal or decimal(self.price) <= 0:
             raise ValueError("transaction price must be positive Decimal")
         if self.source != "sec_edgar_form4":
-            raise ValueError("insider transaction requires verified SEC primary filing")
+            raise ValueError("insider transaction requires an SEC Form 4 labelled source")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", self.transaction_line):
+            raise ValueError("missing or invalid Form 4 transaction line key")
+        if self.filing_form not in ("4", "4/A"):
+            raise ValueError("unsupported insider disclosure form")
         if self.plan_10b5_1 is not None and type(self.plan_10b5_1) is not bool:
             raise TypeError("plan flag must be bool or unknown")
 
@@ -201,7 +207,7 @@ def scout_equities(
         ):
             by_ticker[row.ticker] = row
 
-    verified: dict[str, dict[str, InsiderFiling]] = {}
+    verified: dict[str, dict[tuple[str, str], InsiderFiling]] = {}
     for row in filings:
         if type(row) is not InsiderFiling:
             raise TypeError("expected typed Form 4 filings")
@@ -211,19 +217,22 @@ def scout_equities(
         ):
             continue
         if (
-            row.transaction_code != "P"
+            row.filing_form != "4"
+            or row.transaction_code != "P"
             or row.acquired_disposed != "A"
             or not row.non_derivative
             or not row.direct_ownership
             or row.plan_10b5_1 is not False
         ):
             continue
-        by_accession = verified.setdefault(row.ticker, {})
-        # A corrected filing with the same accession contributes only once,
-        # and the first evidence seen at decision time is kept.
-        old = by_accession.get(row.accession)
+        by_line = verified.setdefault(row.ticker, {})
+        # One Form 4 can contain multiple independent purchase transaction rows.
+        # Deduplicate repeated observations of the same filing + line, but
+        # aggregate all eligible lines while counting the filing only once.
+        line_key = (row.accession, row.transaction_line)
+        old = by_line.get(line_key)
         if old is None or row.received_ns < old.received_ns:
-            by_accession[row.accession] = row
+            by_line[line_key] = row
 
     accepted: list[ScoutedStock] = []
     skipped: list[tuple[str, str]] = []
@@ -256,16 +265,17 @@ def scout_equities(
             continue
 
         records = tuple(verified.get(ticker, {}).values())
+        filing_ids = {r.accession for r in records}
         notional = sum((r.price * r.shares for r in records), Decimal("0"))
         # Transparent ranking for review workload only. This deliberately
         # avoids describing liquidity or insider transactions as alpha.
         # Decimal squashes a heavy-tailed dollar-volume scale without logs.
         liquidity = min(row.median_dollar_volume / policy.min_median_dollar_volume, Decimal("10"))
         spread_quality = (policy.max_spread_bps - row.spread_bps) / max(policy.max_spread_bps, Decimal("1"))
-        priority = liquidity + spread_quality + min(Decimal(len(records)), Decimal("3"))
+        priority = liquidity + spread_quality + min(Decimal(len(filing_ids)), Decimal("3"))
         rationale = (
             "passes as-known listing, age and liquidity screens",
-            f"{len(records)} independently sourced discretionary SEC Form 4 open-market purchase filing(s)",
+            f"{len(filing_ids)} SEC Form 4-labelled purchase filing(s); caller provenance requires verification",
             "priority is research triage, not expected return or an executable recommendation",
         )
         accepted.append(
@@ -273,7 +283,7 @@ def scout_equities(
                 ticker=ticker,
                 venue=row.venue,
                 priority=priority,
-                insider_purchase_count=len(records),
+                insider_purchase_count=len(filing_ids),
                 insider_purchased_notional=notional,
                 filing_accessions=tuple(sorted(r.accession for r in records)),
                 market_source=row.market_source,
