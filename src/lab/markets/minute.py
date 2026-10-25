@@ -94,6 +94,7 @@ class MinuteBuilder:
             missing_minutes_before=gap,
         )
         self._last_end = bar.end_ns
+        self._trade_ids.clear()  # bounded dedup: older duplicates now fail the sealed watermark
         self._start = None
         self._first = self._high = self._low = self._last = None
         self._volume = Decimal("0")
