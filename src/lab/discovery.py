@@ -191,7 +191,9 @@ def scout_equities(
             continue
         old = by_ticker.get(row.ticker)
         if old is None or (row.received_ns, row.session_ns, row.market_source) > (
-            old.received_ns, old.session_ns, old.market_source
+            old.received_ns,
+            old.session_ns,
+            old.market_source,
         ):
             by_ticker[row.ticker] = row
 
