@@ -89,3 +89,32 @@ def test_offline_simulator_journals_intents_and_fills_without_silent_restart(tmp
         assert sim.position == d("-1")
         with pytest.raises(JournalError, match="nonempty journal"):
             OfflineSimulator(contract, journal=journal)
+
+
+def test_maximum_length_provider_trade_and_mark_ids_survive_recovery(tmp_path) -> None:
+    from decimal import Decimal
+
+    from lab.markets import AssetClass, ContractKind, Instrument, MarkPrice, OfflineSimulator, OrderIntent, Side, Trade
+    from lab.markets.recovery import recover_offline
+
+    d = Decimal
+    contract = Instrument(
+        "SIM", "BTC-USD-LINEAR", AssetClass.CRYPTO, ContractKind.LINEAR_DERIVATIVE,
+        "USD", d("0.1"), d("0.001"), d("0.001"), d("5"),
+    )
+    mark_id = "m" * 128
+    first_trade_id = "6" * 128
+    second_trade_id = "7" * 128
+    path = tmp_path / "events.db"
+    with EventJournal(path) as journal:
+        sim = OfflineSimulator(contract, journal=journal, taker_fee_bps=d("0"), slippage_bps=d("0"))
+        sim.on_mark(MarkPrice(mark_id, 100, 100, d("100")))
+        sim.on_trade(Trade(first_trade_id, 100, 100, d("100"), d("100")))
+        sim.submit(OrderIntent("order123", contract.instrument_id, Side.BUY, d("1"), 100))
+        assert len(sim.on_trade(Trade(second_trade_id, 200, 200, d("100"), d("100")))) == 1
+        expected = sim.report()
+        assert any(row["event_id"] == f"fill:order123:{second_trade_id}" for row in journal.read_all())
+        journal.verify()
+    with EventJournal(path) as journal:
+        recovered = recover_offline(contract, journal, taker_fee_bps=d("0"), slippage_bps=d("0"))
+        assert recovered.report() == expected
