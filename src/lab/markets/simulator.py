@@ -298,6 +298,13 @@ class OfflineSimulator:
         if self.halt_reason:
             for order_id, pending in tuple(self.pending.items()):
                 if not pending.intent.reduce_only:
+                    if self.journal is not None:
+                        self.journal.append(
+                            f"reject:{order_id}:{self.last_event_ns}",
+                            "reject",
+                            self.last_event_ns,
+                            {"reason": self.halt_reason},
+                        )
                     self.pending.pop(order_id)
                     self.rejections.append((order_id, self.halt_reason))
 
@@ -333,6 +340,13 @@ class OfflineSimulator:
             try:
                 result = self._execute(pending, trade)
             except ValueError as exc:
+                if self.journal is not None:
+                    self.journal.append(
+                        f"reject:{order_id}:{trade.trade_id}",
+                        "reject",
+                        trade.exchange_ns,
+                        {"reason": str(exc)},
+                    )
                 self.pending.pop(order_id, None)
                 self.rejections.append((order_id, str(exc)))
             else:
