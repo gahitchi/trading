@@ -56,8 +56,15 @@ def test_execution_modes_are_unreachable() -> None:
 def test_domain_rejects_bad_precision_or_margin() -> None:
     with pytest.raises(ValueError, match="step"):
         Instrument(
-            "SIM", "BTC-USD-LINEAR", AssetClass.CRYPTO, ContractKind.LINEAR_DERIVATIVE,
-            "USD", D("0.1"), D("0.003"), D("0.005"), D("5"),
+            "SIM",
+            "BTC-USD-LINEAR",
+            AssetClass.CRYPTO,
+            ContractKind.LINEAR_DERIVATIVE,
+            "USD",
+            D("0.1"),
+            D("0.003"),
+            D("0.005"),
+            D("5"),
         )
     with pytest.raises(TypeError):
         OfflineSimulator(instrument(), starting_balance=1000.0)
@@ -168,8 +175,15 @@ def test_off_tick_trade_refused() -> None:
 
 def test_no_spot_short_in_linear_reference() -> None:
     spot = Instrument(
-        "SIM", "BTC-USD", AssetClass.CRYPTO, ContractKind.SPOT, "USD",
-        D("0.1"), D("0.001"), D("0.001"), D("5"),
+        "SIM",
+        "BTC-USD",
+        AssetClass.CRYPTO,
+        ContractKind.SPOT,
+        "USD",
+        D("0.1"),
+        D("0.001"),
+        D("0.001"),
+        D("5"),
     )
     with pytest.raises(ValueError, match="linear derivatives"):
         OfflineSimulator(spot)
