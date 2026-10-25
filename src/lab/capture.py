@@ -470,9 +470,18 @@ def _collect_ids(key: bytes, value, ids: dict[str, str], field: str | None = Non
 
 
 def _record_id(ids: dict[str, str], raw: str, replacement: str) -> None:
-    if raw in ids and ids[raw] != replacement:
-        raise ValueError("ambiguous raw identifier assigned conflicting pseudonym kinds")
-    ids[raw] = replacement
+    previous = ids.get(raw)
+    if previous is None or previous == replacement:
+        ids[raw] = replacement
+        return
+    # Some brokers use the identical ID for their client and venue order ID.
+    # Keep the CLIENT pseudonym consistently wherever it is referenced.
+    if previous.startswith("CLIENT-") and replacement.startswith(("VENUE-", "ORDER-", "COID-")):
+        return
+    if replacement.startswith("CLIENT-") and previous.startswith(("VENUE-", "ORDER-", "COID-")):
+        ids[raw] = replacement
+        return
+    raise ValueError("ambiguous raw identifier assigned conflicting pseudonym kinds")
 
 
 def _redact_text(key: bytes, text: str, ids: dict[str, str] | None = None) -> str:
@@ -490,7 +499,12 @@ def _redact_text(key: bytes, text: str, ids: dict[str, str] | None = None) -> st
 
 def _redact(key: bytes, value, field: str | None = None, ids: dict[str, str] | None = None):
     if isinstance(value, dict) and field in _KEYED_BY_ORDER:
-        return {_pseudo(key, "CLIENT", str(k)): _redact(key, v, ids=ids) for k, v in value.items()}
+        return {
+            (ids.get(str(k), _pseudo(key, "CLIENT", str(k))) if ids else _pseudo(key, "CLIENT", str(k))): _redact(
+                key, v, ids=ids
+            )
+            for k, v in value.items()
+        }
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
@@ -504,7 +518,11 @@ def _redact(key: bytes, value, field: str | None = None, ids: dict[str, str] | N
     if isinstance(value, str):
         if field in _ID_KEYS and value and value != "None":
             kind = "ACCT" if field.startswith("account") else field.split("_")[0].upper()
-            return _pseudo(key, kind, value.removeprefix("IB-") if kind == "ACCT" else value)
+            return (
+                ids.get(value, _pseudo(key, kind, value.removeprefix("IB-") if kind == "ACCT" else value))
+                if ids
+                else _pseudo(key, kind, value.removeprefix("IB-") if kind == "ACCT" else value)
+            )
         return _redact_text(key, value, ids)
     return value
 
