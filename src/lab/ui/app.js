@@ -218,6 +218,36 @@ $("offline-run").onclick = async () => {
     $("offline-run").disabled = false;
   }
 };
+$("public-crypto-run").onclick = async () => {
+  if (busy) return;
+  busy = true;
+  $("public-crypto-run").disabled = true;
+  notice("");
+  try {
+    const data = await api("/api/public-crypto", {
+      instrument: $("public-crypto-instrument").value,
+      depth: $("public-crypto-depth").value
+    });
+    $("public-crypto-result").textContent = [
+      "READ-ONLY EEA SNAPSHOTS — NO ORDERS ROUTED",
+      "Instrument: " + data.instrument,
+      "Best bid: " + data.book.best_bid + " | Best ask: " + data.book.best_ask,
+      "Observed spread: " + (data.book.spread === null ? "not valid (crossed or locked)" : data.book.spread),
+      "Book event UTC nanoseconds: " + data.book.exchange_ns,
+      "Book received UTC nanoseconds: " + data.book.received_ns,
+      "Indicative funding rate (fraction): " + data.funding.indicated_rate,
+      "Funding observed UTC nanoseconds: " + data.funding.exchange_ns,
+      "Funding received UTC nanoseconds: " + data.funding.received_ns,
+      "WARNING: snapshots are independent, not a synchronized tradable feed.",
+      "No position, funding settlement, strategy approval or external orders."
+    ].join("\n");
+  } catch (e) {
+    notice(e.message);
+  } finally {
+    busy = false;
+    $("public-crypto-run").disabled = false;
+  }
+};
 form.addEventListener("submit", e => { e.preventDefault(); action(() => api("/api/setup", settings())); });
 form.addEventListener("change", e => { if (e.target.name === "profile") riskNote(); });
 $("start").onclick = () => action(async () => {
