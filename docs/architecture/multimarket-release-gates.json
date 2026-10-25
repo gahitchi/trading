@@ -30,14 +30,18 @@
         "tests/test_markets_data_parity.py",
         "docs/audits/2026-10-25-institutional-flow-open-source-review.md",
         "src/lab/markets/recovery.py",
-        "tests/test_markets_recovery.py"
+        "tests/test_markets_recovery.py",
+        "src/lab/markets/portfolio_risk.py",
+        "tests/test_markets_portfolio_risk.py",
+        "src/lab/markets/reconciliation.py",
+        "tests/test_markets_reconciliation.py"
       ],
       "missing": [
         "broker-quality order book / partial fill and liquidation stress models",
         "independent execution/funding/mark data provenance",
         "independently qualified broker state reconciliation, single-writer lease and torn-power durability"
       ],
-      "notes": "Offline simulator optionally journals marks/intents/fills/funding/cancels and risk rejections; refuses nonempty-journal restart until full replay is implemented. D1 accepted review checkpoints: long/short add/reduce/flip PnL conservation, full reversal fee basis, legacy equity digest isolation, no duplicate agent stack. New tests require CI validation; integration into existing Nautilus agents remains a D2 gate. 2026-10-25 hardening: shared per-trade participation budget, trade/mark distinct event kinds, event-time minute seals, strict EEA candle schema, separate mark tick precision, global event ID dedup, exact CSV replay times, SQLite append-only triggers; added regression tests. These are D1 fixes, not broker-grade fill or recoverable OMS evidence. Exact OFFLINE-only journal replay is now implemented using immutable session fingerprints and event-by-event deterministic recomputation; it rejects missing derived fills and mismatched fee/risk inputs. No external broker recovery is implied."
+      "notes": "Offline simulator optionally journals marks/intents/fills/funding/cancels and risk rejections; refuses nonempty-journal restart until full replay is implemented. D1 accepted review checkpoints: long/short add/reduce/flip PnL conservation, full reversal fee basis, legacy equity digest isolation, no duplicate agent stack. New tests require CI validation; integration into existing Nautilus agents remains a D2 gate. 2026-10-25 hardening: shared per-trade participation budget, trade/mark distinct event kinds, event-time minute seals, strict EEA candle schema, separate mark tick precision, global event ID dedup, exact CSV replay times, SQLite append-only triggers; added regression tests. These are D1 fixes, not broker-grade fill or recoverable OMS evidence. Exact OFFLINE-only journal replay is now implemented using immutable session fingerprints and event-by-event deterministic recomputation; it rejects missing derived fills and mismatched fee/risk inputs. No external broker recovery is implied. 2026-10-25 standalone broker-neutral pure preflight: evaluate 3**N subset outcomes (0/50/100% fills) across max six pending orders, quote-denominated collateral, fee/slippage, stressed mark risk, margin, drawdown, funding buffer, monetary loss, and strict missing marks. This is a conservative screening oracle, not a certified all-fractions worst-case or a Nautilus actor bridge."
     },
     {
       "id": "D2-market-data",
@@ -77,8 +81,10 @@
         "verify pinned Nautilus adapter compatibility",
         "verified eligible instrument and account",
         "demo credentials supplied by operator",
-        "restart/fill reconciliation evidence"
-      ]
+        "restart/fill reconciliation evidence",
+        "authenticated venue reconciler adapter supplying durable orders, fills, per-currency collateral and complete snapshot proofs"
+      ],
+      "note": "Added a pure demo-only reconciliation decision oracle with no order routing. It checks account fingerprints, lifecycle mismatches, unknown intents, fill/cancel races, missing fills, positions and collateral by currency. It does not authenticate the input or authorize broker/demo/live routing; a connected venue adapter and recovery qualification remain blocked."
     },
     {
       "id": "D4-user-experience",
