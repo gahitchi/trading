@@ -353,3 +353,14 @@ def test_delayed_receipt_does_not_seal_valid_next_minute_events() -> None:
     assert current[0].open == D("110")
     assert current[0].close == D("115")
     assert current[0].trades == 2
+
+
+def test_mark_prices_are_not_required_to_match_order_tick_precision() -> None:
+    sim = OfflineSimulator(instrument())
+    # Mark/index price can carry finer precision than the exchange trading tick.
+    sim.on_mark(MarkPrice("fine-mark", 1, 1, D("100.012345")))
+    assert sim.mark == D("100.012345")
+    assert sim.equity == sim.balance
+    # Execution prices still obey the instrument tick specification.
+    with pytest.raises(ValueError, match="tick"):
+        sim.on_trade(Trade("bad-trade", 2, 2, D("100.05"), D("1")))
