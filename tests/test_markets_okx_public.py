@@ -70,3 +70,56 @@ def test_candle_rejects_nonfinite_fields_and_provider_schema_drift() -> None:
             PublicCandle("BTC-USDT", 60_000_000_000, 120_000_000_000, **values)
     with pytest.raises(MarketDataError, match="schema"):
         parse_confirmed_candles({"code": "0", "data": [[*row("60000"), "unexpected-field"]]}, "BTC-USDT")
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [60000.9, True, "+60000", "60000.0", " 60000", "1" * 24],
+)
+def test_provider_timestamp_never_coerces_to_integer(timestamp) -> None:
+    with pytest.raises(MarketDataError, match="timestamp"):
+        parse_confirmed_candles({"code": "0", "data": [row(timestamp)]}, "BTC-USDT")
+
+
+@pytest.mark.parametrize(
+    ("field", "corruption"),
+    [
+        (1, 100.0),
+        (5, True),
+        (6, "NaN"),
+        (6, "-1"),
+        (7, "Infinity"),
+        (7, "-0.01"),
+    ],
+)
+def test_entire_candle_numeric_schema_is_exact_and_finite(field, corruption) -> None:
+    corrupt = row("60000")
+    corrupt[field] = corruption
+    with pytest.raises(MarketDataError):
+        parse_confirmed_candles({"code": "0", "data": [corrupt]}, "BTC-USDT")
+
+
+@pytest.mark.parametrize(
+    "final_url",
+    [
+        "https://www.okx.com/api/v5/market/candles",
+        "http://eea.okx.com/api/v5/market/candles",
+        "https://eea.okx.com:8443/api/v5/market/candles",
+        "https://attacker@eea.okx.com/api/v5/market/candles",
+        "https://eea.okx.com/api/v5/market/trades",
+    ],
+)
+def test_candle_response_redirect_cannot_steal_eea_provenance(monkeypatch, final_url) -> None:
+    import lab.markets.okx_public as api
+
+    class Response(io.BytesIO):
+        def geturl(self):
+            return final_url
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url.startswith("https://eea.okx.com/")
+        return Response(json.dumps({"code": "0", "data": [row("60000")]}).encode())
+
+    monkeypatch.setattr(api, "urlopen", fake_urlopen)
+    with pytest.raises(MarketDataError, match="qualified origin"):
+        latest_confirmed_candles("BTC-USDT")
