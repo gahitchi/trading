@@ -118,8 +118,11 @@ def test_native_mark_price_is_neither_last_trade_nor_quote_and_preserves_receipt
     assert converted.ts_init == 200_000
     assert str(converted.value) == "110.5"
     assert str(converted.instrument_id) == "BTC-USDT-SWAP.OKX"
-    with pytest.raises(ValueError, match="tick"):
-        to_nautilus_mark(MarkPrice("mark-bad", 1, 1, D("110.55")), contract())
+    # Independent mark precision is not constrained by tradable order ticks.
+    fine = to_nautilus_mark(MarkPrice("mark-fine", 1, 1, D("110.5567")), contract())
+    assert str(fine.value) == "110.5567"
+    with pytest.raises(MarketDataError, match="precision"):
+        to_nautilus_mark(MarkPrice("mark-too-fine", 1, 1, D("110.1234567891")), contract())
 
 
 def test_causal_tape_is_native_ordered_and_non_executable() -> None:
