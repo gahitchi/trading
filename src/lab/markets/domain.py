@@ -46,7 +46,7 @@ class UnsupportedMode(ValueError):
 
 def decimal(value: Decimal | str | int) -> Decimal:
     """Require exact, finite decimal input; floats are intentionally rejected."""
-    if isinstance(value, bool) or isinstance(value, float):
+    if isinstance(value, (bool, float)):
         raise TypeError("financial input must be Decimal, str, or int, not float")
     v = Decimal(value)
     if not v.is_finite():
