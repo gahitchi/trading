@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from dataclasses import replace
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -118,6 +119,51 @@ def demo(
     return result
 
 
+def native_demo(balance: Decimal = Decimal("1000")) -> dict:
+    """Native Nautilus market-data smoke run; no strategies, orders, accounts or keys."""
+    from lab.markets.nautilus_data import build_causal_tape
+    from lab.markets.nautilus_instruments import LinearContractDefinition
+    from lab.markets.nautilus_runtime import replay_native_observations
+
+    instrument = replace(fixture_instrument(), symbol="BTC-USD-SWAP")
+    spec = LinearContractDefinition(
+        instrument=instrument,
+        base_currency="BTC",
+        settlement_currency="USD",
+        maker_fee_bps=Decimal("2"),
+        taker_fee_bps=Decimal("5"),
+        definition_ns=0,
+        observed_ns=0,
+        metadata_source="offline_fixture",
+    )
+    source = Path(str(files("lab.markets").joinpath("fixture.csv")))
+    observations = []
+    for trade, price in read_trades(source):
+        observations.append(MarkPrice(f"mark-{trade.trade_id}", trade.exchange_ns, trade.received_ns, price))
+        observations.append(trade)
+    tape = build_causal_tape(instrument, observations)
+    result = replay_native_observations(spec, tape, collateral=balance)
+    return {
+        "mode": "offline_sim",
+        "input_kind": "synthetic_fixture",
+        "engine": "nautilus_backtest_native",
+        "instrument": result.native_instrument_id,
+        "trade_observations": result.trade_observations,
+        "mark_observations": result.mark_observations,
+        "first_received_ns": result.first_received_ns,
+        "last_received_ns": result.last_received_ns,
+        "maker_fee_rate": str(result.maker_fee_rate),
+        "taker_fee_rate": str(result.taker_fee_rate),
+        "native_data_engine_used": result.native_data_engine_used,
+        "fees_charged_verified": result.fees_charged_verified,
+        "strategies_qualified": result.strategies_qualified,
+        "orders_routed": False,
+        "broker_execution_enabled": result.broker_execution_enabled,
+        "market_data_validated": False,
+        "qualified_for_live_trading": False,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Offline multi-market reference lab, NO exchange connectivity")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -127,6 +173,8 @@ def main() -> None:
     d.add_argument("--side", choices=["buy", "sell"], default="sell")
     d.add_argument("--balance", type=Decimal, default=Decimal("1000"))
     d.add_argument("--journal", type=Path, help="optional durable SQLite journal; refuses overwriting old sessions")
+    nd = sub.add_parser("native-demo", help="read-only native Nautilus replay of a bundled synthetic fixture")
+    nd.add_argument("--balance", type=Decimal, default=Decimal("1000"))
     recover = sub.add_parser("recover", help="verify and resume a durable OFFLINE_SIM journal; no broker orders")
     recover.add_argument("--journal", type=Path, required=True)
     recover.add_argument("--balance", type=Decimal, default=Decimal("1000"))
@@ -151,6 +199,8 @@ def main() -> None:
         path = args.csv if args.csv is not None else Path(str(sample))
         with EventJournal(args.journal) if args.journal is not None else nullcontext() as journal:
             print(json.dumps(demo(path, args.quantity, Side(args.side), args.balance, journal=journal), indent=2))
+    elif args.command == "native-demo":
+        print(json.dumps(native_demo(args.balance), indent=2))
     elif args.command == "recover":
         with EventJournal(args.journal) as journal:
             sim = recover_offline(fixture_instrument(), journal, starting_balance=args.balance)
