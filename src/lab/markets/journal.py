@@ -14,7 +14,19 @@ import re
 import sqlite3
 from pathlib import Path
 
-_ALLOWED_KINDS = {"intent", "submitted", "ack", "fill", "partial", "cancel", "reject", "unknown", "mark", "funding", "halt"}
+_ALLOWED_KINDS = {
+    "intent",
+    "submitted",
+    "ack",
+    "fill",
+    "partial",
+    "cancel",
+    "reject",
+    "unknown",
+    "mark",
+    "funding",
+    "halt",
+}
 _GENESIS = "0" * 64
 
 
@@ -108,8 +120,7 @@ class EventJournal:
             previous = row[0] if row else _GENESIS
             digest = _digest(previous, event_id, kind, timestamp_ns, canonical)
             cursor = self._db.execute(
-                "INSERT INTO events (event_id,kind,timestamp_ns,payload,previous_digest,digest)"
-                " VALUES(?,?,?,?,?,?)",
+                "INSERT INTO events (event_id,kind,timestamp_ns,payload,previous_digest,digest) VALUES(?,?,?,?,?,?)",
                 (event_id, kind, timestamp_ns, canonical, previous, digest),
             )
             self._db.execute("COMMIT")
