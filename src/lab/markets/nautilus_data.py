@@ -189,7 +189,9 @@ def build_causal_tape(
             identity = ("quote", f"{observation.seq_id}:{observation.exchange_ns}:{observation.received_ns}")
             converted = to_nautilus_book_quote(observation, instrument)
         else:
-            raise TypeError("only source trades, independent marks and offline sequenced quotes may enter a causal tape")
+            raise TypeError(
+                "only source trades, independent marks and offline sequenced quotes may enter a causal tape"
+            )
         if identity in ids:
             raise ValueError("duplicate event identity in causal tape")
         if observation.received_ns < previous_received:

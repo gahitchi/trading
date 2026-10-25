@@ -145,8 +145,10 @@ def test_duplicate_fills_and_future_funding_refused():
 def test_native_opaque_order_ids_are_bound_but_not_used_for_local_order_creation():
     native = AuditOrder("O-19700101-000000-001", Side.BUY, D("1"))
     fill = replace(
-        first(), client_id=native.client_id,
-        trade_id="T-19700101-001", quantity=D("1"),
+        first(),
+        client_id=native.client_id,
+        trade_id="T-19700101-001",
+        quantity=D("1"),
         charged_fee=D("0.05"),
     )
     result = run((fill,), (native,))
