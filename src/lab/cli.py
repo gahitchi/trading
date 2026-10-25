@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import sys
 from dataclasses import replace
@@ -1179,7 +1180,13 @@ def main(argv=None) -> int:
     if a.cmd == "app":
         from lab.app import serve
 
-        return serve(a)
+        try:
+            return serve(a)
+        except OSError as exc:
+            if exc.errno == errno.EADDRINUSE:
+                print(f"Trading Lab: {exc.strerror or exc}. Try a different --port.", file=sys.stderr)
+                return 2
+            raise
     try:
         cfg = load_config(a.config)
     except ConfigError as e:
