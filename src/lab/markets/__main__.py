@@ -166,6 +166,43 @@ def native_demo(balance: Decimal = Decimal("1000")) -> dict:
     }
 
 
+def native_fill_parity_demo() -> dict:
+    """Real Nautilus matching, synthetic quotes, and exact account parity; never a broker run."""
+    from lab.markets.native_fill_parity import run_native_fill_parity, synthetic_quotes
+    from lab.markets.nautilus_instruments import LinearContractDefinition
+
+    instrument = replace(fixture_instrument(), symbol="BTC-USD-SWAP")
+    spec = LinearContractDefinition(
+        instrument=instrument,
+        base_currency="BTC",
+        settlement_currency="USD",
+        maker_fee_bps=Decimal("2"),
+        taker_fee_bps=Decimal("5"),
+        definition_ns=0,
+        observed_ns=0,
+        metadata_source="offline_fixture",
+    )
+    result = run_native_fill_parity(spec, synthetic_quotes(spec))
+    return {
+        "mode": "offline_sim",
+        "input_kind": result.source,
+        "engine": "nautilus_backtest_native",
+        "instrument": result.instrument,
+        "fills": result.fills,
+        "quantity": str(result.quantity),
+        "entry_price": str(result.entry_price),
+        "exit_price": str(result.exit_price),
+        "gross_pnl": str(result.gross_pnl),
+        "charged_fees": str(result.charged_fees),
+        "net_pnl": str(result.net_pnl),
+        "ending_balance": str(result.ending_balance),
+        "expected_ending_balance": str(result.expected_ending_balance),
+        "execution_cost_parity_verified": result.execution_cost_parity_verified,
+        "broker_execution_enabled": False,
+        "qualified_for_live_trading": False,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Offline multi-market reference lab, NO exchange connectivity")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -175,6 +212,10 @@ def main() -> None:
     d.add_argument("--side", choices=["buy", "sell"], default="sell")
     d.add_argument("--balance", type=Decimal, default=Decimal("1000"))
     d.add_argument("--journal", type=Path, help="optional durable SQLite journal; refuses overwriting old sessions")
+    sub.add_parser(
+        "native-fill-parity",
+        help="verify two real native synthetic fills, charged fees and independent Decimal collateral parity",
+    )
     nd = sub.add_parser("native-demo", help="read-only native Nautilus replay of a bundled synthetic fixture")
     nd.add_argument("--balance", type=Decimal, default=Decimal("1000"))
     recover = sub.add_parser("recover", help="verify and resume a durable OFFLINE_SIM journal; no broker orders")
@@ -201,6 +242,8 @@ def main() -> None:
         path = args.csv if args.csv is not None else Path(str(sample))
         with EventJournal(args.journal) if args.journal is not None else nullcontext() as journal:
             print(json.dumps(demo(path, args.quantity, Side(args.side), args.balance, journal=journal), indent=2))
+    elif args.command == "native-fill-parity":
+        print(json.dumps(native_fill_parity_demo(), indent=2))
     elif args.command == "native-demo":
         print(json.dumps(native_demo(args.balance), indent=2))
     elif args.command == "recover":
