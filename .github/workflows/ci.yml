@@ -7,6 +7,12 @@ on:
 permissions:
   contents: read
 
+# Rapid feature-branch pushes must not queue dozens of obsolete six-job matrices.
+# Preserve all main-branch checks; supersede only older runs for the same feature ref.
+concurrency:
+  group: trading-lab-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   collab:
     runs-on: ubuntu-latest
