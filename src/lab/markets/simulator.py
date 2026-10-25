@@ -7,7 +7,7 @@ market fills use the next observed trade with explicit adverse slippage.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
 from lab.markets.accounting import linear_notional, linear_transition, linear_unrealized, signed_funding_payment
@@ -139,6 +139,26 @@ class OfflineSimulator:
         self.total_funding_paid = Decimal("0")
         self.total_realized = Decimal("0")
         self.last_trade_id: str | None = None
+        if self.journal is not None:
+            self.journal.append("session:offline:v1", "session", 0, self.session_identity())
+
+    def session_identity(self) -> dict:
+        """Versioned session fingerprint: replay must not change money or risk assumptions."""
+        return {
+            "schema": 1,
+            "mode": str(self.mode),
+            "instrument": {
+                field.name: str(getattr(self.instrument, field.name))
+                for field in fields(self.instrument)
+            },
+            "limits": {
+                field.name: str(getattr(self.limits, field.name))
+                for field in fields(self.limits)
+            },
+            "starting_balance": str(self.starting_balance),
+            "taker_fee_bps": str(self.taker_fee_bps),
+            "slippage_bps": str(self.slippage_bps),
+        }
 
     @property
     def unrealized(self) -> Decimal:
