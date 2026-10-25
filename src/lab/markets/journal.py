@@ -15,6 +15,7 @@ import sqlite3
 from pathlib import Path
 
 _ALLOWED_KINDS = {
+    "session",
     "intent",
     "submitted",
     "ack",
