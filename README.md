@@ -4,7 +4,9 @@
 > The original IBKR US-stock application remains paper-only and broker-dependent until an individually
 > tested migration. The multi-market CLI is an offline reference simulator, **not yet** a connected demo
 > broker, certified matching engine, deployable autonomous crypto bot or live-money trading system.
-> See [the architecture](docs/architecture/multimarket-2026-10-25.md).
+> See [the architecture](docs/architecture/multimarket-2026-10-25.md) and the
+> [institutional application-flow and open-source review](docs/audits/2026-10-25-institutional-flow-open-source-review.md)
+> for verified capabilities, unimplemented release gates and source/license selection.
 
 ## Multi-market proof of concept (this branch only)
 
