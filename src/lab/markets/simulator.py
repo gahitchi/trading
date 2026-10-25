@@ -10,11 +10,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
+from lab.markets.accounting import linear_notional, linear_transition, linear_unrealized, signed_funding_payment
 from lab.markets.domain import (
     AssetClass,
     Capabilities,
     ContractKind,
     Instrument,
+    MarkPrice,
     OrderIntent,
     Side,
     Trade,
@@ -26,6 +28,7 @@ from lab.markets.domain import (
 from lab.markets.journal import EventJournal, JournalError
 
 DAY_NS = 86_400_000_000_000
+MAX_MARK_AGE_NS = 120_000_000_000  # conservative offline-only reference policy
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +118,9 @@ class OfflineSimulator:
         self.position = Decimal("0")
         self.entry = Decimal("0")
         self.mark: Decimal | None = None
+        self.mark_ns = -1
+        self.last_trade_price: Decimal | None = None
+        self._last_mark_id: str | None = None
         self.last_ns = -1
         self.last_event_ns = -1
         self._trade_ids_at_timestamp: set[str] = set()
@@ -136,7 +142,7 @@ class OfflineSimulator:
     def unrealized(self) -> Decimal:
         if self.mark is None or self.position == 0:
             return Decimal("0")
-        return (self.mark - self.entry) * self.position * self.instrument.multiplier
+        return linear_unrealized(self.position, self.entry, self.mark, self.instrument.multiplier)
 
     @property
     def equity(self) -> Decimal:
@@ -144,7 +150,9 @@ class OfflineSimulator:
 
     @property
     def exposure(self) -> Decimal:
-        return abs(self.position * (self.mark or Decimal("0")) * self.instrument.multiplier)
+        if self.mark is None:
+            return Decimal("0")
+        return linear_notional(self.position, self.mark, self.instrument.multiplier)
 
     def submit(self, intent: OrderIntent) -> None:
         self.capabilities.require(self.instrument, TradingMode.OFFLINE_SIM, short=intent.side == Side.SELL)
@@ -153,8 +161,10 @@ class OfflineSimulator:
         if intent.client_order_id in self.used_ids:
             raise ValueError("duplicate client order ID, including already filled/cancelled")
         self.instrument.check_quantity(intent.quantity)
-        if self.mark is None or intent.created_ns < self.last_ns:
-            raise ValueError("order needs a valid mark and non-stale decision timestamp")
+        if self.mark is None or intent.created_ns < self.last_event_ns:
+            raise ValueError("order needs an observed mark and non-stale decision timestamp")
+        if not intent.reduce_only and intent.created_ns - self.mark_ns > MAX_MARK_AGE_NS:
+            raise ValueError("mark price is stale for risk-increasing orders")
         if intent.quantity * self.mark * self.instrument.multiplier < self.instrument.min_notional:
             raise ValueError("order below instrument minimum notional")
         if intent.quantity * self.mark * self.instrument.multiplier > self.limits.max_order_notional:
@@ -191,22 +201,8 @@ class OfflineSimulator:
         return self.position != 0 and self.position * delta < 0 and abs(delta) <= abs(self.position)
 
     def _next_position(self, delta: Decimal, fill_price: Decimal) -> tuple[Decimal, Decimal, Decimal]:
-        old = self.position
-        new = old + delta
-        if old == 0 or old * delta > 0:
-            avg = ((abs(old) * self.entry + abs(delta) * fill_price) / abs(new)) if new else Decimal("0")
-            return new, avg, Decimal("0")
-        closed = min(abs(old), abs(delta))
-        realized = (fill_price - self.entry) * closed * self.instrument.multiplier
-        if old < 0:
-            realized = -realized
-        if new == 0:
-            avg = Decimal("0")
-        elif old * new > 0:
-            avg = self.entry
-        else:
-            avg = fill_price
-        return new, avg, realized
+        transition = linear_transition(self.position, self.entry, delta, fill_price, self.instrument.multiplier)
+        return transition.position, transition.entry_price, transition.realized_pnl
 
     def _price(self, last: Decimal, side: Side) -> Decimal:
         shift = last * self.slippage_bps / Decimal("10000")
@@ -228,7 +224,7 @@ class OfflineSimulator:
         reducing: bool,
     ) -> None:
         projected_balance = self.balance + realized - fee
-        projected_unreal = (self.mark - avg) * new_pos * self.instrument.multiplier
+        projected_unreal = linear_unrealized(new_pos, avg, self.mark, self.instrument.multiplier)
         projected_equity = projected_balance + projected_unreal
         if reducing:
             return  # emergency reductions are allowed even in a maintenance breach
@@ -236,7 +232,9 @@ class OfflineSimulator:
             raise ValueError("hard halt forbids new exposure")
         if projected_equity <= 0:
             raise ValueError("insufficient equity")
-        notional = abs(new_pos * self.mark * self.instrument.multiplier)
+        if self.last_ns - self.mark_ns > MAX_MARK_AGE_NS:
+            raise ValueError("valuation mark too old for risk-increasing fill")
+        notional = linear_notional(new_pos, self.mark, self.instrument.multiplier)
         max_exposure = min(self.limits.max_gross, self.limits.max_position_fraction) * projected_equity
         if notional > max_exposure:
             raise ValueError("projected exposure exceeds operator risk ceilings")
@@ -257,6 +255,8 @@ class OfflineSimulator:
         if order.reduce_only and not reducing:
             raise ValueError("reduce-only order cannot increase position")
         px = self._price(trade.price, order.side)
+        if not reducing and (self.mark is None or trade.exchange_ns - self.mark_ns > MAX_MARK_AGE_NS):
+            raise ValueError("mark price stale or missing at fill time")
         notional = qty * px * self.instrument.multiplier
         fee = notional * self.taker_fee_bps / Decimal("10000")
         new_pos, avg, realized = self._next_position(delta, px)
@@ -308,6 +308,29 @@ class OfflineSimulator:
                     self.pending.pop(order_id)
                     self.rejections.append((order_id, self.halt_reason))
 
+    def on_mark(self, mark: MarkPrice) -> None:
+        """Valuation/maintenance updates occur on independent exchange mark events."""
+        if mark.exchange_ns < self.last_event_ns or mark.exchange_ns < self.mark_ns:
+            raise ValueError("out-of-order mark event")
+        if mark.mark_id == self._last_mark_id:
+            raise ValueError("duplicate mark event")
+        self.instrument.check_price(mark.price)
+        if self.journal is not None:
+            self.journal.append(
+                f"valuation:{mark.mark_id}",
+                "mark",
+                mark.exchange_ns,
+                {"mark_price": str(mark.price), "received_ns": mark.received_ns},
+            )
+        if self.day_index != mark.exchange_ns // DAY_NS:
+            self.day_index = mark.exchange_ns // DAY_NS
+            self.day_open_equity = self.equity
+        self.mark = mark.price
+        self.mark_ns = mark.exchange_ns
+        self.last_event_ns = mark.exchange_ns
+        self._last_mark_id = mark.mark_id
+        self._risk_update()
+
     def on_trade(self, trade: Trade) -> tuple[Fill, ...]:
         if trade.exchange_ns < self.last_event_ns:
             raise ValueError("out-of-order trade or funding event timestamp")
@@ -328,11 +351,11 @@ class OfflineSimulator:
         if self.day_index != day:
             self.day_index = day
             self.day_open_equity = self.equity
-        self.mark = trade.price
+        self.last_trade_price = trade.price
         self.last_ns = trade.exchange_ns
         self.last_event_ns = trade.exchange_ns
         self.last_trade_id = trade.trade_id
-        self._risk_update()
+        # A last-trade wick must not alter valuation, drawdown or liquidation.
         results = []
         for order_id, pending in tuple(self.pending.items()):
             if order_id not in self.pending:
@@ -365,7 +388,9 @@ class OfflineSimulator:
             raise ValueError("implausible funding rate; input is a fraction, not percent")
         if self.mark is None:
             raise ValueError("no valid market mark for funding")
-        payment = self.position * self.mark * self.instrument.multiplier * rate
+        if timestamp_ns - self.mark_ns > MAX_MARK_AGE_NS:
+            raise ValueError("cannot settle funding against stale valuation mark")
+        payment = signed_funding_payment(self.position, self.mark, self.instrument.multiplier, rate)
         if self.journal is not None:
             self.journal.append(
                 f"funding:{funding_id}",
@@ -389,6 +414,8 @@ class OfflineSimulator:
             "position": str(self.position),
             "entry_price": str(self.entry),
             "mark_price": str(self.mark) if self.mark is not None else None,
+            "last_trade_price": str(self.last_trade_price) if self.last_trade_price is not None else None,
+            "mark_timestamp_ns": self.mark_ns if self.mark is not None else None,
             "unrealized_pnl": str(self.unrealized),
             "realized_pnl": str(self.total_realized),
             "fees": str(self.total_fees),
