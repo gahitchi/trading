@@ -148,7 +148,13 @@ def latest_confirmed_candles(instrument_id: str, *, limit: int = 100) -> tuple[P
         payload = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise MarketDataError("OKX returned invalid JSON") from exc
-    return parse_confirmed_candles(payload, instrument_id)
+    import time
+
+    bars = parse_confirmed_candles(payload, instrument_id)
+    observed_ns = time.time_ns()
+    if any(bar.end_ns > observed_ns for bar in bars):
+        raise MarketDataError("provider marked a future candle as completed")
+    return bars
 
 
 def historical_confirmed_candles(
@@ -180,6 +186,8 @@ def historical_confirmed_candles(
             params["after"] = str(cursor_ms)
         payload, _received_ns = _fetch("/api/v5/market/history-candles", params)
         page = parse_confirmed_candles(payload, instrument_id)
+        if any(bar.end_ns > _received_ns for bar in page):
+            raise MarketDataError("historical provider marked a future candle as completed")
         if not page:
             break
         if cursor_ms is not None and page[-1].start_ns >= cursor_ms * 1_000_000:
