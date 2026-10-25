@@ -66,6 +66,7 @@ class ReconciliationSnapshot:
     observed_ns: int
     orders: tuple[RecordedOrder, ...]
     positions: tuple[tuple[str, Decimal], ...]
+    collateral_balances: tuple[tuple[str, Decimal], ...]
 
     def __post_init__(self) -> None:
         if not re.fullmatch("[A-Z0-9]{2,16}", self.venue):
@@ -78,6 +79,12 @@ class ReconciliationSnapshot:
             if not iid or not isinstance(quantity, Decimal):
                 raise TypeError("positions require canonical instrument and exact Decimal quantity")
             decimal(quantity)
+        if not self.collateral_balances:
+            raise ValueError("broker reconciliation requires independent collateral evidence")
+        for currency, amount in self.collateral_balances:
+            if not re.fullmatch(r"[A-Z]{3,8}", currency) or not isinstance(amount, Decimal):
+                raise TypeError("collateral balances require currency and exact Decimal")
+            decimal(amount)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +93,7 @@ class ReconciliationDecision:
     findings: tuple[str, ...]
     compared_orders: int
     compared_positions: int
+    compared_currencies: int
     # A matching snapshot does NOT authorize execution. No live or demo
     # enablement is exposed from this pure decision oracle.
     execution_authorized: bool = False
@@ -140,6 +148,8 @@ def reconcile_demo(
     theirs = _unique_orders(external.orders, "external")
     local_positions = _unique_positions(local.positions, "local")
     ext_positions = _unique_positions(external.positions, "external")
+    local_balances = _unique_positions(local.collateral_balances, "local collateral")
+    ext_balances = _unique_positions(external.collateral_balances, "external collateral")
     problems = set()
     if any(o.status == OrderState.UNKNOWN for o in (*local.orders, *external.orders)):
         problems.add("unresolved_unknown_order")
@@ -169,9 +179,14 @@ def reconcile_demo(
     for iid in local_positions.keys() | ext_positions.keys():
         if local_positions.get(iid, Decimal("0")) != ext_positions.get(iid, Decimal("0")):
             problems.add("position_mismatch")
+    # A zero collateral balance is not equivalent to a currency missing from
+    # the account snapshot: no implicit FX conversion or netting is allowed.
+    if local_balances != ext_balances:
+        problems.add("collateral_balance_mismatch")
     return ReconciliationDecision(
         frozen=bool(problems),
         findings=tuple(sorted(problems)),
         compared_orders=len(ours.keys() | theirs.keys()),
         compared_positions=len(local_positions.keys() | ext_positions.keys()),
+        compared_currencies=len(local_balances.keys() | ext_balances.keys()),
     )
