@@ -51,15 +51,17 @@
         "src/lab/markets/catalog.py",
         "tests/test_markets_catalog.py",
         "src/lab/markets/okx_observations.py",
-        "tests/test_markets_okx_observations.py"
+        "tests/test_markets_okx_observations.py",
+        "src/lab/markets/nautilus_data.py",
+        "tests/test_markets_nautilus_data.py"
       ],
       "missing": [
         "streaming trade/quote feed",
         "source completeness + market-data reconciliation",
-        "Nautilus bridge",
+        "full Nautilus actor/instrument/account runtime integration",
         "independent raw feed capture with qualified completeness and source revisions"
       ],
-      "note": "The public OKX EEA candles CLI is read-only. Accurate derivative trading still requires quote, independent mark/index and funding sources, venue qualifications, immutable Parquet catalogs and Nautilus bridge. See institutional flow audit. Local immutable daily confirmed-candle Parquet partitions with SHA-256 and gap metadata are implemented; this is not a complete raw L2/trade/mark/funding replay source. Public recent trades (including taker side) and independent swap mark snapshots are now parsed from EEA-hosted endpoints. They are not quote/L2/funding feeds and do not qualify account region or complete replay coverage."
+      "note": "The public OKX EEA candles CLI is read-only. Accurate derivative trading still requires quote, independent mark/index and funding sources, venue qualifications, immutable Parquet catalogs and Nautilus bridge. See institutional flow audit. Local immutable daily confirmed-candle Parquet partitions with SHA-256 and gap metadata are implemented; this is not a complete raw L2/trade/mark/funding replay source. Public recent trades (including taker side) and independent swap mark snapshots are now parsed from EEA-hosted endpoints. They are not quote/L2/funding feeds and do not qualify account region or complete replay coverage. Initial exact read-only TradeTick/Bar conversions to pinned Nautilus event types are implemented, with receipt-time causality checks. No bound Nautilus CryptoPerpetual instrument or broker execution agent is qualified."
     },
     {
       "id": "D3-externally-hosted-demo",

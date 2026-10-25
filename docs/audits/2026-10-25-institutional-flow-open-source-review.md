@@ -3,7 +3,7 @@
 
 ## Executive verdict
 
-The repo already has a serious **US-equities paper-research core**: one Nautilus event-bus trading actor stack, research process isolation, approval and holdout guards, a configurable portfolio allocator, initial-margin reservations against subsets of independent fills, broker reconciliation, and operator authority controls. These are reusable intellectual and engineering assets, **not a cheap copy**. The newly added `lab.markets` is still a **separate offline derivative-accounting reference** and public-candle reader. It has no real demo exchange executor, no Nautilus crypto actor bridge, no production research data catalog, and no GUI integration. Making a claim of multi-market production capability today would be inconsistent with the code.
+The repo already has a serious **US-equities paper-research core**: one Nautilus event-bus trading actor stack, research process isolation, approval and holdout guards, a configurable portfolio allocator, initial-margin reservations against subsets of independent fills, broker reconciliation, and operator authority controls. These are reusable intellectual and engineering assets, **not a cheap copy**. The newly added `lab.markets` is still a **separate offline derivative-accounting reference**, public-feed reader and small read-only Nautilus `TradeTick`/`Bar` conversion boundary. It has no real demo exchange executor, no Nautilus crypto actor bridge, no production research data catalog, and no GUI integration. Making a claim of multi-market production capability today would be inconsistent with the code.
 
 **Strategic choice:** preserve the Nautilus engine and shared agents; build no second execution engine. Use selectively chosen, genuinely open-source libraries for *bounded*, reviewed responsibilities. Do not mistake many strategies, many AI models, or backtest speed for out-of-sample edge. No proprietary fund's secret algorithm is available to copy lawfully, and even a published institution-grade method requires independently tested data, costs, constraints and uncertainty. Incorporate **publicly documented** institutional methods with attribution and independent implementation or properly licensed upstream code.
 
@@ -171,3 +171,16 @@ The original system already has DSR, PSR/HAC adjustments, PBO/CPCV variants, sta
 8. **Venue-specific legal eligibility / live account authorizations**: independent checks and human approval required; no order-routing fallback allowed.
 
 **Review request:** check the fixes and P0/P1 choices with Claude; no push/merge to `main` without explicit owner authorization. Do not turn this audit into another full parallel trading framework.
+
+## Implementation addendum — 2026-10-25 D1/D2/D4
+
+The branch now adds deterministic session-bound replay of the **local offline-only** journal
+(`src/lab/markets/recovery.py`) and immutable UTC-day SHA-256 Parquet candle partitions
+(`src/lab/markets/catalog.py`). It offers a token-authenticated browser synthetic sandbox,
+a read-only EEA public mark/trades snapshot with separately observed timestamps, and the
+first typed conversion into existing pinned Nautilus `TradeTick` and completed `Bar`.
+The pure accounting oracle is still separate from production agents. These additions do not
+qualify a live account, venue contract, queue fills, historical feed completeness, multi-account
+margin, automatic strategies, restart after *external* orders, or a native installer on either OS.
+
+Latest acceptance checklist: `docs/acceptance/multimarket-credential-free.md`.

@@ -41,6 +41,14 @@ missing-interval metadata, but it does **not** qualify their source completeness
 The observations command fetches the latest EEA-hosted public swap mark and recent executed trades as
 **separate timestamped feeds**, preserving aggressor side and source labels. It does **not** provide best
 bid/ask, L2 depth, funding settlement history, full trade continuity or permission to submit orders.
+A typed, offline-only conversion boundary can encode actual observations as NautilusTrader `TradeTick`
+events and confirmed candles as `Bar` events, preserving receipt time so late-fetched bars cannot leak into
+earlier decisions. **This is not yet a running crypto Nautilus strategy, order-management service or broker.**
+The browser app also has a **Try crypto without a broker** synthetic-sample panel before IBKR setup;
+the paper-trading plan and its broker-dependent Start button remain distinct.
+
+For operator-side verification without secrets, see
+[credential-free acceptance checks](docs/acceptance/multimarket-credential-free.md).
 
 This does not trade or backtest those candles; it deliberately excludes unfinished bars, and historical
 bar OHLCV is not sufficient to simulate realistic exchange fills. See the D2/D3/D6 gates in the design.
