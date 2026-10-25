@@ -10,6 +10,7 @@ from lab.markets import (
     AssetClass,
     ContractKind,
     Instrument,
+    MarkPrice,
     MinuteBuilder,
     OfflineSimulator,
     OrderIntent,
@@ -46,6 +47,18 @@ def event(idx: int, px: str = "100", *, timestamp: int | None = None) -> Trade:
 def order(id_: str, side: Side, qty: str, ts: int, *, reduce_only: bool = False) -> OrderIntent:
     return OrderIntent(id_, instrument().instrument_id, side, D(qty), ts, reduce_only=reduce_only)
 
+def observed(sim: OfflineSimulator, trade: Trade, *, mark: str | None = None):
+    """Explicitly provide the independent synthetic valuation feed in fixture tests."""
+    sim.on_mark(
+        MarkPrice(
+            f"valuation-{trade.trade_id}",
+            trade.exchange_ns,
+            trade.received_ns,
+            D(mark) if mark is not None else trade.price,
+        )
+    )
+    return sim.on_trade(trade)
+
 
 def test_execution_modes_are_unreachable() -> None:
     for mode in (TradingMode.BROKER_DEMO, TradingMode.LIVE):
@@ -74,15 +87,15 @@ def test_domain_rejects_bad_precision_or_margin() -> None:
 
 def test_short_no_proceeds_and_cover_realizes_pnl() -> None:
     sim = OfflineSimulator(instrument(), taker_fee_bps=D("0"), slippage_bps=D("0"))
-    sim.on_trade(event(1))
+    observed(sim, event(1))
     sim.submit(order("open", Side.SELL, "1", 1_000_000_000))
-    assert not sim.on_trade(event(10, timestamp=1_000_000_000))
-    assert len(sim.on_trade(event(2))) == 1
+    assert not observed(sim, event(10, timestamp=1_000_000_000))
+    assert len(observed(sim, event(2))) == 1
     assert sim.position == D("-1")
     assert sim.balance == D("1000")  # short sale proceeds do not become free cash
     assert sim.unrealized == D("0")
     sim.submit(order("cover", Side.BUY, "1", 2_000_000_000, reduce_only=True))
-    sim.on_trade(event(3, "90"))
+    observed(sim, event(3, "90"))
     assert sim.position == 0
     assert sim.balance == D("1010")
     assert sim.total_realized == D("10")
@@ -90,9 +103,9 @@ def test_short_no_proceeds_and_cover_realizes_pnl() -> None:
 
 def test_funding_is_explicit_and_signed() -> None:
     sim = OfflineSimulator(instrument(), taker_fee_bps=D("0"), slippage_bps=D("0"))
-    sim.on_trade(event(1))
+    observed(sim, event(1))
     sim.submit(order("short", Side.SELL, "1", 1_000_000_000))
-    sim.on_trade(event(2))
+    observed(sim, event(2))
     paid = sim.apply_funding("fund1", D("0.001"), 3_000_000_000)
     assert paid == D("-0.1")  # short receives funding for positive rate
     assert sim.balance == D("1000.1")
@@ -103,21 +116,21 @@ def test_funding_is_explicit_and_signed() -> None:
 def test_hard_halt_blocks_new_orders_but_allows_cover() -> None:
     limits = SimulationLimits(max_daily_loss=D("0.01"), max_drawdown=D("0.02"))
     sim = OfflineSimulator(instrument(), limits=limits, taker_fee_bps=D("0"), slippage_bps=D("0"))
-    sim.on_trade(event(1))
+    observed(sim, event(1))
     sim.submit(order("short", Side.SELL, "1", 1_000_000_000))
-    sim.on_trade(event(2))
-    sim.on_trade(event(3, "130"))
+    observed(sim, event(2))
+    observed(sim, event(3, "130"))
     assert sim.halt_reason
     with pytest.raises(ValueError, match="hard halt"):
         sim.submit(order("new", Side.SELL, "1", 3_000_000_000))
     sim.submit(order("exit", Side.BUY, "1", 3_000_000_000, reduce_only=True))
-    sim.on_trade(event(4, "130"))
+    observed(sim, event(4, "130"))
     assert sim.position == 0
 
 
 def test_reduction_never_reverses_and_order_ids_are_unique() -> None:
     sim = OfflineSimulator(instrument())
-    sim.on_trade(event(1))
+    observed(sim, event(1))
     with pytest.raises(ValueError, match="reduce-only"):
         sim.submit(order("cover", Side.BUY, "1", 1_000_000_000, reduce_only=True))
     sim.submit(order("unique", Side.BUY, "1", 1_000_000_000))
@@ -128,20 +141,20 @@ def test_reduction_never_reverses_and_order_ids_are_unique() -> None:
 
 def test_operator_risk_prevents_oversized_exposure() -> None:
     sim = OfflineSimulator(instrument(), taker_fee_bps=D("0"), slippage_bps=D("0"))
-    sim.on_trade(event(1))
+    observed(sim, event(1))
     sim.submit(order("big", Side.BUY, "9", 1_000_000_000))
-    assert not sim.on_trade(event(2))
+    assert not observed(sim, event(2))
     assert not sim.position
     assert "risk ceilings" in sim.rejections[0][1]
 
 
 def test_first_fill_is_strictly_after_decision() -> None:
     sim = OfflineSimulator(instrument(), taker_fee_bps=D("0"), slippage_bps=D("0"))
-    sim.on_trade(event(1))
+    observed(sim, event(1))
     sim.submit(order("entry", Side.BUY, "1", 1_000_000_000))
-    sim.on_trade(event(4, timestamp=1_000_000_000))
+    observed(sim, event(4, timestamp=1_000_000_000))
     assert sim.position == 0
-    sim.on_trade(event(5))
+    observed(sim, event(5))
     assert sim.position == 1
 
 
@@ -170,7 +183,7 @@ def test_bars_reject_duplicate_and_late_trades() -> None:
 def test_off_tick_trade_refused() -> None:
     sim = OfflineSimulator(instrument())
     with pytest.raises(ValueError, match="tick"):
-        sim.on_trade(event(1, "100.05"))
+        observed(sim, event(1, "100.05"))
 
 
 def test_no_spot_short_in_linear_reference() -> None:
@@ -220,11 +233,11 @@ def test_offline_cli_fixture_smoke() -> None:
 
 def test_funding_events_prevent_time_travel_in_subsequent_trades() -> None:
     sim = OfflineSimulator(instrument())
-    sim.on_trade(event(1))
+    observed(sim, event(1))
     sim.apply_funding("fund1", D("0.001"), 5_000_000_000)
     with pytest.raises(ValueError, match="out-of-order"):
-        sim.on_trade(event(2))
-    sim.on_trade(event(6))
+        observed(sim, event(2))
+    observed(sim, event(6))
 
 
 def test_minute_bar_dedup_does_not_accumulate_all_historical_ids() -> None:
@@ -233,3 +246,49 @@ def test_minute_bar_dedup_does_not_accumulate_all_historical_ids() -> None:
     assert len(builder._trade_ids) == 1
     builder.flush(60_000_000_000)
     assert not builder._trade_ids
+
+
+def test_last_trade_wick_does_not_liquidate_with_healthy_mark() -> None:
+    sim = OfflineSimulator(instrument(), taker_fee_bps=D("0"), slippage_bps=D("0"))
+    observed(sim, event(1, "100"))
+    sim.submit(order("short1", Side.SELL, "1", 1_000_000_000))
+    observed(sim, event(2, "100"))
+    assert sim.position == D("-1")
+    assert sim.mark == D("100")
+    # Independent trade and mark series: thin-book flash last price of 999.
+    sim.on_trade(event(3, "999"))
+    assert sim.mark == D("100")
+    assert sim.last_trade_price == D("999")
+    assert sim.unrealized == 0
+    assert sim.halt_reason is None
+    # A genuine mark-price move, unlike a trade wick, MUST update equity/risk.
+    sim.on_mark(MarkPrice("newmark", 4_000_000_000, 4_000_000_000, D("130")))
+    assert sim.halt_reason is not None
+
+
+@pytest.mark.parametrize(
+    ("side", "rate", "expected"),
+    [
+        (Side.BUY, "0.01", "-1"),
+        (Side.BUY, "-0.01", "1"),
+        (Side.SELL, "0.01", "1"),
+        (Side.SELL, "-0.01", "-1"),
+    ],
+)
+def test_funding_both_directions_on_both_sides(side: Side, rate: str, expected: str) -> None:
+    sim = OfflineSimulator(instrument(), taker_fee_bps=D("0"), slippage_bps=D("0"))
+    observed(sim, event(1, "100"))
+    sim.submit(order("entry", side, "1", 1_000_000_000))
+    observed(sim, event(2, "100"))
+    assert sim.position == D(side.sign)
+    debit = sim.apply_funding("settlement", D(rate), 3_000_000_000)
+    assert debit == -D(expected)
+    assert sim.balance == D("1000") + D(expected)
+
+
+def test_stale_mark_refuses_new_risk_even_with_recent_trade() -> None:
+    sim = OfflineSimulator(instrument(), taker_fee_bps=D("0"), slippage_bps=D("0"))
+    observed(sim, event(1, "100"))
+    sim.on_trade(event(2, "100", timestamp=150_000_000_000))
+    with pytest.raises(ValueError, match="stale"):
+        sim.submit(order("stale", Side.BUY, "1", 150_000_000_000))
