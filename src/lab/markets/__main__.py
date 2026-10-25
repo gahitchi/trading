@@ -196,55 +196,9 @@ def main() -> None:
             )
         )
     elif args.command == "microstructure":
-        from lab.markets.okx_microstructure import current_public_book, current_public_funding
+        from lab.markets.preview import public_preview
 
-        book = current_public_book(args.instrument, depth=args.depth)
-        funding = current_public_funding(args.instrument)
-        spread_bps = None
-        if book.spread is not None:
-            midpoint = (book.best_bid + book.best_ask) / 2
-            spread_bps = str(book.spread / midpoint * Decimal("10000"))
-        print(
-            json.dumps(
-                {
-                    "instrument": args.instrument,
-                    "source": "OKX_EEA_PUBLIC_REST_SNAPSHOTS",
-                    "book": {
-                        "exchange_ns": book.exchange_ns,
-                        "received_ns": book.received_ns,
-                        "seq_id": book.sequence_id,
-                        "best_bid": str(book.best_bid),
-                        "best_ask": str(book.best_ask),
-                        "spread": str(book.spread) if book.spread is not None else None,
-                        "spread_bps": spread_bps,
-                        "crossed_or_locked": book.crossed_or_locked,
-                        "bids": [
-                            {"price": str(level.price), "native_size": str(level.size_native), "orders": level.order_count}
-                            for level in book.bids
-                        ],
-                        "asks": [
-                            {"price": str(level.price), "native_size": str(level.size_native), "orders": level.order_count}
-                            for level in book.asks
-                        ],
-                    },
-                    "funding": {
-                        "exchange_ns": funding.exchange_ns,
-                        "received_ns": funding.received_ns,
-                        "indicated_rate": str(funding.indicated_rate),
-                        "funding_time_ns": funding.funding_time_ns,
-                        "next_funding_time_ns": funding.next_funding_time_ns,
-                        "realized_payment_qualified": False,
-                    },
-                    "feeds_synchronized": False,
-                    "complete_depth_or_replay": False,
-                    "snapshot_tradable": False,
-                    "authenticated_account_qualified": False,
-                    "orders_routed": False,
-                    "live_trading_enabled": False,
-                },
-                indent=2,
-            )
-        )
+        print(json.dumps(public_preview(args.instrument, depth=args.depth), indent=2))
     elif args.command == "history":
         from lab.markets.catalog import write_confirmed_candles
         from lab.markets.okx_public import historical_confirmed_candles
