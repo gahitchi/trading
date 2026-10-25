@@ -5,10 +5,10 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from nautilus_trader.model import AggressorSide, Bar, TradeTick
+from nautilus_trader.model import AggressorSide, Bar, MarkPriceUpdate, TradeTick
 
-from lab.markets.domain import AssetClass, ContractKind, Instrument, Side, Trade
-from lab.markets.nautilus_data import nautilus_instrument_id, to_nautilus_completed_bar, to_nautilus_trade
+from lab.markets.domain import AssetClass, ContractKind, Instrument, MarkPrice, Side, Trade
+from lab.markets.nautilus_data import nautilus_instrument_id, to_nautilus_completed_bar, to_nautilus_mark, to_nautilus_trade
 from lab.markets.okx_public import MarketDataError, PublicCandle
 
 D = Decimal
@@ -101,3 +101,16 @@ def test_explicit_instrument_binding_and_price_grid() -> None:
     )
     with pytest.raises(ValueError, match="tick"):
         to_nautilus_completed_bar(off_grid, contract(), received_ns=65_000_000_000)
+
+
+def test_native_mark_price_is_neither_last_trade_nor_quote_and_preserves_receipt() -> None:
+    mark = MarkPrice("mark-9", 100_000, 200_000, D("110.5"))
+    converted = to_nautilus_mark(mark, contract())
+    assert isinstance(converted, MarkPriceUpdate)
+    assert not isinstance(converted, TradeTick)
+    assert converted.ts_event == 100_000
+    assert converted.ts_init == 200_000
+    assert str(converted.value) == "110.5"
+    assert str(converted.instrument_id) == "BTC-USDT-SWAP.OKX"
+    with pytest.raises(ValueError, match="tick"):
+        to_nautilus_mark(MarkPrice("mark-bad", 1, 1, D("110.55")), contract())
