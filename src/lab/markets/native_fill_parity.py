@@ -146,8 +146,13 @@ def _validate_quotes(spec: LinearContractDefinition, quotes: tuple[QuoteTick, ..
     # Reject external quote streams disguised as the artificial deterministic fixture.
     def identity(q: QuoteTick) -> tuple[object, ...]:
         return (
-            str(q.instrument_id), q.ts_event, q.ts_init, str(q.bid_price),
-            str(q.ask_price), str(q.bid_size), str(q.ask_size),
+            str(q.instrument_id),
+            q.ts_event,
+            q.ts_init,
+            str(q.bid_price),
+            str(q.ask_price),
+            str(q.bid_size),
+            str(q.ask_size),
         )
     if tuple(map(identity, quotes)) != tuple(map(identity, synthetic_quotes(spec))):
         raise NativeParityError("native parity requires the exact fixed synthetic quote fixture")
