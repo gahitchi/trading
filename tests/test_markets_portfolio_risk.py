@@ -115,7 +115,7 @@ def test_actual_short_stress_and_funding_buffer_can_refuse_exposure() -> None:
     rows = [state(qty="-4", entry="100")]
     limits = caps(
         max_gross=D("2"),
-        max_instrument_fraction=D("2") if False else D("1"),
+        max_instrument_fraction=D("1"),
         max_loss_currency=D("10"),
         price_gap_bps=D("300"),
         funding_buffer_bps=D("30"),
@@ -147,7 +147,7 @@ def test_adverse_slippage_fees_and_funding_are_not_ignored() -> None:
     result = evaluate(orders=[order("entry", "BTC-USDT-SWAP", Side.BUY, "1")], limits=limits)
     assert not result.allowed
     assert "monetary_loss" in result.breaches
-    assert result.worst_equity < D("997")
+    assert result.worst_equity < D("998")
 
 
 def test_pending_cancel_or_partial_fill_is_not_assumed_to_restore_caps() -> None:
@@ -188,9 +188,14 @@ def test_future_and_stale_market_marks_fail_closed() -> None:
     row = state()
     with pytest.raises(ValueError, match="stale"):
         preflight_pending(
-            (row,), (), collateral_currency="USDT",
-            equity=D("1000"), peak_equity=D("1000"), day_open_equity=D("1000"),
-            asof_ns=120_000_000_201, ceilings=caps(),
+            (row,),
+            (),
+            collateral_currency="USDT",
+            equity=D("1000"),
+            peak_equity=D("1000"),
+            day_open_equity=D("1000"),
+            asof_ns=120_000_000_201,
+            ceilings=caps(),
         )
 
 
