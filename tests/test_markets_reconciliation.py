@@ -38,8 +38,9 @@ def snapshot(
     mode: TradingMode = TradingMode.BROKER_DEMO,
     observed_ns: int = 100,
     account: str = ACCOUNT,
+    balances: tuple[tuple[str, Decimal], ...] = (("USDT", D("1000")),),
 ) -> ReconciliationSnapshot:
-    return ReconciliationSnapshot("OKX", mode, account, observed_ns, orders, positions)
+    return ReconciliationSnapshot("OKX", mode, account, observed_ns, orders, positions, balances)
 
 
 def verify(local, remote):
@@ -164,3 +165,24 @@ def test_mutating_a_snapshot_cannot_override_paper_only_guard() -> None:
     demo = snapshot()
     with pytest.raises(ValueError, match="modes"):
         verify(replace(demo, mode=TradingMode.OFFLINE_SIM), demo)
+
+
+def test_cash_collateral_currency_and_amounts_must_match_exactly() -> None:
+    baseline = snapshot()
+    assert verify(baseline, baseline).compared_currencies == 1
+    for remote in (
+        snapshot(balances=(("USDT", D("999.99")),)),
+        snapshot(balances=(("USD", D("1000")),)),
+        snapshot(balances=(("USDT", D("1000")), ("USD", D("0")))),
+    ):
+        result = verify(baseline, remote)
+        assert result.frozen
+        assert "collateral_balance_mismatch" in result.findings
+
+
+def test_duplicate_collateral_currency_and_empty_broker_balance_are_refused() -> None:
+    with pytest.raises(ValueError, match="collateral"):
+        snapshot(balances=())
+    duplicate = snapshot(balances=(("USDT", D("1")), ("USDT", D("2"))))
+    with pytest.raises(ValueError, match="duplicate"):
+        verify(duplicate, snapshot())
