@@ -24,6 +24,7 @@ _ALLOWED_KINDS = {
     "reject",
     "unknown",
     "mark",
+    "trade",
     "funding",
     "halt",
 }
