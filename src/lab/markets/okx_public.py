@@ -149,3 +149,53 @@ def latest_confirmed_candles(instrument_id: str, *, limit: int = 100) -> tuple[P
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise MarketDataError("OKX returned invalid JSON") from exc
     return parse_confirmed_candles(payload, instrument_id)
+
+
+def historical_confirmed_candles(
+    instrument_id: str, *, pages: int = 5, limit: int = 100
+) -> tuple[PublicCandle, ...]:
+    """Bounded, rate-limited read-only historical 1m observation retrieval.
+
+    Uses the provider's documented `after` (strictly earlier) timestamp
+    cursor. Gaps are never forward-filled, revisions are never silently
+    combined, and overlapping/repeated pages fail closed. This is not a
+    complete historical source or a live execution/quote feed.
+    """
+    import time
+
+    from lab.markets.okx_observations import _fetch
+
+    if not re.fullmatch(r"[A-Z0-9_-]{3,80}", instrument_id):
+        raise MarketDataError("instrument_id must be a canonical OKX identifier")
+    if type(pages) is not int or not 1 <= pages <= 50:
+        raise MarketDataError("historical pages must be 1..50")
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise MarketDataError("historical page limit must be 1..100")
+
+    cursor_ms: int | None = None
+    observed: dict[int, PublicCandle] = {}
+    for number in range(pages):
+        params: dict[str, str | int] = {"instId": instrument_id, "bar": "1m", "limit": limit}
+        if cursor_ms is not None:
+            params["after"] = str(cursor_ms)
+        payload, _received_ns = _fetch("/api/v5/market/history-candles", params)
+        page = parse_confirmed_candles(payload, instrument_id)
+        if not page:
+            break
+        if cursor_ms is not None and page[-1].start_ns >= cursor_ms * 1_000_000:
+            raise MarketDataError("historical provider failed strictly older cursor")
+        for bar in page:
+            if bar.start_ns in observed:
+                raise MarketDataError("overlapping historical pages or inconsistent data revision")
+            observed[bar.start_ns] = bar
+        oldest_ms = page[0].start_ns // 1_000_000
+        if cursor_ms is not None and oldest_ms >= cursor_ms:
+            raise MarketDataError("historical pagination cursor did not progress")
+        cursor_ms = oldest_ms
+        if len(payload["data"]) < limit:
+            break
+        if number + 1 < pages:
+            # 20 requests / 2 seconds published for the history endpoint;
+            # choose a conservative 8 requests/second instead of bursting.
+            time.sleep(0.125)
+    return tuple(observed[key] for key in sorted(observed))
