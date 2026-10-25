@@ -109,7 +109,7 @@ class EventJournal:
         self.close()
 
     def append(self, event_id: str, kind: str, timestamp_ns: int, payload: dict) -> int:
-        if not isinstance(event_id, str) or not re.fullmatch(r"[A-Za-z0-9_:-]{1,128}", event_id):
+        if not isinstance(event_id, str) or not re.fullmatch(r"[A-Za-z0-9_:-]{1,256}", event_id):
             raise JournalError("invalid event ID")
         if kind not in _ALLOWED_KINDS:
             raise JournalError("unknown event kind")
