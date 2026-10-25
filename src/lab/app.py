@@ -553,17 +553,23 @@ class Handler(BaseHTTPRequestHandler):
             raw = body
         else:
             raw = body.encode() if isinstance(body, str) else json.dumps(body, allow_nan=False).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(raw)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header(
-            "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
-        )
-        self.end_headers()
-        self.wfile.write(raw)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+            )
+            self.end_headers()
+            self.wfile.write(raw)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
+            # Browsers may abandon in-flight status polls while the local app
+            # is suspended, refreshed or closing. They do not affect trading.
+            # Suppress only transport disconnects, never application failures.
+            self.close_connection = True
 
     def allowed(self):
         return self.headers.get("Host") in self.server.hosts
@@ -642,7 +648,16 @@ def serve(args):
     controller = Controller(config)
     with (controller.directory / "LOCK").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        server = AppServer((args.host, args.port), controller)
+        try:
+            server = AppServer((args.host, args.port), controller)
+        except OSError as exc:
+            if exc.errno == 98:  # EADDRINUSE: do not interrupt an existing app instance
+                raise OSError(
+                    exc.errno,
+                    f"Trading Lab cannot bind {args.host}:{args.port}: port in use. "
+                    "Identify the listener or select another port with --port.",
+                ) from exc
+            raise
 
         def monitor():
             while not controller.closed.wait(1):
