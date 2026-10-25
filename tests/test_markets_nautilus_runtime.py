@@ -55,6 +55,8 @@ def tape():
 def test_real_native_engine_delivers_independent_trade_and_mark_observations():
     result = replay_native_observations(spec(), tape(), collateral=D("1000"))
     assert result.native_data_engine_used
+    assert result.event_integrity_verified
+    assert result.clock_receipt_verified
     assert result.native_instrument_id == "BTC-USD-SWAP.SIM"
     assert result.trade_observations == 2
     assert result.mark_observations == 2
@@ -84,6 +86,14 @@ def test_unqualified_specification_refuses_before_engine_creation(modification, 
     with pytest.raises(ValueError, match=reason):
         candidate = replace(spec(), **modification)
         replay_native_observations(candidate, tape())
+
+
+def test_contract_metadata_cannot_be_observed_in_the_future_of_replayed_events():
+    observed = tape()
+    first_receipt = observed.events[0].ts_init
+    late_contract = replace(spec(), observed_ns=first_receipt + 1)
+    with pytest.raises(ValueError, match="metadata was received after"):
+        replay_native_observations(late_contract, observed)
 
 
 def test_wrong_native_contract_or_tape_claim_fails_closed():
