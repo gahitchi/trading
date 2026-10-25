@@ -78,9 +78,9 @@ class _RoundTripProbe(Strategy):
         self.order_ids = []
 
     def on_start(self) -> None:
-        self.subscribe_quote_ticks(self.instrument_id)
+        self.subscribe_quotes(self.instrument_id)
 
-    def on_quote_tick(self, tick: QuoteTick) -> None:
+    def on_quote(self, tick: QuoteTick) -> None:
         self.quotes_seen += 1
         if self.quotes_seen == 2:
             side = OrderSide.BUY
