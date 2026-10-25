@@ -298,3 +298,58 @@ def test_stale_mark_refuses_new_risk_even_with_recent_trade() -> None:
     sim.on_trade(event(2, "100", timestamp=150_000_000_000))
     with pytest.raises(ValueError, match="stale"):
         sim.submit(order("stale", Side.BUY, "1", 150_000_000_000))
+
+
+def test_simulator_shares_one_trade_participation_budget_across_pending_orders() -> None:
+    sim = OfflineSimulator(
+        instrument(),
+        starting_balance=D("10000"),
+        taker_fee_bps=D("0"),
+        slippage_bps=D("0"),
+    )
+    sim.on_mark(MarkPrice("mark1", 1, 1, D("100")))
+    sim.on_trade(Trade("trade1", 1, 1, D("100"), D("10")))
+    sim.submit(order("longA", Side.BUY, "0.75", 1))
+    sim.submit(order("longB", Side.BUY, "0.75", 1))
+    sim.on_mark(MarkPrice("mark2", 2, 2, D("100")))
+    fills = sim.on_trade(Trade("trade2", 2, 2, D("100"), D("10")))
+    assert [fill.quantity for fill in fills] == [D("0.75"), D("0.25")]
+    assert sum(fill.quantity for fill in fills) == D("1.00")
+    assert sim.position == D("1")
+    assert sim.pending["longB"].remaining == D("0.50")
+    sim.on_mark(MarkPrice("mark3", 3, 3, D("100")))
+    second = sim.on_trade(Trade("trade3", 3, 3, D("100"), D("10")))
+    assert [fill.quantity for fill in second] == [D("0.50")]
+    assert sim.position == D("1.5")
+    assert not sim.pending
+
+
+def test_invalid_trade_does_not_poison_duplicate_state_or_ledger() -> None:
+    sim = OfflineSimulator(instrument())
+    observed(sim, event(1))
+    bad = Trade("reused", 2_000_000_000, 2_000_000_000, D("100.05"), D("10"))
+    with pytest.raises(ValueError, match="tick"):
+        sim.on_trade(bad)
+    assert sim.last_ns == 1_000_000_000
+    assert sim.last_trade_id == "t1"
+    assert "reused" not in sim._trade_ids_at_timestamp
+    good = Trade("reused", 2_000_000_000, 2_000_000_000, D("100"), D("10"))
+    assert sim.on_trade(good) == ()
+    assert sim.last_trade_id == "reused"
+
+
+def test_delayed_receipt_does_not_seal_valid_next_minute_events() -> None:
+    builder = MinuteBuilder()
+    first = Trade("first", 10_000_000_000, 600_000_000_000, D("100"), D("1"))
+    second = Trade("second", 60_000_000_001, 601_000_000_000, D("110"), D("1"))
+    third = Trade("third", 60_000_000_002, 602_000_000_000, D("115"), D("1"))
+    assert builder.push(first) == ()
+    sealed = builder.push(second)
+    assert len(sealed) == 1
+    assert sealed[0].start_ns == 0
+    assert builder.push(third) == ()
+    current = builder.flush(120_000_000_000)
+    assert len(current) == 1
+    assert current[0].open == D("110")
+    assert current[0].close == D("115")
+    assert current[0].trades == 2
