@@ -72,3 +72,13 @@ def test_gaps_remain_visible_in_historical_rows(monkeypatch) -> None:
 def test_pagination_bounds_fail_closed_before_http(pages, limit) -> None:
     with pytest.raises(MarketDataError):
         historical_confirmed_candles("BTC-USDT", pages=pages, limit=limit)
+
+
+def test_historical_refuses_provider_future_completed_candle(monkeypatch) -> None:
+    import lab.markets.okx_observations as api
+
+    # Minute 5 closes at 360s; a provider-reported receipt at 120s
+    # cannot make that historical observation available.
+    monkeypatch.setattr(api, "_fetch", lambda path, params: (response(5), 120_000_000_000))
+    with pytest.raises(MarketDataError, match="future candle"):
+        historical_confirmed_candles("BTC-USDT", pages=1, limit=100)
