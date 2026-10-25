@@ -8,8 +8,10 @@
       "id": "D0-design",
       "status": "implemented",
       "evidence": [
-        "docs/architecture/multimarket-2026-10-25.md"
-      ]
+        "docs/architecture/multimarket-2026-10-25.md",
+        "src/lab/markets/capability_probe.py"
+      ],
+      "note": "Pinned NautilusTrader 2.0.0rc7 exports OKXExecutionClientConfig/Factory, OKXRegion.EEA, OKXEnvironment.DEMO. No importable Alpaca/cTrader adapters in this pinned wheel; import probes run in GitHub CI."
     },
     {
       "id": "D1-offline-simulation",
@@ -21,14 +23,17 @@
         "src/lab/markets/simulator.py",
         "tests/test_markets_reference.py",
         "src/lab/markets/journal.py",
-        "tests/test_markets_journal.py"
+        "tests/test_markets_journal.py",
+        "src/lab/markets/accounting.py",
+        "tests/test_markets_accounting_transitions.py",
+        "tests/test_markets_provenance_isolation.py"
       ],
       "missing": [
         "verified state reconstruction and crash replay",
         "broker-quality order book / partial fill and liquidation stress models",
         "independent execution/funding/mark data provenance"
       ],
-      "notes": "Offline simulator optionally journals marks/intents/fills/funding/cancels and risk rejections; refuses nonempty-journal restart until full replay is implemented."
+      "notes": "Offline simulator optionally journals marks/intents/fills/funding/cancels and risk rejections; refuses nonempty-journal restart until full replay is implemented. D1 accepted review checkpoints: long/short add/reduce/flip PnL conservation, full reversal fee basis, legacy equity digest isolation, no duplicate agent stack. New tests require CI validation; integration into existing Nautilus agents remains a D2 gate."
     },
     {
       "id": "D2-market-data",
@@ -74,7 +79,8 @@
         "forex adapter and calendar",
         "equities alternative broker adapter",
         "per-venue shortability and margin tests"
-      ]
+      ],
+      "note": "Pinned rc7 lacks Alpaca and cTrader modules; select a separately qualified Nautilus upgrade or thin Alpaca v2/cTrader Open API provider wrappers; neither is implemented."
     },
     {
       "id": "D6-live-real-money",
