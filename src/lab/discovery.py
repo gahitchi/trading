@@ -181,6 +181,7 @@ def scout_equities(
     mode = DiscoveryMode.EXPLICIT if selected else DiscoveryMode.SCOUT
     targets = set(selected)
     by_ticker: dict[str, EquityObservation] = {}
+    listing_venues: dict[str, set[str]] = {}
     for row in market:
         if type(row) is not EquityObservation:
             raise TypeError("expected typed market observations")
@@ -189,6 +190,7 @@ def scout_equities(
             continue
         if mode == DiscoveryMode.EXPLICIT and row.ticker not in targets:
             continue
+        listing_venues.setdefault(row.ticker, set()).add(row.venue)
         old = by_ticker.get(row.ticker)
         if old is None or (row.received_ns, row.session_ns, row.market_source) > (
             old.received_ns,
@@ -230,7 +232,12 @@ def scout_equities(
             continue
         if not row.point_in_time_membership:
             reason = "not an active point-in-time listing"
-        elif decision_ns - row.received_ns > policy.max_market_age_ns:
+        elif len(listing_venues.get(ticker, ())) > 1:
+            reason = "ambiguous primary listing venue; qualified instrument required"
+        elif (
+            decision_ns - row.received_ns > policy.max_market_age_ns
+            or decision_ns - row.session_ns > policy.max_market_age_ns
+        ):
             reason = "stale market evidence"
         elif row.history_sessions < policy.min_history_sessions:
             reason = "insufficient historical observations"
