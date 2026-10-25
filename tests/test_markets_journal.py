@@ -44,6 +44,7 @@ def test_money_floats_and_unknown_event_kinds_are_rejected(tmp_path) -> None:
             journal.append("bad3", "fill", -1, {"qty": "1"})
         assert journal.read_all() == ()
 
+
 def test_offline_simulator_journals_intents_and_fills_without_silent_restart(tmp_path) -> None:
     from decimal import Decimal
 
