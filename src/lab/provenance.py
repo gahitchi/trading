@@ -42,10 +42,19 @@ def runtime_digest() -> str:
     return _digest(lambda name: True)
 
 
-def simulation_digest() -> str:
-    """The modules that shape simulated results and validation evidence: trial identity, approvals and the
-    deployment context. A cosmetic edit to the app or the command line no longer invalidates them."""
-    return _digest(lambda name: name not in NOT_SIMULATION)
+def simulation_digest(*, market: str = "equity") -> str:
+    """Fingerprint only modules able to affect the selected research engine.
+
+    Preserve pre-multi-market equity research digests: new crypto-only modules
+    must not silently invalidate existing approved US-equity hypotheses.
+    Shared agent/accounting changes still invalidate both markets. Future
+    crypto deployments must explicitly request market="crypto".
+    """
+    if market not in {"equity", "crypto"}:
+        raise ValueError(f"unsupported research market {market!r}")
+    return _digest(
+        lambda name: name not in NOT_SIMULATION and (market == "crypto" or not name.startswith("markets/"))
+    )
 
 
 def frame_digest(frames):
