@@ -13,13 +13,14 @@ from nautilus_trader.model import (
     Bar,
     BarType,
     InstrumentId,
+    MarkPriceUpdate,
     Price,
     Quantity,
     TradeId,
     TradeTick,
 )
 
-from lab.markets.domain import MAX_EVENT_TIMESTAMP_NS, AssetClass, ContractKind, Instrument, Side, Trade
+from lab.markets.domain import MAX_EVENT_TIMESTAMP_NS, AssetClass, ContractKind, Instrument, MarkPrice, Side, Trade
 from lab.markets.okx_public import MarketDataError, PublicCandle
 
 
@@ -84,4 +85,21 @@ def to_nautilus_completed_bar(candle: PublicCandle, instrument: Instrument, *, r
         Quantity.from_str(f"{candle.volume_native:.{quantity_precision}f}"),
         candle.end_ns,
         received_ns,
+    )
+
+
+def to_nautilus_mark(mark: MarkPrice, instrument: Instrument) -> MarkPriceUpdate:
+    """Independent derivative mark: not an execution tick, quote, or candle.
+
+    Unlike a last trade, Nautilus uses this class to cache margin-relevant
+    valuation data. The caller must still validate the provenance and
+    completeness of the original external mark feed independently.
+    """
+    instrument.check_price(mark.price)
+    pp = _precision(instrument.tick_size)
+    return MarkPriceUpdate(
+        instrument_id=nautilus_instrument_id(instrument),
+        value=Price.from_str(f"{mark.price:.{pp}f}"),
+        ts_event=mark.exchange_ns,
+        ts_init=mark.received_ns,
     )
