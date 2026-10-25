@@ -187,3 +187,31 @@ def test_no_spot_short_in_linear_reference() -> None:
     )
     with pytest.raises(ValueError, match="linear derivatives"):
         OfflineSimulator(spot)
+
+def test_adapter_protocol_cannot_route_demo_or_real_money() -> None:
+    from lab.markets.adapters import ExecutionAdapter, OfflineAdapter, ReplayDataAdapter, open_execution_adapter
+
+    adapter = open_execution_adapter(TradingMode.OFFLINE_SIM, instrument())
+    assert isinstance(adapter, ExecutionAdapter)
+    assert isinstance(adapter, ReplayDataAdapter)
+    assert isinstance(adapter, OfflineAdapter)
+    for mode in (TradingMode.BROKER_DEMO, TradingMode.LIVE):
+        with pytest.raises(UnsupportedMode, match="only offline"):
+            open_execution_adapter(mode, instrument())
+
+
+def test_offline_cli_fixture_smoke() -> None:
+    from importlib.resources import files
+    from pathlib import Path
+
+    from lab.markets.__main__ import demo
+
+    path = Path(str(files("lab.markets").joinpath("fixture.csv")))
+    result = demo(path, D("0.001"), Side.SELL, D("1000"))
+    assert result["mode"] == "offline_sim"
+    assert result["fills"] == 2
+    assert result["position"] == "0.000"
+    assert result["pending_orders"] == 0
+    assert result["minute_bars"] == 3
+    assert result["market_data_validated"] is False
+    assert result["qualified_for_live_trading"] is False
