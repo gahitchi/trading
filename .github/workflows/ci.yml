@@ -39,6 +39,8 @@ jobs:
         python: ["3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tests/test_collab reads immutable threads across agent-owned remote branches
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
