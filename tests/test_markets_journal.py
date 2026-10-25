@@ -77,7 +77,7 @@ def test_offline_simulator_journals_intents_and_fills_without_silent_restart(tmp
         sim.submit(OrderIntent("order1", contract.instrument_id, Side.SELL, d("1"), 100))
         sim.on_mark(MarkPrice("p2", 200, 200, d("100")))
         sim.on_trade(Trade("m2", 200, 200, d("100"), d("100")))
-        assert [e["kind"] for e in journal.read_all()] == ["mark", "trade", "intent", "mark", "trade", "fill"]
+        assert [e["kind"] for e in journal.read_all()] == ["session", "mark", "trade", "intent", "mark", "trade", "fill"]
         assert sim.position == d("-1")
         with pytest.raises(JournalError, match="nonempty journal"):
             OfflineSimulator(contract, journal=journal)
