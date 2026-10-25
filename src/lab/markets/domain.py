@@ -11,6 +11,9 @@ from decimal import Decimal
 from enum import StrEnum
 from re import fullmatch
 
+# Durable SQLite and Arrow/Parquet event times use signed 64-bit UTC nanoseconds.
+MAX_EVENT_TIMESTAMP_NS = 2**63 - 1
+
 
 class AssetClass(StrEnum):
     CRYPTO = "crypto"
@@ -153,9 +156,9 @@ class Trade:
     def __post_init__(self) -> None:
         if not self.trade_id or len(self.trade_id) > 128:
             raise ValueError("trade ID missing or too long")
-        if not isinstance(self.exchange_ns, int) or not isinstance(self.received_ns, int):
-            raise TypeError("timestamps must be Unix nanoseconds")
-        if self.exchange_ns < 0 or self.received_ns < self.exchange_ns:
+        if type(self.exchange_ns) is not int or type(self.received_ns) is not int:
+            raise TypeError("timestamps must be integer Unix nanoseconds")
+        if not 0 <= self.exchange_ns <= self.received_ns <= MAX_EVENT_TIMESTAMP_NS:
             raise ValueError("invalid exchange/receive timestamps")
         for name in ("price", "quantity"):
             v = getattr(self, name)
@@ -184,7 +187,7 @@ class MarkPrice:
             raise ValueError("mark ID missing or too long")
         if type(self.exchange_ns) is not int or type(self.received_ns) is not int:
             raise TypeError("mark timestamps must be integer nanoseconds")
-        if self.exchange_ns < 0 or self.received_ns < self.exchange_ns:
+        if not 0 <= self.exchange_ns <= self.received_ns <= MAX_EVENT_TIMESTAMP_NS:
             raise ValueError("invalid mark timestamps")
         if not isinstance(self.price, Decimal):
             raise TypeError("mark price must be Decimal")
@@ -208,7 +211,7 @@ class OrderIntent:
         if not isinstance(self.quantity, Decimal):
             raise TypeError("quantity must be Decimal")
         positive(decimal(self.quantity), "quantity")
-        if not isinstance(self.created_ns, int) or self.created_ns < 0:
-            raise ValueError("created_ns must be nonnegative int")
+        if type(self.created_ns) is not int or not 0 <= self.created_ns <= MAX_EVENT_TIMESTAMP_NS:
+            raise ValueError("created_ns must be signed-64-bit nonnegative UTC nanoseconds")
         if not isinstance(self.reduce_only, bool):
             raise TypeError("reduce_only must be bool")
