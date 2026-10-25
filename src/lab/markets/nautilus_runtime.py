@@ -35,6 +35,11 @@ def _fingerprint(event) -> tuple[str, ...]:
         return ("trade", *common, str(event.trade_id), str(event.price), str(event.size))
     if kind == "MarkPriceUpdate":
         return ("mark", *common, str(event.value))
+    if kind == "QuoteTick":
+        return (
+            "quote", *common, str(event.bid_price), str(event.ask_price),
+            str(event.bid_size), str(event.ask_size),
+        )
     raise TypeError("unexpected event type in native replay")
 
 
@@ -46,6 +51,7 @@ class _ReadOnlyTapeObserver(DataActor):
         self._instrument_id = instrument_id
         self.trades = 0
         self.marks = 0
+        self.quotes = 0
         self.received_ns: list[int] = []
         self.clock_samples_ns: list[int] = []
         self.delivered_fingerprints: list[tuple[str, ...]] = []
@@ -53,6 +59,7 @@ class _ReadOnlyTapeObserver(DataActor):
     def on_start(self) -> None:
         self.subscribe_trades(self._instrument_id)
         self.subscribe_mark_prices(self._instrument_id)
+        self.subscribe_quotes(self._instrument_id)
 
     def _record(self, event) -> None:
         self.clock_samples_ns.append(self.clock.timestamp_ns())
@@ -67,12 +74,17 @@ class _ReadOnlyTapeObserver(DataActor):
         self.marks += 1
         self._record(mark)
 
+    def on_quote(self, tick) -> None:
+        self.quotes += 1
+        self._record(tick)
+
 
 @dataclass(frozen=True, slots=True)
 class NativeReadOnlyReplay:
     native_instrument_id: str
     trade_observations: int
     mark_observations: int
+    quote_observations: int
     first_received_ns: int
     last_received_ns: int
     maker_fee_rate: Decimal
@@ -114,7 +126,7 @@ def replay_native_observations(
     positive(decimal(collateral), "starting collateral")
     native = to_nautilus_perpetual(spec)
     observed = -1
-    expected_trades, expected_marks = 0, 0
+    expected_trades, expected_marks, expected_quotes = 0, 0, 0
     for event in tape.events:
         if event.instrument_id != native.id:
             raise ValueError("native event belongs to another instrument")
@@ -125,6 +137,8 @@ def replay_native_observations(
             expected_trades += 1
         elif type(event).__name__ == "MarkPriceUpdate":
             expected_marks += 1
+        elif type(event).__name__ == "QuoteTick":
+            expected_quotes += 1
         else:
             raise TypeError("unsupported native observation in read-only pilot")
     if observed != tape.last_received_ns:
@@ -153,7 +167,9 @@ def replay_native_observations(
         engine.add_actor(observer)
         engine.add_data(list(tape.events))
         engine.run()
-        if observer.trades != expected_trades or observer.marks != expected_marks:
+        if (observer.trades, observer.marks, observer.quotes) != (
+            expected_trades, expected_marks, expected_quotes
+        ):
             raise ValueError("Nautilus data engine did not deliver the full observed tape")
         if observer.delivered_fingerprints != [_fingerprint(event) for event in tape.events]:
             raise ValueError("Nautilus replay altered event contents or receipt-order delivery")
@@ -165,6 +181,7 @@ def replay_native_observations(
             native_instrument_id=str(native.id),
             trade_observations=observer.trades,
             mark_observations=observer.marks,
+            quote_observations=observer.quotes,
             first_received_ns=observer.received_ns[0],
             last_received_ns=observer.received_ns[-1],
             maker_fee_rate=spec.maker_fee_bps / Decimal("10000"),

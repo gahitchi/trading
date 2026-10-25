@@ -60,6 +60,7 @@ def test_real_native_engine_delivers_independent_trade_and_mark_observations():
     assert result.native_instrument_id == "BTC-USD-SWAP.SIM"
     assert result.trade_observations == 2
     assert result.mark_observations == 2
+    assert result.quote_observations == 0
     assert result.first_received_ns == 1_000_000_001
     assert result.last_received_ns == 4_000_000_001
     assert result.maker_fee_rate == D("0.0002")
@@ -67,6 +68,44 @@ def test_real_native_engine_delivers_independent_trade_and_mark_observations():
     assert not result.broker_execution_enabled
     assert not result.fees_charged_verified
     assert not result.strategies_qualified
+
+
+def test_native_read_only_actor_ingests_one_causally_qualified_offline_book_quote():
+    from lab.markets.book_sequence import apply_recorded_book_frame
+    from lab.markets.nautilus_data import build_causal_tape, to_nautilus_book_quote
+
+    book = apply_recorded_book_frame(
+        None,
+        {
+            "arg": {"channel": "books", "instId": "BTC-USD-SWAP"},
+            "action": "snapshot",
+            "data": [{
+                "ts": "5000", "seqId": 10, "prevSeqId": -1, "checksum": 0,
+                "bids": [["100.0", "10.000", "0", "1"]],
+                "asks": [["100.2", "10.000", "0", "1"]],
+            }],
+        },
+        received_ns=5_000_000_001,
+    )
+    tick = to_nautilus_book_quote(book, spec().instrument)
+    assert str(tick.bid_price) == "100.0"
+    assert str(tick.ask_price) == "100.2"
+    assert tick.ts_event == 5_000_000_000
+    assert tick.ts_init == 5_000_000_001
+    # The existing trade and independent mark stream remains intact.
+    source = (
+        MarkPrice("m1", 1_000_000_000, 1_000_000_001, D("100.1234")),
+        Trade("t1", 2_000_000_000, 2_000_000_001, D("100.1"), D("0.010"), Side.BUY),
+        MarkPrice("m2", 3_000_000_000, 3_000_000_001, D("100.2234")),
+        Trade("t2", 4_000_000_000, 4_000_000_001, D("100.2"), D("0.020"), Side.SELL),
+        book,
+    )
+    replay = replay_native_observations(spec(), build_causal_tape(spec().instrument, source))
+    assert replay.quote_observations == 1
+    assert replay.trade_observations == 2
+    assert replay.mark_observations == 2
+    assert replay.event_integrity_verified and replay.clock_receipt_verified
+    assert not replay.broker_execution_enabled
 
 
 def test_real_native_replay_is_deterministic_and_does_not_create_orders():

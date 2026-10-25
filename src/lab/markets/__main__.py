@@ -150,6 +150,7 @@ def native_demo(balance: Decimal = Decimal("1000")) -> dict:
         "instrument": result.native_instrument_id,
         "trade_observations": result.trade_observations,
         "mark_observations": result.mark_observations,
+        "quote_observations": result.quote_observations,
         "first_received_ns": result.first_received_ns,
         "last_received_ns": result.last_received_ns,
         "maker_fee_rate": str(result.maker_fee_rate),

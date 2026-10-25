@@ -19,10 +19,12 @@ from nautilus_trader.model import (
     MarkPriceUpdate,
     Price,
     Quantity,
+    QuoteTick,
     TradeId,
     TradeTick,
 )
 
+from lab.markets.book_sequence import SequencedBook
 from lab.markets.domain import MAX_EVENT_TIMESTAMP_NS, AssetClass, ContractKind, Instrument, MarkPrice, Side, Trade
 from lab.markets.okx_public import MarketDataError, PublicCandle
 
@@ -112,6 +114,38 @@ def to_nautilus_mark(mark: MarkPrice, instrument: Instrument) -> MarkPriceUpdate
     )
 
 
+def to_nautilus_book_quote(book: SequencedBook, instrument: Instrument) -> QuoteTick:
+    """Read-only native BBO from an offline sequenced frame, never a fill.
+
+    Does not promote public REST snapshots or incomplete book data into
+    execution-quality orders, maker queue position or available collateral.
+    """
+    if (
+        type(book) is not SequencedBook
+        or book.source != "offline_recorded_okx_books_ws"
+        or book.execution_qualified
+        or book.instrument_id != instrument.symbol
+    ):
+        raise MarketDataError("unqualified or mismatched recorded book source")
+    if not book.bids or not book.asks or book.best_bid >= book.best_ask:
+        raise MarketDataError("recorded quote requires a valid uncrossed book")
+    for level in (book.bids[0], book.asks[0]):
+        instrument.check_price(level.price)
+        if level.size_native <= 0 or level.size_native % instrument.quantity_step:
+            raise MarketDataError("book size has unqualified contract units or precision")
+    pp = _precision(instrument.tick_size)
+    qp = _precision(instrument.quantity_step)
+    return QuoteTick(
+        nautilus_instrument_id(instrument),
+        Price.from_str(f"{book.best_bid:.{pp}f}"),
+        Price.from_str(f"{book.best_ask:.{pp}f}"),
+        Quantity.from_str(f"{book.bids[0].size_native:.{qp}f}"),
+        Quantity.from_str(f"{book.asks[0].size_native:.{qp}f}"),
+        book.exchange_ns,
+        book.received_ns,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CausalNautilusTape:
     """Native read-only event tape; never an execution-qualified data catalog.
@@ -122,14 +156,14 @@ class CausalNautilusTape:
     """
 
     instrument_id: str
-    events: tuple[TradeTick | MarkPriceUpdate, ...]
+    events: tuple[TradeTick | MarkPriceUpdate | QuoteTick, ...]
     last_received_ns: int
     execution_qualified: bool = False
 
 
 def build_causal_tape(
     instrument: Instrument,
-    observations: Sequence[Trade | MarkPrice],
+    observations: Sequence[Trade | MarkPrice | SequencedBook],
 ) -> CausalNautilusTape:
     """Convert independently recorded tape observations for Nautilus ingestion.
 
@@ -143,7 +177,7 @@ def build_causal_tape(
     previous_event = -1
     previous_received = -1
     ids: set[tuple[str, str]] = set()
-    result: list[TradeTick | MarkPriceUpdate] = []
+    result: list[TradeTick | MarkPriceUpdate | QuoteTick] = []
     for observation in observations:
         if type(observation) is Trade:
             identity = ("trade", observation.trade_id)
@@ -151,8 +185,11 @@ def build_causal_tape(
         elif type(observation) is MarkPrice:
             identity = ("mark", observation.mark_id)
             converted = to_nautilus_mark(observation, instrument)
+        elif type(observation) is SequencedBook:
+            identity = ("quote", f"{observation.seq_id}:{observation.exchange_ns}:{observation.received_ns}")
+            converted = to_nautilus_book_quote(observation, instrument)
         else:
-            raise TypeError("only source trades and independent mark observations may enter a causal tape")
+            raise TypeError("only trades, independent marks and offline sequenced quotes may enter a causal tape")
         if identity in ids:
             raise ValueError("duplicate event identity in causal tape")
         if observation.received_ns < previous_received:
