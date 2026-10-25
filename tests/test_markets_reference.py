@@ -69,7 +69,7 @@ def test_short_no_proceeds_and_cover_realizes_pnl() -> None:
     sim = OfflineSimulator(instrument(), taker_fee_bps=D("0"), slippage_bps=D("0"))
     sim.on_trade(event(1))
     sim.submit(order("open", Side.SELL, "1", 1_000_000_000))
-    assert not sim.on_trade(event(1, timestamp=1_000_000_000))
+    assert not sim.on_trade(event(10, timestamp=1_000_000_000))
     assert len(sim.on_trade(event(2))) == 1
     assert sim.position == D("-1")
     assert sim.balance == D("1000")  # short sale proceeds do not become free cash
