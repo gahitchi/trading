@@ -281,9 +281,7 @@ def run_native_fill_parity(
             raise NativeParityError("independent position oracle did not end flat")
         expected_fees = Decimal("0")
         for price in (px1, px2):
-            expected_fees += (price * quantity * c.multiplier * rate).quantize(
-                quantum, rounding=ROUND_HALF_UP
-            )
+            expected_fees += (price * quantity * c.multiplier * rate).quantize(quantum, rounding=ROUND_HALF_UP)
         charges = []
         for fill in probe.fills:
             if fill.commission.currency != currency:
@@ -297,9 +295,7 @@ def run_native_fill_parity(
         if balance is None:
             raise NativeParityError("missing native account or collateral balance")
         ending = balance.as_decimal()
-        expected_ending = (collateral + closed.realized_pnl - expected_fees).quantize(
-            quantum, rounding=ROUND_HALF_UP
-        )
+        expected_ending = (collateral + closed.realized_pnl - expected_fees).quantize(quantum, rounding=ROUND_HALF_UP)
         if ending != expected_ending:
             raise NativeParityError("native margin account disagrees with exact Decimal PnL and charged fees")
         if len(engine.generate_fills_report()) != 2:
