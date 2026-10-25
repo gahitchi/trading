@@ -206,8 +206,7 @@ def main() -> None:
         observed = historical_confirmed_candles(args.instrument, pages=args.pages, limit=args.limit)
         manifests = write_confirmed_candles(args.store, observed) if args.store is not None and observed else ()
         gap_count = sum(
-            (observed[i].start_ns - observed[i - 1].start_ns) // 60_000_000_000 - 1
-            for i in range(1, len(observed))
+            (observed[i].start_ns - observed[i - 1].start_ns) // 60_000_000_000 - 1 for i in range(1, len(observed))
         )
         print(
             json.dumps(
