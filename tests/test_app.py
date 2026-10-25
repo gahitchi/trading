@@ -430,3 +430,93 @@ def test_offline_sandbox_endpoint_is_locally_authenticated(controller):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_public_crypto_inspection_never_changes_broker_plan_or_routes_orders(controller, monkeypatch):
+    from lab.markets import preview
+
+    before_config = controller.config_path.read_bytes()
+    before_settings = dict(controller.settings)
+    observed = []
+
+    def fake_preview(instrument, *, depth):
+        observed.append((instrument, depth))
+        return {
+            "source": "OKX_EEA_PUBLIC_REST_SNAPSHOTS",
+            "orders_routed": False,
+            "snapshot_tradable": False,
+            "feeds_synchronized": False,
+        }
+
+    monkeypatch.setattr(preview, "public_preview", fake_preview)
+    value = controller.public_crypto_snapshot({"instrument": "BTC-USDT-SWAP", "depth": "5"})
+    assert value["orders_routed"] is False
+    assert value["snapshot_tradable"] is False
+    assert observed == [("BTC-USDT-SWAP", 5)]
+    assert controller.config_path.read_bytes() == before_config
+    assert controller.settings == before_settings
+    assert not controller.alive()
+
+    for invalid in (
+        {"instrument": "BTC-USDT-SWAP", "depth": 5},
+        {"instrument": "BTC-USDT-SWAP", "depth": "51"},
+        {"instrument": "BTC-USDT", "depth": "5"},
+        {"instrument": "https://other.example", "depth": "5"},
+        {"instrument": "BTC-USDT-SWAP", "depth": "5", "api_key": "secret"},
+    ):
+        with pytest.raises(ValueError):
+            controller.public_crypto_snapshot(invalid)
+    assert observed == [("BTC-USDT-SWAP", 5)]
+
+
+def test_public_crypto_endpoint_requires_local_authentication(controller, monkeypatch):
+    from lab.markets import preview
+
+    calls = []
+    monkeypatch.setattr(
+        preview,
+        "public_preview",
+        lambda instrument, *, depth: (
+            calls.append((instrument, depth))
+            or {"orders_routed": False, "live_trading_enabled": False, "source": "OKX_EEA_PUBLIC_REST_SNAPSHOTS"}
+        ),
+    )
+    server = app.AppServer(("127.0.0.1", 0), controller)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host = f"127.0.0.1:{server.server_address[1]}"
+
+    def request(token, origin, payload):
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+        conn.request(
+            "POST",
+            "/api/public-crypto",
+            json.dumps(payload),
+            {
+                "Host": host,
+                "Origin": origin,
+                "Content-Type": "application/json",
+                "X-App-Token": token,
+            },
+        )
+        response = conn.getresponse()
+        status, body = response.status, json.loads(response.read())
+        conn.close()
+        return status, body
+
+    sample = {"instrument": "BTC-USDT-SWAP", "depth": "1"}
+    try:
+        assert request("invalid", "http://" + host, sample)[0] == 403
+        assert request(server.token, "https://untrusted.example", sample)[0] == 403
+        assert request(server.token, "http://" + host, {"instrument": "BTC-USD", "depth": "1"})[0] == 400
+        assert calls == []
+        status, body = request(server.token, "http://" + host, sample)
+        assert status == 200
+        assert body["orders_routed"] is False
+        assert body["live_trading_enabled"] is False
+        assert calls == [("BTC-USDT-SWAP", 1)]
+        assert not controller.alive()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
