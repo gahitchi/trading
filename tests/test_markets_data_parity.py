@@ -16,9 +16,7 @@ from lab.markets.minute_batch import aggregate_trades
 def test_timestamp_parser_exact_utc_and_offset() -> None:
     assert timestamp_ns("1970-01-01T00:00:00Z") == 0
     assert timestamp_ns("2026-10-25T01:02:03.123456Z") % 1_000_000_000 == 123_456_000
-    assert timestamp_ns("2026-10-25T03:02:03.123456+02:00") == timestamp_ns(
-        "2026-10-25T01:02:03.123456Z"
-    )
+    assert timestamp_ns("2026-10-25T03:02:03.123456+02:00") == timestamp_ns("2026-10-25T01:02:03.123456Z")
     with pytest.raises(ValueError, match="nonnegative"):
         timestamp_ns("1969-12-31T23:59:59Z")
     with pytest.raises(ValueError, match="timezone"):
