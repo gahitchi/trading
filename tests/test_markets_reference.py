@@ -250,7 +250,12 @@ def test_minute_bar_dedup_does_not_accumulate_all_historical_ids() -> None:
 
 
 def test_last_trade_wick_does_not_liquidate_with_healthy_mark() -> None:
-    sim = OfflineSimulator(instrument(), taker_fee_bps=D("0"), slippage_bps=D("0"))
+    sim = OfflineSimulator(
+        instrument(),
+        limits=SimulationLimits(max_drawdown=D("0.02"), max_daily_loss=D("0.02")),
+        taker_fee_bps=D("0"),
+        slippage_bps=D("0"),
+    )
     observed(sim, event(1, "100"))
     sim.submit(order("short1", Side.SELL, "1", 1_000_000_000))
     observed(sim, event(2, "100"))
