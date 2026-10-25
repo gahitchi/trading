@@ -11,11 +11,14 @@ import csv
 import json
 from datetime import UTC, datetime
 from decimal import Decimal
+from contextlib import nullcontext
 from importlib.resources import files
 from pathlib import Path
 
 from lab.markets.domain import AssetClass, ContractKind, Instrument, MarkPrice, OrderIntent, Side, Trade
 from lab.markets.minute import MinuteBuilder
+from lab.markets.journal import EventJournal
+from lab.markets.recovery import recover_offline
 from lab.markets.simulator import OfflineSimulator
 
 
@@ -58,8 +61,8 @@ def read_trades(path: Path) -> list[tuple[Trade, Decimal]]:
     return trades
 
 
-def demo(path: Path, quantity: Decimal, side: Side, starting_balance: Decimal) -> dict:
-    instrument = Instrument(
+def fixture_instrument() -> Instrument:
+    return Instrument(
         venue="SIM",
         symbol="BTC-USD-LINEAR",
         asset_class=AssetClass.CRYPTO,
@@ -71,7 +74,18 @@ def demo(path: Path, quantity: Decimal, side: Side, starting_balance: Decimal) -
         min_notional=Decimal("5"),
         multiplier=Decimal("1"),
     )
-    sim = OfflineSimulator(instrument, starting_balance=starting_balance)
+
+
+def demo(
+    path: Path,
+    quantity: Decimal,
+    side: Side,
+    starting_balance: Decimal,
+    *,
+    journal: EventJournal | None = None,
+) -> dict:
+    instrument = fixture_instrument()
+    sim = OfflineSimulator(instrument, starting_balance=starting_balance, journal=journal)
     bars = MinuteBuilder()
     trades = read_trades(path)
     completed = []
@@ -112,6 +126,10 @@ def main() -> None:
     d.add_argument("--quantity", type=Decimal, default=Decimal("0.001"))
     d.add_argument("--side", choices=["buy", "sell"], default="sell")
     d.add_argument("--balance", type=Decimal, default=Decimal("1000"))
+    d.add_argument("--journal", type=Path, help="optional durable SQLite journal; refuses overwriting old sessions")
+    recover = sub.add_parser("recover", help="verify and resume a durable OFFLINE_SIM journal; no broker orders")
+    recover.add_argument("--journal", type=Path, required=True)
+    recover.add_argument("--balance", type=Decimal, default=Decimal("1000"))
     c = sub.add_parser("candles", help="READ-ONLY OKX EEA public confirmed 1m candles")
     c.add_argument("--instrument", default="BTC-USDT")
     c.add_argument("--limit", type=int, default=20)
@@ -119,7 +137,16 @@ def main() -> None:
     if args.command == "demo":
         sample = files("lab.markets").joinpath("fixture.csv")
         path = args.csv if args.csv is not None else Path(str(sample))
-        print(json.dumps(demo(path, args.quantity, Side(args.side), args.balance), indent=2))
+        with EventJournal(args.journal) if args.journal is not None else nullcontext() as journal:
+            print(json.dumps(demo(path, args.quantity, Side(args.side), args.balance, journal=journal), indent=2))
+    elif args.command == "recover":
+        with EventJournal(args.journal) as journal:
+            sim = recover_offline(fixture_instrument(), journal, starting_balance=args.balance)
+            result = sim.report()
+            result["recovery_verified"] = True
+            result["journal_events"] = len(journal.read_all())
+            result["external_execution_enabled"] = False
+            print(json.dumps(result, indent=2))
     elif args.command == "candles":
         from lab.markets.okx_public import latest_confirmed_candles
 
