@@ -16,8 +16,15 @@ D = Decimal
 
 def contract() -> Instrument:
     return Instrument(
-        "OKX", "BTC-USDT-SWAP", AssetClass.CRYPTO, ContractKind.LINEAR_DERIVATIVE,
-        "USDT", D("0.1"), D("0.001"), D("0.001"), D("5"),
+        "OKX",
+        "BTC-USDT-SWAP",
+        AssetClass.CRYPTO,
+        ContractKind.LINEAR_DERIVATIVE,
+        "USDT",
+        D("0.1"),
+        D("0.001"),
+        D("0.001"),
+        D("5"),
     )
 
 
@@ -45,8 +52,14 @@ def test_public_trade_not_forced_to_order_minimum_but_uses_venue_step() -> None:
 
 def test_completed_1m_bar_is_never_a_trade_and_cannot_arrive_early() -> None:
     bar = PublicCandle(
-        "BTC-USDT-SWAP", 0, 60_000_000_000,
-        D("100.0"), D("101.0"), D("99.0"), D("100.2"), D("3.500"),
+        "BTC-USDT-SWAP",
+        0,
+        60_000_000_000,
+        D("100.0"),
+        D("101.0"),
+        D("99.0"),
+        D("100.2"),
+        D("3.500"),
     )
     with pytest.raises(MarketDataError, match="before it closes"):
         to_nautilus_completed_bar(bar, contract(), received_ns=59_000_000_000)
@@ -61,14 +74,26 @@ def test_completed_1m_bar_is_never_a_trade_and_cannot_arrive_early() -> None:
 
 def test_explicit_instrument_binding_and_price_grid() -> None:
     bar = PublicCandle(
-        "BTC-USDT", 0, 60_000_000_000,
-        D("100"), D("100"), D("100"), D("100"), D("1"),
+        "BTC-USDT",
+        0,
+        60_000_000_000,
+        D("100"),
+        D("100"),
+        D("100"),
+        D("100"),
+        D("1"),
     )
     with pytest.raises(MarketDataError, match="instrument"):
         to_nautilus_completed_bar(bar, contract(), received_ns=65_000_000_000)
     off_grid = PublicCandle(
-        "BTC-USDT-SWAP", 0, 60_000_000_000,
-        D("100.05"), D("100.1"), D("100.0"), D("100.05"), D("1"),
+        "BTC-USDT-SWAP",
+        0,
+        60_000_000_000,
+        D("100.05"),
+        D("100.1"),
+        D("100.0"),
+        D("100.05"),
+        D("1"),
     )
     with pytest.raises(ValueError, match="tick"):
         to_nautilus_completed_bar(off_grid, contract(), received_ns=65_000_000_000)
