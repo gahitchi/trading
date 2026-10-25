@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 
 import pytest
 
@@ -117,15 +118,14 @@ def test_bundle_exports_the_authoritative_sqlite_ledger_and_sanitize_pseudonymiz
     assert not list(clean.rglob("*.sqlite3"))  # raw databases are never copied
     text = "".join(p.read_text() for p in clean.rglob("*.json"))
     raw_ids = list(h.broker().state["orders"]) + [f["trade_id"] for f in h.broker().state["fills"]]
-    residuals = [identifier for identifier in raw_ids if identifier in text]
-    contexts = []
-    for path in clean.rglob("*.json"):
-        data = path.read_text()
-        for identifier in residuals:
-            at = data.find(identifier)
-            if at >= 0:
-                contexts.append((path.name, data[max(0, at - 35) : at + len(identifier) + 35]))
-    assert raw_ids and not residuals, contexts  # every order and trade ID pseudonymized
+    # A raw trade ID can be as short as "T2". A substring check incorrectly
+    # fails after 20:00 UTC because ISO timestamps contain "T20:...".
+    residuals = [
+        identifier
+        for identifier in raw_ids
+        if re.search(r"(?<![A-Za-z0-9])" + re.escape(identifier) + r"(?![A-Za-z0-9])", text)
+    ]
+    assert raw_ids and not residuals  # broker IDs are not present as complete identifiers
     assert "CLIENT-" in text and "TRADE-" in text
 
 
