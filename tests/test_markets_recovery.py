@@ -78,12 +78,14 @@ def test_recovery_rejects_different_economic_assumptions(tmp_path, balance, fees
     path = tmp_path / "events.db"
     with EventJournal(path) as journal:
         OfflineSimulator(instrument(), journal=journal, taker_fee_bps=D("0"), slippage_bps=D("0"))
-    with EventJournal(path) as journal:
-        with pytest.raises(JournalError, match="identity"):
-            recover_offline(
-                instrument(), journal,
-                starting_balance=D(balance), taker_fee_bps=D(fees), slippage_bps=D(slippage)
-            )
+    with EventJournal(path) as journal, pytest.raises(JournalError, match="identity"):
+        recover_offline(
+            instrument(),
+            journal,
+            starting_balance=D(balance),
+            taker_fee_bps=D(fees),
+            slippage_bps=D(slippage),
+        )
 
 
 def test_replay_detects_missing_derived_fill_even_with_valid_hash_chain(tmp_path) -> None:
@@ -99,9 +101,8 @@ def test_replay_detects_missing_derived_fill_even_with_valid_hash_chain(tmp_path
             {"price": "100", "quantity": "100", "received_ns": 2},
         )
         journal.verify()
-    with EventJournal(path) as journal:
-        with pytest.raises(JournalError, match="incomplete"):
-            recover_offline(instrument(), journal, taker_fee_bps=D("0"), slippage_bps=D("0"))
+    with EventJournal(path) as journal, pytest.raises(JournalError, match="incomplete"):
+        recover_offline(instrument(), journal, taker_fee_bps=D("0"), slippage_bps=D("0"))
 
 
 def test_recovery_refuses_unrecognized_broker_lifecycle_events(tmp_path) -> None:
@@ -109,15 +110,13 @@ def test_recovery_refuses_unrecognized_broker_lifecycle_events(tmp_path) -> None
     with EventJournal(path) as journal:
         OfflineSimulator(instrument(), journal=journal)
         journal.append("external:1", "ack", 2, {"venue_id": "x"})
-    with EventJournal(path) as journal:
-        with pytest.raises(JournalError, match="unsupported offline event"):
-            recover_offline(instrument(), journal)
+    with EventJournal(path) as journal, pytest.raises(JournalError, match="unsupported offline event"):
+        recover_offline(instrument(), journal)
 
 
 def test_recovery_never_adopts_legacy_journal_without_session_fingerprint(tmp_path) -> None:
     path = tmp_path / "events.db"
     with EventJournal(path) as journal:
         journal.append("trade:one", "trade", 1, {"price": "100", "quantity": "1", "received_ns": 1})
-    with EventJournal(path) as journal:
-        with pytest.raises(JournalError, match="identity"):
-            recover_offline(instrument(), journal)
+    with EventJournal(path) as journal, pytest.raises(JournalError, match="identity"):
+        recover_offline(instrument(), journal)
