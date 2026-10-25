@@ -20,6 +20,8 @@ def test_native_fixture_engine_smoke_is_credential_free_and_not_a_strategy() -> 
     assert result["trade_observations"] == 6
     assert result["mark_observations"] == 6
     assert result["native_data_engine_used"] is True
+    assert result["event_integrity_verified"] is True
+    assert result["clock_receipt_verified"] is True
     assert result["fees_charged_verified"] is False
     assert result["orders_routed"] is False
     assert result["broker_execution_enabled"] is False
