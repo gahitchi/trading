@@ -82,6 +82,17 @@ class EventJournal:
             "previous_digest TEXT NOT NULL,"
             "digest TEXT NOT NULL)"
         )
+        # These triggers prevent routine accidental edits/deletes by SQLite users.
+        # A privileged filesystem actor can drop them: this is NOT tamper-proof
+        # or externally anchored evidence, only local append-only enforcement.
+        self._db.execute(
+            "CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events "
+            "BEGIN SELECT RAISE(ABORT, 'append-only journal'); END"
+        )
+        self._db.execute(
+            "CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events "
+            "BEGIN SELECT RAISE(ABORT, 'append-only journal'); END"
+        )
         status = self._db.execute("PRAGMA quick_check").fetchone()
         if not status or status[0] != "ok":
             raise JournalError("SQLite journal integrity check failed")
