@@ -8,7 +8,13 @@ import pytest
 from nautilus_trader.model import AggressorSide, Bar, MarkPriceUpdate, TradeTick
 
 from lab.markets.domain import AssetClass, ContractKind, Instrument, MarkPrice, Side, Trade
-from lab.markets.nautilus_data import nautilus_instrument_id, to_nautilus_completed_bar, to_nautilus_mark, to_nautilus_trade
+from lab.markets.nautilus_data import (
+    build_causal_tape,
+    nautilus_instrument_id,
+    to_nautilus_completed_bar,
+    to_nautilus_mark,
+    to_nautilus_trade,
+)
 from lab.markets.okx_public import MarketDataError, PublicCandle
 
 D = Decimal
@@ -114,3 +120,43 @@ def test_native_mark_price_is_neither_last_trade_nor_quote_and_preserves_receipt
     assert str(converted.instrument_id) == "BTC-USDT-SWAP.OKX"
     with pytest.raises(ValueError, match="tick"):
         to_nautilus_mark(MarkPrice("mark-bad", 1, 1, D("110.55")), contract())
+
+
+def test_causal_tape_is_native_ordered_and_non_executable() -> None:
+    observations = (
+        MarkPrice("mark1", 10, 20, D("100.0")),
+        Trade("trade1", 21, 30, D("100.1"), D("0.020"), Side.BUY),
+        MarkPrice("mark2", 22, 40, D("100.2")),
+    )
+    tape = build_causal_tape(contract(), observations)
+    assert tape.instrument_id == contract().instrument_id
+    assert tape.last_received_ns == 40
+    assert tape.execution_qualified is False
+    assert [type(e) for e in tape.events] == [MarkPriceUpdate, TradeTick, MarkPriceUpdate]
+    assert [e.ts_event for e in tape.events] == [10, 21, 22]
+    assert [e.ts_init for e in tape.events] == [20, 30, 40]
+
+
+def test_causal_tape_rejects_reordering_duplicates_and_unqualified_inputs() -> None:
+    a = MarkPrice("m1", 10, 15, D("100.0"))
+    b = Trade("t1", 11, 20, D("100.1"), D("0.020"))
+    with pytest.raises(ValueError, match="without source"):
+        build_causal_tape(contract(), ())
+    with pytest.raises(ValueError, match="receipt-time regression"):
+        build_causal_tape(contract(), (b, a))
+    with pytest.raises(ValueError, match="exchange-time regression"):
+        build_causal_tape(contract(), (b, MarkPrice("m2", 9, 25, D("100.2"))))
+    with pytest.raises(ValueError, match="duplicate"):
+        build_causal_tape(contract(), (a, a))
+    with pytest.raises(TypeError, match="source trades"):
+        build_causal_tape(contract(), (a, object()))
+
+
+def test_reconstructed_historical_snapshots_cannot_be_reordered_into_replay() -> None:
+    # A snapshot can contain old events with identical receipt timestamps.
+    # Feeding them newest-first and silently sorting would introduce
+    # hindsight to a strategy. Fail closed instead.
+    old = Trade("old", 1, 100, D("100.0"), D("0.010"))
+    new = Trade("new", 2, 100, D("100.1"), D("0.010"))
+    with pytest.raises(ValueError, match="exchange-time regression"):
+        build_causal_tape(contract(), (new, old))
