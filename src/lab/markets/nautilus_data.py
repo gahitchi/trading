@@ -8,6 +8,9 @@ best bid/ask, queue fills, regional account capabilities or collateral.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
+
 from nautilus_trader.model import (
     AggressorSide,
     Bar,
@@ -103,3 +106,57 @@ def to_nautilus_mark(mark: MarkPrice, instrument: Instrument) -> MarkPriceUpdate
         ts_event=mark.exchange_ns,
         ts_init=mark.received_ns,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class CausalNautilusTape:
+    """Native read-only event tape; never an execution-qualified data catalog.
+
+    Original receipt ordering is preserved. We never sort a late observation
+    back into earlier strategy knowledge. Exchange-time regressions or gaps
+    in receipt ordering are rejected, not repaired using future information.
+    """
+
+    instrument_id: str
+    events: tuple[TradeTick | MarkPriceUpdate, ...]
+    last_received_ns: int
+    execution_qualified: bool = False
+
+
+def build_causal_tape(
+    instrument: Instrument,
+    observations: Sequence[Trade | MarkPrice],
+) -> CausalNautilusTape:
+    """Convert independently recorded tape observations for Nautilus ingestion.
+
+    Caller must supply real receive-time ordered observations. Historical
+    snapshots downloaded at one later timestamp are NOT a genuine streaming
+    tape; they cannot qualify market replay from their exchange timestamps.
+    No synthetic prices, implied marks, missing trades or forward fills.
+    """
+    if not observations:
+        raise ValueError("cannot build a causal tape without source observations")
+    previous_event = -1
+    previous_received = -1
+    ids: set[tuple[str, str]] = set()
+    result: list[TradeTick | MarkPriceUpdate] = []
+    for observation in observations:
+        if type(observation) is Trade:
+            identity = ("trade", observation.trade_id)
+            converted = to_nautilus_trade(observation, instrument)
+        elif type(observation) is MarkPrice:
+            identity = ("mark", observation.mark_id)
+            converted = to_nautilus_mark(observation, instrument)
+        else:
+            raise TypeError("only source trades and independent mark observations may enter a causal tape")
+        if identity in ids:
+            raise ValueError("duplicate event identity in causal tape")
+        if observation.received_ns < previous_received:
+            raise ValueError("receipt-time regression: never sort information backwards into the past")
+        if observation.exchange_ns < previous_event:
+            raise ValueError("exchange-time regression: source replay requires explicit late-event policy")
+        ids.add(identity)
+        previous_received = observation.received_ns
+        previous_event = observation.exchange_ns
+        result.append(converted)
+    return CausalNautilusTape(instrument.instrument_id, tuple(result), previous_received)
