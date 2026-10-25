@@ -188,7 +188,9 @@ def audit_observed_cashflows(
                 quantum,
             )
             if event.charged_fee != expected_fee:
-                raise AuditMismatch(f"observed {event.liquidity} fee differs from independent currency-rounded schedule")
+                raise AuditMismatch(
+                    f"observed {event.liquidity} fee differs from independent currency-rounded schedule"
+                )
             signed_qty = event.quantity * event.side.sign
             transition = linear_transition(position, entry, signed_qty, event.price, instrument.multiplier)
             position, entry = transition.position, transition.entry_price
