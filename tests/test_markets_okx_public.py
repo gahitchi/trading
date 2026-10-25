@@ -50,3 +50,25 @@ def test_public_fetch_pins_eea_host_and_excludes_unconfirmed(monkeypatch) -> Non
         latest_confirmed_candles("https://evil.example")
     with pytest.raises(MarketDataError, match="limit"):
         latest_confirmed_candles("BTC-USDT", limit=301)
+
+
+def test_candle_rejects_nonfinite_fields_and_provider_schema_drift() -> None:
+    from decimal import Decimal
+
+    from lab.markets.okx_public import PublicCandle
+
+    for field in ("open", "high", "low", "close", "volume_native"):
+        values = {
+            "open": Decimal("100"),
+            "high": Decimal("105"),
+            "low": Decimal("95"),
+            "close": Decimal("102"),
+            "volume_native": Decimal("10"),
+        }
+        values[field] = Decimal("NaN")
+        with pytest.raises(MarketDataError, match="nonfinite"):
+            PublicCandle("BTC-USDT", 60_000_000_000, 120_000_000_000, **values)
+    with pytest.raises(MarketDataError, match="schema"):
+        parse_confirmed_candles(
+            {"code": "0", "data": [row("60000") + ["unexpected-field"]]}, "BTC-USDT"
+        )
