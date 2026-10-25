@@ -85,9 +85,7 @@ class _RoundTripProbe(Strategy):
             side = OrderSide.SELL
         else:
             return
-        order = self.order_factory.market(
-            self.instrument_id, side, self.quantity, time_in_force=TimeInForce.GTC
-        )
+        order = self.order_factory.market(self.instrument_id, side, self.quantity, time_in_force=TimeInForce.GTC)
         self.order_ids.append(str(order.client_order_id))
         self.submit_order(order)
 
@@ -217,7 +215,12 @@ def run_native_fill_parity(
             raise NativeParityError("native order sides, attribution, or taker liquidity do not match")
         q1, q2 = Decimal(str(entry.last_qty)), Decimal(str(exit_.last_qty))
         px1, px2 = Decimal(str(entry.last_px)), Decimal(str(exit_.last_px))
-        if q1 != quantity or q2 != quantity or px1 != Decimal(str(quotes[1].ask_price)) or px2 != Decimal(str(quotes[2].bid_price)):
+        if (
+            q1 != quantity
+            or q2 != quantity
+            or px1 != Decimal(str(quotes[1].ask_price))
+            or px2 != Decimal(str(quotes[2].bid_price))
+        ):
             raise NativeParityError("native fill violates expected synthetic quote price/quantity")
         if not quotes[1].ts_init <= entry.ts_event <= quotes[2].ts_init:
             raise NativeParityError("entry fill occurred before the decision or after the exit decision")
@@ -233,10 +236,7 @@ def run_native_fill_parity(
         if closed.position != 0:
             raise NativeParityError("independent position oracle did not end flat")
         expected_fees = sum(
-            (
-                Money.from_decimal(px * quantity * c.multiplier * rate, currency).as_decimal()
-                for px in (px1, px2)
-            ),
+            (Money.from_decimal(px * quantity * c.multiplier * rate, currency).as_decimal() for px in (px1, px2)),
             Decimal("0"),
         )
         charges = []
