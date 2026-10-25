@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
-from lab.markets.domain import decimal
+from lab.markets.domain import MAX_EVENT_TIMESTAMP_NS, decimal
 
 _EEA_BASE = "https://eea.okx.com"
 _ONE_MINUTE_MS = 60_000
@@ -39,10 +39,12 @@ class PublicCandle:
     source: str = "OKX_EEA_PUBLIC_CANDLES"
 
     def __post_init__(self) -> None:
+        if type(self.start_ns) is not int or type(self.end_ns) is not int:
+            raise MarketDataError("candle timestamps must be exact integer UTC nanoseconds")
         if self.start_ns < 0 or self.start_ns % 60_000_000_000:
             raise MarketDataError("one-minute candle must start on UTC minute boundary")
-        if self.end_ns != self.start_ns + 60_000_000_000:
-            raise MarketDataError("one-minute candle has invalid end")
+        if self.end_ns != self.start_ns + 60_000_000_000 or self.end_ns > MAX_EVENT_TIMESTAMP_NS:
+            raise MarketDataError("one-minute candle end exceeds signed-64-bit timestamp range")
         for name in ("open", "high", "low", "close", "volume_native"):
             value = getattr(self, name)
             if not isinstance(value, Decimal):
