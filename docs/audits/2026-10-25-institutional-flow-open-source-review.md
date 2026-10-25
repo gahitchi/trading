@@ -135,6 +135,8 @@ The original system already has DSR, PSR/HAC adjustments, PBO/CPCV variants, sta
 
 **AD-08 — Independent release:** each venue/product/mode combination has qualification evidence and a hard explicit release gate. Offline/no-credential first install precedes external demo; small-money live is a new independently approved subsystem, not a parameter flip.
 
+**AD-09 — Natural-language instructions are untrusted drafts:** the planned "describe the desired trade" field produces only a **versioned, validated parameter proposal** with an explicit natural-language explanation. A deterministic parser/schema validator must map supported products, venues, account mode, position sizing, time horizon and risk objectives to legal operator bounds; ambiguous prompts abstain. The operator reviews a before/after diff, and activation requires explicit approval. The language model cannot mutate hard stops, credential scopes, research approval evidence, venue region, live authorization, or risk-engine constraints. Test prompt injection, adversarial sizing requests and unknowable market assumptions; no dependency on paid inference services for the core program.
+
 ## 6. Prioritized execution plan
 
 | Priority | Work | Concrete gate |
