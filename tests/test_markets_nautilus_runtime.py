@@ -111,8 +111,8 @@ def test_risk_collateral_and_event_ownership_are_checked_before_native_engine():
     with pytest.raises(ValueError, match="positive"):
         replay_native_observations(spec(), tape(), collateral=D("-10"))
     original = tape()
-    misbound = replace(original, events=(original.events[0], replace(original.events[1], ts_init=0)))
-    with pytest.raises((TypeError, ValueError), match="receipt|noncausal"):
+    misbound = replace(original, events=(original.events[2], original.events[0]))
+    with pytest.raises(ValueError, match="noncausal"):
         replay_native_observations(spec(), misbound)
 
 
