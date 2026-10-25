@@ -134,6 +134,11 @@ def main() -> None:
     c.add_argument("--instrument", default="BTC-USDT")
     c.add_argument("--limit", type=int, default=20)
     c.add_argument("--store", type=Path, help="save verified local checksum-addressed Parquet partitions")
+    h = sub.add_parser("history", help="READ-ONLY paginated EEA historical 1m candles")
+    h.add_argument("--instrument", default="BTC-USDT")
+    h.add_argument("--pages", type=int, default=5)
+    h.add_argument("--limit", type=int, default=100)
+    h.add_argument("--store", type=Path, help="save validated checksum-addressed daily Parquet partitions")
     o = sub.add_parser("observations", help="READ-ONLY EEA latest trades + independent swap mark (NOT a quote)")
     o.add_argument("--instrument", default="BTC-USDT-SWAP")
     o.add_argument("--limit", type=int, default=20)
@@ -236,6 +241,33 @@ def main() -> None:
                     "authenticated_account_qualified": False,
                     "orders_routed": False,
                     "live_trading_enabled": False,
+                },
+                indent=2,
+            )
+        )
+    elif args.command == "history":
+        from lab.markets.catalog import write_confirmed_candles
+        from lab.markets.okx_public import historical_confirmed_candles
+
+        observed = historical_confirmed_candles(args.instrument, pages=args.pages, limit=args.limit)
+        manifests = write_confirmed_candles(args.store, observed) if args.store is not None and observed else ()
+        gap_count = sum(
+            (observed[i].start_ns - observed[i - 1].start_ns) // 60_000_000_000 - 1
+            for i in range(1, len(observed))
+        )
+        print(
+            json.dumps(
+                {
+                    "instrument": args.instrument,
+                    "source": "OKX_EEA_PUBLIC_HISTORICAL_CANDLES",
+                    "count": len(observed),
+                    "start_ns": observed[0].start_ns if observed else None,
+                    "end_ns": observed[-1].end_ns if observed else None,
+                    "missing_minutes_between_observations": gap_count,
+                    "catalog_manifests": [str(path) for path in manifests],
+                    "complete_history_claimed": False,
+                    "execution_supported": False,
+                    "fees_funding_quotes_available": False,
                 },
                 indent=2,
             )
