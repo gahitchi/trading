@@ -364,3 +364,16 @@ def test_mark_prices_are_not_required_to_match_order_tick_precision() -> None:
     # Execution prices still obey the instrument tick specification.
     with pytest.raises(ValueError, match="tick"):
         sim.on_trade(Trade("bad-trade", 2, 2, D("100.05"), D("1")))
+
+
+def test_replay_ids_are_unique_across_nonadjacent_events() -> None:
+    sim = OfflineSimulator(instrument())
+    sim.on_mark(MarkPrice("mark-A", 1, 1, D("100")))
+    sim.on_trade(Trade("trade-A", 1, 1, D("100"), D("10")))
+    sim.on_mark(MarkPrice("mark-B", 2, 2, D("100")))
+    sim.on_trade(Trade("trade-B", 2, 2, D("100"), D("10")))
+    with pytest.raises(ValueError, match="duplicate mark"):
+        sim.on_mark(MarkPrice("mark-A", 3, 3, D("100")))
+    with pytest.raises(ValueError, match="duplicate trade"):
+        sim.on_trade(Trade("trade-A", 3, 3, D("100"), D("10")))
+    assert sim.last_event_ns == 2
