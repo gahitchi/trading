@@ -352,6 +352,9 @@ experiments/LOG.md          your lab notebook
   The bounded synthetic power pilot does not qualify research power or false-positive control.
 - **US stocks only.** Forex and crypto are not supported: instruments, ticks, sessions, funding and broker
   lifecycle are equity-specific (ChatGPT C005-F7). Adding them is a scope decision for Gabriel.
+- **London Gold is a read-only preview.** `lab.gold` calculates a proposed 1%-notional ATR trade with a 2:1
+  gross target; it does not place or protect orders. See [London Gold PAPER rollout](docs/gold-paper-rollout.md)
+  for the broker and execution checks required before enabling it.
 - **Free data is survivorship-biased** and unofficial; see [Data](#data).
 - Idle cash and short-sale proceeds earn no interest unless `[margin] credit_apr` / `short_rebate_apr` are set
   (ASSUMED rates).
