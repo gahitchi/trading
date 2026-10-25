@@ -124,6 +124,10 @@ class OfflineSimulator:
         self.last_ns = -1
         self.last_event_ns = -1
         self._trade_ids_at_timestamp: set[str] = set()
+        # A reference simulator favors exact event identity over long-run RAM;
+        # high-throughput history instead uses columnar data/catalog checks.
+        self._seen_trade_ids: set[str] = set()
+        self._seen_mark_ids: set[str] = set()
         self.peak_equity = self.balance
         self.day_index: int | None = None
         self.day_open_equity = self.balance
@@ -311,7 +315,7 @@ class OfflineSimulator:
         """Valuation/maintenance updates occur on independent exchange mark events."""
         if mark.exchange_ns < self.last_event_ns or mark.exchange_ns < self.mark_ns:
             raise ValueError("out-of-order mark event")
-        if mark.mark_id == self._last_mark_id:
+        if mark.mark_id in self._seen_mark_ids:
             raise ValueError("duplicate mark event")
         # Valuation marks may have more precision than the executable price tick.
         # MarkPrice independently validates positive finite Decimal values; the
@@ -330,13 +334,14 @@ class OfflineSimulator:
         self.mark_ns = mark.exchange_ns
         self.last_event_ns = mark.exchange_ns
         self._last_mark_id = mark.mark_id
+        self._seen_mark_ids.add(mark.mark_id)
         self._risk_update()
 
     def on_trade(self, trade: Trade) -> tuple[Fill, ...]:
         if trade.exchange_ns < self.last_event_ns:
             raise ValueError("out-of-order trade or funding event timestamp")
-        if trade.exchange_ns == self.last_ns and trade.trade_id in self._trade_ids_at_timestamp:
-            raise ValueError("duplicate trade ID at timestamp")
+        if trade.trade_id in self._seen_trade_ids:
+            raise ValueError("duplicate trade ID")
         self.instrument.check_price(trade.price)
         if self.journal is not None:
             self.journal.append(
@@ -348,6 +353,7 @@ class OfflineSimulator:
         if trade.exchange_ns != self.last_ns:
             self._trade_ids_at_timestamp.clear()
         self._trade_ids_at_timestamp.add(trade.trade_id)
+        self._seen_trade_ids.add(trade.trade_id)
         day = trade.exchange_ns // DAY_NS
         if self.day_index != day:
             self.day_index = day
