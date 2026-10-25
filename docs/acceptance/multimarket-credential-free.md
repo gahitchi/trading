@@ -41,13 +41,21 @@ Only on a working internet connection in a supported EU domain:
 ```sh
 uv run python -m lab.markets candles --instrument BTC-USDT --limit 20 --store ./results/manual-multimarket-check/candles
 uv run python -m lab.markets observations --instrument BTC-USDT-SWAP --limit 20
+uv run python -m lab.markets microstructure --instrument BTC-USDT-SWAP --depth 5
+uv run python -m lab.markets history --instrument BTC-USDT --pages 3 --limit 100 --store ./results/manual-multimarket-check/candles
 ```
 
 These two commands may fail if the public EEA endpoint, product, network or regional
 entitlement is unavailable. **Record the failure exactly; do not switch to a global
 OKX endpoint to make the test pass.** Completed candles and recent trades are not
 a continuous replay feed. Mark and latest trade are two independent timestamps and
-do not provide spread, best bid/ask, queue position or funding.
+do not provide spread, best bid/ask, queue position or funding. The
+separate microstructure command reports a bounded EEA REST book snapshot (best
+bid/ask and ordered price levels) and an **indicative**, not settled, funding
+rate. These feeds are not synchronized and cannot prove fills. The history
+command accepts only strictly older page cursors, does not fill missing
+intervals, and stores content-addressed Parquet files; it is not a complete
+execution-quality data history.
 
 ## 4. Local browser synthetic sample
 
@@ -58,7 +66,11 @@ uv run lab app --directory ./results/manual-multimarket-check/dashboard --no-bro
 Open the localhost URL printed by the app. Before providing any paper-broker
 configuration, choose **Try crypto without a broker** and run the default sample.
 Confirm that a clearly labelled synthetic position, equity, fees, and no-qualified-
-strategy message appear, with no attempt to connect to IB Gateway. The main existing
+strategy message appear, with no attempt to connect to IB Gateway. Also test
+**Inspect public crypto market data**, choosing a swap instrument. It must
+show the separate book and indicative-funding timestamps, deny requests without
+an internet connection rather than fabricating a quote, and never activate
+the paper broker, a strategy, or an order path. The main existing
 IBKR paper wizard is deliberately separate; pressing **Start paper trading** is *not*
 part of this acceptance.
 
