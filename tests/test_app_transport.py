@@ -13,7 +13,12 @@ from lab import app
 
 @pytest.mark.parametrize(
     "disconnect",
-    [BrokenPipeError(32, "Broken pipe"), ConnectionResetError(104, "Reset"), ConnectionAbortedError(103, "Aborted"), TimeoutError("timeout")],
+    [
+        BrokenPipeError(32, "Broken pipe"),
+        ConnectionResetError(104, "Reset"),
+        ConnectionAbortedError(103, "Aborted"),
+        TimeoutError("timeout"),
+    ],
 )
 def test_browser_disconnections_do_not_print_handler_tracebacks(disconnect):
     handler = object.__new__(app.Handler)
