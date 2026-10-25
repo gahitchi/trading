@@ -32,7 +32,7 @@ from nautilus_trader.model import (
 from nautilus_trader.trading import Strategy, StrategyConfig
 
 from lab.markets.accounting import linear_transition
-from lab.markets.domain import MAX_EVENT_TIMESTAMP_NS, decimal, positive
+from lab.markets.domain import MAX_EVENT_TIMESTAMP_NS, Side, decimal, positive
 from lab.markets.nautilus_instruments import LinearContractDefinition, to_nautilus_perpetual
 
 
@@ -43,6 +43,7 @@ class NativeParityError(ValueError):
 @dataclass(frozen=True, slots=True)
 class NativeFillParity:
     instrument: str
+    entry_side: Side
     entry_price: Decimal
     exit_price: Decimal
     quantity: Decimal
@@ -59,10 +60,11 @@ class NativeFillParity:
 
 
 class _RoundTripConfig(StrategyConfig):
-    def __init__(self, *, instrument_id, quantity: Quantity) -> None:
+    def __init__(self, *, instrument_id, quantity: Quantity, entry_side: OrderSide) -> None:
         super().__init__()
         self.instrument_id = instrument_id
         self.quantity = quantity
+        self.entry_side = entry_side
 
 
 class _RoundTripProbe(Strategy):
@@ -72,6 +74,7 @@ class _RoundTripProbe(Strategy):
         super().__init__(config)
         self.instrument_id = config.instrument_id
         self.quantity = config.quantity
+        self.entry_side = config.entry_side
         self.quotes_seen = 0
         self.fills = []
         self.failures = []
@@ -83,13 +86,19 @@ class _RoundTripProbe(Strategy):
     def on_quote(self, tick: QuoteTick) -> None:
         self.quotes_seen += 1
         if self.quotes_seen == 2:
-            side = OrderSide.BUY
+            side = self.entry_side
         elif self.quotes_seen == 3:
-            # Never send an exit unless the native portfolio actually holds the entry.
-            if not self.portfolio.is_net_long(self.instrument_id):
-                self.failures.append("entry not long before scheduled exit")
-                return
-            side = OrderSide.SELL
+            # A cover requires an actual native short, not an assumed fill.
+            if self.entry_side == OrderSide.BUY:
+                if not self.portfolio.is_net_long(self.instrument_id):
+                    self.failures.append("entry not long before scheduled exit")
+                    return
+                side = OrderSide.SELL
+            else:
+                if not self.portfolio.is_net_short(self.instrument_id):
+                    self.failures.append("entry not short before scheduled cover")
+                    return
+                side = OrderSide.BUY
         else:
             return
         order = self.order_factory.market(self.instrument_id, side, self.quantity, time_in_force=TimeInForce.GTC)
@@ -134,6 +143,14 @@ def _validate_quotes(spec: LinearContractDefinition, quotes: tuple[QuoteTick, ..
             raise NativeParityError("top-of-book size insufficient for fully controlled fill")
     if spec.observed_ns > quotes[0].ts_init:
         raise NativeParityError("contract metadata observed after the first test quote")
+    # Reject external quote streams disguised as the artificial deterministic fixture.
+    def identity(q: QuoteTick) -> tuple[object, ...]:
+        return (
+            str(q.instrument_id), q.ts_event, q.ts_init, str(q.bid_price),
+            str(q.ask_price), str(q.bid_size), str(q.ask_size),
+        )
+    if tuple(map(identity, quotes)) != tuple(map(identity, synthetic_quotes(spec))):
+        raise NativeParityError("native parity requires the exact fixed synthetic quote fixture")
 
 
 def synthetic_quotes(spec: LinearContractDefinition) -> tuple[QuoteTick, ...]:
@@ -168,6 +185,7 @@ def run_native_fill_parity(
     *,
     quantity: Decimal = Decimal("1.000"),
     collateral: Decimal = Decimal("1000"),
+    side: Side = Side.BUY,
 ) -> NativeFillParity:
     """Verify a synthetic native BUY/SELL against the independent Decimal oracle.
 
@@ -177,6 +195,8 @@ def run_native_fill_parity(
     """
     if type(quantity) is not Decimal or type(collateral) is not Decimal:
         raise TypeError("quantity and collateral must be exact Decimal values")
+    if not isinstance(side, Side):
+        raise TypeError("entry side must be a typed Side")
     positive(decimal(quantity), "quantity")
     positive(decimal(collateral), "collateral")
     _validate_quotes(spec, quotes, quantity)
@@ -187,7 +207,11 @@ def run_native_fill_parity(
     rate = spec.taker_fee_bps / Decimal("10000")
     if rate <= 0:
         raise NativeParityError("fee parity requires a strictly positive taker fee")
-    probe = _RoundTripProbe(_RoundTripConfig(instrument_id=native.id, quantity=Quantity.from_str(str(quantity))))
+    entry_side = OrderSide.BUY if side == Side.BUY else OrderSide.SELL
+    exit_side = OrderSide.SELL if side == Side.BUY else OrderSide.BUY
+    probe = _RoundTripProbe(
+        _RoundTripConfig(instrument_id=native.id, quantity=Quantity.from_str(str(quantity)), entry_side=entry_side)
+    )
     engine = BacktestEngine(config=BacktestEngineConfig(logging=LoggerConfig(stdout_level=LogLevel.ERROR)))
     try:
         engine.add_venue(
@@ -212,8 +236,8 @@ def run_native_fill_parity(
             raise NativeParityError("native engine did not produce exactly two observed fills")
         entry, exit_ = probe.fills
         if (
-            entry.order_side != OrderSide.BUY
-            or exit_.order_side != OrderSide.SELL
+            entry.order_side != entry_side
+            or exit_.order_side != exit_side
             or entry.liquidity_side != LiquiditySide.TAKER
             or exit_.liquidity_side != LiquiditySide.TAKER
             or len({str(entry.trade_id), str(exit_.trade_id)}) != 2
@@ -225,8 +249,8 @@ def run_native_fill_parity(
         if (
             q1 != quantity
             or q2 != quantity
-            or px1 != Decimal(str(quotes[1].ask_price))
-            or px2 != Decimal(str(quotes[2].bid_price))
+            or px1 != Decimal(str(quotes[1].ask_price if side == Side.BUY else quotes[1].bid_price))
+            or px2 != Decimal(str(quotes[2].bid_price if side == Side.BUY else quotes[2].ask_price))
         ):
             raise NativeParityError("native fill violates expected synthetic quote price/quantity")
         if not quotes[1].ts_init <= entry.ts_event <= quotes[2].ts_init:
@@ -238,8 +262,9 @@ def run_native_fill_parity(
 
         # Independent price/quantity accounting. Fee rounding is delegated to the
         # native currency precision, never obtained from the observed commission.
-        opened = linear_transition(Decimal("0"), Decimal("0"), quantity, px1, c.multiplier)
-        closed = linear_transition(opened.position, opened.entry_price, -quantity, px2, c.multiplier)
+        signed_quantity = quantity * side.sign
+        opened = linear_transition(Decimal("0"), Decimal("0"), signed_quantity, px1, c.multiplier)
+        closed = linear_transition(opened.position, opened.entry_price, -signed_quantity, px2, c.multiplier)
         if closed.position != 0:
             raise NativeParityError("independent position oracle did not end flat")
         expected_fees = sum(
@@ -266,6 +291,7 @@ def run_native_fill_parity(
             raise NativeParityError("native cached fill report disagrees with fill callbacks")
         return NativeFillParity(
             instrument=str(native.id),
+            entry_side=side,
             entry_price=px1,
             exit_price=px2,
             quantity=quantity,

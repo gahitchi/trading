@@ -8,7 +8,7 @@ from decimal import Decimal
 import pytest
 from nautilus_trader.model import Price, Quantity, QuoteTick
 
-from lab.markets.domain import AssetClass, ContractKind, Instrument
+from lab.markets.domain import AssetClass, ContractKind, Instrument, Side
 from lab.markets.native_fill_parity import NativeParityError, run_native_fill_parity, synthetic_quotes
 from lab.markets.nautilus_instruments import LinearContractDefinition
 
@@ -56,9 +56,27 @@ def test_real_native_round_trip_charges_both_taker_fees_and_reconciles_account()
 
 
 def test_real_native_parity_is_reproducible_without_a_broker():
-    left = run_native_fill_parity(spec(), synthetic_quotes(spec()))
-    right = run_native_fill_parity(spec(), synthetic_quotes(spec()))
-    assert left == right
+    for side in (Side.BUY, Side.SELL):
+        left = run_native_fill_parity(spec(), synthetic_quotes(spec()), side=side)
+        right = run_native_fill_parity(spec(), synthetic_quotes(spec()), side=side)
+        assert left == right
+
+
+def test_short_cover_reconciles_negative_pnl_and_both_taker_fees():
+    s = spec()
+    result = run_native_fill_parity(s, synthetic_quotes(s), side=Side.SELL)
+    assert result.entry_side == Side.SELL
+    assert result.fills == 2
+    assert result.entry_price == D("100.0")
+    assert result.exit_price == D("101.2")
+    assert result.quantity == D("1.000")
+    assert result.gross_pnl == D("-1.2")
+    assert result.charged_fees == D("0.10")
+    assert result.net_pnl == D("-1.30")
+    assert result.ending_balance == D("998.70")
+    assert result.ending_balance == result.expected_ending_balance
+    assert result.execution_cost_parity_verified
+    assert not result.broker_execution_enabled
 
 
 def test_unqualified_metadata_and_zero_fee_are_rejected():
@@ -96,6 +114,24 @@ def test_invalid_collateral_quantity_and_feed_refused_before_native_engine():
         run_native_fill_parity(s, (q[0], q[1], bad, q[3]))
 
 
+def test_modified_but_causal_quotes_cannot_be_claimed_as_the_synthetic_fixture():
+    s = spec()
+    q = synthetic_quotes(s)
+    forged = QuoteTick(
+        q[1].instrument_id,
+        Price.from_str("99.9"),
+        Price.from_str("100.2"),
+        Quantity.from_str("10.000"),
+        Quantity.from_str("10.000"),
+        q[1].ts_event,
+        q[1].ts_init,
+    )
+    with pytest.raises(NativeParityError, match="exact fixed synthetic"):
+        run_native_fill_parity(s, (q[0], forged, q[2], q[3]))
+    with pytest.raises(TypeError, match="typed Side"):
+        run_native_fill_parity(s, q, side="sell")
+
+
 def test_synthetic_test_feed_must_not_be_mislabelled_as_real_market_data():
     s = spec()
     quotes = synthetic_quotes(s)
@@ -120,7 +156,14 @@ def test_cli_outputs_native_fees_and_never_authorizes_a_broker():
     )
     payload = json.loads(completed.stdout)
     assert payload["fills"] == 2
+    assert payload["sides_verified"] == ["buy", "sell"]
     assert payload["charged_fees"] == "0.10"
+    short = payload["short_round_trip"]
+    assert short["fills"] == 2
+    assert short["gross_pnl"] == "-1.2000"
+    assert short["charged_fees"] == "0.10"
+    assert short["ending_balance"] == "998.70"
+    assert short["ending_balance"] == short["expected_ending_balance"]
     assert payload["ending_balance"] == payload["expected_ending_balance"]
     assert payload["execution_cost_parity_verified"] is True
     assert payload["input_kind"] == "synthetic_offline_quotes"

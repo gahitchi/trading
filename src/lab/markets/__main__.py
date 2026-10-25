@@ -182,10 +182,24 @@ def native_fill_parity_demo() -> dict:
         observed_ns=0,
         metadata_source="offline_fixture",
     )
-    result = run_native_fill_parity(spec, synthetic_quotes(spec))
+    quotes = synthetic_quotes(spec)
+    result = run_native_fill_parity(spec, quotes, side=Side.BUY)
+    short = run_native_fill_parity(spec, quotes, side=Side.SELL)
     return {
         "mode": "offline_sim",
         "input_kind": result.source,
+        "sides_verified": [result.entry_side.value, short.entry_side.value],
+        "short_round_trip": {
+            "fills": short.fills,
+            "entry_price": str(short.entry_price),
+            "exit_price": str(short.exit_price),
+            "gross_pnl": str(short.gross_pnl),
+            "charged_fees": str(short.charged_fees),
+            "net_pnl": str(short.net_pnl),
+            "ending_balance": str(short.ending_balance),
+            "expected_ending_balance": str(short.expected_ending_balance),
+            "execution_cost_parity_verified": short.execution_cost_parity_verified,
+        },
         "engine": "nautilus_backtest_native",
         "instrument": result.instrument,
         "fills": result.fills,
@@ -214,7 +228,7 @@ def main() -> None:
     d.add_argument("--journal", type=Path, help="optional durable SQLite journal; refuses overwriting old sessions")
     sub.add_parser(
         "native-fill-parity",
-        help="verify two real native synthetic fills, charged fees and independent Decimal collateral parity",
+        help="verify long/short native synthetic fills, fees and independent Decimal account parity",
     )
     nd = sub.add_parser("native-demo", help="read-only native Nautilus replay of a bundled synthetic fixture")
     nd.add_argument("--balance", type=Decimal, default=Decimal("1000"))
