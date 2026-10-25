@@ -147,6 +147,8 @@ class Trade:
     received_ns: int
     price: Decimal
     quantity: Decimal
+    taker_side: Side | None = None
+    venue_source: str | None = None
 
     def __post_init__(self) -> None:
         if not self.trade_id or len(self.trade_id) > 128:
@@ -160,6 +162,12 @@ class Trade:
             if not isinstance(v, Decimal):
                 raise TypeError(f"{name} must be Decimal")
             positive(decimal(v), name)
+        if self.taker_side is not None and not isinstance(self.taker_side, Side):
+            raise TypeError("taker_side must be a Side value")
+        if self.venue_source is not None and (
+            type(self.venue_source) is not str or not 1 <= len(self.venue_source) <= 16
+        ):
+            raise ValueError("invalid trade source label")
 
 
 @dataclass(frozen=True, slots=True)

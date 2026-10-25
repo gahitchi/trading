@@ -355,12 +355,12 @@ class OfflineSimulator:
             raise ValueError("duplicate trade ID")
         self.instrument.check_price(trade.price)
         if self.journal is not None:
-            self.journal.append(
-                f"trade:{trade.trade_id}",
-                "trade",
-                trade.exchange_ns,
-                {"price": str(trade.price), "quantity": str(trade.quantity), "received_ns": trade.received_ns},
-            )
+            evidence = {"price": str(trade.price), "quantity": str(trade.quantity), "received_ns": trade.received_ns}
+            if trade.taker_side is not None:
+                evidence["taker_side"] = str(trade.taker_side)
+            if trade.venue_source is not None:
+                evidence["venue_source"] = trade.venue_source
+            self.journal.append(f"trade:{trade.trade_id}", "trade", trade.exchange_ns, evidence)
         self._seen_trade_ids.add(trade.trade_id)
         day = trade.exchange_ns // DAY_NS
         if self.day_index != day:

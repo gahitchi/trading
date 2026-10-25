@@ -101,6 +101,8 @@ def recover_offline(
                         int(payload["received_ns"]),
                         Decimal(payload["price"]),
                         Decimal(payload["quantity"]),
+                        taker_side=Side(payload["taker_side"]) if payload.get("taker_side") else None,
+                        venue_source=payload.get("venue_source"),
                     )
                 )
             elif kind == "intent":
