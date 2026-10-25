@@ -119,3 +119,22 @@ def test_bundle_exports_the_authoritative_sqlite_ledger_and_sanitize_pseudonymiz
     raw_ids = list(h.broker().state["orders"]) + [f["trade_id"] for f in h.broker().state["fills"]]
     assert raw_ids and not [i for i in raw_ids if i in text]  # every order and trade ID pseudonymized
     assert "CLIENT-" in text and "TRADE-" in text
+
+
+def test_sanitize_replaces_short_cross_file_broker_ids_without_touching_unrelated_tokens(tmp_path):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "orders.json").write_text(json.dumps({"trade_id": "T2", "client_order_id": "co-1"}))
+    (raw / "notes.json").write_text(
+        json.dumps({"reason": "late fill T2 after dispose co-1", "control": "XT2 must stay"})
+    )
+    clean = tmp_path / "clean"
+    capture.sanitize(raw, clean, tmp_path / "pseudonym.key")
+    typed = json.loads((clean / "orders.json").read_text())
+    notes = json.loads((clean / "notes.json").read_text())
+    assert typed["trade_id"].startswith("TRADE-")
+    assert typed["client_order_id"].startswith("CLIENT-")
+    assert typed["trade_id"] in notes["reason"]
+    assert typed["client_order_id"] in notes["reason"]
+    assert "T2" not in notes["reason"]
+    assert notes["control"] == "XT2 must stay"
