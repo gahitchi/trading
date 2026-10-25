@@ -37,7 +37,7 @@ def test_historical_provider_pages_are_strictly_older_and_sorted(monkeypatch) ->
         calls.append(dict(params))
         return (
             response(5, 4) if "after" not in params else response(3, 2),
-            10_000_000_000,
+            1_000_000_000_000,
         )
 
     monkeypatch.setattr(api, "_fetch", fake_fetch)
@@ -50,7 +50,7 @@ def test_historical_provider_pages_are_strictly_older_and_sorted(monkeypatch) ->
 def test_historical_overlap_or_stuck_page_is_refused(monkeypatch) -> None:
     import lab.markets.okx_observations as api
 
-    monkeypatch.setattr(api, "_fetch", lambda path, params: (response(5, 4), 10_000_000_000))
+    monkeypatch.setattr(api, "_fetch", lambda path, params: (response(5, 4), 1_000_000_000_000))
     monkeypatch.setattr("time.sleep", lambda _: None)
     with pytest.raises(MarketDataError, match="older cursor"):
         historical_confirmed_candles("BTC-USDT", pages=2, limit=2)
@@ -59,7 +59,7 @@ def test_historical_overlap_or_stuck_page_is_refused(monkeypatch) -> None:
 def test_gaps_remain_visible_in_historical_rows(monkeypatch) -> None:
     import lab.markets.okx_observations as api
 
-    monkeypatch.setattr(api, "_fetch", lambda path, params: (response(7, 2), 10_000_000_000))
+    monkeypatch.setattr(api, "_fetch", lambda path, params: (response(7, 2), 1_000_000_000_000))
     bars = historical_confirmed_candles("BTC-USDT", pages=2, limit=100)
     assert len(bars) == 2
     assert bars[1].start_ns - bars[0].start_ns == 5 * 60_000_000_000
