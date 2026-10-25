@@ -24,9 +24,9 @@ class MinuteBar:
 
 
 class MinuteBuilder:
-    """Ingest monotonic exchange timestamps; emit only after a receive-time watermark.
+    """Ingest monotonic exchange timestamps with an explicit event-time watermark.
 
-    A watermark certifies that later data cannot be treated as an on-time trade.
+    A watermark certifies that earlier event-time data cannot be treated as on-time.
     The caller must enforce vendor sequence/backfill separately. Missing minutes
     remain missing and are reported on the next actual completed bar.
     """
@@ -49,16 +49,19 @@ class MinuteBuilder:
             raise ValueError("duplicate trade ID; rejecting rather than double-counting")
         if trade.exchange_ns < self._last_ts:
             raise ValueError("out-of-order trade: replay must explicitly sort/repair source")
-        if trade.exchange_ns <= self._watermark:
+        if trade.exchange_ns < self._watermark:
             raise ValueError("trade arrived for an already finalized watermark")
         start = trade.exchange_ns // MINUTE_NS * MINUTE_NS
         out: tuple[MinuteBar, ...] = ()
         if self._start is not None and start != self._start:
             if start < self._start:
                 raise ValueError("cannot regress minute")
-            out = self.flush(trade.received_ns)
+            # The next observed UTC minute proves the preceding interval ended.
+            # Received time may be arbitrarily delayed; using it here would
+            # wrongly seal valid later trades in the new interval.
+            out = self.flush(start)
             if self._start is not None:
-                raise ValueError("previous minute not yet final at receive timestamp")
+                raise ValueError("previous minute not yet final at next event-time boundary")
         if self._start is None:
             self._start = start
             self._first = self._high = self._low = trade.price
