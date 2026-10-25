@@ -163,6 +163,27 @@ class Trade:
 
 
 @dataclass(frozen=True, slots=True)
+class MarkPrice:
+    """Independent valuation/liquidation event; never inferred from a trade."""
+
+    mark_id: str
+    exchange_ns: int
+    received_ns: int
+    price: Decimal
+
+    def __post_init__(self) -> None:
+        if not self.mark_id or len(self.mark_id) > 128:
+            raise ValueError("mark ID missing or too long")
+        if type(self.exchange_ns) is not int or type(self.received_ns) is not int:
+            raise TypeError("mark timestamps must be integer nanoseconds")
+        if self.exchange_ns < 0 or self.received_ns < self.exchange_ns:
+            raise ValueError("invalid mark timestamps")
+        if not isinstance(self.price, Decimal):
+            raise TypeError("mark price must be Decimal")
+        positive(decimal(self.price), "mark price")
+
+
+@dataclass(frozen=True, slots=True)
 class OrderIntent:
     client_order_id: str
     instrument_id: str
