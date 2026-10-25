@@ -92,7 +92,7 @@ def verify_recorded_book_capture(
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         before = os.fstat(descriptor)
         if not stat.S_ISREG(before.st_mode) or before.st_size <= 0 or before.st_size > max_bytes:
-            raise BookCaptureError("capture must be a bounded nonempty regular file")
+            raise BookCaptureError("capture must be a nonempty regular file within the byte limit")
         with os.fdopen(descriptor, "rb") as file:
             descriptor = None
             raw = file.read(max_bytes + 1)
@@ -128,7 +128,7 @@ def verify_recorded_book_capture(
             raise BookCaptureError("blank recording row is not a market event")
         count += 1
         if count > max_frames:
-            raise BookCaptureError("capture exceeds bounded event count")
+            raise BookCaptureError("capture exceeds bounded frame count")
         try:
             item = json.loads(
                 line,
