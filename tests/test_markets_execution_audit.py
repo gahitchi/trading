@@ -158,6 +158,24 @@ def test_native_opaque_order_ids_are_bound_but_not_used_for_local_order_creation
         run((), (replace(native, client_id="../secrets"),))
 
 
+def test_unqualified_spot_and_noncrypto_contracts_cannot_use_linear_perpetual_math():
+    spot = replace(contract(), kind=ContractKind.SPOT)
+    equity = Instrument(
+        "SIM",
+        "BTC",
+        AssetClass.EQUITY,
+        ContractKind.SHARE,
+        "USD",
+        D("0.01"),
+        D("1"),
+        D("1"),
+        D("1"),
+    )
+    for unsupported in (spot, equity):
+        with pytest.raises(ValueError, match="crypto linear"):
+            audit_observed_cashflows(unsupported, (), (), collateral=D("1000"), taker_fee_bps=D("5"))
+
+
 def test_bad_collateral_precision_and_unsupported_inputs():
     with pytest.raises(AuditMismatch, match="representable"):
         audit_observed_cashflows(contract(), plans(), (), collateral=D("1000.001"), taker_fee_bps=D("5"))

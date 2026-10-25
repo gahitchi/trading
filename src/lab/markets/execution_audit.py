@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 from lab.markets.accounting import linear_transition, signed_funding_payment
-from lab.markets.domain import MAX_EVENT_TIMESTAMP_NS, Instrument, Side, decimal, positive
+from lab.markets.domain import MAX_EVENT_TIMESTAMP_NS, AssetClass, ContractKind, Instrument, Side, decimal, positive
 
 # A native Nautilus ClientOrderId may contain separators and exceed the
 # stricter local OrderIntent alphanumeric limit. This auditor consumes an
@@ -97,6 +97,8 @@ def audit_observed_cashflows(
     This intentionally does not infer unseen fills, authenticate funding
     receipts, approximate execution queue position, or authorize new orders.
     """
+    if instrument.asset_class is not AssetClass.CRYPTO or instrument.kind is not ContractKind.LINEAR_DERIVATIVE:
+        raise ValueError("cashflow audit supports quote-settled crypto linear derivatives only")
     if type(currency_precision) is not int or not 0 <= currency_precision <= 9:
         raise ValueError("unsupported collateral currency precision")
     if type(max_mark_age_ns) is not int or max_mark_age_ns <= 0:
