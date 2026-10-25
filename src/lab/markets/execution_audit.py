@@ -19,7 +19,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from lab.markets.accounting import linear_transition, signed_funding_payment
 from lab.markets.domain import MAX_EVENT_TIMESTAMP_NS, Instrument, Side, decimal, positive
 
-_ORDER_ID = re.compile(r"[A-Za-z0-9]{1,32}")
+# A native Nautilus ClientOrderId may contain separators and exceed the
+# stricter local OrderIntent alphanumeric limit. This auditor consumes an
+# *observed opaque identifier*; it must not weaken local order creation.
+_ORDER_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 _MAX_EVENTS = 10_000
 _DEFAULT_MARK_AGE_NS = 120_000_000_000
 

@@ -142,6 +142,20 @@ def test_duplicate_fills_and_future_funding_refused():
         run((first(), once, twice))
 
 
+def test_native_opaque_order_ids_are_bound_but_not_used_for_local_order_creation():
+    native = AuditOrder("O-19700101-000000-001", Side.BUY, D("1"))
+    fill = replace(
+        first(), client_id=native.client_id,
+        trade_id="T-19700101-001", quantity=D("1"),
+        charged_fee=D("0.05"),
+    )
+    result = run((fill,), (native,))
+    assert result.fill_count == 1
+    assert result.remaining_orders == ((native.client_id, D("0")),)
+    with pytest.raises(AuditMismatch, match="durable order identity"):
+        run((), (replace(native, client_id="../secrets"),))
+
+
 def test_bad_collateral_precision_and_unsupported_inputs():
     with pytest.raises(AuditMismatch, match="representable"):
         audit_observed_cashflows(contract(), plans(), (), collateral=D("1000.001"), taker_fee_bps=D("5"))
