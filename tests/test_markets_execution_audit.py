@@ -161,8 +161,12 @@ def test_native_opaque_order_ids_are_bound_but_not_used_for_local_order_creation
 def test_maker_fee_and_rebate_have_independent_lifecycle_specific_precision():
     maker = replace(second(), price=D("100.3"), charged_fee=D("0.01"), liquidity="maker")
     result = audit_observed_cashflows(
-        contract(), plans(), (first(), maker, close()),
-        collateral=D("1000"), taker_fee_bps=D("5"), maker_fee_bps=D("2"),
+        contract(),
+        plans(),
+        (first(), maker, close()),
+        collateral=D("1000"),
+        taker_fee_bps=D("5"),
+        maker_fee_bps=D("2"),
     )
     assert result.realized_pnl == D("0.7400")
     assert result.charged_fees == D("0.08")
@@ -171,15 +175,23 @@ def test_maker_fee_and_rebate_have_independent_lifecycle_specific_precision():
         run((first(), maker, close()))
     with pytest.raises(AuditMismatch, match="maker fee"):
         audit_observed_cashflows(
-            contract(), plans(), (first(), replace(maker, charged_fee=D("0.03")), close()),
-            collateral=D("1000"), taker_fee_bps=D("5"), maker_fee_bps=D("2"),
+            contract(),
+            plans(),
+            (first(), replace(maker, charged_fee=D("0.03")), close()),
+            collateral=D("1000"),
+            taker_fee_bps=D("5"),
+            maker_fee_bps=D("2"),
         )
     with pytest.raises(AuditMismatch, match="liquidity attribution"):
         run((replace(first(), liquidity="unknown"),))
     rebate = replace(maker, charged_fee=D("-0.01"))
     result_rebate = audit_observed_cashflows(
-        contract(), plans(), (first(), rebate, close()),
-        collateral=D("1000"), taker_fee_bps=D("5"), maker_fee_bps=D("-2"),
+        contract(),
+        plans(),
+        (first(), rebate, close()),
+        collateral=D("1000"),
+        taker_fee_bps=D("5"),
+        maker_fee_bps=D("-2"),
     )
     assert result_rebate.charged_fees == D("0.06")
     assert result_rebate.ending_balance == D("1000.68")
