@@ -10,7 +10,7 @@ arithmetic validates its observed fills and native account after settlement.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from nautilus_trader.backtest import BacktestEngine
 from nautilus_trader.common import LogLevel
