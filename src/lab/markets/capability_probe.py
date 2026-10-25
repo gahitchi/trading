@@ -29,9 +29,7 @@ def inspect_adapters() -> dict:
         for enum_name in ("OKXRegion", "OKXEnvironment"):
             enum = getattr(module, enum_name, None)
             if enum is not None:
-                data[f"{enum_name}_members"] = [
-                    s for s in ("EEA", "EU", "DEMO", "LIVE") if hasattr(enum, s)
-                ]
+                data[f"{enum_name}_members"] = [s for s in ("EEA", "EU", "DEMO", "LIVE") if hasattr(enum, s)]
         result["adapters"][name] = data
     return result
 
