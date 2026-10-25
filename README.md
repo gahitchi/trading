@@ -59,7 +59,9 @@ partially filled and cancelled orders, positions, and exact collateral by
 currency. It does not authenticate venue data, settle money, authorize
 orders, or qualify a live/demo exchange connection.
 The offline-only Nautilus bridge now constructs native `CryptoPerpetual` instruments from explicit,
-scenario-supplied contract metadata (including multiplier, minimum notional, margins and fee rates),
+scenario-supplied contract metadata (including multiplier, minimum notional and margin
+assumptions; maker/taker BPS are retained separately because pinned Nautilus 2.0.0rc7
+cannot accept them in its native perpetual constructor),
 and converts observed trades, independently priced marks, and confirmed candles into native `TradeTick`,
 `MarkPriceUpdate`, and `Bar` objects. It preserves each source receipt timestamp and refuses
 duplicate or time-regressing observations in its read-only causal tape. Mark prices retain their
