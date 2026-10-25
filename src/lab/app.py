@@ -448,6 +448,24 @@ class Controller:
             "result": demo(path, quantity, Side(options["side"]), capital),
         }
 
+    def public_crypto_snapshot(self, options):
+        """Explicitly requested, read-only EEA public market inspection.
+
+        The only accepted input is a vetted instrument ID and bounded depth;
+        the implementation cannot change URLs, use credentials or route orders.
+        Never confuse indicative public funding with a settled broker debit.
+        """
+        from lab.markets.preview import public_preview
+
+        if type(options) is not dict or set(options) != {"instrument", "depth"}:
+            raise ValueError("Expected only instrument and depth for public market inspection.")
+        instrument, depth = options["instrument"], options["depth"]
+        if type(instrument) is not str or not re.fullmatch(r"[A-Z0-9_-]{3,80}-SWAP", instrument):
+            raise ValueError("Public funding inspection requires a canonical swap instrument.")
+        if type(depth) is not str or depth not in {"1", "5", "10"}:
+            raise ValueError("Public order-book depth must be 1, 5, or 10.")
+        return public_preview(instrument, depth=int(depth))
+
     def status(self):
         with self.lock:
             hb, requests, authority = {}, [], None
@@ -601,6 +619,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = c.approve(body.get("request"))
             elif self.path == "/api/offline-demo":
                 result = c.offline_demo(body)
+            elif self.path == "/api/public-crypto":
+                result = c.public_crypto_snapshot(body)
             else:
                 return self.reply(404, {"error": "Not found."})
             return self.reply(200, result)
