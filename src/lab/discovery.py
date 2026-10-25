@@ -285,7 +285,7 @@ def scout_equities(
                 priority=priority,
                 insider_purchase_count=len(filing_ids),
                 insider_purchased_notional=notional,
-                filing_accessions=tuple(sorted(r.accession for r in records)),
+                filing_accessions=tuple(sorted(filing_ids)),
                 market_source=row.market_source,
                 observed_ns=row.received_ns,
                 rationale=rationale,
