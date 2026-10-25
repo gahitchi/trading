@@ -36,13 +36,8 @@ def read_trades(path: Path) -> list[tuple[Trade, Decimal]]:
     trades = []
     with path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        if not reader.fieldnames or len(reader.fieldnames) != 5 or set(reader.fieldnames) != {
-            "timestamp",
-            "price",
-            "quantity",
-            "trade_id",
-            "mark_price",
-        }:
+        expected = {"timestamp", "price", "quantity", "trade_id", "mark_price"}
+        if not reader.fieldnames or len(reader.fieldnames) != len(expected) or set(reader.fieldnames) != expected:
             raise ValueError("CSV fields must be timestamp,price,quantity,trade_id,mark_price")
         for row in reader:
             stamp = timestamp_ns(row["timestamp"])
