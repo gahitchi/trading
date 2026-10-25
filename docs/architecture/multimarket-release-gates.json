@@ -63,7 +63,11 @@
         "tests/test_markets_okx_microstructure.py",
         "tests/test_markets_microstructure_cli.py",
         "tests/test_markets_history.py",
-        "docs/acceptance/multimarket-credential-free.md"
+        "docs/acceptance/multimarket-credential-free.md",
+        "src/lab/markets/nautilus_instruments.py",
+        "src/lab/markets/nautilus_data.py",
+        "tests/test_markets_nautilus_instruments.py",
+        "tests/test_markets_nautilus_data.py"
       ],
       "missing": [
         "streaming trade/quote feed",
@@ -71,7 +75,8 @@
         "full Nautilus actor/instrument/account runtime integration",
         "independent raw feed capture with qualified completeness and source revisions"
       ],
-      "note": "The public OKX EEA candles CLI is read-only. Accurate derivative trading still requires quote, independent mark/index and funding sources, venue qualifications, immutable Parquet catalogs and Nautilus bridge. See institutional flow audit. Local immutable daily confirmed-candle Parquet partitions with SHA-256 and gap metadata are implemented; this is not a complete raw L2/trade/mark/funding replay source. Public recent trades (including taker side) and independent swap mark snapshots are now parsed from EEA-hosted endpoints. They are not quote/L2/funding feeds and do not qualify account region or complete replay coverage. Initial exact read-only TradeTick/Bar conversions to pinned Nautilus event types are implemented, with receipt-time causality checks. No bound Nautilus CryptoPerpetual instrument or broker execution agent is qualified. 2026-10-25 extension: conservative EEA read-only REST multi-level book snapshot and indicative funding parser, bounded paginated 1m history, explicit non-synchronized provenance, missing-minute reporting, shared CLI/browser preview, and fail-closed validation tests. These snapshots cannot settle funding or determine maker queue placement; complete streaming L2 and authenticated account capabilities remain missing."
+      "note": "The public OKX EEA candles CLI is read-only. Accurate derivative trading still requires quote, independent mark/index and funding sources, venue qualifications, immutable Parquet catalogs and Nautilus bridge. See institutional flow audit. Local immutable daily confirmed-candle Parquet partitions with SHA-256 and gap metadata are implemented; this is not a complete raw L2/trade/mark/funding replay source. Public recent trades (including taker side) and independent swap mark snapshots are now parsed from EEA-hosted endpoints. They are not quote/L2/funding feeds and do not qualify account region or complete replay coverage. Initial exact read-only TradeTick/Bar conversions to pinned Nautilus event types are implemented, with receipt-time causality checks. No bound Nautilus CryptoPerpetual instrument or broker execution agent is qualified. 2026-10-25 extension: conservative EEA read-only REST multi-level book snapshot and indicative funding parser, bounded paginated 1m history, explicit non-synchronized provenance, missing-minute reporting, shared CLI/browser preview, and fail-closed validation tests. These snapshots cannot settle funding or determine maker queue placement; complete streaming L2 and authenticated account capabilities remain missing.",
+      "notes": "undefined 2026-10-25 M1 extension: native Nautilus CryptoPerpetual registration from explicit offline-only quote-collateral linear contract definition (including multiplier, fees, margin and separate definition/receipt times); native independent MarkPriceUpdate conversion; source-ordered read-only trade/mark replay tape rejects duplicate IDs and time regressions. No strategy, OMS, data-engine registration, broker demo or fee/margin schedule qualified; existing actor integration still missing."
     },
     {
       "id": "D3-externally-hosted-demo",
