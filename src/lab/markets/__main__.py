@@ -24,15 +24,19 @@ def timestamp_ns(raw: str) -> int:
     if stamp.tzinfo is None:
         raise ValueError("timestamps must include timezone, preferably Z")
     utc = stamp.astimezone(UTC)
-    epoch_s = int(utc.timestamp())
-    return epoch_s * 1_000_000_000 + utc.microsecond * 1000
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
+    delta = utc - epoch
+    ns = ((delta.days * 86_400 + delta.seconds) * 1_000_000_000) + delta.microseconds * 1000
+    if ns < 0:
+        raise ValueError("market replay timestamps must be nonnegative Unix nanoseconds")
+    return ns
 
 
 def read_trades(path: Path) -> list[tuple[Trade, Decimal]]:
     trades = []
     with path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        if not reader.fieldnames or set(reader.fieldnames) != {
+        if not reader.fieldnames or len(reader.fieldnames) != 5 or set(reader.fieldnames) != {
             "timestamp",
             "price",
             "quantity",
