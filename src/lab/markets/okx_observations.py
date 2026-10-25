@@ -43,7 +43,7 @@ def _fetch(path: str, params: dict[str, str | int]) -> tuple[dict, int]:
         with urlopen(request, timeout=10) as response:
             final_url = response.geturl() if hasattr(response, "geturl") else url
             final = urlsplit(final_url)
-            if final.scheme != "https" or final.hostname != _EEA_HOST:
+            if final.scheme != "https" or final.netloc != _EEA_HOST or final.path != path:
                 raise MarketDataError("OKX EEA endpoint redirected outside qualified region")
             raw = response.read(_MAX_BYTES + 1)
         observed_ns = time.time_ns()
