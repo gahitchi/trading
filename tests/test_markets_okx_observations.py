@@ -132,3 +132,27 @@ def test_trade_taker_metadata_survives_exact_offline_journal_replay(tmp_path) ->
         recovered = recover_offline(contract, journal)
         assert recovered.last_trade_price == D("100.0")
         journal.verify()
+
+
+@pytest.mark.parametrize(
+    "final_url",
+    [
+        "https://eea.okx.com:8443/api/v5/market/trades",
+        "https://some-user@eea.okx.com/api/v5/market/trades",
+        "https://eea.okx.com/api/v5/public/mark-price",
+    ],
+)
+def test_trade_observations_require_exact_regional_origin_and_endpoint(monkeypatch, final_url) -> None:
+    import lab.markets.okx_observations as api
+
+    class Response(io.BytesIO):
+        def geturl(self):
+            return final_url
+
+    monkeypatch.setattr(
+        api,
+        "urlopen",
+        lambda request, timeout: Response(json.dumps({"code": "0", "data": [trade_row()]}).encode()),
+    )
+    with pytest.raises(MarketDataError, match="qualified region"):
+        recent_public_trades("BTC-USDT-SWAP")
