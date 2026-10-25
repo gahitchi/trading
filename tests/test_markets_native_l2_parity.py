@@ -8,8 +8,8 @@ from decimal import Decimal
 import pytest
 
 from lab.markets.domain import AssetClass, ContractKind, Instrument
-from lab.markets.nautilus_instruments import LinearContractDefinition
 from lab.markets.native_l2_parity import NativeL2Error, run_native_l2_partial_parity
+from lab.markets.nautilus_instruments import LinearContractDefinition
 
 D = Decimal
 
