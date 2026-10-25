@@ -97,6 +97,8 @@ def test_invalid_collateral_quantity_and_feed_refused_before_native_engine():
         run_native_fill_parity(s, q, quantity=1.0)
     with pytest.raises(ValueError, match="positive"):
         run_native_fill_parity(s, q, collateral=D("-1"))
+    with pytest.raises(NativeParityError, match="collateral exceeds quote currency precision"):
+        run_native_fill_parity(s, q, collateral=D("1000.001"))
     with pytest.raises(ValueError, match="minimum"):
         run_native_fill_parity(s, q, quantity=D("0.0005"))
     with pytest.raises(NativeParityError, match="exactly four"):

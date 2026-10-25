@@ -10,7 +10,7 @@ arithmetic validates its observed fills and native account after settlement.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from nautilus_trader.backtest import BacktestEngine
 from nautilus_trader.common import LogLevel
@@ -212,6 +212,11 @@ def run_native_fill_parity(
     currency = Currency.from_str(c.quote_currency)
     venue = Venue(c.venue)
     rate = spec.taker_fee_bps / Decimal("10000")
+    # The oracle must not use Nautilus Money.from_decimal to derive its expected values.
+    # Validate collateral precision before allowing the engine to round starting equity.
+    quantum = Decimal("1").scaleb(-currency.precision)
+    if collateral != collateral.quantize(quantum):
+        raise NativeParityError("starting collateral exceeds quote currency precision")
     if rate <= 0:
         raise NativeParityError("fee parity requires a strictly positive taker fee")
     entry_side = OrderSide.BUY if side == Side.BUY else OrderSide.SELL
@@ -267,15 +272,16 @@ def run_native_fill_parity(
         if not probe.portfolio.is_net_flat(native.id):
             raise NativeParityError("native round trip did not end flat")
 
-        # Independent price/quantity accounting. Fee rounding is delegated to the
-        # native currency precision, never obtained from the observed commission.
+        # Independent price/quantity accounting and Decimal currency quantization.
+        # Neither expected fees nor expected balance come from Nautilus Money.
         signed_quantity = quantity * side.sign
         opened = linear_transition(Decimal("0"), Decimal("0"), signed_quantity, px1, c.multiplier)
         closed = linear_transition(opened.position, opened.entry_price, -signed_quantity, px2, c.multiplier)
         if closed.position != 0:
             raise NativeParityError("independent position oracle did not end flat")
         expected_fees = sum(
-            (Money.from_decimal(px * quantity * c.multiplier * rate, currency).as_decimal() for px in (px1, px2)),
+            ((px * quantity * c.multiplier * rate).quantize(quantum, rounding=ROUND_HALF_UP)
+             for px in (px1, px2)),
             Decimal("0"),
         )
         charges = []
@@ -291,7 +297,9 @@ def run_native_fill_parity(
         if balance is None:
             raise NativeParityError("missing native account or collateral balance")
         ending = balance.as_decimal()
-        expected_ending = Money.from_decimal(collateral + closed.realized_pnl - expected_fees, currency).as_decimal()
+        expected_ending = (collateral + closed.realized_pnl - expected_fees).quantize(
+            quantum, rounding=ROUND_HALF_UP
+        )
         if ending != expected_ending:
             raise NativeParityError("native margin account disagrees with exact Decimal PnL and charged fees")
         if len(engine.generate_fills_report()) != 2:
