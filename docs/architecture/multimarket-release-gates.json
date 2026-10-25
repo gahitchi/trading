@@ -53,7 +53,13 @@
         "src/lab/markets/okx_observations.py",
         "tests/test_markets_okx_observations.py",
         "src/lab/markets/nautilus_data.py",
-        "tests/test_markets_nautilus_data.py"
+        "tests/test_markets_nautilus_data.py",
+        "src/lab/markets/okx_microstructure.py",
+        "src/lab/markets/preview.py",
+        "tests/test_markets_okx_microstructure.py",
+        "tests/test_markets_microstructure_cli.py",
+        "tests/test_markets_history.py",
+        "docs/acceptance/multimarket-credential-free.md"
       ],
       "missing": [
         "streaming trade/quote feed",
@@ -61,7 +67,7 @@
         "full Nautilus actor/instrument/account runtime integration",
         "independent raw feed capture with qualified completeness and source revisions"
       ],
-      "note": "The public OKX EEA candles CLI is read-only. Accurate derivative trading still requires quote, independent mark/index and funding sources, venue qualifications, immutable Parquet catalogs and Nautilus bridge. See institutional flow audit. Local immutable daily confirmed-candle Parquet partitions with SHA-256 and gap metadata are implemented; this is not a complete raw L2/trade/mark/funding replay source. Public recent trades (including taker side) and independent swap mark snapshots are now parsed from EEA-hosted endpoints. They are not quote/L2/funding feeds and do not qualify account region or complete replay coverage. Initial exact read-only TradeTick/Bar conversions to pinned Nautilus event types are implemented, with receipt-time causality checks. No bound Nautilus CryptoPerpetual instrument or broker execution agent is qualified."
+      "note": "The public OKX EEA candles CLI is read-only. Accurate derivative trading still requires quote, independent mark/index and funding sources, venue qualifications, immutable Parquet catalogs and Nautilus bridge. See institutional flow audit. Local immutable daily confirmed-candle Parquet partitions with SHA-256 and gap metadata are implemented; this is not a complete raw L2/trade/mark/funding replay source. Public recent trades (including taker side) and independent swap mark snapshots are now parsed from EEA-hosted endpoints. They are not quote/L2/funding feeds and do not qualify account region or complete replay coverage. Initial exact read-only TradeTick/Bar conversions to pinned Nautilus event types are implemented, with receipt-time causality checks. No bound Nautilus CryptoPerpetual instrument or broker execution agent is qualified. 2026-10-25 extension: conservative EEA read-only REST multi-level book snapshot and indicative funding parser, bounded paginated 1m history, explicit non-synchronized provenance, missing-minute reporting, shared CLI/browser preview, and fail-closed validation tests. These snapshots cannot settle funding or determine maker queue placement; complete streaming L2 and authenticated account capabilities remain missing."
     },
     {
       "id": "D3-externally-hosted-demo",
@@ -87,9 +93,10 @@
         "src/lab/app.py",
         "src/lab/ui/index.html",
         "src/lab/ui/app.js",
-        "tests/test_app.py"
+        "tests/test_app.py",
+        "src/lab/markets/preview.py"
       ],
-      "note": "The browser now offers a zero-credential, locally authenticated synthetic crypto sample without modifying IBKR settings. A full Nautilus-backed offline strategy engine and first-run multi-market mode selector remain unimplemented."
+      "note": "The browser now offers a zero-credential, locally authenticated synthetic crypto sample without modifying IBKR settings. A full Nautilus-backed offline strategy engine and first-run multi-market mode selector remain unimplemented. Authenticated browser now offers a user-triggered, credential-free, read-only public EEA depth/funding snapshot panel; broker-independent autonomous Nautilus strategy execution and Windows/Arch first-boot field acceptance remain missing."
     },
     {
       "id": "D5-forex-and-equities",
