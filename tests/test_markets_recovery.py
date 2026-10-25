@@ -97,7 +97,9 @@ def test_replay_detects_missing_derived_fill_even_with_valid_hash_chain(tmp_path
         sim.submit(OrderIntent("entry", instrument().instrument_id, Side.BUY, D("1"), 1))
         # Crash after trade observation was persisted, before its derived fill was saved.
         journal.append(
-            "trade:trade2", "trade", 2,
+            "trade:trade2",
+            "trade",
+            2,
             {"price": "100", "quantity": "100", "received_ns": 2},
         )
         journal.verify()

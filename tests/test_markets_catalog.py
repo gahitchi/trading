@@ -60,7 +60,9 @@ def test_payload_corruption_rejected_before_replay(tmp_path) -> None:
 
 def test_untrusted_manifest_and_symbol_rejected(tmp_path) -> None:
     with pytest.raises(MarketDataError, match="invalid catalog instrument"):
-        write_confirmed_candles(tmp_path, (PublicCandle("../escape", 0, MINUTE, D("100"), D("100"), D("100"), D("100"), D("1")),))
+        write_confirmed_candles(
+            tmp_path, (PublicCandle("../escape", 0, MINUTE, D("100"), D("100"), D("100"), D("100"), D("1")),)
+        )
     path = write_confirmed_candles(tmp_path, (candle(0),))[0]
     metadata = json.loads(path.read_text())
     metadata["complete_history_claimed"] = True
@@ -71,5 +73,9 @@ def test_untrusted_manifest_and_symbol_rejected(tmp_path) -> None:
     with pytest.raises(MarketDataError, match="unqualified"):
         write_confirmed_candles(
             tmp_path,
-            (PublicCandle("BTC-USDT", MINUTE, 2 * MINUTE, D("100"), D("100"), D("100"), D("100"), D("1"), source="UNVERIFIED"),),
+            (
+                PublicCandle(
+                    "BTC-USDT", MINUTE, 2 * MINUTE, D("100"), D("100"), D("100"), D("100"), D("1"), source="UNVERIFIED"
+                ),
+            ),
         )
