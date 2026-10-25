@@ -63,6 +63,10 @@ def test_completed_1m_bar_is_never_a_trade_and_cannot_arrive_early() -> None:
     )
     with pytest.raises(MarketDataError, match="before it closes"):
         to_nautilus_completed_bar(bar, contract(), received_ns=59_000_000_000)
+    with pytest.raises(MarketDataError, match="signed-64-bit"):
+        to_nautilus_completed_bar(bar, contract(), received_ns=2**63)
+    with pytest.raises(MarketDataError, match="signed-64-bit"):
+        to_nautilus_completed_bar(bar, contract(), received_ns=True)
     converted = to_nautilus_completed_bar(bar, contract(), received_ns=65_000_000_000)
     assert isinstance(converted, Bar)
     assert not isinstance(converted, TradeTick)
