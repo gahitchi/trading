@@ -39,9 +39,9 @@ def to_nautilus_trade(trade: Trade, instrument: Instrument) -> TradeTick:
     if trade.quantity % instrument.quantity_step:
         raise ValueError("observed trade violates venue quantity step")
     if trade.taker_side == Side.BUY:
-        aggressor = AggressorSide.BUYER
+        aggressor = AggressorSide.BUY
     elif trade.taker_side == Side.SELL:
-        aggressor = AggressorSide.SELLER
+        aggressor = AggressorSide.SELL
     else:
         aggressor = AggressorSide.NO_AGGRESSOR
     return TradeTick(

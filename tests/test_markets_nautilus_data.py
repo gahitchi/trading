@@ -34,7 +34,7 @@ def test_true_trade_timestamp_and_aggressor_are_preserved() -> None:
     assert isinstance(converted, TradeTick)
     assert converted.ts_event == 1_000_000_000
     assert converted.ts_init == 1_200_000_000
-    assert converted.aggressor_side == AggressorSide.SELLER
+    assert converted.aggressor_side == AggressorSide.SELL
     assert str(converted.price) == "100.1"
     assert str(converted.size) == "0.025"
     assert str(converted.instrument_id) == "BTC-USDT-SWAP.OKX"
