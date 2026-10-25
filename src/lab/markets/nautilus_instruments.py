@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from nautilus_trader.model import CryptoPerpetual, Currency, Price, Quantity, Symbol
+from nautilus_trader.model import CryptoPerpetual, Currency, Money, Price, Quantity, Symbol
 
 from lab.markets.domain import MAX_EVENT_TIMESTAMP_NS, AssetClass, ContractKind, Instrument, decimal
 from lab.markets.nautilus_data import nautilus_instrument_id
@@ -95,6 +95,7 @@ def to_nautilus_perpetual(spec: LinearContractDefinition) -> CryptoPerpetual:
         size_increment=Quantity.from_str(f"{c.quantity_step:.{qp}f}"),
         multiplier=Quantity.from_str(str(c.multiplier)),
         min_quantity=Quantity.from_str(f"{c.min_quantity:.{qp}f}"),
+        min_notional=Money.from_str(f"{c.min_notional} {c.quote_currency}"),
         margin_init=c.initial_margin,
         margin_maint=c.maintenance_margin,
         maker_fee=spec.maker_fee_bps / Decimal("10000"),
