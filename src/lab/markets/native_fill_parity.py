@@ -115,6 +115,18 @@ class _RoundTripProbe(Strategy):
         self.failures.append("native order denied")
 
 
+def _quote_identity(q: QuoteTick) -> tuple[object, ...]:
+    return (
+        str(q.instrument_id),
+        q.ts_event,
+        q.ts_init,
+        str(q.bid_price),
+        str(q.ask_price),
+        str(q.bid_size),
+        str(q.ask_size),
+    )
+
+
 def _validate_quotes(spec: LinearContractDefinition, quotes: tuple[QuoteTick, ...], qty: Decimal) -> None:
     if spec.metadata_source != "offline_fixture":
         raise NativeParityError("native fill parity only accepts offline_fixture contracts")
@@ -144,17 +156,7 @@ def _validate_quotes(spec: LinearContractDefinition, quotes: tuple[QuoteTick, ..
     if spec.observed_ns > quotes[0].ts_init:
         raise NativeParityError("contract metadata observed after the first test quote")
     # Reject external quote streams disguised as the artificial deterministic fixture.
-    def identity(q: QuoteTick) -> tuple[object, ...]:
-        return (
-            str(q.instrument_id),
-            q.ts_event,
-            q.ts_init,
-            str(q.bid_price),
-            str(q.ask_price),
-            str(q.bid_size),
-            str(q.ask_size),
-        )
-    if tuple(map(identity, quotes)) != tuple(map(identity, synthetic_quotes(spec))):
+    if tuple(_quote_identity(q) for q in quotes) != tuple(_quote_identity(q) for q in synthetic_quotes(spec)):
         raise NativeParityError("native parity requires the exact fixed synthetic quote fixture")
 
 
