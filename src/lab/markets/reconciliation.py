@@ -149,11 +149,14 @@ def reconcile_demo(
         if expected is None:
             problems.add("unowned_external_order")
         elif actual is None:
-            # Some venues list only open orders; a missing terminal order is
-            # acceptable only if there is no local uncertainty and its fill
-            # was independently reconciled through the positions check.
+            # Some venues list only open orders. Without independently
+            # durable trade confirmations a missing terminal *fill* cannot
+            # be proved by matching aggregate positions (offsetting fills
+            # would otherwise hide a discrepancy).
             if expected.status.open_or_uncertain:
                 problems.add("unobserved_open_order")
+            elif expected.filled:
+                problems.add("missing_terminal_fill_evidence")
         else:
             if (expected.instrument_id, expected.side, expected.original) != (
                 actual.instrument_id, actual.side, actual.original
