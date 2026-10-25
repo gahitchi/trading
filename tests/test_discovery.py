@@ -140,7 +140,7 @@ def test_repeated_accession_not_counted_as_two_independent_filings():
     ("change", "reason"),
     [
         ({"point_in_time_membership": False}, "listing"),
-        ({"received_ns": NOW - 8 * DAY}, "stale"),
+        ({"received_ns": NOW - 8 * DAY, "session_ns": NOW - 8 * DAY - 1_000_000_000}, "stale"),
         ({"history_sessions": 10}, "historical"),
         ({"market_cap": D("100")}, "capitalization"),
         ({"median_dollar_volume": D("1000")}, "liquidity"),
