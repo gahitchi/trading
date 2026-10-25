@@ -58,3 +58,39 @@ def test_occupied_loopback_port_explains_port_override_without_killing_listener(
     with pytest.raises(OSError, match=r"port in use.*--port"):
         app.serve(args)
     assert (tmp_path / "LOCK").exists()
+
+
+def test_public_cli_reports_occupied_port_without_traceback(tmp_path, monkeypatch, capsys):
+    from lab import cli
+
+    class ControllerStub:
+        def __init__(self, _config):
+            self.directory = tmp_path
+
+    def busy(_address, _controller):
+        raise OSError(errno.EADDRINUSE, "already in use")
+
+    monkeypatch.setattr(app, "Controller", ControllerStub)
+    monkeypatch.setattr(app, "AppServer", busy)
+    status = cli.main(["app", "--directory", str(tmp_path), "--port", "8765", "--no-browser"])
+    err = capsys.readouterr().err
+    assert status == 2
+    assert "port in use" in err
+    assert "--port" in err
+    assert "Traceback" not in err
+
+
+def test_cli_does_not_hide_unrelated_bind_failures(tmp_path, monkeypatch):
+    from lab import cli
+
+    class ControllerStub:
+        def __init__(self, _config):
+            self.directory = tmp_path
+
+    def denied(_address, _controller):
+        raise OSError(errno.EACCES, "permission denied")
+
+    monkeypatch.setattr(app, "Controller", ControllerStub)
+    monkeypatch.setattr(app, "AppServer", denied)
+    with pytest.raises(OSError, match="permission denied"):
+        cli.main(["app", "--directory", str(tmp_path), "--no-browser"])
