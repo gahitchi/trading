@@ -137,11 +137,7 @@ def latest_confirmed_candles(instrument_id: str, *, limit: int = 100) -> tuple[P
             final = urlsplit(final_url)
             # urllib follows redirects by default. The original URL being
             # pinned is insufficient for a claim of EEA provider provenance.
-            if (
-                final.scheme != "https"
-                or final.netloc != "eea.okx.com"
-                or final.path != "/api/v5/market/candles"
-            ):
+            if final.scheme != "https" or final.netloc != "eea.okx.com" or final.path != "/api/v5/market/candles":
                 raise MarketDataError("OKX EEA candle endpoint redirected outside qualified origin")
             raw = response.read(_MAX_BYTES + 1)
     except (HTTPError, URLError, TimeoutError, OSError) as exc:
