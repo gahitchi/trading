@@ -147,14 +147,8 @@ class OfflineSimulator:
         return {
             "schema": 1,
             "mode": str(self.mode),
-            "instrument": {
-                field.name: str(getattr(self.instrument, field.name))
-                for field in fields(self.instrument)
-            },
-            "limits": {
-                field.name: str(getattr(self.limits, field.name))
-                for field in fields(self.limits)
-            },
+            "instrument": {field.name: str(getattr(self.instrument, field.name)) for field in fields(self.instrument)},
+            "limits": {field.name: str(getattr(self.limits, field.name)) for field in fields(self.limits)},
             "starting_balance": str(self.starting_balance),
             "taker_fee_bps": str(self.taker_fee_bps),
             "slippage_bps": str(self.slippage_bps),
