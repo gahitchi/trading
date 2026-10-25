@@ -407,6 +407,47 @@ class Controller:
             Authority(self.rt, read_json(self.rt / "identity.json")).approve(ident)
         return self.status()
 
+    def offline_demo(self, options):
+        """Run a bounded, credential-free *synthetic* reference scenario.
+
+        This does not start a service, enable a venue, or touch the saved
+        IBKR account configuration, execution authority or hard-stop files.
+        """
+        from decimal import Decimal
+        from importlib.resources import files
+
+        from lab.markets.__main__ import demo
+        from lab.markets.domain import Side
+
+        if type(options) is not dict or set(options) != {"side", "quantity", "capital"}:
+            raise ValueError("Expected only side, quantity and capital for the offline sample.")
+        if any(type(value) is not str or len(value) > 64 for value in options.values()):
+            raise ValueError("Offline parameters must be short strings.")
+        if options["side"] not in ("buy", "sell"):
+            raise ValueError("Offline side must be buy or sell.")
+        try:
+            quantity, capital = Decimal(options["quantity"]), Decimal(options["capital"])
+        except ArithmeticError as exc:
+            raise ValueError("Offline quantity and capital must be finite decimals.") from exc
+        if not quantity.is_finite() or not capital.is_finite():
+            raise ValueError("Offline quantity and capital must be finite decimals.")
+        if not Decimal("0.001") <= quantity <= Decimal("2"):
+            raise ValueError("Offline demonstration quantity must be 0.001..2 contracts.")
+        if not Decimal("100") <= capital <= Decimal("1000000"):
+            raise ValueError("Offline demonstration capital must be 100..1000000.")
+        with self.lock:
+            if self.alive():
+                raise ValueError("Pause the broker engine before running an independent offline sandbox.")
+        path = Path(str(files("lab.markets").joinpath("fixture.csv")))
+        return {
+            "mode": "offline_sim",
+            "sample_kind": "synthetic_fixture",
+            "broker_connected": False,
+            "orders_routed": False,
+            "strategy_qualified": False,
+            "result": demo(path, quantity, Side(options["side"]), capital),
+        }
+
     def status(self):
         with self.lock:
             hb, requests, authority = {}, [], None
@@ -558,6 +599,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = c.pause(flatten=True)
             elif self.path == "/api/approve":
                 result = c.approve(body.get("request"))
+            elif self.path == "/api/offline-demo":
+                result = c.offline_demo(body)
             else:
                 return self.reply(404, {"error": "Not found."})
             return self.reply(200, result)

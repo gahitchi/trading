@@ -188,6 +188,36 @@ async function action(fn) {
   try { render(await fn()); } catch (e) { notice(e.message); }
   finally { busy = false; try { render(await api("/api/status")); } catch (e) { notice(e.message); } }
 }
+$("offline-run").onclick = async () => {
+  if (busy) return;
+  busy = true;
+  $("offline-run").disabled = true;
+  notice("");
+  try {
+    const payload = {
+      side: $("offline-side").value,
+      quantity: $("offline-quantity").value,
+      capital: $("offline-capital").value
+    };
+    const data = await api("/api/offline-demo", payload);
+    const sim = data.result;
+    $("offline-result").textContent = [
+      "OFFLINE SIMULATION — SYNTHETIC FIXTURE — NO ORDERS ROUTED",
+      "Instrument: " + sim.instrument,
+      "Position: " + sim.position,
+      "Final simulated equity: $" + sim.equity,
+      "Fees paid: $" + sim.fees,
+      "Synthetic fills: " + sim.fills,
+      "Risk halt: " + (sim.hard_halt || "none"),
+      "No strategy was evaluated and no market feed was qualified."
+    ].join("\n");
+  } catch (e) {
+    notice(e.message);
+  } finally {
+    busy = false;
+    $("offline-run").disabled = false;
+  }
+};
 form.addEventListener("submit", e => { e.preventDefault(); action(() => api("/api/setup", settings())); });
 form.addEventListener("change", e => { if (e.target.name === "profile") riskNote(); });
 $("start").onclick = () => action(async () => {

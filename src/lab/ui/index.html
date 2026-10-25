@@ -50,6 +50,18 @@
     <p class="help controls-help">Start connects to the broker and checks market history with orders paused. Trading begins only when those checks pass, then follows your schedule.</p>
   </section>
 
+  <section class="panel" aria-labelledby="offline-title">
+    <h2 id="offline-title">Try crypto without a broker</h2>
+    <p class="help">Zero-credential, synthetic reference simulation. No internet, market signal, actual broker account, trading service, or real orders. Results do not establish profitability or exchange-quality fills.</p>
+    <div class="fields">
+      <label>Direction<select id="offline-side"><option value="buy">Long (buy)</option><option value="sell">Short (sell)</option></select></label>
+      <label>Reference contracts<input id="offline-quantity" inputmode="decimal" type="number" min="0.001" max="2" step="0.001" value="0.001"></label>
+      <label>Starting test collateral (USD)<input id="offline-capital" inputmode="decimal" type="number" min="100" max="1000000" step="1" value="1000"></label>
+    </div>
+    <button type="button" class="secondary" id="offline-run">Run synthetic example</button>
+    <pre id="offline-result" role="status" aria-live="polite">No synthetic test run yet.</pre>
+  </section>
+
   <div class="columns">
     <section class="panel plan" aria-labelledby="plan-title">
       <h2 id="plan-title">Your plan</h2>

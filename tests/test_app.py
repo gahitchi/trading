@@ -364,3 +364,66 @@ def test_simulated_live_node_readiness_cannot_masquerade_as_broker_data(goog_lab
     assert evidence["binding"] == digest(read_json(h.runtime / "identity.json"))
     assert len(evidence["history"]["GOOG"]) == goog_lab.portfolio.vol_window + 1
     assert evidence["signals"]["buy_and_hold:GOOG"]["active"]
+
+
+def test_offline_sandbox_does_not_require_ibkr_or_modify_plan(controller, monkeypatch):
+    original = controller.config_path.read_bytes()
+    original_settings = dict(controller.settings)
+    monkeypatch.setattr(
+        app.subprocess,
+        "Popen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("offline sandbox attempted broker start")),
+    )
+    result = controller.offline_demo({"side": "sell", "quantity": "0.001", "capital": "1000"})
+    assert result["mode"] == "offline_sim"
+    assert result["sample_kind"] == "synthetic_fixture"
+    assert result["broker_connected"] is False
+    assert result["orders_routed"] is False
+    assert result["strategy_qualified"] is False
+    assert result["result"]["qualified_for_live_trading"] is False
+    assert controller.config_path.read_bytes() == original
+    assert controller.settings == original_settings
+    assert not controller.alive()
+    for invalid in (
+        {"side": "sell", "quantity": "NaN", "capital": "1000"},
+        {"side": "sell", "quantity": "0.001", "capital": "inf"},
+        {"side": "sell", "quantity": "0.001", "capital": "1000", "live": "yes"},
+        {"side": "sell", "quantity": "1000", "capital": "1000"},
+    ):
+        with pytest.raises(ValueError):
+            controller.offline_demo(invalid)
+
+
+def test_offline_sandbox_endpoint_is_locally_authenticated(controller):
+    server = app.AppServer(("127.0.0.1", 0), controller)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host = f"127.0.0.1:{server.server_address[1]}"
+    payload = json.dumps({"side": "buy", "quantity": "0.001", "capital": "1000"})
+    try:
+        def request(token):
+            conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+            conn.request(
+                "POST", "/api/offline-demo", payload,
+                {
+                    "Host": host,
+                    "Origin": "http://" + host,
+                    "Content-Type": "application/json",
+                    "X-App-Token": token,
+                },
+            )
+            response = conn.getresponse()
+            status, body = response.status, json.loads(response.read())
+            conn.close()
+            return status, body
+
+        assert request("invalid")[0] == 403
+        status, body = request(server.token)
+        assert status == 200
+        assert body["orders_routed"] is False
+        assert body["result"]["market_data_validated"] is False
+        assert not controller.alive()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
