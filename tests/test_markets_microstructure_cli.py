@@ -52,7 +52,10 @@ def test_crossed_book_cli_reports_no_valid_spread(monkeypatch, capsys) -> None:
 
     d = Decimal
     book = BookSnapshot(
-        "BTC-USDT-SWAP", 1, 2, 3,
+        "BTC-USDT-SWAP",
+        1,
+        2,
+        3,
         (BookLevel(d("100.2"), d("1"), 1),),
         (BookLevel(d("100.1"), d("1"), 1),),
     )
