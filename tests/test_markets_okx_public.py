@@ -70,5 +70,5 @@ def test_candle_rejects_nonfinite_fields_and_provider_schema_drift() -> None:
             PublicCandle("BTC-USDT", 60_000_000_000, 120_000_000_000, **values)
     with pytest.raises(MarketDataError, match="schema"):
         parse_confirmed_candles(
-            {"code": "0", "data": [row("60000") + ["unexpected-field"]]}, "BTC-USDT"
+            {"code": "0", "data": [[*row("60000"), "unexpected-field"]]}, "BTC-USDT"
         )
