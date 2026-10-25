@@ -295,10 +295,13 @@ setting on the same period, and keep one only if it beats `equal` out of sample.
 ### Long/short, leverage and margin
 
 Signals and cross-sectional strategies return signed targets (negative = short); `lab.toml` decides what is
-traded. The defaults are long-only and unlevered. To allow shorts and leverage, raise `[risk] max_short_gross`,
-`max_gross`, the net range `min_net`/`max_net`, and `[portfolio] max_leverage` (the ceiling for volatility
-targeting) or `leverage`. The broker's rules bound all of it: `[margin]` holds Reg T / FINRA requirements by
-default, so gross exposure can never be configured above 2x. The risk agent keeps the targets' initial margin
+traded. The defaults are long-only and unlevered. To enable shorts and leverage, select `[risk] profile =
+"dynamic"` or `"aggressive"` (always bounded by `[limits]`), or set `[risk] profile = "custom"` and raise
+`[risk] max_short_gross`, `max_gross`, the net range `min_net`/`max_net`, and `[portfolio] max_leverage`
+as appropriate. Under a **named preset**, the loader derives effective risk settings from the profile and
+`[limits]`; editing the custom numeric `[risk]` settings does not increase the preset's allowances. Use
+`lab risk-profile` to inspect the actual ceilings. The broker's rules bound all of it: `[margin]` holds
+Reg T / FINRA requirements by default, so gross exposure can never be configured above 2x. The risk agent keeps the targets' initial margin
 inside equity with a cushion, deleverages by itself when equity nears the maintenance requirement, and turns a
 breach into a `margin_call` hard halt during which positions may only shrink. Borrow fees and interest on
 borrowed cash accrue for every night a book is held; their rates are assumptions (no free point-in-time borrow
@@ -332,9 +335,13 @@ not move reserved sessions into training. `[trading] intraday_holdout_start` set
 (e.g. when the partition was first made from 1h history and leaves 15m none), never after a holdout already run.
 This is a separate protocol because free intraday history falls inside the daily holdout, not proof of
 independence from prior daily research. The research swarm works on daily bars, and its promoted signals trade
-at the daily speed only. New exposure waits while earlier orders are unsettled; beside a reduction that has not
-filled, it goes out only as far as the whole current book plus the entry stays within the profile's gross limit. IBKR paces historical-data requests (60 per 10 minutes), so the node refuses setups that would
-exceed about 50: at 5m that is 25 stock-strategy pairs.
+at the daily speed only. New exposure waits while earlier orders are unsettled; where a reduction has not filled,
+`lab.reservations` checks possible independent-fill outcomes against **all** profile exposure
+(per-stock, gross, short-book, and net) and initial-margin limits, not merely gross exposure.
+Reservations also account for fees, slippage, and separately specified adverse-price stress;
+they are not a guarantee against future market gaps. IBKR paces historical-data requests
+(60 per 10 minutes), so the node refuses setups that would exceed about 50: at 5m that is
+25 stock-strategy pairs.
 
 ## Safety
 
@@ -352,7 +359,10 @@ exceed about 50: at 5m that is 25 stock-strategy pairs.
   booked from IB's reports at start-up, once per trade ID. Before every rebalance the ledger must match IB's
   positions, or it is a hard halt. `lab recover --adopt-broker` can take IB's positions only after all
   pending orders have terminal reports. It cannot erase unknown order intents; a broker snapshot alone
-  does not prove that a late fill is impossible.
+  does not prove that a late fill is impossible. After independently checking IBKR's **order and trade
+  history** for an unreported order, the operator can resolve that specific intent using
+  `lab recover --dispose-order ID --evidence "what IBKR history confirms" --reason "why disposal is safe"`.
+  Never dispose an order without evidence that it cannot fill later.
 - **Tested against a simulated IB paper broker**: the paper node itself, not a copy, runs in `tests/test_harness.py`
   (lab.sim), including a week of trading that must match the backtest fill for fill.
 - **Limits**: per-order notional cap, orders per day, daily buy turnover, NautilusTrader's order-rate limit, risk
@@ -365,13 +375,25 @@ exceed about 50: at 5m that is 25 stock-strategy pairs.
 lab.toml                    every setting: universe, periods, costs, risk, portfolio, paper, research
 Dockerfile, docker-compose.yml, .env.example, RUNBOOK.md
 src/lab/
-  agents/                   signal, cross-sectional, allocator, risk, execution, recorder, alerts, smoke test
+  agents/                   existing Nautilus signal, allocation, risk, execution and monitoring agents
   signals/                  Signal / CrossSectionalSignal interfaces, built-ins, registry
-  research/                 providers (Claude Code, Ollama), roles, sandbox, orchestrator, validator worker
-  backtest.py               wires the agents into NautilusTrader's backtest engine
-  experiments.py            comparison, trials registry, noise floor, PBO, walk-forward, holdout ledger
+  research/                 AI providers, roles, sandbox, orchestrator and validator worker
+  markets/                  experimental D1 crypto domain, shared linear accounting, offline SIM,
+                            one-minute data, read-only OKX EEA candles, journal and adapter contracts
+  backtest.py               existing equity agents wired into NautilusTrader's backtest engine
+  experiments.py            research comparisons, trial registry, walk-forward and holdout ledger
   stats.py                  PSR, DSR, PBO (CSCV), bootstrap CI
-  paper.py                  the same agents on Interactive Brokers' paper account
+  paper.py                  existing Interactive Brokers paper-only runtime
+  allocation.py             stock portfolio-weighting methods
+  reservations.py           worst-case independent-order-fill exposure and margin checks
+  margin.py  risk_profiles.py
+                            equity financing and profile/operator limits
+  execution_store.py        durable execution and recovery bookkeeping
+  authority.py              operator mandates and execution authority
+  strategy_bank.py          experimental approved-strategy portfolio bank
+  capture.py                read-only evidence capture
+  runtime_ops.py            runtime recovery and upgrade operations
+  provenance.py             simulation and whole-runtime implementation digests
   data.py  universe.py  costs.py  metrics.py  report.py  notify.py  safety.py  config.py  cli.py
 tests/                      pytest suite (offline; `pytest -m llm` adds a real model call)
 examples/goog-offline/      offline configuration on real GOOG prices
@@ -382,8 +404,12 @@ experiments/LOG.md          your lab notebook
 
 - The optional daily strategy bank is experimental and has no whole-policy promotion claim.
   The bounded synthetic power pilot does not qualify research power or false-positive control.
-- **US stocks only.** Forex and crypto are not supported: instruments, ticks, sessions, funding and broker
-  lifecycle are equity-specific (ChatGPT C005-F7). Adding them is a scope decision for Gabriel.
+- **Original `lab` pipeline: US stocks only.** `lab backtest` and `lab paper` still use equity-specific
+  instruments, sessions, Reg-T margin, and the IBKR paper account lifecycle. Multi-market support has
+  been authorized and is under active development in `lab.markets`: currently D1 offline crypto
+  linear-derivative reference simulation and **read-only** OKX Europe one-minute candles.
+  Neither live crypto/forex trading nor an externally connected crypto demo executor is implemented.
+  See the [multi-market ADR](docs/architecture/multimarket-2026-10-25.md).
 - **Free data is survivorship-biased** and unofficial; see [Data](#data).
 - Idle cash and short-sale proceeds earn no interest unless `[margin] credit_apr` / `short_rebate_apr` are set
   (ASSUMED rates).
@@ -399,8 +425,8 @@ experiments/LOG.md          your lab notebook
   positions itself: the agents' own deleveraging and margin-call halt are what is tested.
 - IBKR's $1 minimum is charged per fill, so an order filled in pieces is slightly overcharged.
 - NautilusTrader is pinned to `2.0.0rc7` (2.0 is in release candidates); upgrade deliberately and rerun the tests.
-- The IB live path is built against the adapter's API and verified up to connecting; the RUNBOOK's smoke test
-  is the first end-to-end check.
+- The existing IBKR integration remains **paper-only**; the RUNBOOK smoke test is still required to
+  verify the broker lifecycle end to end. No live-money order route is authorized or enabled.
 
 ## Collaboration
 
