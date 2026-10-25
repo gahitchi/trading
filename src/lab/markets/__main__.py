@@ -14,7 +14,7 @@ from decimal import Decimal
 from importlib.resources import files
 from pathlib import Path
 
-from lab.markets.domain import AssetClass, ContractKind, Instrument, OrderIntent, Side, Trade
+from lab.markets.domain import AssetClass, ContractKind, Instrument, MarkPrice, OrderIntent, Side, Trade
 from lab.markets.minute import MinuteBuilder
 from lab.markets.simulator import OfflineSimulator
 
@@ -28,21 +28,24 @@ def timestamp_ns(raw: str) -> int:
     return epoch_s * 1_000_000_000 + utc.microsecond * 1000
 
 
-def read_trades(path: Path) -> list[Trade]:
+def read_trades(path: Path) -> list[tuple[Trade, Decimal]]:
     trades = []
     with path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        if not reader.fieldnames or set(reader.fieldnames) != {"timestamp", "price", "quantity", "trade_id"}:
-            raise ValueError("CSV fields must be timestamp,price,quantity,trade_id")
+        if not reader.fieldnames or set(reader.fieldnames) != {"timestamp", "price", "quantity", "trade_id", "mark_price"}:
+            raise ValueError("CSV fields must be timestamp,price,quantity,trade_id,mark_price")
         for row in reader:
             stamp = timestamp_ns(row["timestamp"])
             trades.append(
-                Trade(
-                    trade_id=row["trade_id"],
-                    exchange_ns=stamp,
-                    received_ns=stamp,
-                    price=Decimal(row["price"]),
-                    quantity=Decimal(row["quantity"]),
+                (
+                    Trade(
+                        trade_id=row["trade_id"],
+                        exchange_ns=stamp,
+                        received_ns=stamp,
+                        price=Decimal(row["price"]),
+                        quantity=Decimal(row["quantity"]),
+                    ),
+                    Decimal(row["mark_price"]),
                 )
             )
     if len(trades) < 3:
@@ -67,8 +70,9 @@ def demo(path: Path, quantity: Decimal, side: Side, starting_balance: Decimal) -
     bars = MinuteBuilder()
     trades = read_trades(path)
     completed = []
-    for i, trade in enumerate(trades):
+    for i, (trade, mark) in enumerate(trades):
         completed.extend(bars.push(trade))
+        sim.on_mark(MarkPrice(f"mark-{trade.trade_id}", trade.exchange_ns, trade.received_ns, mark))
         sim.on_trade(trade)
         if i == 0:
             sim.submit(OrderIntent("entry1", instrument.instrument_id, side, quantity, trade.exchange_ns))
@@ -79,7 +83,7 @@ def demo(path: Path, quantity: Decimal, side: Side, starting_balance: Decimal) -
                     "exit1", instrument.instrument_id, closing, abs(sim.position), trade.exchange_ns, reduce_only=True
                 )
             )
-    completed.extend(bars.flush(trades[-1].received_ns + 60_000_000_000))
+    completed.extend(bars.flush(trades[-1][0].received_ns + 60_000_000_000))
     result = sim.report()
     result.update(
         {
@@ -89,6 +93,7 @@ def demo(path: Path, quantity: Decimal, side: Side, starting_balance: Decimal) -
             "minute_bars": len(completed),
             "missing_minutes": sum(x.missing_minutes_before for x in completed),
             "trades_received": len(trades),
+            "mark_feed": "explicit CSV mark_price (synthetic/unverified)",
         }
     )
     return result
@@ -98,7 +103,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Offline multi-market reference lab, NO exchange connectivity")
     sub = parser.add_subparsers(dest="command", required=True)
     d = sub.add_parser("demo", help="run a synthetic local linear-contract scenario")
-    d.add_argument("--csv", type=Path, default=None, help="CSV with timestamp,price,quantity,trade_id")
+    d.add_argument("--csv", type=Path, default=None, help="CSV with timestamp,price,quantity,trade_id,mark_price")
     d.add_argument("--quantity", type=Decimal, default=Decimal("0.001"))
     d.add_argument("--side", choices=["buy", "sell"], default="sell")
     d.add_argument("--balance", type=Decimal, default=Decimal("1000"))
