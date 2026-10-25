@@ -65,8 +65,11 @@ def test_real_native_crypto_perpetual_fields_not_parallel_placeholders():
     assert model.ts_init == 200
     assert D(str(model.margin_init)) == D("0.2")
     assert D(str(model.margin_maint)) == D("0.1")
-    assert D(str(model.maker_fee)) == D("0.0001")
-    assert D(str(model.taker_fee)) == D("0.0005")
+    # rc7 cannot encode maker/taker rates in native CryptoPerpetual:
+    # retain the audited BPS assumptions separately, never infer zero fees.
+    definition = spec()
+    assert definition.maker_fee_bps == D("1")
+    assert definition.taker_fee_bps == D("5")
 
 
 @pytest.mark.parametrize(
