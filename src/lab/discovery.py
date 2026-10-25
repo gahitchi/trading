@@ -124,8 +124,10 @@ class ScoutPolicy:
             raise ValueError("invalid evidence windows")
         for field in ("min_market_cap", "min_median_dollar_volume", "max_spread_bps"):
             amount = getattr(self, field)
-            if type(amount) is not Decimal or not Decimal("0") <= decimal(amount):
-                raise ValueError(f"{field} must be a nonnegative finite Decimal")
+            if type(amount) is not Decimal or not decimal(amount).is_finite():
+                raise ValueError(f"{field} must be a finite Decimal")
+            if amount < 0 or (field == "min_median_dollar_volume" and amount == 0):
+                raise ValueError(f"{field} must be nonnegative and volume must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,7 +199,10 @@ def scout_equities(
     for row in filings:
         if type(row) is not InsiderFiling:
             raise TypeError("expected typed Form 4 filings")
-        if row.ticker not in by_ticker or not decision_ns - policy.insider_lookback_ns <= row.received_ns <= decision_ns:
+        if row.ticker not in by_ticker or not (
+            decision_ns - policy.insider_lookback_ns <= row.received_ns <= decision_ns
+            and decision_ns - policy.insider_lookback_ns <= row.transaction_ns <= decision_ns
+        ):
             continue
         if (
             row.transaction_code != "P"
