@@ -9,8 +9,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from dataclasses import replace
 from contextlib import nullcontext
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from importlib.resources import files
