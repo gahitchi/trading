@@ -70,10 +70,12 @@ class EquityObservation:
 class InsiderFiling:
     """SEC Form 4 filing *availability* and transaction time are distinct.
 
-    SEC-derived leads must be independently checked against a real filing;
-    unverified data are not accepted here. Non-derivative open-market purchases
-    are informational only. P without A, an automatic plan, or missing times
-    cannot silently qualify as a discretionary insider buy.
+    Source-labelled objects are NOT cryptographic/source verification: this
+    offline module can only validate fields supplied by a caller. Production
+    ingestion must independently verify each official Form 4, issuer mapping,
+    corrections, receipt time and raw-file fingerprint before using the record.
+    Non-derivative open-market buys are informational only. P without A,
+    automatic plans or missing times cannot qualify as discretionary buys.
     """
 
     ticker: str
