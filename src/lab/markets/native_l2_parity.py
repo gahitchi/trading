@@ -117,14 +117,16 @@ def _frame(action: str, seq: int, prev: int, ts: int, bids, asks) -> dict:
     return {
         "arg": {"channel": "books", "instId": "BTC-USD-SWAP"},
         "action": action,
-        "data": [{
-            "ts": str(ts),
-            "seqId": seq,
-            "prevSeqId": prev,
-            "checksum": 0,
-            "bids": bids,
-            "asks": asks,
-        }],
+        "data": [
+            {
+                "ts": str(ts),
+                "seqId": seq,
+                "prevSeqId": prev,
+                "checksum": 0,
+                "bids": bids,
+                "asks": asks,
+            }
+        ],
     }
 
 
@@ -140,14 +142,17 @@ def _controlled_depth(spec: LinearContractDefinition):
         raise NativeL2Error("only the pinned artificial linear L2 fixture is accepted")
 
     frames = (
-        _frame("snapshot", 1, -1, 1000, [["100.0", "10.000", "0", "1"]],
-               [["100.2", "10.000", "0", "1"]]),
+        _frame("snapshot", 1, -1, 1000, [["100.0", "10.000", "0", "1"]], [["100.2", "10.000", "0", "1"]]),
         _frame("update", 2, 1, 2000, [], [["100.2", "0.400", "0", "1"]]),
-        _frame("update", 3, 2, 3000, [],
-               [["100.2", "0", "0", "0"], ["100.3", "0.600", "0", "1"]]),
-        _frame("update", 4, 3, 4000,
-               [["100.0", "0", "0", "0"], ["101.0", "10.000", "0", "1"]],
-               [["100.3", "0", "0", "0"], ["101.2", "10.000", "0", "1"]]),
+        _frame("update", 3, 2, 3000, [], [["100.2", "0", "0", "0"], ["100.3", "0.600", "0", "1"]]),
+        _frame(
+            "update",
+            4,
+            3,
+            4000,
+            [["100.0", "0", "0", "0"], ["101.0", "10.000", "0", "1"]],
+            [["100.3", "0", "0", "0"], ["101.2", "10.000", "0", "1"]],
+        ),
     )
     state = None
     output = []
