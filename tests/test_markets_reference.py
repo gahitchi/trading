@@ -215,3 +215,19 @@ def test_offline_cli_fixture_smoke() -> None:
     assert result["minute_bars"] == 3
     assert result["market_data_validated"] is False
     assert result["qualified_for_live_trading"] is False
+
+def test_funding_events_prevent_time_travel_in_subsequent_trades() -> None:
+    sim = OfflineSimulator(instrument())
+    sim.on_trade(event(1))
+    sim.apply_funding("fund1", D("0.001"), 5_000_000_000)
+    with pytest.raises(ValueError, match="out-of-order"):
+        sim.on_trade(event(2))
+    sim.on_trade(event(6))
+
+
+def test_minute_bar_dedup_does_not_accumulate_all_historical_ids() -> None:
+    builder = MinuteBuilder()
+    builder.push(event(1, timestamp=1_000_000_000))
+    assert len(builder._trade_ids) == 1
+    builder.flush(60_000_000_000)
+    assert not builder._trade_ids
