@@ -120,7 +120,7 @@ def test_insider_is_recognized_only_after_public_filing_reception():
         {"direct_ownership": False},
         {"plan_10b5_1": True},
         {"plan_10b5_1": None},
-        {"received_ns": NOW - 100 * DAY},
+        {"received_ns": NOW - 100 * DAY, "filed_ns": NOW - 102 * DAY, "transaction_ns": NOW - 103 * DAY},
     ],
 )
 def test_non_discretionary_or_stale_form4_cannot_boost_ranking(change):
