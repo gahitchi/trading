@@ -280,6 +280,7 @@ def build_node(
             if spec.sha256 != digest:
                 raise ApprovalError("paper node requires an approved, digest-bound research SignalSpec")
     from lab.persistence import atomic_json, file_lock
+    from lab.provenance import runtime_digest
     from lab.research.approval import deployment_context
 
     bank = None
@@ -297,6 +298,9 @@ def build_node(
         "signals": [{"name": s.name, "params": s.params, "sha256": s.sha256} for s in specs],
         "deployment": deployment_context(cfg.snapshot(), live=True, tickers=tickers),
         "execution": execution_identity(cfg),
+        # Any code change still stops a runtime until an explicit upgrade; the deployment context above binds
+        # only the simulation code an approval was validated with.
+        "runtime_sha256": runtime_digest(),
     }
     if bank is not None:
         identity["strategy_bank"] = bank.manifest
@@ -408,6 +412,8 @@ def build_node(
                 leverage=cfg.portfolio.leverage,
                 periods_per_year=252 * sp.bars_per_session,
                 weighting=cfg.portfolio.weighting,
+                session_bars=sp.bars_per_session if session else 1,
+                flat_at_close=bool(session) and cfg.trading.flat_at_close,
                 state_path=str(rt / "allocator.json"),
             )
         )
@@ -467,6 +473,7 @@ def build_node(
                 notification_health=notifier.health if notifier is not None else None,
                 reservation_costs=cfg.costs,
                 reservation_gap=max(p.reservation_gap, cfg.trading.limit_collar),
+                entry_slippage=cfg.trading.limit_collar,
                 max_order_value=p.max_order_value,
                 max_orders_per_day=p.max_orders_per_day,
                 max_daily_turnover=p.max_daily_turnover,

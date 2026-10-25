@@ -26,6 +26,7 @@ class PriceMark:
     ticker: str
     price: float
     ts: int
+    volume: float = 0.0  # the bar's volume (shares), warm-up bars included: the execution agent's liquidity cap
 
 
 @dataclass(frozen=True)

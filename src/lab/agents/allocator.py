@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from itertools import pairwise
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import numpy as np
 from nautilus_trader.common import DataActor, DataActorConfig
 
 from lab.agents.messages import T_MARK, T_RISK, T_SIGNAL, T_TARGETS, TargetWeights
-from lab.allocation import MIN_RISK_RETURNS, risk_weights
+from lab.allocation import MIN_RISK_RETURNS, covariance, interval_returns, risk_weights
 from lab.persistence import atomic_json, read_json
+
+NY = ZoneInfo("America/New_York")
+
+
+def _same_session(a: int, b: int) -> bool:
+    """Both bar timestamps (UNIX ns) fall on the same New York date."""
+    return datetime.fromtimestamp(a / 1e9, NY).date() == datetime.fromtimestamp(b / 1e9, NY).date()
 
 
 class AllocatorAgentConfig(DataActorConfig):
@@ -30,6 +38,8 @@ class AllocatorAgentConfig(DataActorConfig):
         state_path: str | None = None,
         bank=None,
         weighting: str = "equal",
+        session_bars: int = 1,
+        flat_at_close: bool = False,
         **_kwargs,
     ):
         """sleeves: sleeve id ("signal:TICKER") -> (ticker, weight). Weights are fractions of equity.
@@ -56,6 +66,10 @@ class AllocatorAgentConfig(DataActorConfig):
         self.leverage = leverage
         self.state_path = state_path
         self.periods_per_year = periods_per_year  # bars per year: 252 daily, 252 x bars per session intraday
+        # Quick speeds (Gemini audit F-R12): bar-to-bar returns inside a session and the overnight return are
+        # different risks. A book that is flat at the close never holds the overnight one.
+        self.session_bars = session_bars
+        self.flat_at_close = flat_at_close
 
 
 class AllocatorAgent(DataActor):
@@ -140,19 +154,32 @@ class AllocatorAgent(DataActor):
         held = [t for t, w in weights.items() if w != 0]
         if not held:
             return 1.0
-        # Match BOTH endpoints. A two-day return is not interchangeable with
-        # somebody else's one-day return. Missing/partial warm-up stays in cash.
-        returns = {}
-        for t in held:
-            rows = list(self.closes[t])
-            returns[t] = {(a[0], b[0]): math.log(b[1] / a[1]) for a, b in pairwise(rows)}
-        shared = sorted(set.intersection(*(set(returns[t]) for t in held)))
-        if len(shared) < min(20, self.config.vol_window):
-            return 0.0
-        rets = np.array([[returns[t][k] for k in shared] for t in held])
-        cov = np.atleast_2d(np.cov(rets))
+        # Each pair of stocks over the intervals they share, both ends priced (F-R11): one stock with gaps or a
+        # recent listing no longer sends the whole book to cash. A held stock without enough returns of its own
+        # is sized as if it were as volatile as the most volatile known one; before any held stock has enough
+        # returns, stay in cash.
+        min_obs = min(20, self.config.vol_window)
+        rows = {t: list(self.closes[t]) for t in held}
         w = np.array([weights[t] for t in held])
-        vol = math.sqrt(max(float(w @ cov @ w), 0.0) * self.config.periods_per_year)
+        if self.config.session_bars <= 1:
+            cov = covariance({t: interval_returns(rows[t]) for t in held}, held, min_obs, np.max)
+            if cov is None:
+                return 0.0
+            annual = float(w @ cov @ w) * self.config.periods_per_year
+        else:
+            intra = covariance({t: interval_returns(rows[t], _same_session) for t in held}, held, min_obs, np.max)
+            if intra is None:
+                return 0.0
+            annual = float(w @ intra @ w) * 252 * (self.config.session_bars - 1)
+            if not self.config.flat_at_close:
+                overnight = covariance(
+                    {t: interval_returns(rows[t], lambda a, b: not _same_session(a, b)) for t in held}, held, 3, np.max
+                )
+                # A held overnight book needs an overnight estimate; until three nights are seen, stay in cash.
+                if overnight is None:
+                    return 0.0
+                annual += float(w @ overnight @ w) * 252
+        vol = math.sqrt(max(annual, 0.0))
         return (
             min(1.0, self.config.max_leverage)
             if vol <= 0

@@ -31,6 +31,11 @@ def main():
         "window": 63,
         "high_volatility": 0.30,
         "trend_band": 0.03,
+        # Regime persistence against chatter around a threshold (Gemini audit F-R17): leave "volatile" below
+        # 85% of the entry level, a trend below 75% of it, and follow a new regime after 3 bars.
+        "volatility_exit": 0.85,
+        "trend_exit": 0.75,
+        "min_dwell_bars": 3,
         "entries": [
             {
                 "name": s.name,

@@ -36,6 +36,18 @@ class StrategyBank:
             type(v) not in (float, int) or not math.isfinite(v) or not 0 < v < 2 for v in (self.volatility, self.trend)
         ):
             raise ValueError("invalid bank regime thresholds")
+        # Optional regime persistence (Gemini audit F-R17); absent keys keep a manifest's original behaviour.
+        # A regime is left only past its exit threshold (a share of the entry one), and a new regime must hold
+        # for min_dwell_bars consecutive bars before the selection follows it.
+        self.volatility_exit = manifest.get("volatility_exit", 1.0)
+        self.trend_exit = manifest.get("trend_exit", 1.0)
+        self.min_dwell = manifest.get("min_dwell_bars", 1)
+        if any(type(v) not in (float, int) or not 0 < v <= 1 for v in (self.volatility_exit, self.trend_exit)):
+            raise ValueError("regime exit thresholds must be shares (0, 1] of the entry thresholds")
+        if type(self.min_dwell) is not int or not 1 <= self.min_dwell <= 63:
+            raise ValueError("min_dwell_bars must be an integer from 1 to 63")
+        self.regime = None  # the regime in force
+        self.pending = (None, 0, None)  # (candidate regime, consecutive bars, last bar counted)
         actual = {s.name: digest({"name": s.name, "params": s.params, "sha256": s.sha256}) for s in specs}
         entries = manifest["entries"]
         if (
@@ -78,18 +90,44 @@ class StrategyBank:
         mean = sum(returns) / len(returns)
         vol = math.sqrt(sum((r - mean) ** 2 for r in returns) / (len(returns) - 1) * 252)
         move = rows[-1][1] / rows[0][1] - 1
-        regime = (
-            "volatile"
-            if vol >= self.volatility
-            else "up"
-            if move > self.trend
-            else "down"
-            if move < -self.trend
-            else "range"
-        )
+        regime = self._persist(self._classify(vol, move), rows[-1][0])
         eligible = [
             e
             for e in self.entries
             if e["start"] < now < e["end"] and e["name"] not in retired and regime in e["regimes"]
         ]
         return (eligible[0]["name"] if eligible else None), regime
+
+    def _classify(self, vol: float, move: float) -> str:
+        """Thresholds with a deadband: the regime in force is kept until its exit threshold is crossed."""
+        held = self.regime
+        v_in = self.volatility * (self.volatility_exit if held == "volatile" else 1)
+        if vol >= v_in:
+            return "volatile"
+        up_in = self.trend * (self.trend_exit if held == "up" else 1)
+        down_in = self.trend * (self.trend_exit if held == "down" else 1)
+        if move > up_in:
+            return "up"
+        if move < -down_in:
+            return "down"
+        return "range"
+
+    def _persist(self, raw: str, bar_ts: int) -> str:
+        """Follow a new regime only after it holds for min_dwell distinct bars (select() runs several times a
+        bar)."""
+        if self.regime is None or self.min_dwell <= 1:
+            self.regime = raw
+            self.pending = (None, 0, None)
+            return raw
+        if raw == self.regime:
+            self.pending = (None, 0, None)
+            return raw
+        candidate, count, last = self.pending
+        if candidate != raw:
+            candidate, count, last = raw, 0, None
+        if last != bar_ts:
+            count += 1
+        self.pending = (candidate, count, bar_ts)
+        if count >= self.min_dwell:
+            self.regime, self.pending = raw, (None, 0, None)
+        return self.regime

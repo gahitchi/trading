@@ -52,7 +52,8 @@ def private_file(path, value):
 
 
 def install_shortcuts(root):
-    """Windows: a Trading Lab icon on the desktop and in the Start menu, once. A failure never blocks the app."""
+    """Windows: a Trading Lab icon on the desktop and in the Start menu, once. A failure never blocks the app.
+    (Arch Linux and KDE: tools/install_arch.py installs the menu entry.)"""
     if sys.platform != "win32":
         return
     env = dict(os.environ)
@@ -61,6 +62,40 @@ def install_shortcuts(root):
     env["TRADING_LAB_ICON"] = str(root / "src" / "lab" / "ui" / "icons" / "trading-lab.ico")
     command = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", SHORTCUTS]
     subprocess.run(command, env=env, check=False)
+
+
+DOCKER_DESKTOP = [
+    Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Docker" / "Docker" / "Docker Desktop.exe",
+    Path("/Applications/Docker.app"),
+]
+
+
+def docker_running() -> bool:
+    return subprocess.run(["docker", "info"], capture_output=True, check=False).returncode == 0
+
+
+def ensure_docker(seconds=300):
+    """Start Docker Desktop when its engine is not running (Windows and macOS), and wait for it. On Linux the
+    engine is a system service: say how to start it."""
+    if docker_running():
+        return
+    app = next((p for p in DOCKER_DESKTOP if p.exists()), None)
+    if app is None:
+        raise ValueError("Docker is not running. Start it (Linux: sudo systemctl start docker) and try again.")
+    print("Starting Docker Desktop (the first start can take a few minutes; accept its terms if it asks)...")
+    if app.suffix == ".app":
+        subprocess.run(["open", "-a", str(app)], check=False)
+    else:
+        subprocess.Popen([str(app)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        time.sleep(3)
+        if docker_running():
+            return
+    raise ValueError(
+        "Docker Desktop did not start. If it asked to install WSL or restart Windows, do that, then open "
+        "Trading Lab again."
+    )
 
 
 def wait_until_ready(url, seconds=120):
@@ -83,16 +118,22 @@ def open_app(url):
     for candidate in APP_BROWSERS:
         exe = candidate if Path(candidate).is_file() else shutil.which(candidate)
         if exe:
-            subprocess.Popen(
-                [exe, f"--app={url}", "--window-size=1280,900"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-            return
+            try:
+                subprocess.Popen(
+                    [exe, f"--app={url}", "--window-size=1280,900"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return
+            except OSError:
+                continue  # a broken install: try the next browser (ChatGPT G014-F4)
     webbrowser.open(url)
 
 
 def main():
     root = Path(__file__).resolve().parents[1]
-    subprocess.run(["docker", "compose", "version"], check=True, cwd=root)
+    subprocess.run(["docker", "compose", "version"], check=True, cwd=root, capture_output=True)
+    ensure_docker()
     if not (root / ".env").exists():
         print("Connect IB Gateway in PAPER mode. Credentials are saved only on this computer.")
         username = input("IBKR username: ").strip()
@@ -116,7 +157,7 @@ def main():
     env["LAB_APP_GID"] = str(os.getgid()) if hasattr(os, "getgid") else "1000"
     subprocess.run(["docker", "compose", "-f", "compose.app.yml", "up", "--build", "-d"], check=True, cwd=root, env=env)
     install_shortcuts(root)
-    print("Complete any IBKR two-factor prompt. Next time, open Trading Lab from its desktop or Start menu icon.")
+    print("Complete any IBKR two-factor prompt. Next time, open Trading Lab from its icon.")
     print("Save your plan, then click Start paper trading. No orders are enabled by this installer.")
     if not wait_until_ready(URL):
         print(f"The app is not answering yet. Open {URL} once the container is healthy.")

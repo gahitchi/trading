@@ -163,6 +163,17 @@ def cmd_data_membership(cfg, a):
         print(f"no price data yet for {len(missing)}: {', '.join(missing[:10])}{'...' if len(missing) > 10 else ''}")
 
 
+def cmd_data_risk_free(cfg, a):
+    if a.file:
+        df = data.save_risk_free(cfg, pd.read_csv(a.file), source=f"csv:{a.file}")
+    else:
+        df = data.save_risk_free(cfg, data.fetch_risk_free(), source="FRED DTB3 (3-month Treasury bill)")
+    print(
+        f"risk-free rate: {len(df)} days {df['date'].iloc[0].date()} .. {df['date'].iloc[-1].date()} "
+        f"-> {data.risk_free_path(cfg).relative_to(cfg.root)}; Sharpe and Sortino now use excess returns"
+    )
+
+
 def cmd_data_sample(cfg, a):
     e = data.save(
         cfg,
@@ -995,6 +1006,9 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--note")
     i.set_defaults(fn=cmd_data_import)
     d.add_parser("sample", help="store the offline real-data sample (GOOG 2004-2013)").set_defaults(fn=cmd_data_sample)
+    rf = d.add_parser("risk-free", help="daily risk-free rate for excess-return Sharpe/Sortino (FRED DTB3, free)")
+    rf.add_argument("--file", help="CSV with date and rate (annual percent) instead of downloading from FRED")
+    rf.set_defaults(fn=cmd_data_risk_free)
     mb = d.add_parser("membership", help="point-in-time universe: CSV of ticker,start,end membership spells")
     mb.add_argument("file")
     mb.set_defaults(fn=cmd_data_membership)

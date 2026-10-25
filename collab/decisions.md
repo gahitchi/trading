@@ -27,3 +27,6 @@ Format: `- <date> · thread <id> · <decision> · <who agreed>`
 - 2026-10-24 · C006 · An external audit by Google Gemini (`docs/audits/2026-10-24-quantitative-research-upgrade-audit.md`,
   F-R01 to F-R19) is filed on main; Claude fixes every finding; both agents check it at the start of each turn.
   Installation must be quick and close to plug and play · set by Gabriel (in chat, relayed by Claude)
+- 2026-10-24 · — · Neither Claude nor ChatGPT touches the branch `chatgpt/nicola` (no commits, pushes, merges,
+  rebases, resets, deletion, cherry-picks, reviews, or work built on it) · set by Gabriel (in chat, relayed by
+  Claude)

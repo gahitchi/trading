@@ -60,13 +60,32 @@ Two layers of cooperating agents:
 
 ## Install
 
-Python 3.13 or 3.14 (NautilusTrader 2.0 requires it), Linux or macOS. Uses [uv](https://docs.astral.sh/uv/) (`pacman -S uv` on Arch).
+**The app (paper trading on your computer), one command.** It installs what is missing, downloads Trading
+Lab, asks for your IBKR paper login once, starts it and adds a Trading Lab icon. Run the same command again
+to update; your settings, credentials and history are kept. Nothing trades until you press Start.
+
+Windows 10/11, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/gahitchi/trading/main/install.ps1 | iex
+```
+
+Arch Linux with KDE: `bash install-arch.sh` from a clone, see [docs/arch-install.md](docs/arch-install.md).
+
+On Windows it installs Docker Desktop and Python with `winget` if they are missing. Docker Desktop's first
+start asks you to accept its terms and may install WSL 2 and ask for a restart; after the restart, run the
+command again. The first start builds the program (5 to 15 minutes); later starts take seconds. Before
+trading you need an approved IBKR account with a paper account (`DU...`), see [RUNBOOK.md](RUNBOOK.md).
+
+**The research lab (command line).** Python 3.13 or 3.14 (NautilusTrader 2.0 requires it), Linux or macOS.
+Uses [uv](https://docs.astral.sh/uv/) (`pacman -S uv` on Arch).
 
 ```bash
 git clone https://github.com/gahitchi/trading.git && cd trading
 uv sync --frozen --extra dev
 source .venv/bin/activate
-pytest                 # offline suite, including several minutes of recovery scenarios
+pytest -m "not llm and not harness" -n auto   # fast offline suite, in parallel (a few minutes)
+pytest -m harness      # real-clock recovery scenarios against the simulated broker (several minutes)
 lab doctor             # what is ready, what is missing
 ```
 
@@ -331,8 +350,13 @@ experiments/LOG.md          your lab notebook
 
 - The optional daily strategy bank is experimental and has no whole-policy promotion claim.
   The bounded synthetic power pilot does not qualify research power or false-positive control.
+- **US stocks only.** Forex and crypto are not supported: instruments, ticks, sessions, funding and broker
+  lifecycle are equity-specific (ChatGPT C005-F7). Adding them is a scope decision for Gabriel.
 - **Free data is survivorship-biased** and unofficial; see [Data](#data).
-- Idle cash and short-sale proceeds earn no interest (conservative).
+- Idle cash and short-sale proceeds earn no interest unless `[margin] credit_apr` / `short_rebate_apr` are set
+  (ASSUMED rates).
+- Backtests execute at split- and dividend-adjusted prices; per-share commissions use the recorded split history,
+  but fully unadjusted execution prices are not modelled yet.
 - Intraday: free history is short (weeks for 15m/5m), so intraday statistics are much weaker than daily ones.
   Backtests round data delay up to whole bars and replay sparse opening prints; this is an approximation,
   not a guaranteed conservative execution model. The pinned exchange calendar handles regular holidays and

@@ -183,4 +183,6 @@ def test_normal_research_route_can_actually_short(goog_lab, goog):
         position += fill.qty if fill.side == "BUY" else -fill.qty
         positions.append(position)
     assert min(positions) < 0 < max(positions)
-    assert result.borrow_fees > 0 and result.ledger_vs_account == pytest.approx(0.0, abs=1e-6)
+    # A margin account books realized P&L from the average entry price, rounded to the cent at each closing
+    # fill; the ledger books each fill's cash. With entries at several prices the two differ by cents.
+    assert result.borrow_fees > 0 and result.ledger_vs_account == pytest.approx(0.0, abs=0.01 * len(result.fills))

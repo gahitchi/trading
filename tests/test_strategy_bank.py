@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 
 import pytest
 
@@ -132,3 +133,44 @@ def test_bank_retirement_survives_allocator_restart(tmp_path):
         AllocatorAgentConfig(sleeves={"sma_trend:A": ("A", 1)}, vol_window=20, state_path=str(state))
     )
     assert restarted.retired == {"sma_trend"}
+
+
+def _walk(b, prices, start=datetime(2025, 1, 1, tzinfo=UTC)):
+    """Regimes selected day by day along a benchmark price path."""
+    rows, out = [], []
+    for i, price in enumerate(prices):
+        rows.append((int((start + timedelta(days=i)).timestamp() * 1e9), price))
+        if len(rows) > 20:
+            out.append(b.select({"A": rows[-21:]})[1])
+            out.append(b.select({"A": rows[-21:]})[1])  # select() runs several times a bar
+    return out[::2]
+
+
+def _wobble(days=60):
+    """A path whose 20-day return wobbles between about 2.6% and 3.4%, around the 3% trend band."""
+    return [100 * 1.03 ** (t / 20) * (1 + 0.002 * (1, -1, 0)[t % 3]) for t in range(days)]
+
+
+def test_regime_chatter_around_a_threshold_is_damped():
+    """Gemini audit F-R17: a 20-day return wobbling around the 3% trend band flipped the regime, and the whole
+    book's strategy, back and forth day after day."""
+    plain = _walk(bank(), _wobble())
+    flips = sum(a != b for a, b in pairwise(plain))
+    m = manifest()
+    m.update(volatility_exit=0.85, trend_exit=0.75, min_dwell_bars=3)
+    damped = _walk(bank(m), _wobble())
+    assert flips >= 10 and sum(a != b for a, b in pairwise(damped)) <= 1
+    # A decisive, lasting move still changes the regime, a few bars after it starts.
+    fall = _wobble() + [_wobble()[-1] * 0.98**k for k in range(1, 16)]
+    assert _walk(bank(m), fall)[-1] == "down"
+
+
+def test_regime_persistence_settings_are_validated():
+    m = manifest()
+    m["min_dwell_bars"] = 0
+    with pytest.raises(ValueError, match="min_dwell_bars"):
+        bank(m)
+    m = manifest()
+    m["trend_exit"] = 1.5
+    with pytest.raises(ValueError, match="exit thresholds"):
+        bank(m)

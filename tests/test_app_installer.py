@@ -33,6 +33,8 @@ def test_installer_creates_only_private_setup_and_launches_fixed_paper_compose(t
     calls = []
     monkeypatch.setattr(tool.subprocess, "run", lambda args, **kw: calls.append((args, kw)))
     opened = []
+    monkeypatch.setattr(tool, "ensure_docker", lambda: None)
+    monkeypatch.setattr(tool, "install_shortcuts", lambda root: None)
     monkeypatch.setattr(tool, "wait_until_ready", lambda url: True)
     monkeypatch.setattr(tool, "open_app", opened.append)
     assert tool.main() == 0
@@ -67,9 +69,9 @@ def test_windows_gets_desktop_and_start_menu_shortcuts_with_the_app_icon(tmp_pat
     tool = installer()
     calls = []
     monkeypatch.setattr(tool.subprocess, "run", lambda args, **kw: calls.append((args, kw)))
-    monkeypatch.setattr(tool.sys, "platform", "linux")
+    monkeypatch.setattr(tool.sys, "platform", "darwin")
     tool.install_shortcuts(tmp_path)
-    assert calls == []  # shortcuts are a Windows convenience; elsewhere nothing is written
+    assert calls == []  # no shortcut on macOS
     monkeypatch.setattr(tool.sys, "platform", "win32")
     tool.install_shortcuts(tmp_path)
     ((args, kw),) = calls
@@ -102,3 +104,39 @@ def test_the_window_waits_for_the_app_to_answer(monkeypatch):
         server.server_close()
     monkeypatch.setattr(tool.time, "sleep", lambda _: None)
     assert not tool.wait_until_ready(f"http://127.0.0.1:{server.server_address[1]}", seconds=0.2)
+
+
+def test_a_stopped_docker_desktop_is_started_and_awaited(tmp_path, monkeypatch):
+    tool = installer()
+    app = tmp_path / "Docker Desktop.exe"
+    app.write_text("")
+    states = iter([False, False, True])
+    started = []
+    monkeypatch.setattr(tool, "docker_running", lambda: next(states))
+    monkeypatch.setattr(tool, "DOCKER_DESKTOP", [app])
+    monkeypatch.setattr(tool.subprocess, "Popen", lambda args, **kw: started.append(args))
+    monkeypatch.setattr(tool.time, "sleep", lambda _: None)
+    tool.ensure_docker()
+    assert started == [[str(app)]]
+    monkeypatch.setattr(tool, "docker_running", lambda: False)
+    monkeypatch.setattr(tool, "DOCKER_DESKTOP", [tmp_path / "missing.exe"])
+    with pytest.raises(ValueError, match="systemctl start docker"):
+        tool.ensure_docker()
+
+
+def test_a_browser_that_fails_to_launch_falls_through_to_the_next(tmp_path, monkeypatch):
+    tool = installer()
+    broken, edge = tmp_path / "broken.exe", tmp_path / "msedge.exe"
+    broken.write_text("")
+    edge.write_text("")
+    launched = []
+
+    def popen(args, **kw):
+        if args[0] == str(broken):
+            raise OSError("not a valid application")
+        launched.append(args[0])
+
+    monkeypatch.setattr(tool.subprocess, "Popen", popen)
+    monkeypatch.setattr(tool, "APP_BROWSERS", [str(broken), str(edge)])
+    tool.open_app("http://127.0.0.1:8765")
+    assert launched == [str(edge)]

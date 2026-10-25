@@ -91,10 +91,13 @@ def test_flat_at_close_exits_in_the_last_interval_and_re_enters_next_session(goo
         by_day.setdefault(ny(f.ts).date(), []).append(f)
     assert len(by_day) == len(DAYS)
     for fills in by_day.values():
-        # Conservative entry reserves can allow a later top-up; every purchase
-        # must still precede the one complete liquidation at the close.
+        # Conservative entry reserves can allow a later top-up, and a stock rallying past its per-stock limit
+        # is trimmed during the session (G013-F1); the book is never short and is flat at the close.
         assert fills[0].side == "BUY" and fills[-1].side == "SELL"
-        assert all(f.side == "BUY" for f in fills[:-1])
+        held = 0.0
+        for f in fills:
+            held += f.qty if f.side == "BUY" else -f.qty
+            assert held >= 0
         assert ny(fills[-1].ts).strftime("%H:%M") == "15:45"  # the session's last bar fills the exit
         assert sum(f.qty if f.side == "BUY" else -f.qty for f in fills) == 0  # flat every night
     assert "flat_at_close" in {e.kind for e in r.risk_events}
@@ -121,7 +124,10 @@ def test_overnight_shorts_pay_borrow_per_night_and_flat_books_pay_nothing(goog_l
     assert set(by_day) == {day.date() for day in DAYS}
     for fills in by_day.values():
         assert fills[0].side == "SELL" and fills[-1].side == "BUY"
-        assert all(f.side == "SELL" for f in fills[:-1])
+        held = 0.0
+        for f in fills:  # trims of a short past its limit are allowed; the book never turns long
+            held += f.qty if f.side == "BUY" else -f.qty
+            assert held <= 0
         assert ny(fills[-1].ts).strftime("%H:%M") == "15:45"
         assert sum(f.qty if f.side == "BUY" else -f.qty for f in fills) == 0
 

@@ -43,7 +43,10 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --frozen --extra dev
-      - run: uv run --no-sync pytest
+      - name: fast tier, in parallel
+        run: uv run --no-sync pytest -m "not llm and not harness" -n auto
+      - name: real-clock LiveNode harness, serially
+        run: uv run --no-sync pytest -m "harness"
       - name: offline example on real prices
         working-directory: examples/goog-offline
         run: |

@@ -11,8 +11,9 @@ Behaviour modelled on IBKR (as used by this lab):
   - intraday (quick speeds): MARKET and LIMIT DAY orders fill at the next trade print the harness
     delivers (open_session with the bar's opening prices); DAY orders expire at the close (expire_day)
   - resting limit orders fill at the open if the open crosses their limit
-  - IBKR Pro Fixed commissions and the backtest's one-tick slippage (lab/costs.py), so a
-    harness run and a backtest over the same bars must produce the same ledger
+  - IBKR Pro Fixed commissions, and optionally one tick of slippage on market orders. With slippage off,
+    a harness run and a backtest with [backtest] slippage = false over the same bars must produce the same
+    ledger (the backtest's modelled spread and impact have no counterpart here)
   - sells beyond the position are refused unless short selling is enabled for the account
   - an account ID ("DU..." = paper)
 

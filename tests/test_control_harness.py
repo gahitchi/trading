@@ -8,6 +8,9 @@ from lab.persistence import read_json
 from lab.signals.registry import SignalSpec
 from lab.sim.harness import LiveHarness
 
+# Real-clock LiveNode runs against the simulated broker: the slow, serial tier (Gemini audit F-R19).
+pytestmark = pytest.mark.harness
+
 
 @pytest.mark.parametrize("mode", ["manual", "supervised"])
 def test_controlled_node_does_not_submit_automatic_orders(mode, goog_lab, goog, tmp_path, monkeypatch):

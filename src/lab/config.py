@@ -29,11 +29,16 @@ class CostSettings:
     commission_per_share: float
     commission_min: float
     commission_max_pct: float
-    slippage: bool
+    slippage: bool  # charge the modelled half-spread and market impact below on every simulated fill
     open_print_fraction: float
     min_trade_value: float
     rebalance_band: float
     cash_buffer: float
+    # Execution costs (Gemini audit F-R06), simulated fills only; the real broker charges reality in paper:
+    min_half_spread_bps: float = 1.0  # floor under the Corwin-Schultz half-spread estimate
+    impact_coefficient: float = 0.5  # eta in eta x daily volatility x sqrt(order / average daily volume)
+    max_participation: float = 0.05  # simulated orders that add exposure trade at most this share of bar volume
+    cost_window: int = 20  # bars of history for volatility, volume and spread
 
 
 @dataclass(frozen=True)
@@ -61,6 +66,8 @@ class MarginSettings:
     cushion: float = 0.10  # stay this far above the requirement; deleverage before the broker would
     borrow_apr: float = 0.005  # ASSUMED stock-borrow fee for easy-to-borrow names (no historical fee data)
     debit_apr: float = 0.06  # ASSUMED interest on borrowed cash (IBKR: benchmark rate + spread; set the current one)
+    credit_apr: float = 0.0  # ASSUMED interest earned on free cash (cash beyond short-sale proceeds); F-R08
+    short_rebate_apr: float = 0.0  # ASSUMED rebate on short-sale proceeds held as collateral; F-R08
 
 
 @dataclass(frozen=True)
@@ -287,8 +294,17 @@ def _check_risk(r: RiskSettings, m: MarginSettings) -> None:
             raise ConfigError(f"margin.{k} must be in (0, 1]")
     if m.maintenance_long > m.initial_long or m.maintenance_short > m.initial_short:
         raise ConfigError("margin: maintenance requirements cannot exceed initial requirements")
-    if not (0 <= m.cushion < 1 and m.borrow_apr >= 0 and m.debit_apr >= 0):
-        raise ConfigError("margin: need 0 <= cushion < 1 and non-negative financing rates")
+    if not (
+        0 <= m.cushion < 1
+        and m.borrow_apr >= 0
+        and m.debit_apr >= 0
+        and 0 <= m.credit_apr <= m.debit_apr
+        and 0 <= m.short_rebate_apr <= m.debit_apr
+    ):
+        raise ConfigError(
+            "margin: need 0 <= cushion < 1, non-negative financing rates, and credit or rebate rates no higher "
+            "than the debit rate (a broker never pays more on cash than it charges)"
+        )
     # The broker's initial requirement caps gross exposure: at Reg T's 50% that is 2x. No setting may promise more.
     worst = max(m.initial_long, m.initial_short) * r.max_gross
     if worst > 1 + 1e-9:
@@ -444,6 +460,10 @@ def _load_config(path: str | Path | None = None, *, environ=None) -> LabConfig:
             min_trade_value=float(bt["min_trade_value"]),
             rebalance_band=float(bt["rebalance_band"]),
             cash_buffer=float(bt["cash_buffer"]),
+            min_half_spread_bps=float(bt.get("min_half_spread_bps", 1.0)),
+            impact_coefficient=float(bt.get("impact_coefficient", 0.5)),
+            max_participation=float(bt.get("max_participation", 0.05)),
+            cost_window=int(bt.get("cost_window", 20)),
         ),
         risk=risk,
         margin=margin,
@@ -497,6 +517,10 @@ def _check_settings(cfg: LabConfig) -> None:
     for key in ("commission_max_pct", "rebalance_band", "cash_buffer"):
         bounded(f"backtest.{key}", getattr(cfg.costs, key), 0, 1, strict_high=True)
     bounded("backtest.open_print_fraction", cfg.costs.open_print_fraction, 0, 1, strict_low=True)
+    bounded("backtest.min_half_spread_bps", cfg.costs.min_half_spread_bps, 0, 500)
+    bounded("backtest.impact_coefficient", cfg.costs.impact_coefficient, 0, 5)
+    bounded("backtest.max_participation", cfg.costs.max_participation, 0, 1, strict_low=True)
+    bounded("backtest.cost_window", cfg.costs.cost_window, 2, 500)
     bounded("portfolio.target_vol", cfg.portfolio.target_vol, 0)
     for key in ("max_order_value", "max_orders_per_day", "max_daily_turnover", "cash_tolerance"):
         bounded(f"paper.{key}", getattr(cfg.paper, key), 0)

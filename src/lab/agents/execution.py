@@ -6,6 +6,7 @@ import json
 import math
 import sqlite3
 import time
+from collections import deque
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -18,6 +19,7 @@ from lab.agents.messages import (
     T_APPROVED,
     T_EQUITY,
     T_FILL,
+    T_MARK,
     T_RISK,
     T_SIGNAL,
     EquitySnapshot,
@@ -49,6 +51,38 @@ def _opening(current: float, target: float) -> float:
     if current == 0 or current * target < 0:
         return abs(target)
     return max(0.0, abs(target) - abs(current))
+
+
+def _liquidity_cap(seen, participation: float | None) -> float | None:
+    """Shares of new exposure one order may add: `participation` x the average volume of the bars `seen`
+    ((ts, volume) pairs). None (no cap) without the setting or before five bars of volume are known."""
+    if not participation or not seen or len(seen) < 5:
+        return None
+    return math.floor(participation * sum(v for _, v in seen) / len(seen))
+
+
+def _held_breach(held: dict, prices: dict, equity: float, limits, margin) -> str | None:
+    """Which hard limit (per stock, gross, short book, net, initial margin) the held book breaks at the
+    current marks, or None. Without risk limits (component tests) nothing is checked."""
+    if limits is None or not any(held.values()):
+        return None
+    from lab.reservations import check_openings
+
+    reason = check_openings(held, {}, prices, equity, limits, margin or MarginSettings())
+    return reason.replace("possible fill exceeds", "held book exceeds") if reason else None
+
+
+def _exposure_note(held: dict, prices: dict, equity: float, margin) -> str:
+    """The book's exposure at the decision marks, for breach reports (G013-F2)."""
+    if equity <= 0:
+        return "no positive equity"
+    w = {t: q * prices.get(t, 0.0) / equity for t, q in held.items() if q}
+    return (
+        f"gross {sum(abs(v) for v in w.values()):.4f}, net {sum(w.values()):.4f}, "
+        f"short {-sum(min(v, 0) for v in w.values()):.4f}, "
+        f"largest {max((abs(v) for v in w.values()), default=0):.4f}, "
+        f"initial margin {mg.initial_requirement(w, margin or MarginSettings()):.4f} of equity"
+    )
 
 
 def _with_opening(current: float, target: float, opening: float) -> float:
@@ -99,6 +133,9 @@ class ExecutionAgentConfig(StrategyConfig):
         notification_health=None,
         reservation_costs=None,
         reservation_gap: float = 0.0,
+        max_participation: float | None = None,
+        participation_window: int = 20,
+        entry_slippage: float = 0.0,
         **_kwargs,
     ):
         """instruments: ticker -> InstrumentId. margin: financing rates accrued on short and levered books.
@@ -152,7 +189,10 @@ class ExecutionAgentConfig(StrategyConfig):
         self.notification_health = notification_health
         self.authority = authority
         self.reservation_costs = reservation_costs
-        self.reservation_gap = reservation_gap
+        self.max_participation = max_participation
+        self.participation_window = participation_window
+        self.reservation_gap = reservation_gap  # adverse move stressed for cash and margin
+        self.entry_slippage = entry_slippage  # worst entry price assumed for exposure caps
         if live and borrow_book is not None:
             raise ValueError("historical borrow evidence cannot authorize live paper-broker orders")
         if state_path and borrow_book is not None:
@@ -179,6 +219,7 @@ class ExecutionAgent(Strategy):
         self.authority_nonce = None
         self.weights: dict[str, float] = {}
         self.prices: dict[str, float] = {}
+        self.volumes: dict[str, deque] = {}  # ticker -> recent (bar ts, bar volume): the liquidity cap
         self.price_stamps: dict[str, int] = {}
         self.price_ts = 0
         self.new_data = False
@@ -287,6 +328,8 @@ class ExecutionAgent(Strategy):
     def on_start(self):
         self.subscribe_topic(T_SIGNAL, self._on_signal)
         self.subscribe_topic(T_APPROVED, self._on_approved)
+        if self.config.max_participation:
+            self.subscribe_topic(T_MARK, self._on_mark)
         if self.config.live:
             now = datetime.fromtimestamp(self.clock.timestamp_ns() / 1e9, NY)
             previous = self._read_heartbeat()
@@ -341,6 +384,13 @@ class ExecutionAgent(Strategy):
     def on_stop(self):
         if self.config.live:
             self._write_heartbeat(running=False)
+
+    def _on_mark(self, msg):
+        """Bar volumes, warm-up included, for the liquidity cap (Gemini audit F-R06)."""
+        if msg.volume > 0 and msg.ticker in self.config.instruments:
+            seen = self.volumes.setdefault(msg.ticker, deque(maxlen=self.config.participation_window))
+            if not seen or seen[-1][0] < msg.ts:  # several agents may report the same bar
+                seen.append((msg.ts, msg.volume))
 
     def _on_signal(self, msg):
         self.prices[msg.ticker] = msg.price
@@ -476,6 +526,7 @@ class ExecutionAgent(Strategy):
                     "blocked": self.blocked_reason or None,
                     "orders_sent": self.orders_sent,
                     "account": self._account_id(),
+                    "risk": self._risk_view(),
                 }
             )
         )
@@ -569,13 +620,60 @@ class ExecutionAgent(Strategy):
         )
         return True
 
+    def _risk_view(self) -> dict:
+        """The book's exposure at the engine's marks, for the operator (ChatGPT G014-F1): equity, gross, net,
+        short, largest position and initial margin against the configured limits, and any breach. Computed
+        here, from the reconciled ledger, never in the browser; marked unknown when a held mark is missing or
+        stale, rather than shown from old prices."""
+        unsafe = self._unsafe_held_marks()
+        limits = getattr(self.config, "risk_limits", None)
+        view = {
+            "marks_current": not unsafe,
+            "unsafe_marks": unsafe,
+            "limits": (
+                {
+                    "max_weight": limits.max_weight,
+                    "max_gross": limits.max_gross,
+                    "max_short_gross": limits.max_short_gross,
+                    "min_net": limits.min_net,
+                    "max_net": limits.max_net,
+                }
+                if limits is not None
+                else None
+            ),
+        }
+        if unsafe:
+            return view
+        long_value, short_value = self._book()
+        actual_in_cash = self.config.live and self.config.dedicated_account
+        equity = self.cash + long_value - short_value - (0.0 if actual_in_cash else self.financing)
+        if not math.isfinite(equity) or equity <= 0:
+            return {
+                **view,
+                "equity": round(equity, 2) if math.isfinite(equity) else None,
+                "breach": "no positive equity",
+            }
+        weights = {t: q * self.prices.get(t, 0.0) / equity for t, q in self.held.items() if q}
+        margin = self.config.margin or MarginSettings()
+        return {
+            **view,
+            "equity": round(equity, 2),
+            "gross": sum(abs(w) for w in weights.values()),
+            "net": sum(weights.values()),
+            "short": -sum(min(w, 0) for w in weights.values()),
+            "largest": max((abs(w) for w in weights.values()), default=0.0),
+            "initial_margin": mg.initial_requirement(weights, margin),
+            "breach": _held_breach(self.held, self.prices, equity, limits, margin),
+        }
+
     def _book(self) -> tuple[float, float]:
         long_value = sum(q * self.prices.get(t, 0.0) for t, q in self.held.items() if q > 0)
         short_value = -sum(q * self.prices.get(t, 0.0) for t, q in self.held.items() if q < 0)
         return long_value, short_value
 
     def _accrue(self) -> None:
-        """Charge borrow fees and debit interest for the calendar days since the last accrual."""
+        """Charge borrow fees and debit interest, and credit interest on free cash and short proceeds, for the
+        calendar days since the last accrual. `financing` is the net cost (negative when credits win)."""
         ts = self.price_ts
         verified_fee = None
         if self.borrow_ledger is not None and ts > self.accrued_to:
@@ -588,8 +686,9 @@ class ExecutionAgent(Strategy):
             borrow, debit = mg.financing_cost(
                 self.cash, short_value, days, self.config.margin, verified_borrow_fee=verified_fee
             )
+            credit = mg.financing_credit(self.cash, short_value, days, self.config.margin)
             self.borrow_fees += borrow
-            self.financing += borrow + debit
+            self.financing += borrow + debit - credit
         if ts and (not self.accrued_to or days > 0):
             self.accrued_to = ts
             self._save()  # persist every accrual: a restart must not re-accrue the span at a different book
@@ -794,6 +893,15 @@ class ExecutionAgent(Strategy):
                 self._risk_event("authority_blocked", self.blocked_reason)
                 return
         reduce_only = self.reduce_only or bool(halt_kinds(halt) & {"margin_call", "cash_mismatch"})
+        # A held book past a hard limit at the decision marks (drift from prices, interest or fees): the
+        # reductions that restore it go out whatever their size (G013-F1, Gemini audit F-R13). The limits bind
+        # decisions and submissions; marked holdings can still cross them between decisions, so every breach
+        # is reported with the book's exposure, and one that no order can correct is reported again.
+        margin = getattr(self.config, "margin", None)
+        breach = _held_breach(self.held, self.prices, snap.equity, getattr(self.config, "risk_limits", None), margin)
+        if breach:
+            self._risk_event("cap_breach", f"{breach}; {_exposure_note(self.held, self.prices, snap.equity, margin)}")
+        corrective = 0
         orders = []
         borrow_blocked = False
         for ticker, iid in self.config.instruments.items():
@@ -817,17 +925,27 @@ class ExecutionAgent(Strategy):
                 if reason:
                     borrow_blocked = True
                     self._risk_event("borrow_unavailable", reason + "; new short exposure blocked")
+            cap = _liquidity_cap(
+                getattr(self, "volumes", {}).get(ticker), getattr(self.config, "max_participation", None)
+            )
+            if cap is not None and _opening(current, target) > cap:
+                # Gemini audit F-R06: new exposure trades at most max_participation of the average bar volume;
+                # the rest follows on later decisions. Reductions are never held back by liquidity.
+                target = math.trunc(_with_opening(current, target, cap))
+                self._risk_event("liquidity_cap", f"{ticker}: new exposure capped at {cap:,.0f} shares this bar")
             diff = target - current
             if diff == 0:
                 continue
             value = abs(diff) * price
-            if target != 0 and value < self.config.min_trade_value:
+            restores = bool(breach) and current != 0 and target * current >= 0 and abs(target) < abs(current)
+            if target != 0 and value < self.config.min_trade_value and not restores:
                 continue
             if (
                 target != 0
                 and current != 0
                 and target * current > 0
                 and value < self.config.rebalance_band * snap.equity
+                and not restores
             ):
                 continue  # small drift: not worth the commission
             if self.cache.orders_open_count(instrument_id=iid) > 0:
@@ -837,7 +955,14 @@ class ExecutionAgent(Strategy):
                 self._risk_event("order_pending", f"{ticker}: previous order still unsettled; no new order today")
                 continue
             orders.append((_opening(current, target), target, current, iid, ticker, price))
+            corrective += restores
 
+        if breach and not corrective:
+            self._risk_event(
+                "cap_breach_unresolved",
+                f"{breach}: no corrective order could be sent this decision (pending or open orders, missing "
+                "marks or no reducing target); additions stay blocked",
+            )
         orders.sort(key=lambda o: o[0] > 0)
         # A reduction is not settled until its broker report arrives. Gross-only
         # headroom cannot enforce short/net/margin limits under partial fills (ChatGPT, G009).
@@ -889,20 +1014,11 @@ class ExecutionAgent(Strategy):
                 )
                 break
             if opening > 0 and getattr(self.config, "risk_limits", None) is not None:
-                from lab.reservations import check_openings, stressed_openings
+                from lab.reservations import check_openings
 
                 candidate = {**reserved, ticker: target}
                 if getattr(self.config, "reservation_costs", None) is not None:
-                    reason = stressed_openings(
-                        self.held,
-                        candidate,
-                        self.prices,
-                        snap.equity,
-                        self.config.risk_limits,
-                        self.config.margin,
-                        self.config.reservation_costs,
-                        self.config.reservation_gap,
-                    )
+                    reason = self._reserve(candidate, snap.equity)
                 else:
                     reason = check_openings(
                         self.held, candidate, self.prices, snap.equity, self.config.risk_limits, self.config.margin
@@ -914,16 +1030,7 @@ class ExecutionAgent(Strategy):
                     while lo < hi:
                         mid = (lo + hi + 1) // 2
                         trial = _with_opening(current, target, mid)
-                        refusal = stressed_openings(
-                            self.held,
-                            {**reserved, ticker: trial},
-                            self.prices,
-                            snap.equity,
-                            self.config.risk_limits,
-                            self.config.margin,
-                            self.config.reservation_costs,
-                            self.config.reservation_gap,
-                        )
+                        refusal = self._reserve({**reserved, ticker: trial}, snap.equity)
                         if refusal:
                             hi = mid - 1
                         else:
@@ -931,16 +1038,7 @@ class ExecutionAgent(Strategy):
                     if lo and lo * price >= self.config.min_trade_value:
                         target = _with_opening(current, target, lo)
                         opening = lo
-                        reason = stressed_openings(
-                            self.held,
-                            {**reserved, ticker: target},
-                            self.prices,
-                            snap.equity,
-                            self.config.risk_limits,
-                            self.config.margin,
-                            self.config.reservation_costs,
-                            self.config.reservation_gap,
-                        )
+                        reason = self._reserve({**reserved, ticker: target}, snap.equity)
                 if reason:
                     self._risk_event("reservation_blocked", f"{ticker}: {reason}")
                     continue
@@ -956,6 +1054,22 @@ class ExecutionAgent(Strategy):
                     self._save()
                 else:
                     self.cap_orders, self.cap_opened = previous_caps
+
+    def _reserve(self, destinations: dict, equity: float) -> str | None:
+        """Exposure caps at decision marks; cash and margin under the adverse gap (lab.reservations)."""
+        from lab.reservations import split_openings
+
+        return split_openings(
+            self.held,
+            destinations,
+            self.prices,
+            equity,
+            self.config.risk_limits,
+            self.config.margin,
+            self.config.reservation_costs,
+            self.config.entry_slippage,
+            self.config.reservation_gap,
+        )
 
     def _now(self) -> datetime:
         return market_now(self.clock, self.config.market_offset_days)
@@ -1084,7 +1198,7 @@ class ExecutionAgent(Strategy):
             c = self.config.limit_collar
             px = self.prices[ticker] * (1 + c if side == OrderSide.BUY else 1 - c)
             order = self.order_factory.limit(
-                iid, side, qty, inst.make_price(round(px, 2)), time_in_force=TimeInForce.DAY
+                iid, side, qty, inst.make_price(round(px, inst.price_precision)), time_in_force=TimeInForce.DAY
             )
         else:
             order = self.order_factory.market(iid, side, qty, time_in_force=TimeInForce.DAY)  # exits must go
@@ -1183,7 +1297,9 @@ class ExecutionAgent(Strategy):
             return False
         if info:
             info["filled"] = info.get("filled", 0.0) + qty
-        self.cash += -qty * px - fee if buy else qty * px - fee
+        # Cash settles in cents, half away from zero, as the broker's (and the simulator's) account does.
+        notional = math.floor(qty * px * 100 + 0.5) / 100
+        self.cash += -notional - fee if buy else notional - fee
         self.commissions += fee
         self.held[ticker] = self.held.get(ticker, 0.0) + (qty if buy else -qty)
         self.applied[trade] = [time.time_ns(), str(ev.client_order_id)]

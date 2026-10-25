@@ -260,6 +260,9 @@ def test_custom_validation_records_the_risk_actually_used(goog_lab, monkeypatch)
         lambda *a: (SimpleNamespace(rows=[{}, {"sharpe_edge": 1, "dsr": 1, "signal_errors": 0, "fills": 1}]), []),
     )
     monkeypatch.setattr(experiments, "null_test", lambda *a, **kw: {"p_value": 0})
+    from lab import factor_stats
+
+    monkeypatch.setattr(factor_stats, "diagnose", lambda *a, **kw: {})  # Stage-0 diagnostics (F-R15) run the signal
     worker.main(["train", str(hdir), "unused"])
     record = json.loads((hdir / "train.json").read_text())
     effective = experiments.effective_risk(goog_lab, 1)

@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from lab import allocation
 from lab.agents.allocator import AllocatorAgent, AllocatorAgentConfig
 from lab.agents.messages import PriceMark
 from lab.config import ConfigError, MarginSettings, RiskSettings, validate_effective
@@ -40,17 +41,26 @@ def test_volatility_aligns_both_return_endpoints():
     weights = {"A": 0.5, "B": 0.5}
     rows = {t: {(x[0], y[0]): math.log(y[1] / x[1]) for x, y in itertools.pairwise(a.closes[t])} for t in weights}
     common = sorted(rows["A"].keys() & rows["B"].keys())
-    portfolio_returns = np.array([(rows["A"][k] + rows["B"][k]) / 2 for k in common])
-    expected = 0.15 / (portfolio_returns.std(ddof=1) * math.sqrt(252))
-    assert a._vol_scale(weights) == pytest.approx(expected)
+    # The pair's covariance uses only the intervals both stocks share (Gemini audit F-R11: pairwise, shrunk).
+    cov = allocation.covariance(rows, ["A", "B"], 20)
+    w = np.array([0.5, 0.5])
+    assert a._vol_scale(weights) == pytest.approx(0.15 / math.sqrt(float(w @ cov @ w) * 252))
     assert (11, 13) not in common  # a two-day move must not be paired with a one-day move
+    x = np.array([rows["A"][k] for k in common])
+    y = np.array([rows["B"][k] for k in common])
+    sd = np.sqrt(np.diag(cov))
+    assert cov[0, 1] / (sd[0] * sd[1]) == pytest.approx(np.corrcoef(x, y)[0, 1], abs=0.5)  # shrunk toward 0
 
 
 def test_volatility_warmup_survives_restart_and_requires_every_asset(tmp_path):
     a = allocator(tmp_path)
+    assert a._vol_scale({"A": 0.5, "B": 0.5}) == 0  # no history at all: cash
     for i in range(25):
         a._on_mark(PriceMark("A", 100 + i % 3, i))
-    assert a._vol_scale({"A": 0.5, "B": 0.5}) == 0
+    # Gemini audit F-R11: B, without history, no longer forces the book to cash; it is sized as if as volatile
+    # as the most volatile known stock (here A), uncorrelated.
+    a_only = a._vol_scale({"A": 0.5, "B": 0.5})
+    assert 0 < a_only < a._vol_scale({"A": 0.5})
     for i in range(25):
         a._on_mark(PriceMark("B", 100 + i % 2, i))
     before = a._vol_scale({"A": 0.5, "B": 0.5})

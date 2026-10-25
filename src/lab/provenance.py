@@ -7,14 +7,45 @@ from pathlib import Path
 
 import pandas as pd
 
+# The operator surface only: modules that cannot change a simulated result, a validation verdict or how the
+# agents behave (Gemini audit F-R16, narrowed after ChatGPT C006-F1). Configuration, accounting, execution
+# state, safety, authority, notifications (an alert outage blocks additions) and every module added later
+# count as simulation code, so a change to any of them invalidates trials and approvals. The live runtime is
+# bound to all code through runtime_digest().
+NOT_SIMULATION = frozenset(
+    {
+        "app.py",  # the local control panel's HTTP server (it starts the engine through the CLI)
+        "cli.py",  # argument parsing and printing
+        "report.py",  # HTML reports of finished runs
+        "paper_report.py",  # summaries of the paper journal
+        "capture.py",  # read-only evidence snapshots
+        "research/orchestrator.py",  # how the language models are asked; validation runs in worker.py
+        "research/providers.py",
+        "research/roles.py",
+    }
+)
 
-def source_digest():
+
+def _digest(include) -> str:
     root = Path(__file__).parent
     digest = hashlib.sha256()
     for p in sorted(root.rglob("*.py")):
-        digest.update(str(p.relative_to(root)).encode())
-        digest.update(p.read_bytes())
+        name = p.relative_to(root).as_posix()
+        if include(name):
+            digest.update(name.encode())
+            digest.update(p.read_bytes())
     return digest.hexdigest()
+
+
+def runtime_digest() -> str:
+    """Every module: binds a live paper runtime to the exact code it runs (preflight, upgrade)."""
+    return _digest(lambda name: True)
+
+
+def simulation_digest() -> str:
+    """The modules that shape simulated results and validation evidence: trial identity, approvals and the
+    deployment context. A cosmetic edit to the app or the command line no longer invalidates them."""
+    return _digest(lambda name: name not in NOT_SIMULATION)
 
 
 def frame_digest(frames):
@@ -32,5 +63,5 @@ def environment():
         "python": platform.python_version(),
         "platform": platform.platform(),
         "packages": dict(sorted(packages.items())),
-        "source_sha256": source_digest(),
+        "source_sha256": runtime_digest(),
     }

@@ -185,6 +185,18 @@ main {
 .readouts dd { margin: 3px 0 0; font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .schedule { margin-top: 14px; font-size: 13px; color: var(--display-dim); }
 
+.alarms { display: grid; gap: 8px; margin: 12px 4px 0; }
+.alarms:empty { display: none; }
+.alarm { padding: 12px 14px; border-radius: 10px; font-weight: 600; line-height: 1.45; }
+.alarm.red { background: var(--danger-soft); color: var(--danger); }
+.alarm.amber { background: color-mix(in srgb, var(--pause) 16%, var(--panel)); color: color-mix(in srgb, var(--pause) 55%, var(--ink)); }
+.alarm small { display: block; font-weight: 450; margin-top: 2px; }
+.readouts dd.warn { color: #ffb4a6; }
+.facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 0; }
+.facts dt { font-size: 12.5px; color: var(--ink-2); }
+.facts dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+h3.sub { font-size: 14.5px; font-weight: 650; font-stretch: 108%; margin: 20px 0 6px; }
+td.over { color: var(--danger); font-weight: 700; }
 .block {
   margin: 12px 4px 0;
   padding: 12px 14px;
