@@ -52,9 +52,7 @@ def simulation_digest(*, market: str = "equity") -> str:
     """
     if market not in {"equity", "crypto"}:
         raise ValueError(f"unsupported research market {market!r}")
-    return _digest(
-        lambda name: name not in NOT_SIMULATION and (market == "crypto" or not name.startswith("markets/"))
-    )
+    return _digest(lambda name: name not in NOT_SIMULATION and (market == "crypto" or not name.startswith("markets/")))
 
 
 def frame_digest(frames):
