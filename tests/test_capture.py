@@ -117,7 +117,15 @@ def test_bundle_exports_the_authoritative_sqlite_ledger_and_sanitize_pseudonymiz
     assert not list(clean.rglob("*.sqlite3"))  # raw databases are never copied
     text = "".join(p.read_text() for p in clean.rglob("*.json"))
     raw_ids = list(h.broker().state["orders"]) + [f["trade_id"] for f in h.broker().state["fills"]]
-    assert raw_ids and not [i for i in raw_ids if i in text]  # every order and trade ID pseudonymized
+    residuals = [identifier for identifier in raw_ids if identifier in text]
+    contexts = []
+    for path in clean.rglob("*.json"):
+        data = path.read_text()
+        for identifier in residuals:
+            at = data.find(identifier)
+            if at >= 0:
+                contexts.append((path.name, data[max(0, at - 35) : at + len(identifier) + 35]))
+    assert raw_ids and not residuals, contexts  # every order and trade ID pseudonymized
     assert "CLIENT-" in text and "TRADE-" in text
 
 
