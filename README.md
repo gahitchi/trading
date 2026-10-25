@@ -18,7 +18,7 @@ uv run python -m lab.markets demo --side buy --quantity 0.001 --balance 1000
 Both commands run a **synthetic** trade fixture and a next-observed-trade simulator, demonstrating long/short
 contracts, the 24/7 UTC minute aggregator, adverse slippage, taker commissions and operator risk ceilings.
 They do not make real orders or claim a profitable strategy. The CLI accepts `--csv path.csv` with
-`timestamp,price,quantity,trade_id` fields; the timestamps must have UTC/explicit timezone offsets.
+`timestamp,price,quantity,trade_id,mark_price` fields; the timestamps must have UTC/explicit timezone offsets. The independent mark-price column is **required**. In the bundled synthetic fixture it is hypothetical, not an exchange-validated mark feed.
 External data from an arbitrary CSV is not automatically qualified as trustworthy market data.
 
 For real, **read-only**, public OKX Europe completed one-minute candles (requires network, no credentials):
