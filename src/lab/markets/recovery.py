@@ -26,9 +26,7 @@ class _ReplayCollector:
         return ()
 
     def append(self, event_id: str, kind: str, timestamp_ns: int, payload: dict) -> int:
-        self.events.append(
-            {"event_id": event_id, "kind": kind, "timestamp_ns": timestamp_ns, "payload": payload}
-        )
+        self.events.append({"event_id": event_id, "kind": kind, "timestamp_ns": timestamp_ns, "payload": payload})
         return len(self.events)
 
 
