@@ -31,6 +31,8 @@ For real, **read-only**, public OKX Europe completed one-minute candles (require
 uv run python -m lab.markets candles --instrument BTC-USDT --limit 20
 uv run python -m lab.markets candles --instrument BTC-USDT --limit 100 --store ./results/candle-catalog
 uv run python -m lab.markets observations --instrument BTC-USDT-SWAP --limit 20
+uv run python -m lab.markets microstructure --instrument BTC-USDT-SWAP --depth 5
+uv run python -m lab.markets history --instrument BTC-USDT --pages 5 --limit 100 --store ./results/candle-catalog
 ```
 
 A stored OFFLINE_SIM journal can be deterministically verified and resumed only with **matching account,
@@ -39,13 +41,19 @@ reference-simulator recovery, not broker/exchange reconciliation. Existing journ
 The optional candle catalog stores immutable, SHA-256-addressed UTC-day Parquet partitions and preserves
 missing-interval metadata, but it does **not** qualify their source completeness or order-execution quality.
 The observations command fetches the latest EEA-hosted public swap mark and recent executed trades as
-**separate timestamped feeds**, preserving aggressor side and source labels. It does **not** provide best
-bid/ask, L2 depth, funding settlement history, full trade continuity or permission to submit orders.
+**separate timestamped feeds**, preserving aggressor side and source labels. The new microstructure command
+fetches an independently timestamped REST order-book depth snapshot and **indicative** funding rate, not
+a gap-free streaming L2 feed, confirmed account funding cashflows, verified maker fills, or authority to trade.
+The history command retrieves up to 50 bounded pages of confirmed 1-minute bars through the EEA history
+endpoint, enforcing chronological cursors without silently forward-filling gaps; it cannot claim complete
+historical coverage or point-in-time quote/fee/funding provenance.
 A typed, offline-only conversion boundary can encode actual observations as NautilusTrader `TradeTick`
 events and confirmed candles as `Bar` events, preserving receipt time so late-fetched bars cannot leak into
 earlier decisions. **This is not yet a running crypto Nautilus strategy, order-management service or broker.**
-The browser app also has a **Try crypto without a broker** synthetic-sample panel before IBKR setup;
-the paper-trading plan and its broker-dependent Start button remain distinct.
+The browser app has a **Try crypto without a broker** synthetic-sample panel and a separate
+**Inspect public crypto market data** read-only panel with token-protected access, before IBKR setup.
+Neither panel starts autonomous trading. The paper-trading plan and its broker-dependent Start button
+remain distinct.
 
 For operator-side verification without secrets, see
 [credential-free acceptance checks](docs/acceptance/multimarket-credential-free.md).
