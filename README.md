@@ -1,5 +1,37 @@
 # trading-lab
 
+> **Experimental multi-market branch** — This branch adds an entirely separate, additive crypto-first architecture.
+> The original IBKR US-stock application remains paper-only and broker-dependent until an individually
+> tested migration. The multi-market CLI is an offline reference simulator, **not yet** a connected demo
+> broker, certified matching engine, deployable autonomous crypto bot or live-money trading system.
+> See [the architecture](docs/architecture/multimarket-2026-10-25.md).
+
+## Multi-market proof of concept (this branch only)
+
+After the standard `uv sync --frozen --extra dev` installation, no broker credentials are needed:
+
+```sh
+uv run python -m lab.markets demo
+uv run python -m lab.markets demo --side buy --quantity 0.001 --balance 1000
+```
+
+Both commands run a **synthetic** trade fixture and a next-observed-trade simulator, demonstrating long/short
+contracts, the 24/7 UTC minute aggregator, adverse slippage, taker commissions and operator risk ceilings.
+They do not make real orders or claim a profitable strategy. The CLI accepts `--csv path.csv` with
+`timestamp,price,quantity,trade_id` fields; the timestamps must have UTC/explicit timezone offsets.
+External data from an arbitrary CSV is not automatically qualified as trustworthy market data.
+
+For real, **read-only**, public OKX Europe completed one-minute candles (requires network, no credentials):
+
+```sh
+uv run python -m lab.markets candles --instrument BTC-USDT --limit 20
+```
+
+This does not trade or backtest those candles; it deliberately excludes unfinished bars, and historical
+bar OHLCV is not sufficient to simulate realistic exchange fills. See the D2/D3/D6 gates in the design.
+The existing `lab paper` IBKR deployment below is unchanged. Live-money orders are **not** implemented.
+
+
 [![ci](https://github.com/gahitchi/trading/actions/workflows/ci.yml/badge.svg)](https://github.com/gahitchi/trading/actions/workflows/ci.yml)
 
 A paper-only US-stock research system **in development**, built on
