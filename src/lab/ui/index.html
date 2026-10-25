@@ -62,6 +62,17 @@
     <pre id="offline-result" role="status" aria-live="polite">No synthetic test run yet.</pre>
   </section>
 
+  <section class="panel" aria-labelledby="public-crypto-title">
+    <h2 id="public-crypto-title">Inspect public crypto market data</h2>
+    <p class="help">Read-only OKX Europe REST snapshots, requiring internet access. Best bid/ask and indicative funding are separate observations, not synchronized execution prices, settled funding, or an approved strategy. No broker connection or orders.</p>
+    <div class="fields">
+      <label>Swap instrument<select id="public-crypto-instrument"><option value="BTC-USDT-SWAP">BTC-USDT-SWAP</option><option value="ETH-USDT-SWAP">ETH-USDT-SWAP</option></select></label>
+      <label>Book depth<select id="public-crypto-depth"><option value="1">1 level</option><option value="5" selected>5 levels</option><option value="10">10 levels</option></select></label>
+    </div>
+    <button type="button" class="secondary" id="public-crypto-run">Inspect read-only snapshots</button>
+    <pre id="public-crypto-result" role="status" aria-live="polite">No public observations requested.</pre>
+  </section>
+
   <div class="columns">
     <section class="panel plan" aria-labelledby="plan-title">
       <h2 id="plan-title">Your plan</h2>
