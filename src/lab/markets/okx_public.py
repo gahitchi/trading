@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from lab.markets.domain import decimal
@@ -62,6 +62,8 @@ class PublicCandle:
 
 
 def parse_confirmed_candles(payload: dict, instrument_id: str) -> tuple[PublicCandle, ...]:
+    if not re.fullmatch(r"[A-Z0-9_-]{3,80}", instrument_id):
+        raise MarketDataError("instrument_id must be a canonical OKX identifier")
     if not isinstance(payload, dict) or payload.get("code") != "0":
         raise MarketDataError("OKX public data request failed")
     rows = payload.get("data")
@@ -77,13 +79,25 @@ def parse_confirmed_candles(payload: dict, instrument_id: str) -> tuple[PublicCa
         if row[8] == "0":
             continue  # NEVER use an unfinished candle for a completed-bar signal
         try:
+            # Provider timestamps and all seven numeric fields are decimal
+            # strings. int(60000.9), int(True), or str(float) would fabricate
+            # precision and potentially accept corrupted market observations.
+            if type(row[0]) is not str or not re.fullmatch(r"[0-9]{1,19}", row[0]):
+                raise MarketDataError("timestamp must be exact decimal milliseconds")
+            if any(type(value) is not str for value in row[1:8]):
+                raise MarketDataError("candle values must be exact decimal strings")
             start_ms = int(row[0])
-            if start_ms < 0 or start_ms % _ONE_MINUTE_MS:
+            if start_ms % _ONE_MINUTE_MS:
                 raise MarketDataError("timestamp not aligned to UTC minute")
             if start_ms in seen:
                 raise MarketDataError("duplicate completed candle")
             seen.add(start_ms)
-            values = [decimal(str(x)) for x in row[1:6]]
+            # The extra quote/base-volume fields are not used for execution,
+            # but an invalid provider row must not be promoted to evidence.
+            fields = [decimal(value) for value in row[1:8]]
+            if any(value < 0 for value in fields[4:]):
+                raise MarketDataError("negative native or converted volume")
+            values = fields[:5]
         except MarketDataError:
             raise
         except (ValueError, TypeError, ArithmeticError) as exc:
@@ -117,6 +131,16 @@ def latest_confirmed_candles(instrument_id: str, *, limit: int = 100) -> tuple[P
     request = Request(url, headers={"Accept": "application/json", "User-Agent": "trading-lab/0.2"})
     try:
         with urlopen(request, timeout=10) as response:
+            final_url = response.geturl() if hasattr(response, "geturl") else url
+            final = urlsplit(final_url)
+            # urllib follows redirects by default. The original URL being
+            # pinned is insufficient for a claim of EEA provider provenance.
+            if (
+                final.scheme != "https"
+                or final.netloc != "eea.okx.com"
+                or final.path != "/api/v5/market/candles"
+            ):
+                raise MarketDataError("OKX EEA candle endpoint redirected outside qualified origin")
             raw = response.read(_MAX_BYTES + 1)
     except (HTTPError, URLError, TimeoutError, OSError) as exc:
         raise MarketDataError("OKX public feed unavailable") from exc
