@@ -45,7 +45,11 @@ class LinearContractDefinition:
             raise ValueError("Nautilus linear bridge refuses non-crypto and non-linear instruments")
         if self.settlement_currency != c.quote_currency:
             raise ValueError("linear contract must settle in its quoted collateral currency")
-        if not self.base_currency.isascii() or not self.base_currency.isalpha() or not 2 <= len(self.base_currency) <= 8:
+        if (
+            not self.base_currency.isascii()
+            or not self.base_currency.isalpha()
+            or not 2 <= len(self.base_currency) <= 8
+        ):
             raise ValueError("invalid base currency")
         if self.base_currency.upper() != self.base_currency or self.base_currency == c.quote_currency:
             raise ValueError("unqualified base currency")
