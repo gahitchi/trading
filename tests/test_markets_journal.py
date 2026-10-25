@@ -43,3 +43,31 @@ def test_money_floats_and_unknown_event_kinds_are_rejected(tmp_path) -> None:
         with pytest.raises(JournalError, match="timestamp"):
             journal.append("bad3", "fill", -1, {"qty": "1"})
         assert journal.read_all() == ()
+
+def test_offline_simulator_journals_intents_and_fills_without_silent_restart(tmp_path) -> None:
+    from decimal import Decimal
+
+    from lab.markets import AssetClass, ContractKind, Instrument, OfflineSimulator, OrderIntent, Side, Trade
+
+    d = Decimal
+    contract = Instrument(
+        "SIM",
+        "BTC-USD-LINEAR",
+        AssetClass.CRYPTO,
+        ContractKind.LINEAR_DERIVATIVE,
+        "USD",
+        d("0.1"),
+        d("0.001"),
+        d("0.001"),
+        d("5"),
+    )
+    path = tmp_path / "events.db"
+    with EventJournal(path) as journal:
+        sim = OfflineSimulator(contract, journal=journal, taker_fee_bps=d("0"), slippage_bps=d("0"))
+        sim.on_trade(Trade("m1", 100, 100, d("100"), d("100")))
+        sim.submit(OrderIntent("order1", contract.instrument_id, Side.SELL, d("1"), 100))
+        sim.on_trade(Trade("m2", 200, 200, d("100"), d("100")))
+        assert [e["kind"] for e in journal.read_all()] == ["mark", "intent", "mark", "fill"]
+        assert sim.position == d("-1")
+        with pytest.raises(JournalError, match="nonempty journal"):
+            OfflineSimulator(contract, journal=journal)
