@@ -55,6 +55,29 @@ class OfflineAdapter:
     def replay_trade(self, trade: Trade) -> tuple[Fill, ...]:
         return self.simulator.on_trade(trade)
 
+    def preview_pending_risk(self, *, asof_ns: int, ceilings):
+        """Assess the *actual* pending offline book without authorizing routing.
+
+        This is a shared accounting/modeling boundary for the later Nautilus
+        adapter; it does not replace the simulator's mandatory fill-time check.
+        """
+        from lab.markets.portfolio_risk import OpenPosition, preflight_pending
+
+        sim = self.simulator
+        if sim.mark is None or asof_ns < sim.last_event_ns:
+            raise ValueError("risk preview requires fresh, non-rewound independent mark evidence")
+        mark = OpenPosition(sim.instrument, sim.position, sim.entry, sim.mark, sim.mark_ns)
+        return preflight_pending(
+            (mark,),
+            tuple(order.intent for order in sim.pending.values()),
+            collateral_currency=sim.instrument.quote_currency,
+            equity=sim.equity,
+            peak_equity=sim.peak_equity,
+            day_open_equity=sim.day_open_equity,
+            asof_ns=asof_ns,
+            ceilings=ceilings,
+        )
+
 
 def open_execution_adapter(
     mode: TradingMode,
