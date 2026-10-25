@@ -102,11 +102,41 @@ def main() -> None:
     d.add_argument("--quantity", type=Decimal, default=Decimal("0.001"))
     d.add_argument("--side", choices=["buy", "sell"], default="sell")
     d.add_argument("--balance", type=Decimal, default=Decimal("1000"))
+    c = sub.add_parser("candles", help="READ-ONLY OKX EEA public confirmed 1m candles")
+    c.add_argument("--instrument", default="BTC-USDT")
+    c.add_argument("--limit", type=int, default=20)
     args = parser.parse_args()
     if args.command == "demo":
         sample = files("lab.markets").joinpath("fixture.csv")
         path = args.csv if args.csv is not None else Path(str(sample))
         print(json.dumps(demo(path, args.quantity, Side(args.side), args.balance), indent=2))
+    elif args.command == "candles":
+        from lab.markets.okx_public import latest_confirmed_candles
+
+        observed = latest_confirmed_candles(args.instrument, limit=args.limit)
+        print(
+            json.dumps(
+                {
+                    "source": "OKX_EEA_PUBLIC_CANDLES",
+                    "instrument": args.instrument,
+                    "count": len(observed),
+                    "unconfirmed_excluded": True,
+                    "execution_supported": False,
+                    "candles": [
+                        {
+                            "start_ns": bar.start_ns,
+                            "open": str(bar.open),
+                            "high": str(bar.high),
+                            "low": str(bar.low),
+                            "close": str(bar.close),
+                            "volume_native": str(bar.volume_native),
+                        }
+                        for bar in observed
+                    ],
+                },
+                indent=2,
+            )
+        )
 
 
 if __name__ == "__main__":
