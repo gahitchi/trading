@@ -401,10 +401,13 @@ def test_offline_sandbox_endpoint_is_locally_authenticated(controller):
     host = f"127.0.0.1:{server.server_address[1]}"
     payload = json.dumps({"side": "buy", "quantity": "0.001", "capital": "1000"})
     try:
+
         def request(token):
             conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
             conn.request(
-                "POST", "/api/offline-demo", payload,
+                "POST",
+                "/api/offline-demo",
+                payload,
                 {
                     "Host": host,
                     "Origin": "http://" + host,
