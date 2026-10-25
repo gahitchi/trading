@@ -313,7 +313,9 @@ class OfflineSimulator:
             raise ValueError("out-of-order mark event")
         if mark.mark_id == self._last_mark_id:
             raise ValueError("duplicate mark event")
-        self.instrument.check_price(mark.price)
+        # Valuation marks may have more precision than the executable price tick.
+        # MarkPrice independently validates positive finite Decimal values; the
+        # order/trade price tick rules must NOT be applied to index/mark prices.
         if self.journal is not None:
             self.journal.append(
                 f"valuation:{mark.mark_id}",
