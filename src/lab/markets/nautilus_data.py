@@ -15,8 +15,11 @@ from nautilus_trader.model import (
     AggressorSide,
     Bar,
     BarType,
+    BookOrder,
     InstrumentId,
     MarkPriceUpdate,
+    OrderBookDepth,
+    OrderSide,
     Price,
     Quantity,
     QuoteTick,
@@ -141,6 +144,54 @@ def to_nautilus_book_quote(book: SequencedBook, instrument: Instrument) -> Quote
         Price.from_str(f"{book.best_ask:.{pp}f}"),
         Quantity.from_str(f"{book.bids[0].size_native:.{qp}f}"),
         Quantity.from_str(f"{book.asks[0].size_native:.{qp}f}"),
+        book.exchange_ns,
+        book.received_ns,
+    )
+
+
+def to_nautilus_book_depth(book: SequencedBook, instrument: Instrument) -> OrderBookDepth:
+    """Depth snapshot from a gap-free offline WS replay, not a live data claim.
+
+    This is eligible only for fixed local BacktestEngine experiments. L2
+    matching must retain explicit consumption assumptions and reject any
+    inference of authenticated exchange/account authority.
+    """
+    if (
+        type(book) is not SequencedBook
+        or book.source != "offline_recorded_okx_books_ws"
+        or book.execution_qualified
+        or book.instrument_id != instrument.symbol
+    ):
+        raise MarketDataError("unqualified or mismatched recorded depth source")
+    if not book.bids or not book.asks or book.best_bid >= book.best_ask:
+        raise MarketDataError("invalid crossed recorded depth")
+    pp = _precision(instrument.tick_size)
+    qp = _precision(instrument.quantity_step)
+
+    def make_orders(levels, side, offset):
+        orders = []
+        for index, level in enumerate(levels, start=offset):
+            instrument.check_price(level.price)
+            if level.size_native <= 0 or level.size_native % instrument.quantity_step:
+                raise MarketDataError("depth level is not in validated contract-size units")
+            orders.append(
+                BookOrder(
+                    side,
+                    Price.from_str(f"{level.price:.{pp}f}"),
+                    Quantity.from_str(f"{level.size_native:.{qp}f}"),
+                    index,
+                )
+            )
+        return orders
+
+    return OrderBookDepth(
+        nautilus_instrument_id(instrument),
+        make_orders(book.bids, OrderSide.BUY, 1),
+        make_orders(book.asks, OrderSide.SELL, 1 + len(book.bids)),
+        [level.order_count for level in book.bids],
+        [level.order_count for level in book.asks],
+        0,
+        book.seq_id,
         book.exchange_ns,
         book.received_ns,
     )
