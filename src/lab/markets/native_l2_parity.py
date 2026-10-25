@@ -92,10 +92,10 @@ class _PartialProbe(Strategy):
         self.fills.append(event)
 
     def on_order_denied(self, event) -> None:
-        self.failures.append("native order denied")
+        self.failures.append(f"native order denied: {getattr(event, 'reason', 'unavailable')}")
 
     def on_order_rejected(self, event) -> None:
-        self.failures.append("native order rejected")
+        self.failures.append(f"native order rejected: {getattr(event, 'reason', 'unavailable')}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,7 +216,8 @@ def run_native_l2_partial_parity(
         if (
             tuple(Decimal(str(fill.last_qty)) for fill in probe.fills) != expected_qty
             or tuple(Decimal(str(fill.last_px)) for fill in probe.fills) != expected_px
-            or any(fill.liquidity_side != LiquiditySide.TAKER for fill in probe.fills)
+            or tuple(fill.liquidity_side for fill in probe.fills)
+            != (LiquiditySide.TAKER, LiquiditySide.MAKER, LiquiditySide.TAKER)
             or [str(fill.client_order_id) for fill in probe.fills]
             != [probe.order_ids[0], probe.order_ids[0], probe.order_ids[1]]
         ):
@@ -232,6 +233,7 @@ def run_native_l2_partial_parity(
                 Decimal(str(fill.last_px)),
                 fill.commission.as_decimal(),
                 fill.ts_init,
+                "maker" if fill.liquidity_side == LiquiditySide.MAKER else "taker",
             )
             for fill in probe.fills
         )
@@ -244,6 +246,7 @@ def run_native_l2_partial_parity(
             receipts,
             collateral=collateral,
             taker_fee_bps=spec.taker_fee_bps,
+            maker_fee_bps=spec.maker_fee_bps,
             currency_precision=currency.precision,
         )
         account = engine.cache.account_for_venue(venue)
@@ -253,8 +256,8 @@ def run_native_l2_partial_parity(
             or audit.final_position != 0
             or any(left != 0 for _, left in audit.remaining_orders)
             or audit.realized_pnl != Decimal("0.7400")
-            or audit.charged_fees != Decimal("0.10")
-            or audit.ending_balance != Decimal("1000.64")
+            or audit.charged_fees != Decimal("0.08")
+            or audit.ending_balance != Decimal("1000.66")
             or audit.ending_balance != balance.as_decimal()
             or len(engine.generate_fills_report()) != 3
         ):

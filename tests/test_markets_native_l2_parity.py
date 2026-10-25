@@ -43,8 +43,8 @@ def test_native_l2_partial_order_round_trip_charges_fees_and_settles_actual_acco
     assert observed.entry_parts == (D("0.400"), D("0.600"))
     assert observed.entry_prices == (D("100.2"), D("100.3"))
     assert observed.realized_pnl == D("0.7400")
-    assert observed.charged_fees == D("0.10")
-    assert observed.ending_balance == D("1000.64")
+    assert observed.charged_fees == D("0.08")
+    assert observed.ending_balance == D("1000.66")
     assert observed.native_account_parity_verified
     assert not observed.broker_execution_enabled
     assert not observed.market_data_qualified

@@ -47,6 +47,7 @@ class RecordedFill:
     price: Decimal
     charged_fee: Decimal
     observed_ns: int
+    liquidity: str = "taker"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +90,7 @@ def audit_observed_cashflows(
     *,
     collateral: Decimal,
     taker_fee_bps: Decimal,
+    maker_fee_bps: Decimal | None = None,
     currency_precision: int = 2,
     max_mark_age_ns: int = _DEFAULT_MARK_AGE_NS,
 ) -> ExecutionAudit:
@@ -107,6 +109,12 @@ def audit_observed_cashflows(
     decimal(taker_fee_bps)
     if not Decimal("0") <= taker_fee_bps <= Decimal("1000"):
         raise ValueError("unsupported taker fee assumption")
+    if maker_fee_bps is not None:
+        if type(maker_fee_bps) is not Decimal:
+            raise TypeError("maker fee rate must be exact Decimal")
+        decimal(maker_fee_bps)
+        if not Decimal("-100") <= maker_fee_bps <= Decimal("1000"):
+            raise ValueError("unsupported maker fee or rebate assumption")
     quantum = Decimal("1").scaleb(-currency_precision)
     if _money(collateral, quantum) != collateral:
         raise AuditMismatch("starting collateral is not representable in quote currency")
@@ -170,12 +178,17 @@ def audit_observed_cashflows(
             if event.quantity % instrument.quantity_step or event.quantity > remaining[event.client_id]:
                 raise AuditMismatch("partial fill exceeds order remaining or quantity step")
             decimal(event.charged_fee)
+            if type(event.liquidity) is not str or event.liquidity not in ("maker", "taker"):
+                raise AuditMismatch("unqualified maker/taker liquidity attribution")
+            if event.liquidity == "maker" and maker_fee_bps is None:
+                raise AuditMismatch("missing explicit maker fee schedule for observed maker fill")
+            rate = maker_fee_bps if event.liquidity == "maker" else taker_fee_bps
             expected_fee = _money(
-                event.quantity * event.price * instrument.multiplier * taker_fee_bps / Decimal("10000"),
+                event.quantity * event.price * instrument.multiplier * rate / Decimal("10000"),
                 quantum,
             )
             if event.charged_fee != expected_fee:
-                raise AuditMismatch("observed taker fee differs from independent currency-rounded schedule")
+                raise AuditMismatch(f"observed {event.liquidity} fee differs from independent currency-rounded schedule")
             signed_qty = event.quantity * event.side.sign
             transition = linear_transition(position, entry, signed_qty, event.price, instrument.multiplier)
             position, entry = transition.position, transition.entry_price
