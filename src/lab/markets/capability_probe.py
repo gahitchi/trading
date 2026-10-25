@@ -14,7 +14,13 @@ import json
 def inspect_adapters() -> dict:
     result = {"nautilus_trader_version": importlib.metadata.version("nautilus_trader"), "adapters": {}}
     for name, symbols in {
-        "okx": ("OKXRegion", "OKXEnvironment", "OKXDataClientConfig", "OKXExecClientConfig", "OKXExecutionClientConfig"),
+        "okx": (
+            "OKXRegion",
+            "OKXEnvironment",
+            "OKXDataClientConfig",
+            "OKXExecClientConfig",
+            "OKXExecutionClientConfig",
+        ),
         "alpaca": ("AlpacaDataClientConfig", "AlpacaExecClientConfig"),
         "interactive_brokers": ("InteractiveBrokersDataClientConfig", "InteractiveBrokersExecutionClientConfig"),
         "ctrader": (),
