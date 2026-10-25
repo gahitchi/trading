@@ -12,6 +12,7 @@ from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
 from lab.markets.accounting import linear_notional, linear_transition, linear_unrealized, signed_funding_payment
 from lab.markets.domain import (
+    MAX_EVENT_TIMESTAMP_NS,
     AssetClass,
     Capabilities,
     ContractKind,
@@ -401,8 +402,8 @@ class OfflineSimulator:
     def apply_funding(self, funding_id: str, rate: Decimal, timestamp_ns: int) -> Decimal:
         if not funding_id or funding_id in self.used_funding_ids:
             raise ValueError("missing or duplicate funding event ID")
-        if not isinstance(timestamp_ns, int) or timestamp_ns < self.last_event_ns:
-            raise ValueError("funding event timestamp predates last event")
+        if type(timestamp_ns) is not int or not self.last_event_ns <= timestamp_ns <= MAX_EVENT_TIMESTAMP_NS:
+            raise ValueError("invalid or out-of-order funding timestamp")
         rate = decimal(rate)
         if abs(rate) > Decimal("1"):
             raise ValueError("implausible funding rate; input is a fraction, not percent")
