@@ -87,6 +87,23 @@ def test_future_market_snapshot_is_invisible_and_cannot_override_as_known_snapsh
     assert scout_equities((), (future,), (), decision_ns=NOW).candidates == ()
 
 
+def test_recent_receipt_of_ancient_prices_does_not_qualify_a_stock():
+    old_session = market("AAPL", session_ns=NOW - 30 * DAY, received_ns=NOW - 1)
+    out = scout_equities((), (old_session,), (), decision_ns=NOW)
+    assert not out.candidates
+    assert "stale" in out.skipped[0][1]
+
+
+def test_conflicting_primary_listings_fail_closed_without_silent_venue_substitution():
+    a = market("AAPL", venue="XNAS")
+    b = market("AAPL", venue="XNYS")
+    left = scout_equities((), (a, b), (), decision_ns=NOW)
+    right = scout_equities((), (b, a), (), decision_ns=NOW)
+    assert left == right
+    assert not left.candidates
+    assert "ambiguous" in left.skipped[0][1]
+
+
 def test_insider_is_recognized_only_after_public_filing_reception():
     older = insider("AAPL", received_ns=NOW + 1, filed_ns=NOW - DAY)
     out = scout_equities((), (market("AAPL"),), (older,), decision_ns=NOW)
