@@ -59,6 +59,7 @@ def test_real_native_crypto_perpetual_fields_not_parallel_placeholders():
     assert str(model.price_increment) == "0.1"
     assert str(model.size_increment) == "0.001"
     assert str(model.min_quantity) == "0.001"
+    assert D(str(model.min_notional).split()[0]) == D("5")
     assert str(model.multiplier) == "0.01"
     assert model.ts_event == 100
     assert model.ts_init == 200
