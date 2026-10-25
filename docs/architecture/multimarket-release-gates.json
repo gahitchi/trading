@@ -70,16 +70,18 @@
         "tests/test_markets_nautilus_data.py",
         "src/lab/markets/nautilus_runtime.py",
         "tests/test_markets_nautilus_runtime.py",
-        "tests/test_markets_native_cli.py"
+        "tests/test_markets_native_cli.py",
+        "src/lab/markets/native_fill_parity.py",
+        "tests/test_markets_native_fill_parity.py"
       ],
       "missing": [
         "streaming trade/quote feed",
         "source completeness + market-data reconciliation",
         "full Nautilus actor/instrument/account runtime integration",
         "independent raw feed capture with qualified completeness and source revisions",
-        "native Nautilus fee/cost binding and execution-account parity not qualified in pinned rc7"
+        "market-derived maker/taker and partial-fill slippage, margin, funding and liquidation model parity beyond a controlled synthetic round trip"
       ],
-      "note": "The public OKX EEA candles CLI is read-only. Accurate derivative trading still requires quote, independent mark/index and funding sources, venue qualifications, immutable Parquet catalogs and Nautilus bridge. See institutional flow audit. Local immutable daily confirmed-candle Parquet partitions with SHA-256 and gap metadata are implemented; this is not a complete raw L2/trade/mark/funding replay source. Public recent trades (including taker side) and independent swap mark snapshots are now parsed from EEA-hosted endpoints. They are not quote/L2/funding feeds and do not qualify account region or complete replay coverage. Initial exact read-only TradeTick/Bar conversions to pinned Nautilus event types are implemented, with receipt-time causality checks. No bound Nautilus CryptoPerpetual instrument or broker execution agent is qualified. 2026-10-25 extension: conservative EEA read-only REST multi-level book snapshot and indicative funding parser, bounded paginated 1m history, explicit non-synchronized provenance, missing-minute reporting, shared CLI/browser preview, and fail-closed validation tests. These snapshots cannot settle funding or determine maker queue placement; complete streaming L2 and authenticated account capabilities remain missing.",
+      "note": "The public OKX EEA candles CLI is read-only. Accurate derivative trading still requires quote, independent mark/index and funding sources, venue qualifications, immutable Parquet catalogs and Nautilus bridge. See institutional flow audit. Local immutable daily confirmed-candle Parquet partitions with SHA-256 and gap metadata are implemented; this is not a complete raw L2/trade/mark/funding replay source. Public recent trades (including taker side) and independent swap mark snapshots are now parsed from EEA-hosted endpoints. They are not quote/L2/funding feeds and do not qualify account region or complete replay coverage. Initial exact read-only TradeTick/Bar conversions to pinned Nautilus event types are implemented, with receipt-time causality checks. No bound Nautilus CryptoPerpetual instrument or broker execution agent is qualified. 2026-10-25 extension: conservative EEA read-only REST multi-level book snapshot and indicative funding parser, bounded paginated 1m history, explicit non-synchronized provenance, missing-minute reporting, shared CLI/browser preview, and fail-closed validation tests. These snapshots cannot settle funding or determine maker queue placement; complete streaming L2 and authenticated account capabilities remain missing. 2026-10-25 native-fill-parity: two controlled synthetic market-order taker fills are charged by pinned Nautilus and reconciled against independent exact Decimal quantity, fees, PnL and margin account. Verified by tests; no claim of realistic depth/queue or external routing.",
       "notes": "undefined 2026-10-25 M1 extension: native Nautilus CryptoPerpetual registration from explicit offline-only quote-collateral linear contract definition (including multiplier, margin and separate definition/receipt times; pinned Nautilus 2.0.0rc7 does NOT support native maker/taker fee constructor fields, so fee BPS remain an explicit offline-only bound assumption and actual Nautilus fee integration is a blocked gate); native independent MarkPriceUpdate conversion; source-ordered read-only trade/mark replay tape rejects duplicate IDs and time regressions. No strategy, OMS, data-engine registration, broker demo or fee/margin schedule qualified; existing actor integration still missing. 2026-10-25 M1 native runtime pilot: actual Nautilus BacktestEngine, MARGIN account, maker/taker venue fee model and existing DataActor callbacks receive bounded synthetic fixture trades + independent MarkPriceUpdates in strict receipt order. Available by credential-free native-demo CLI. No strategy, OMS, order/fill, fee-charge parity, venue authenticity, internet feed or account routing; M1 and D2 remain partial."
     },
     {
@@ -132,6 +134,23 @@
         "all independent live safety and legal qualifications"
       ],
       "note": "Not implemented and not authorized. Preserve existing paper-only guards."
+    },
+    {
+      "id": "D7-default-equity-scout",
+      "status": "partial",
+      "criteria": "Empty user stock selection triggers default point-in-time stock scouting, independently qualified live universe and official-source insider leads; validated ranking plus research gates must select eligible investments or explicitly abstain.",
+      "evidence": [
+        "src/lab/discovery.py",
+        "tests/test_discovery.py",
+        "docs/architecture/automatic-market-scout.md"
+      ],
+      "missing": [
+        "qualified market-wide instrument universe and immutable as-of fundamentals provider",
+        "official SEC Form 4 ingestion with original filing, corrections and availability timestamps",
+        "factor scoring with net-cost calibration, corporate actions, delistings and robust statistical/multiple-testing approval",
+        "app startup integration; sector/issuer diversification and broker-authorized execution handoff; cross-platform field acceptance"
+      ],
+      "note": "Only an offline, research-only candidate triage model is implemented. It cannot fetch data, claim investment alpha, emit orders or authorize trading. A source-labelled Form4 object is NOT proof that source verification occurred. Zero candidates means abstain."
     }
   ]
 }
