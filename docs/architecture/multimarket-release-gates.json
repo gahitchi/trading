@@ -33,6 +33,8 @@
         "tests/test_markets_recovery.py",
         "src/lab/markets/portfolio_risk.py",
         "tests/test_markets_portfolio_risk.py",
+        "src/lab/markets/execution_audit.py",
+        "tests/test_markets_execution_audit.py",
         "src/lab/markets/reconciliation.py",
         "tests/test_markets_reconciliation.py"
       ],
@@ -72,12 +74,14 @@
         "tests/test_markets_nautilus_runtime.py",
         "tests/test_markets_native_cli.py",
         "src/lab/markets/native_fill_parity.py",
-        "tests/test_markets_native_fill_parity.py"
+        "tests/test_markets_native_fill_parity.py",
+        "src/lab/markets/book_sequence.py",
+        "tests/test_markets_book_sequence.py"
       ],
       "missing": [
         "streaming trade/quote feed",
         "source completeness + market-data reconciliation",
-        "full Nautilus actor/instrument/account runtime integration",
+        "execution-qualified Nautilus actor/instrument/account runtime integration",
         "independent raw feed capture with qualified completeness and source revisions",
         "market-derived maker/taker and partial-fill slippage, margin, funding and liquidation model parity beyond a controlled synthetic round trip"
       ],

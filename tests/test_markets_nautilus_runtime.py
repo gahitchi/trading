@@ -79,11 +79,16 @@ def test_native_read_only_actor_ingests_one_causally_qualified_offline_book_quot
         {
             "arg": {"channel": "books", "instId": "BTC-USD-SWAP"},
             "action": "snapshot",
-            "data": [{
-                "ts": "5000", "seqId": 10, "prevSeqId": -1, "checksum": 0,
-                "bids": [["100.0", "10.000", "0", "1"]],
-                "asks": [["100.2", "10.000", "0", "1"]],
-            }],
+            "data": [
+                {
+                    "ts": "5000",
+                    "seqId": 10,
+                    "prevSeqId": -1,
+                    "checksum": 0,
+                    "bids": [["100.0", "10.000", "0", "1"]],
+                    "asks": [["100.2", "10.000", "0", "1"]],
+                }
+            ],
         },
         received_ns=5_000_000_001,
     )

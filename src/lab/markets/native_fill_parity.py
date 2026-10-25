@@ -319,7 +319,10 @@ def run_native_fill_parity(
             for fill in probe.fills
         )
         audited = audit_observed_cashflows(
-            c, plans, stream, collateral=collateral,
+            c,
+            plans,
+            stream,
+            collateral=collateral,
             taker_fee_bps=spec.taker_fee_bps,
             currency_precision=currency.precision,
         )

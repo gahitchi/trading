@@ -75,6 +75,19 @@ provenance, accurate order-book queue execution, maker/partial-fill parity, veri
 funding, strategy profitability, broker-demo settlement, crash recovery or authority
 to trade money. A passing result is a narrow component qualification, not a release gate.
 
+The next credential-free research layer also validates *recorded* standard OKX WebSocket
+`books` snapshot/update sequences using `prevSeqId`/`seqId` (not the deprecated
+checksum), checks timestamp and price-level continuity, and computes strictly capped
+**displayed** depth participation without claiming fills. Its snapshots are admitted
+only into the existing Nautilus **read-only DataActor** as native `QuoteTick` events,
+alongside independent `TradeTick` and `MarkPriceUpdate` streams. A separate Decimal
+cashflow auditor consumes actual simulated native `OrderFilled` callbacks, supports
+partial fills and quote-currency per-fill fee rounding, and rejects synthetic funding
+records whose signed-position cash does not balance. Funding indications never count
+as settled cash. No gap-free authenticated feed, source contract entitlement, true
+partial-fill matching, broker funding receipt, strategy promotion or demo account
+is qualified by these offline boundaries.
+
 Neither the native runtime nor its fixture proves a profitable strategy or real-market execution-cost parity.
 
 The offline-only Nautilus bridge now constructs native `CryptoPerpetual` instruments from explicit,

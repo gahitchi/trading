@@ -37,8 +37,12 @@ def _fingerprint(event) -> tuple[str, ...]:
         return ("mark", *common, str(event.value))
     if kind == "QuoteTick":
         return (
-            "quote", *common, str(event.bid_price), str(event.ask_price),
-            str(event.bid_size), str(event.ask_size),
+            "quote",
+            *common,
+            str(event.bid_price),
+            str(event.ask_price),
+            str(event.bid_size),
+            str(event.ask_size),
         )
     raise TypeError("unexpected event type in native replay")
 
@@ -168,7 +172,9 @@ def replay_native_observations(
         engine.add_data(list(tape.events))
         engine.run()
         if (observer.trades, observer.marks, observer.quotes) != (
-            expected_trades, expected_marks, expected_quotes
+            expected_trades,
+            expected_marks,
+            expected_quotes,
         ):
             raise ValueError("Nautilus data engine did not deliver the full observed tape")
         if observer.delivered_fingerprints != [_fingerprint(event) for event in tape.events]:
