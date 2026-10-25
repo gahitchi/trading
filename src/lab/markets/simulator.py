@@ -111,6 +111,8 @@ class OfflineSimulator:
         self.entry = Decimal("0")
         self.mark: Decimal | None = None
         self.last_ns = -1
+        self.last_event_ns = -1
+        self._trade_ids_at_timestamp: set[str] = set()
         self.peak_equity = self.balance
         self.day_index: int | None = None
         self.day_open_equity = self.balance
@@ -265,10 +267,13 @@ class OfflineSimulator:
                     self.rejections.append((order_id, self.halt_reason))
 
     def on_trade(self, trade: Trade) -> tuple[Fill, ...]:
-        if trade.exchange_ns < self.last_ns:
-            raise ValueError("out-of-order trade timestamp")
-        if trade.trade_id == self.last_trade_id:
-            raise ValueError("immediate duplicate trade ID")
+        if trade.exchange_ns < self.last_event_ns:
+            raise ValueError("out-of-order trade or funding event timestamp")
+        if trade.exchange_ns != self.last_ns:
+            self._trade_ids_at_timestamp.clear()
+        if trade.trade_id in self._trade_ids_at_timestamp:
+            raise ValueError("duplicate trade ID at timestamp")
+        self._trade_ids_at_timestamp.add(trade.trade_id)
         self.instrument.check_price(trade.price)
         day = trade.exchange_ns // DAY_NS
         if self.day_index != day:
@@ -276,6 +281,7 @@ class OfflineSimulator:
             self.day_open_equity = self.equity
         self.mark = trade.price
         self.last_ns = trade.exchange_ns
+        self.last_event_ns = trade.exchange_ns
         self.last_trade_id = trade.trade_id
         self._risk_update()
         results = []
@@ -296,8 +302,8 @@ class OfflineSimulator:
     def apply_funding(self, funding_id: str, rate: Decimal, timestamp_ns: int) -> Decimal:
         if not funding_id or funding_id in self.used_funding_ids:
             raise ValueError("missing or duplicate funding event ID")
-        if not isinstance(timestamp_ns, int) or timestamp_ns < self.last_ns:
-            raise ValueError("funding timestamp predates last market state")
+        if not isinstance(timestamp_ns, int) or timestamp_ns < self.last_event_ns:
+            raise ValueError("funding event timestamp predates last event")
         rate = decimal(rate)
         if abs(rate) > Decimal("1"):
             raise ValueError("implausible funding rate; input is a fraction, not percent")
@@ -307,6 +313,7 @@ class OfflineSimulator:
         self.balance -= payment
         self.total_funding_paid += payment
         self.used_funding_ids.add(funding_id)
+        self.last_event_ns = timestamp_ns
         self._risk_update()
         return payment
 
