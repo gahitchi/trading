@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "phase": "D1-reference-development",
+  "baseline": "e65502961b5957c56821644cf04df7b7787b2d00",
+  "policy": "Never enable live-money routing by a profile, config toggle, or adapter fallback.",
+  "gates": [
+    {
+      "id": "D0-design",
+      "status": "implemented",
+      "evidence": [
+        "docs/architecture/multimarket-2026-10-25.md"
+      ]
+    },
+    {
+      "id": "D1-offline-simulation",
+      "status": "partial",
+      "criteria": "Offline CLI, account model, safe fill/margin model, crash-safe journal, expanded deterministic and statistical tests, adequate liquidation/price/fee/funding models.",
+      "evidence": [
+        "src/lab/markets/domain.py",
+        "src/lab/markets/minute.py",
+        "src/lab/markets/simulator.py",
+        "tests/test_markets_reference.py"
+      ],
+      "missing": [
+        "durable intent/fill journal",
+        "venue-grade execution model",
+        "crash/replay evidence",
+        "funding + mark/index data provenance"
+      ]
+    },
+    {
+      "id": "D2-market-data",
+      "status": "partial",
+      "criteria": "Qualified complete one-minute public and trade feeds, timestamp, gap and source audit, normalized immutable storage, Nautilus catalog bridge.",
+      "evidence": [
+        "src/lab/markets/okx_public.py",
+        "tests/test_markets_okx_public.py"
+      ],
+      "missing": [
+        "streaming trade/quote feed",
+        "immutable daily Parquet catalogs",
+        "source completeness + market-data reconciliation",
+        "Nautilus bridge"
+      ]
+    },
+    {
+      "id": "D3-externally-hosted-demo",
+      "status": "blocked",
+      "criteria": "Authenticated OKX EEA demo adapter and supervised qualified acceptance with fills, rejects, margin, funding and reconciliation.",
+      "missing": [
+        "verify pinned Nautilus adapter compatibility",
+        "verified eligible instrument and account",
+        "demo credentials supplied by operator",
+        "restart/fill reconciliation evidence"
+      ]
+    },
+    {
+      "id": "D4-user-experience",
+      "status": "blocked",
+      "criteria": "Broker-independent first boot with offline simulation selected by default in Windows and Arch launchers.",
+      "missing": [
+        "installer/dashboard integration",
+        "UI health and risk controls",
+        "cross-platform first-run tests"
+      ]
+    },
+    {
+      "id": "D5-forex-and-equities",
+      "status": "blocked",
+      "criteria": "At least one qualified demo executor and market-data adapter for forex and equities under shared typed contracts.",
+      "missing": [
+        "forex adapter and calendar",
+        "equities alternative broker adapter",
+        "per-venue shortability and margin tests"
+      ]
+    },
+    {
+      "id": "D6-live-real-money",
+      "status": "disabled",
+      "criteria": "Independent reviewed implementation, engine version qualification, weeks of forward demo evidence, explicit live authorization with monetary caps and per-venue acceptance.",
+      "missing": [
+        "all independent live safety and legal qualifications"
+      ],
+      "note": "Not implemented and not authorized. Preserve existing paper-only guards."
+    }
+  ]
+}
