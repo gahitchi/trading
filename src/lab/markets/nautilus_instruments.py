@@ -4,6 +4,10 @@ This is an actual Nautilus CryptoPerpetual model object, not a parallel
 instrument implementation. The metadata is provided explicitly and is not
 treated as authenticated exchange contract, account, fee or margin evidence.
 
+The pinned 2.0.0rc7 CryptoPerpetual constructor has no maker/taker fee
+parameters: exact fee assumptions are retained on LinearContractDefinition
+only and MUST be provided separately to an eventual qualified engine.
+
 Only *linear, quote-settled* crypto swaps are supported. In particular,
 a provider's unverified 'BTC-USDT-SWAP' label does not qualify an EEA
 X-Perps execution instrument. No adapter client or trading node is created.
@@ -75,11 +79,13 @@ class LinearContractDefinition:
 
 
 def to_nautilus_perpetual(spec: LinearContractDefinition) -> CryptoPerpetual:
-    """Register a priced crypto swap in Nautilus *for offline replay only*.
+    """Create Nautilus model for offline replay and **never** authorize execution.
 
-    Adapter execution capabilities remain disabled elsewhere even if this
-    model object exists. The rate/contract fields are scenario assumptions,
-    not authenticated from OKX EEA, and may not be used for broker routing.
+    Pinned rc7 does not accept `maker_fee`/`taker_fee` on native
+    CryptoPerpetual. The exact BPS fee schedule stays in `spec`; any future
+    trading/backtest integration must bind it independently, prove that
+    resulting fees are charged, and fail closed if it cannot. A model object
+    alone is not a qualified fee/margin/execution policy.
     """
     c = spec.instrument
     qp = _precision(c.quantity_step)
@@ -102,8 +108,6 @@ def to_nautilus_perpetual(spec: LinearContractDefinition) -> CryptoPerpetual:
         min_notional=Money.from_str(f"{c.min_notional} {c.quote_currency}"),
         margin_init=c.initial_margin,
         margin_maint=c.maintenance_margin,
-        maker_fee=spec.maker_fee_bps / Decimal("10000"),
-        taker_fee=spec.taker_fee_bps / Decimal("10000"),
         ts_event=spec.definition_ns,
         ts_init=spec.observed_ns,
     )
