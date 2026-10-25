@@ -134,6 +134,9 @@ def main() -> None:
     c.add_argument("--instrument", default="BTC-USDT")
     c.add_argument("--limit", type=int, default=20)
     c.add_argument("--store", type=Path, help="save verified local checksum-addressed Parquet partitions")
+    o = sub.add_parser("observations", help="READ-ONLY EEA latest trades + independent swap mark (NOT a quote)")
+    o.add_argument("--instrument", default="BTC-USDT-SWAP")
+    o.add_argument("--limit", type=int, default=20)
     args = parser.parse_args()
     if args.command == "demo":
         sample = files("lab.markets").joinpath("fixture.csv")
@@ -148,6 +151,42 @@ def main() -> None:
             result["journal_events"] = len(journal.read_all())
             result["external_execution_enabled"] = False
             print(json.dumps(result, indent=2))
+    elif args.command == "observations":
+        from lab.markets.okx_observations import current_public_mark, recent_public_trades
+
+        trade_events = recent_public_trades(args.instrument, limit=args.limit)
+        mark = current_public_mark(args.instrument)
+        print(
+            json.dumps(
+                {
+                    "source": "OKX_EEA_PUBLIC_SNAPSHOT",
+                    "instrument": args.instrument,
+                    "execution_supported": False,
+                    "quotes_available": False,
+                    "funding_verified": False,
+                    "account_capabilities_qualified": False,
+                    "not_a_synchronized_order_book": True,
+                    "mark": {
+                        "exchange_ns": mark.exchange_ns,
+                        "received_ns": mark.received_ns,
+                        "price": str(mark.price),
+                    },
+                    "trades": [
+                        {
+                            "id": trade.trade_id,
+                            "exchange_ns": trade.exchange_ns,
+                            "received_ns": trade.received_ns,
+                            "price": str(trade.price),
+                            "size_native": str(trade.quantity),
+                            "taker_side": str(trade.taker_side),
+                            "venue_source": trade.venue_source,
+                        }
+                        for trade in trade_events
+                    ],
+                },
+                indent=2,
+            )
+        )
     elif args.command == "candles":
         from lab.markets.okx_public import latest_confirmed_candles
 

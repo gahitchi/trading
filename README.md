@@ -30,6 +30,7 @@ For real, **read-only**, public OKX Europe completed one-minute candles (require
 ```sh
 uv run python -m lab.markets candles --instrument BTC-USDT --limit 20
 uv run python -m lab.markets candles --instrument BTC-USDT --limit 100 --store ./results/candle-catalog
+uv run python -m lab.markets observations --instrument BTC-USDT-SWAP --limit 20
 ```
 
 A stored OFFLINE_SIM journal can be deterministically verified and resumed only with **matching account,
@@ -37,6 +38,9 @@ instrument, fee, and risk assumptions**; truncated or inconsistent evidence is r
 reference-simulator recovery, not broker/exchange reconciliation. Existing journals are never silently reset.
 The optional candle catalog stores immutable, SHA-256-addressed UTC-day Parquet partitions and preserves
 missing-interval metadata, but it does **not** qualify their source completeness or order-execution quality.
+The observations command fetches the latest EEA-hosted public swap mark and recent executed trades as
+**separate timestamped feeds**, preserving aggressor side and source labels. It does **not** provide best
+bid/ask, L2 depth, funding settlement history, full trade continuity or permission to submit orders.
 
 This does not trade or backtest those candles; it deliberately excludes unfinished bars, and historical
 bar OHLCV is not sufficient to simulate realistic exchange fills. See the D2/D3/D6 gates in the design.

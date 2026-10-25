@@ -49,7 +49,9 @@
         "src/lab/markets/minute_batch.py",
         "tests/test_markets_minute_batch.py",
         "src/lab/markets/catalog.py",
-        "tests/test_markets_catalog.py"
+        "tests/test_markets_catalog.py",
+        "src/lab/markets/okx_observations.py",
+        "tests/test_markets_okx_observations.py"
       ],
       "missing": [
         "streaming trade/quote feed",
@@ -57,7 +59,7 @@
         "Nautilus bridge",
         "independent raw feed capture with qualified completeness and source revisions"
       ],
-      "note": "The public OKX EEA candles CLI is read-only. Accurate derivative trading still requires quote, independent mark/index and funding sources, venue qualifications, immutable Parquet catalogs and Nautilus bridge. See institutional flow audit. Local immutable daily confirmed-candle Parquet partitions with SHA-256 and gap metadata are implemented; this is not a complete raw L2/trade/mark/funding replay source."
+      "note": "The public OKX EEA candles CLI is read-only. Accurate derivative trading still requires quote, independent mark/index and funding sources, venue qualifications, immutable Parquet catalogs and Nautilus bridge. See institutional flow audit. Local immutable daily confirmed-candle Parquet partitions with SHA-256 and gap metadata are implemented; this is not a complete raw L2/trade/mark/funding replay source. Public recent trades (including taker side) and independent swap mark snapshots are now parsed from EEA-hosted endpoints. They are not quote/L2/funding feeds and do not qualify account region or complete replay coverage."
     },
     {
       "id": "D3-externally-hosted-demo",
@@ -72,13 +74,20 @@
     },
     {
       "id": "D4-user-experience",
-      "status": "blocked",
+      "status": "partial",
       "criteria": "Broker-independent first boot with offline simulation selected by default in Windows and Arch launchers.",
       "missing": [
         "installer/dashboard integration",
         "UI health and risk controls",
         "cross-platform first-run tests"
-      ]
+      ],
+      "evidence": [
+        "src/lab/app.py",
+        "src/lab/ui/index.html",
+        "src/lab/ui/app.js",
+        "tests/test_app.py"
+      ],
+      "note": "The browser now offers a zero-credential, locally authenticated synthetic crypto sample without modifying IBKR settings. A full Nautilus-backed offline strategy engine and first-run multi-market mode selector remain unimplemented."
     },
     {
       "id": "D5-forex-and-equities",
