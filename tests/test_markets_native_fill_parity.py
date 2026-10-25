@@ -104,3 +104,25 @@ def test_synthetic_test_feed_must_not_be_mislabelled_as_real_market_data():
     assert quotes[2].ts_init > quotes[1].ts_init
     result = run_native_fill_parity(s, quotes)
     assert result.source == "synthetic_offline_quotes"
+
+
+def test_cli_outputs_native_fees_and_never_authorizes_a_broker():
+    import json
+    import subprocess
+    import sys
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "lab.markets", "native-fill-parity"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=40,
+    )
+    payload = json.loads(completed.stdout)
+    assert payload["fills"] == 2
+    assert payload["charged_fees"] == "0.10"
+    assert payload["ending_balance"] == payload["expected_ending_balance"]
+    assert payload["execution_cost_parity_verified"] is True
+    assert payload["input_kind"] == "synthetic_offline_quotes"
+    assert payload["broker_execution_enabled"] is False
+    assert payload["qualified_for_live_trading"] is False
