@@ -19,7 +19,7 @@ from nautilus_trader.model import (
     TradeTick,
 )
 
-from lab.markets.domain import AssetClass, ContractKind, Instrument, Side, Trade
+from lab.markets.domain import MAX_EVENT_TIMESTAMP_NS, AssetClass, ContractKind, Instrument, Side, Trade
 from lab.markets.okx_public import MarketDataError, PublicCandle
 
 
@@ -65,7 +65,9 @@ def to_nautilus_completed_bar(candle: PublicCandle, instrument: Instrument, *, r
         raise MarketDataError("candle instrument does not match normalized contract")
     if candle.source != "OKX_EEA_PUBLIC_CANDLES":
         raise MarketDataError("unqualified public candle origin")
-    if type(received_ns) is not int or received_ns < candle.end_ns:
+    if type(received_ns) is not int or received_ns > MAX_EVENT_TIMESTAMP_NS:
+        raise MarketDataError("invalid signed-64-bit candle receive timestamp")
+    if received_ns < candle.end_ns:
         raise MarketDataError("candle cannot be available before it closes")
     for px in (candle.open, candle.high, candle.low, candle.close):
         instrument.check_price(px)
