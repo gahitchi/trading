@@ -26,6 +26,7 @@ from nautilus_trader.model import (
     OmsType,
     OrderSide,
     Price,
+    Quantity,
     TimeInForce,
     Venue,
 )
@@ -68,7 +69,7 @@ class _PartialProbe(Strategy):
             order = self.order_factory.limit(
                 self.instrument_id,
                 OrderSide.BUY,
-                quantity=Decimal("1"),
+                quantity=Quantity.from_str("1.000"),
                 price=Price.from_str("100.3"),
                 time_in_force=TimeInForce.GTC,
             )
@@ -79,7 +80,7 @@ class _PartialProbe(Strategy):
             order = self.order_factory.market(
                 self.instrument_id,
                 OrderSide.SELL,
-                quantity=Decimal("1"),
+                quantity=Quantity.from_str("1.000"),
                 time_in_force=TimeInForce.GTC,
             )
         else:
