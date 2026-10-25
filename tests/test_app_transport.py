@@ -55,6 +55,6 @@ def test_occupied_loopback_port_explains_port_override_without_killing_listener(
     monkeypatch.setattr(app, "Controller", ControllerStub)
     monkeypatch.setattr(app, "AppServer", busy)
     args = SimpleNamespace(directory=str(tmp_path), host="127.0.0.1", port=8765, config=None, no_browser=True)
-    with pytest.raises(OSError, match="port in use.*--port"):
+    with pytest.raises(OSError, match=r"port in use.*--port"):
         app.serve(args)
     assert (tmp_path / "LOCK").exists()
