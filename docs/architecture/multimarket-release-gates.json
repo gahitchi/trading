@@ -19,14 +19,16 @@
         "src/lab/markets/domain.py",
         "src/lab/markets/minute.py",
         "src/lab/markets/simulator.py",
-        "tests/test_markets_reference.py"
+        "tests/test_markets_reference.py",
+        "src/lab/markets/journal.py",
+        "tests/test_markets_journal.py"
       ],
       "missing": [
-        "durable intent/fill journal",
-        "venue-grade execution model",
-        "crash/replay evidence",
-        "funding + mark/index data provenance"
-      ]
+        "verified state reconstruction and crash replay",
+        "broker-quality order book / partial fill and liquidation stress models",
+        "independent execution/funding/mark data provenance"
+      ],
+      "notes": "Offline simulator optionally journals marks/intents/fills/funding/cancels and risk rejections; refuses nonempty-journal restart until full replay is implemented."
     },
     {
       "id": "D2-market-data",
