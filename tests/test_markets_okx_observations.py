@@ -111,8 +111,15 @@ def test_trade_taker_metadata_survives_exact_offline_journal_replay(tmp_path) ->
 
     D = Decimal
     contract = Instrument(
-        "SIM", "BTC-USDT-SWAP", AssetClass.CRYPTO, ContractKind.LINEAR_DERIVATIVE,
-        "USDT", D("0.1"), D("0.001"), D("0.001"), D("5"),
+        "SIM",
+        "BTC-USDT-SWAP",
+        AssetClass.CRYPTO,
+        ContractKind.LINEAR_DERIVATIVE,
+        "USDT",
+        D("0.1"),
+        D("0.001"),
+        D("0.001"),
+        D("5"),
     )
     path = tmp_path / "trades.db"
     with EventJournal(path) as journal:
