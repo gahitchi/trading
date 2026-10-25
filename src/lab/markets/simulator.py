@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 
+from lab.markets.journal import EventJournal, JournalError
 from lab.markets.domain import (
     AssetClass,
     Capabilities,
@@ -82,11 +83,15 @@ class OfflineSimulator:
         taker_fee_bps: Decimal = Decimal("5"),
         slippage_bps: Decimal = Decimal("2"),
         mode: TradingMode = TradingMode.OFFLINE_SIM,
+        journal: EventJournal | None = None,
     ) -> None:
         if mode != TradingMode.OFFLINE_SIM:
             raise UnsupportedMode("reference simulation refuses BROKER_DEMO and LIVE")
         if instrument.asset_class != AssetClass.CRYPTO or instrument.kind != ContractKind.LINEAR_DERIVATIVE:
             raise ValueError("v1 reference simulator supports crypto linear derivatives only")
+        if journal is not None and journal.read_all():
+            raise JournalError("refusing to reset a nonempty journal without full state replay")
+        self.journal = journal
         self.instrument = instrument
         self.mode = mode
         self.limits = limits or SimulationLimits()
@@ -159,11 +164,24 @@ class OfflineSimulator:
             raise ValueError("reduce-only order may not open or reverse a position")
         if self.halt_reason and not intent.reduce_only:
             raise ValueError("hard halt: only valid reduce-only orders accepted")
+        if self.journal is not None:
+            self.journal.append(
+                f"intent:{intent.client_order_id}",
+                "intent",
+                intent.created_ns,
+                {"instrument": intent.instrument_id, "side": str(intent.side), "quantity": str(intent.quantity),
+                 "reduce_only": intent.reduce_only},
+            )
         self.used_ids.add(intent.client_order_id)
         self.pending[intent.client_order_id] = _Pending(intent, intent.quantity)
 
     def cancel(self, order_id: str) -> bool:
-        return self.pending.pop(order_id, None) is not None
+        if order_id not in self.pending:
+            return False
+        if self.journal is not None:
+            self.journal.append(f"cancel:{order_id}", "cancel", self.last_event_ns, {"order_id": order_id})
+        self.pending.pop(order_id)
+        return True
 
     def _is_reduction(self, delta: Decimal) -> bool:
         return self.position != 0 and self.position * delta < 0 and abs(delta) <= abs(self.position)
@@ -239,6 +257,14 @@ class OfflineSimulator:
         fee = notional * self.taker_fee_bps / Decimal("10000")
         new_pos, avg, realized = self._next_position(delta, px)
         self._check_risk(qty, px, fee, realized, new_pos, avg, reducing=reducing)
+        if self.journal is not None:
+            self.journal.append(
+                f"fill:{order.client_order_id}:{trade.trade_id}",
+                "fill",
+                trade.exchange_ns,
+                {"side": str(order.side), "quantity": str(qty), "price": str(px),
+                 "fee": str(fee), "realized_pnl": str(realized)},
+            )
         self.position = new_pos
         self.entry = avg
         self.balance += realized - fee
@@ -275,6 +301,14 @@ class OfflineSimulator:
             raise ValueError("duplicate trade ID at timestamp")
         self._trade_ids_at_timestamp.add(trade.trade_id)
         self.instrument.check_price(trade.price)
+        if self.journal is not None:
+            self.journal.append(
+                f"trade:{trade.trade_id}",
+                "mark",
+                trade.exchange_ns,
+                {"price": str(trade.price), "quantity": str(trade.quantity),
+                 "received_ns": trade.received_ns},
+            )
         day = trade.exchange_ns // DAY_NS
         if self.day_index != day:
             self.day_index = day
@@ -310,6 +344,11 @@ class OfflineSimulator:
         if self.mark is None:
             raise ValueError("no valid market mark for funding")
         payment = self.position * self.mark * self.instrument.multiplier * rate
+        if self.journal is not None:
+            self.journal.append(
+                f"funding:{funding_id}", "funding", timestamp_ns,
+                {"rate": str(rate), "payment": str(payment), "position": str(self.position)},
+            )
         self.balance -= payment
         self.total_funding_paid += payment
         self.used_funding_ids.add(funding_id)
