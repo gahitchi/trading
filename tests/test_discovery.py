@@ -153,6 +153,24 @@ def test_pretrade_universe_screen_rejects_low_quality_evidence(change, reason):
     assert reason in out.skipped[0][1]
 
 
+def test_multiple_purchase_lines_in_one_form4_sum_notional_but_count_only_one_filing():
+    first = insider("AAPL", transaction_line="1", shares=D("1000"))
+    second = insider("AAPL", transaction_line="2", shares=D("300"))
+    repeated_first = insider("AAPL", transaction_line="1", shares=D("1000"))
+    out = scout_equities((), (market("AAPL"),), (second, repeated_first, first), decision_ns=NOW)
+    assert out.candidates[0].insider_purchase_count == 1
+    assert out.candidates[0].filing_accessions == (first.accession,)
+    assert out.candidates[0].insider_purchased_notional == D("126750")
+
+
+def test_amended_filing_is_not_double_counted_without_explicit_amendment_resolution():
+    amended = insider("AAPL", filing_form="4/A")
+    out = scout_equities((), (market("AAPL"),), (amended,), decision_ns=NOW)
+    assert out.candidates[0].insider_purchase_count == 0
+    with pytest.raises(ValueError, match="transaction line"):
+        insider("AAPL", transaction_line="")
+
+
 def test_deterministic_ranking_independent_of_input_order():
     a, b = market("AAPL"), market("MSFT")
     f = insider("AAPL")
