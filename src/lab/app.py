@@ -1,6 +1,7 @@
 """Local setup and control UI. Never places orders outside the existing paper engine."""
 
 import copy
+import errno
 import hashlib
 import hmac
 import json
@@ -651,7 +652,7 @@ def serve(args):
         try:
             server = AppServer((args.host, args.port), controller)
         except OSError as exc:
-            if exc.errno == 98:  # EADDRINUSE: do not interrupt an existing app instance
+            if exc.errno == errno.EADDRINUSE:  # do not interrupt an existing app instance
                 raise OSError(
                     exc.errno,
                     f"Trading Lab cannot bind {args.host}:{args.port}: port in use. "
