@@ -58,13 +58,20 @@ class NativeFillParity:
     qualified_for_live_trading: bool = False
 
 
+class _RoundTripConfig(StrategyConfig):
+    def __init__(self, *, instrument_id, quantity: Quantity) -> None:
+        super().__init__()
+        self.instrument_id = instrument_id
+        self.quantity = quantity
+
+
 class _RoundTripProbe(Strategy):
     """Fixed two-order test; not reusable as a trading signal or production strategy."""
 
-    def __init__(self, instrument_id, quantity: Quantity) -> None:
-        super().__init__(StrategyConfig())
-        self.instrument_id = instrument_id
-        self.quantity = quantity
+    def __init__(self, config: _RoundTripConfig) -> None:
+        super().__init__(config)
+        self.instrument_id = config.instrument_id
+        self.quantity = config.quantity
         self.quotes_seen = 0
         self.fills = []
         self.failures = []
@@ -180,7 +187,7 @@ def run_native_fill_parity(
     rate = spec.taker_fee_bps / Decimal("10000")
     if rate <= 0:
         raise NativeParityError("fee parity requires a strictly positive taker fee")
-    probe = _RoundTripProbe(native.id, Quantity.from_str(str(quantity)))
+    probe = _RoundTripProbe(_RoundTripConfig(instrument_id=native.id, quantity=Quantity.from_str(str(quantity))))
     engine = BacktestEngine(config=BacktestEngineConfig(logging=LoggerConfig(stdout_level=LogLevel.ERROR)))
     try:
         engine.add_venue(
