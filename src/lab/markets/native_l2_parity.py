@@ -77,11 +77,19 @@ class _PartialProbe(Strategy):
             if not self.portfolio.is_net_long(self.instrument_id):
                 self.failures.append("native book did not contain the full partial entry")
                 return
-            order = self.order_factory.market(
+            # A pure L2 tape has no separate QuoteTick market-price reference
+            # for the native risk engine. Bound the exit to the observed bid
+            # rather than bypassing MARKET_PRICE_UNAVAILABLE risk checks.
+            if not depth.bids:
+                self.failures.append("no observed bid available to price a safe exit")
+                return
+            order = self.order_factory.limit(
                 self.instrument_id,
                 OrderSide.SELL,
                 quantity=Quantity.from_str("1.000"),
+                price=depth.bids[0].price,
                 time_in_force=TimeInForce.GTC,
+                reduce_only=True,
             )
         else:
             return
