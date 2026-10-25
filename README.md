@@ -18,6 +18,7 @@ uv run python -m lab.markets demo --side buy --quantity 0.001 --balance 1000
 uv run python -m lab.markets demo --journal ./results/offline-reference.sqlite3
 uv run python -m lab.markets recover --journal ./results/offline-reference.sqlite3
 uv run python -m lab.markets native-demo
+uv run python -m lab.markets native-fill-parity
 ```
 
 Both commands run a **synthetic** trade fixture and a next-observed-trade simulator, demonstrating long/short
@@ -64,6 +65,15 @@ mark fixture through the real Nautilus BacktestEngine, with a margin account, ex
 nonzero maker/taker fees at the native venue (the model's required location for trading fees) and a
 read-only Nautilus DataActor that verifies every event was delivered at its receipt timestamp.
 This pilot has **no strategy, order routing, filled orders, fees actually charged or broker connection**.
+The separate `native-fill-parity` diagnostic does generate **two actual Nautilus simulated
+market-order fills** against four **explicitly synthetic** top-of-book quotes. It compares
+native taker fee charges, price/quantity, a flat terminal position, and the native margin
+account with an independent exact-Decimal linear-contract oracle. This verifies only
+that fixed controlled round-trip and its cost accounting. It is **not** market-data
+provenance, accurate order-book queue execution, maker/partial-fill parity, verified
+funding, strategy profitability, broker-demo settlement, crash recovery or authority
+to trade money. A passing result is a narrow component qualification, not a release gate.
+
 Neither the native runtime nor its fixture proves a profitable strategy or execution-cost parity.
 
 The offline-only Nautilus bridge now constructs native `CryptoPerpetual` instruments from explicit,
