@@ -10,7 +10,7 @@ arithmetic validates its observed fills and native account after settlement.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from nautilus_trader.backtest import BacktestEngine
 from nautilus_trader.common import LogLevel
@@ -279,11 +279,11 @@ def run_native_fill_parity(
         closed = linear_transition(opened.position, opened.entry_price, -signed_quantity, px2, c.multiplier)
         if closed.position != 0:
             raise NativeParityError("independent position oracle did not end flat")
-        expected_fees = sum(
-            ((px * quantity * c.multiplier * rate).quantize(quantum, rounding=ROUND_HALF_UP)
-             for px in (px1, px2)),
-            Decimal("0"),
-        )
+        expected_fees = Decimal("0")
+        for price in (px1, px2):
+            expected_fees += (price * quantity * c.multiplier * rate).quantize(
+                quantum, rounding=ROUND_HALF_UP
+            )
         charges = []
         for fill in probe.fills:
             if fill.commission.currency != currency:
