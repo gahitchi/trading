@@ -188,6 +188,7 @@ def test_no_spot_short_in_linear_reference() -> None:
     with pytest.raises(ValueError, match="linear derivatives"):
         OfflineSimulator(spot)
 
+
 def test_adapter_protocol_cannot_route_demo_or_real_money() -> None:
     from lab.markets.adapters import ExecutionAdapter, OfflineAdapter, ReplayDataAdapter, open_execution_adapter
 
@@ -215,6 +216,7 @@ def test_offline_cli_fixture_smoke() -> None:
     assert result["minute_bars"] == 3
     assert result["market_data_validated"] is False
     assert result["qualified_for_live_trading"] is False
+
 
 def test_funding_events_prevent_time_travel_in_subsequent_trades() -> None:
     sim = OfflineSimulator(instrument())
