@@ -98,8 +98,12 @@ def to_nautilus_mark(mark: MarkPrice, instrument: Instrument) -> MarkPriceUpdate
     valuation data. The caller must still validate the provenance and
     completeness of the original external mark feed independently.
     """
-    instrument.check_price(mark.price)
-    pp = _precision(instrument.tick_size)
+    # Mark/index price precision is independent of the *tradable* order tick.
+    # Rounding the mark to an order tick would silently alter derivative PnL,
+    # collateral and liquidation calculations.
+    pp = _precision(mark.price)
+    if pp > 9:
+        raise MarketDataError("mark precision exceeds native fixed-price representation")
     return MarkPriceUpdate(
         instrument_id=nautilus_instrument_id(instrument),
         value=Price.from_str(f"{mark.price:.{pp}f}"),
