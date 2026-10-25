@@ -199,6 +199,7 @@ def native_fill_parity_demo() -> dict:
             "ending_balance": str(short.ending_balance),
             "expected_ending_balance": str(short.expected_ending_balance),
             "execution_cost_parity_verified": short.execution_cost_parity_verified,
+            "independent_cashflow_audit_verified": short.independent_cashflow_audit_verified,
         },
         "engine": "nautilus_backtest_native",
         "instrument": result.instrument,
@@ -212,6 +213,7 @@ def native_fill_parity_demo() -> dict:
         "ending_balance": str(result.ending_balance),
         "expected_ending_balance": str(result.expected_ending_balance),
         "execution_cost_parity_verified": result.execution_cost_parity_verified,
+        "independent_cashflow_audit_verified": result.independent_cashflow_audit_verified,
         "broker_execution_enabled": False,
         "qualified_for_live_trading": False,
     }

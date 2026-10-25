@@ -51,6 +51,7 @@ def test_real_native_round_trip_charges_both_taker_fees_and_reconciles_account()
     assert result.ending_balance == D("1000.70")
     assert result.ending_balance == result.expected_ending_balance
     assert result.execution_cost_parity_verified
+    assert result.independent_cashflow_audit_verified
     assert not result.broker_execution_enabled
     assert not result.qualified_for_live_trading
 
@@ -76,6 +77,7 @@ def test_short_cover_reconciles_negative_pnl_and_both_taker_fees():
     assert result.ending_balance == D("998.70")
     assert result.ending_balance == result.expected_ending_balance
     assert result.execution_cost_parity_verified
+    assert result.independent_cashflow_audit_verified
     assert not result.broker_execution_enabled
 
 
@@ -168,6 +170,8 @@ def test_cli_outputs_native_fees_and_never_authorizes_a_broker():
     assert short["ending_balance"] == short["expected_ending_balance"]
     assert payload["ending_balance"] == payload["expected_ending_balance"]
     assert payload["execution_cost_parity_verified"] is True
+    assert payload["independent_cashflow_audit_verified"] is True
+    assert short["independent_cashflow_audit_verified"] is True
     assert payload["input_kind"] == "synthetic_offline_quotes"
     assert payload["broker_execution_enabled"] is False
     assert payload["qualified_for_live_trading"] is False

@@ -129,6 +129,7 @@ def audit_observed_cashflows(
     fees = Decimal("0")
     funding = Decimal("0")
     last_received = -1
+    last_effective = -1
     seen_fills: set[str] = set()
     seen_funding: set[str] = set()
     fill_count = 0
@@ -141,6 +142,10 @@ def audit_observed_cashflows(
         if event.observed_ns < last_received:
             raise AuditMismatch("cashflow receipt order regressed")
         last_received = event.observed_ns
+        effective_ns = event.observed_ns if type(event) is RecordedFill else event.event_ns
+        if type(effective_ns) is not int or effective_ns < last_effective:
+            raise AuditMismatch("funding or fill event time regressed")
+        last_effective = effective_ns
         if type(event) is RecordedFill:
             if (
                 type(event.client_id) is not str

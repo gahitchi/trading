@@ -21,8 +21,15 @@ D = Decimal
 
 def contract():
     return Instrument(
-        "SIM", "BTC-USD-SWAP", AssetClass.CRYPTO, ContractKind.LINEAR_DERIVATIVE,
-        "USD", D("0.1"), D("0.001"), D("0.001"), D("5"),
+        "SIM",
+        "BTC-USD-SWAP",
+        AssetClass.CRYPTO,
+        ContractKind.LINEAR_DERIVATIVE,
+        "USD",
+        D("0.1"),
+        D("0.001"),
+        D("0.001"),
+        D("5"),
     )
 
 
@@ -44,8 +51,13 @@ def close():
 
 def funding():
     return RecordedFunding(
-        "fund1", 3_000_000_000, 3_000_000_000, 2_500_000_000,
-        D("100"), D("0.01"), D("1.00"),
+        "fund1",
+        3_000_000_000,
+        3_000_000_000,
+        2_500_000_000,
+        D("100"),
+        D("0.01"),
+        D("1.00"),
     )
 
 
@@ -121,6 +133,9 @@ def test_duplicate_fills_and_future_funding_refused():
         run((first(), replace(funding(), source="OKX_EEA_PUBLIC_INDICATIVE_FUNDING")))
     with pytest.raises(AuditMismatch, match="receipt order"):
         run((second(), first()))
+    with pytest.raises(AuditMismatch, match="event time regressed"):
+        delayed = replace(funding(), event_ns=500_000_000, mark_ns=400_000_000, reported_debit=D("0.40"))
+        run((first(), delayed))
     with pytest.raises(AuditMismatch, match="duplicated funding"):
         once = replace(funding(), reported_debit=D("0.40"))
         twice = replace(once, observed_ns=3_000_000_001)

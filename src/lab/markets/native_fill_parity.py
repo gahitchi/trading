@@ -33,6 +33,7 @@ from nautilus_trader.trading import Strategy, StrategyConfig
 
 from lab.markets.accounting import linear_transition
 from lab.markets.domain import MAX_EVENT_TIMESTAMP_NS, Side, decimal, positive
+from lab.markets.execution_audit import AuditOrder, RecordedFill, audit_observed_cashflows
 from lab.markets.nautilus_instruments import LinearContractDefinition, to_nautilus_perpetual
 
 
@@ -55,6 +56,7 @@ class NativeFillParity:
     fills: int
     source: str = "synthetic_offline_quotes"
     execution_cost_parity_verified: bool = True
+    independent_cashflow_audit_verified: bool = True
     broker_execution_enabled: bool = False
     qualified_for_live_trading: bool = False
 
@@ -298,6 +300,38 @@ def run_native_fill_parity(
         expected_ending = (collateral + closed.realized_pnl - expected_fees).quantize(quantum, rounding=ROUND_HALF_UP)
         if ending != expected_ending:
             raise NativeParityError("native margin account disagrees with exact Decimal PnL and charged fees")
+        # Feed the ACTUAL Nautilus callbacks into the partial-fill-aware
+        # independent financial audit; this does not create or route orders.
+        plans = (
+            AuditOrder(probe.order_ids[0], side, quantity),
+            AuditOrder(probe.order_ids[1], Side.SELL if side is Side.BUY else Side.BUY, quantity),
+        )
+        stream = tuple(
+            RecordedFill(
+                client_id=str(fill.client_order_id),
+                trade_id=str(fill.trade_id),
+                side=Side.BUY if fill.order_side == OrderSide.BUY else Side.SELL,
+                quantity=Decimal(str(fill.last_qty)),
+                price=Decimal(str(fill.last_px)),
+                charged_fee=fill.commission.as_decimal(),
+                observed_ns=fill.ts_init,
+            )
+            for fill in probe.fills
+        )
+        audited = audit_observed_cashflows(
+            c, plans, stream, collateral=collateral,
+            taker_fee_bps=spec.taker_fee_bps,
+            currency_precision=currency.precision,
+        )
+        if (
+            audited.final_position != 0
+            or audited.realized_pnl != closed.realized_pnl
+            or audited.charged_fees != charged
+            or audited.ending_balance != ending
+            or audited.funding_debits != 0
+            or any(left != 0 for _, left in audited.remaining_orders)
+        ):
+            raise NativeParityError("native fills disagree with independent cashflow audit")
         if len(engine.generate_fills_report()) != 2:
             raise NativeParityError("native cached fill report disagrees with fill callbacks")
         return NativeFillParity(

@@ -17,22 +17,30 @@ def frame(action="snapshot", *, seq=7, prev=-1, bids=None, asks=None, ts="1000")
     return {
         "arg": {"channel": "books", "instId": "BTC-USD-SWAP"},
         "action": action,
-        "data": [{
-            "ts": ts,
-            "seqId": seq,
-            "prevSeqId": prev,
-            "checksum": 0,
-            "bids": [["100.0", "10.000", "0", "2"]] if bids is None else bids,
-            "asks": [["100.2", "10.000", "0", "2"]] if asks is None else asks,
-        }],
+        "data": [
+            {
+                "ts": ts,
+                "seqId": seq,
+                "prevSeqId": prev,
+                "checksum": 0,
+                "bids": [["100.0", "10.000", "0", "2"]] if bids is None else bids,
+                "asks": [["100.2", "10.000", "0", "2"]] if asks is None else asks,
+            }
+        ],
     }
 
 
 def instrument():
     return Instrument(
-        "SIM", "BTC-USD-SWAP", AssetClass.CRYPTO,
-        ContractKind.LINEAR_DERIVATIVE, "USD",
-        D("0.1"), D("0.001"), D("0.001"), D("5"),
+        "SIM",
+        "BTC-USD-SWAP",
+        AssetClass.CRYPTO,
+        ContractKind.LINEAR_DERIVATIVE,
+        "USD",
+        D("0.1"),
+        D("0.001"),
+        D("0.001"),
+        D("5"),
     )
 
 
@@ -41,7 +49,10 @@ def test_incremental_updates_modify_levels_and_share_a_contiguous_sequence():
     assert not snap.execution_qualified
     assert snap.best_ask == D("100.2")
     changes = frame(
-        "update", seq=9, prev=7, ts="1001",
+        "update",
+        seq=9,
+        prev=7,
+        ts="1001",
         bids=[["100.1", "4.000", "0", "1"]],
         asks=[["100.2", "0", "0", "0"], ["100.3", "20.000", "0", "4"]],
     )
@@ -106,11 +117,18 @@ def test_rejects_wrong_contract_or_unrepresentable_quantity():
         estimate_displayed_taker_capacity(
             snap,
             Instrument(
-                "SIM", "ETH-USD-SWAP", AssetClass.CRYPTO,
-                ContractKind.LINEAR_DERIVATIVE, "USD",
-                D("0.1"), D("0.001"), D("0.001"), D("5"),
+                "SIM",
+                "ETH-USD-SWAP",
+                AssetClass.CRYPTO,
+                ContractKind.LINEAR_DERIVATIVE,
+                "USD",
+                D("0.1"),
+                D("0.001"),
+                D("0.001"),
+                D("5"),
             ),
-            Side.BUY, D("1.000"),
+            Side.BUY,
+            D("1.000"),
         )
     with pytest.raises(ValueError, match="step"):
         estimate_displayed_taker_capacity(snap, instrument(), Side.SELL, D("0.0001"))
