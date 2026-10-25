@@ -15,6 +15,8 @@ After the standard `uv sync --frozen --extra dev` installation, no broker creden
 ```sh
 uv run python -m lab.markets demo
 uv run python -m lab.markets demo --side buy --quantity 0.001 --balance 1000
+uv run python -m lab.markets demo --journal ./results/offline-reference.sqlite3
+uv run python -m lab.markets recover --journal ./results/offline-reference.sqlite3
 ```
 
 Both commands run a **synthetic** trade fixture and a next-observed-trade simulator, demonstrating long/short
@@ -27,7 +29,14 @@ For real, **read-only**, public OKX Europe completed one-minute candles (require
 
 ```sh
 uv run python -m lab.markets candles --instrument BTC-USDT --limit 20
+uv run python -m lab.markets candles --instrument BTC-USDT --limit 100 --store ./results/candle-catalog
 ```
+
+A stored OFFLINE_SIM journal can be deterministically verified and resumed only with **matching account,
+instrument, fee, and risk assumptions**; truncated or inconsistent evidence is rejected. This is local
+reference-simulator recovery, not broker/exchange reconciliation. Existing journals are never silently reset.
+The optional candle catalog stores immutable, SHA-256-addressed UTC-day Parquet partitions and preserves
+missing-interval metadata, but it does **not** qualify their source completeness or order-execution quality.
 
 This does not trade or backtest those candles; it deliberately excludes unfinished bars, and historical
 bar OHLCV is not sufficient to simulate realistic exchange fills. See the D2/D3/D6 gates in the design.

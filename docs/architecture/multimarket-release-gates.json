@@ -28,14 +28,16 @@
         "tests/test_markets_accounting_transitions.py",
         "tests/test_markets_provenance_isolation.py",
         "tests/test_markets_data_parity.py",
-        "docs/audits/2026-10-25-institutional-flow-open-source-review.md"
+        "docs/audits/2026-10-25-institutional-flow-open-source-review.md",
+        "src/lab/markets/recovery.py",
+        "tests/test_markets_recovery.py"
       ],
       "missing": [
-        "verified state reconstruction and crash replay",
         "broker-quality order book / partial fill and liquidation stress models",
-        "independent execution/funding/mark data provenance"
+        "independent execution/funding/mark data provenance",
+        "independently qualified broker state reconciliation, single-writer lease and torn-power durability"
       ],
-      "notes": "Offline simulator optionally journals marks/intents/fills/funding/cancels and risk rejections; refuses nonempty-journal restart until full replay is implemented. D1 accepted review checkpoints: long/short add/reduce/flip PnL conservation, full reversal fee basis, legacy equity digest isolation, no duplicate agent stack. New tests require CI validation; integration into existing Nautilus agents remains a D2 gate. 2026-10-25 hardening: shared per-trade participation budget, trade/mark distinct event kinds, event-time minute seals, strict EEA candle schema, separate mark tick precision, global event ID dedup, exact CSV replay times, SQLite append-only triggers; added regression tests. These are D1 fixes, not broker-grade fill or recoverable OMS evidence."
+      "notes": "Offline simulator optionally journals marks/intents/fills/funding/cancels and risk rejections; refuses nonempty-journal restart until full replay is implemented. D1 accepted review checkpoints: long/short add/reduce/flip PnL conservation, full reversal fee basis, legacy equity digest isolation, no duplicate agent stack. New tests require CI validation; integration into existing Nautilus agents remains a D2 gate. 2026-10-25 hardening: shared per-trade participation budget, trade/mark distinct event kinds, event-time minute seals, strict EEA candle schema, separate mark tick precision, global event ID dedup, exact CSV replay times, SQLite append-only triggers; added regression tests. These are D1 fixes, not broker-grade fill or recoverable OMS evidence. Exact OFFLINE-only journal replay is now implemented using immutable session fingerprints and event-by-event deterministic recomputation; it rejects missing derived fills and mismatched fee/risk inputs. No external broker recovery is implied."
     },
     {
       "id": "D2-market-data",
@@ -45,15 +47,17 @@
         "src/lab/markets/okx_public.py",
         "tests/test_markets_okx_public.py",
         "src/lab/markets/minute_batch.py",
-        "tests/test_markets_minute_batch.py"
+        "tests/test_markets_minute_batch.py",
+        "src/lab/markets/catalog.py",
+        "tests/test_markets_catalog.py"
       ],
       "missing": [
         "streaming trade/quote feed",
-        "immutable daily Parquet catalogs",
         "source completeness + market-data reconciliation",
-        "Nautilus bridge"
+        "Nautilus bridge",
+        "independent raw feed capture with qualified completeness and source revisions"
       ],
-      "note": "The public OKX EEA candles CLI is read-only. Accurate derivative trading still requires quote, independent mark/index and funding sources, venue qualifications, immutable Parquet catalogs and Nautilus bridge. See institutional flow audit."
+      "note": "The public OKX EEA candles CLI is read-only. Accurate derivative trading still requires quote, independent mark/index and funding sources, venue qualifications, immutable Parquet catalogs and Nautilus bridge. See institutional flow audit. Local immutable daily confirmed-candle Parquet partitions with SHA-256 and gap metadata are implemented; this is not a complete raw L2/trade/mark/funding replay source."
     },
     {
       "id": "D3-externally-hosted-demo",

@@ -9,15 +9,15 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from decimal import Decimal
-from contextlib import nullcontext
 from importlib.resources import files
 from pathlib import Path
 
 from lab.markets.domain import AssetClass, ContractKind, Instrument, MarkPrice, OrderIntent, Side, Trade
-from lab.markets.minute import MinuteBuilder
 from lab.markets.journal import EventJournal
+from lab.markets.minute import MinuteBuilder
 from lab.markets.recovery import recover_offline
 from lab.markets.simulator import OfflineSimulator
 
@@ -133,6 +133,7 @@ def main() -> None:
     c = sub.add_parser("candles", help="READ-ONLY OKX EEA public confirmed 1m candles")
     c.add_argument("--instrument", default="BTC-USDT")
     c.add_argument("--limit", type=int, default=20)
+    c.add_argument("--store", type=Path, help="save verified local checksum-addressed Parquet partitions")
     args = parser.parse_args()
     if args.command == "demo":
         sample = files("lab.markets").joinpath("fixture.csv")
@@ -151,6 +152,11 @@ def main() -> None:
         from lab.markets.okx_public import latest_confirmed_candles
 
         observed = latest_confirmed_candles(args.instrument, limit=args.limit)
+        manifests = ()
+        if args.store is not None and observed:
+            from lab.markets.catalog import write_confirmed_candles
+
+            manifests = write_confirmed_candles(args.store, observed)
         print(
             json.dumps(
                 {
@@ -159,6 +165,8 @@ def main() -> None:
                     "count": len(observed),
                     "unconfirmed_excluded": True,
                     "execution_supported": False,
+                    "catalog_manifests": [str(path) for path in manifests],
+                    "catalog_qualified_for_execution": False,
                     "candles": [
                         {
                             "start_ns": bar.start_ns,
