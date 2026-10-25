@@ -27,6 +27,17 @@ from lab.markets.nautilus_instruments import LinearContractDefinition, to_nautil
 _MAX_EVENTS = 10_000
 
 
+def _fingerprint(event) -> tuple[str, ...]:
+    """Exact native event identity and economics; never reduce delivery proof to counts."""
+    kind = type(event).__name__
+    common = (str(event.instrument_id), str(event.ts_event), str(event.ts_init))
+    if kind == "TradeTick":
+        return ("trade", *common, str(event.trade_id), str(event.price), str(event.size))
+    if kind == "MarkPriceUpdate":
+        return ("mark", *common, str(event.value))
+    raise TypeError("unexpected event type in native replay")
+
+
 class _ReadOnlyTapeObserver(DataActor):
     """Native actor used only to verify true exchange/clock event delivery."""
 
@@ -36,18 +47,25 @@ class _ReadOnlyTapeObserver(DataActor):
         self.trades = 0
         self.marks = 0
         self.received_ns: list[int] = []
+        self.clock_samples_ns: list[int] = []
+        self.delivered_fingerprints: list[tuple[str, ...]] = []
 
     def on_start(self) -> None:
         self.subscribe_trades(self._instrument_id)
         self.subscribe_mark_prices(self._instrument_id)
 
+    def _record(self, event) -> None:
+        self.clock_samples_ns.append(self.clock.timestamp_ns())
+        self.received_ns.append(event.ts_init)
+        self.delivered_fingerprints.append(_fingerprint(event))
+
     def on_trade(self, tick) -> None:
         self.trades += 1
-        self.received_ns.append(tick.ts_init)
+        self._record(tick)
 
     def on_mark_price(self, mark) -> None:
         self.marks += 1
-        self.received_ns.append(mark.ts_init)
+        self._record(mark)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +78,8 @@ class NativeReadOnlyReplay:
     maker_fee_rate: Decimal
     taker_fee_rate: Decimal
     native_data_engine_used: bool = True
+    event_integrity_verified: bool = False
+    clock_receipt_verified: bool = False
     fees_charged_verified: bool = False
     broker_execution_enabled: bool = False
     strategies_qualified: bool = False
@@ -87,6 +107,8 @@ def replay_native_observations(
         raise ValueError("pilot may not claim qualified execution data")
     if not 0 < len(tape.events) <= _MAX_EVENTS:
         raise ValueError("native pilot requires bounded, nonempty data")
+    if spec.observed_ns > tape.events[0].ts_init:
+        raise ValueError("contract metadata was received after the first replay observation")
     if not isinstance(collateral, Decimal):
         raise TypeError("collateral must be an exact Decimal")
     positive(decimal(collateral), "starting collateral")
@@ -133,8 +155,10 @@ def replay_native_observations(
         engine.run()
         if observer.trades != expected_trades or observer.marks != expected_marks:
             raise ValueError("Nautilus data engine did not deliver the full observed tape")
-        if observer.received_ns != sorted(observer.received_ns):
-            raise ValueError("Nautilus replay reordered receipt-time observations")
+        if observer.delivered_fingerprints != [_fingerprint(event) for event in tape.events]:
+            raise ValueError("Nautilus replay altered event contents or receipt-order delivery")
+        if observer.clock_samples_ns != observer.received_ns:
+            raise ValueError("Nautilus actor clock disagrees with observation receipt times")
         if not observer.received_ns:
             raise ValueError("Nautilus did not deliver the provided tape")
         return NativeReadOnlyReplay(
@@ -145,6 +169,8 @@ def replay_native_observations(
             last_received_ns=observer.received_ns[-1],
             maker_fee_rate=spec.maker_fee_bps / Decimal("10000"),
             taker_fee_rate=spec.taker_fee_bps / Decimal("10000"),
+            event_integrity_verified=True,
+            clock_receipt_verified=True,
         )
     finally:
         engine.dispose()
