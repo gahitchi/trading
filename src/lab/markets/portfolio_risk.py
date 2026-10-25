@@ -183,9 +183,7 @@ def preflight_pending(
     # Every position is evaluated even when the caller supplies no new orders.
     for fractions in product(_STEPS, repeat=len(pending)):
         evaluated += 1
-        holdings = {
-            iid: (state.quantity, state.entry_price) for iid, state in instrument_by_id.items()
-        }
+        holdings = {iid: (state.quantity, state.entry_price) for iid, state in instrument_by_id.items()}
         projected_equity = equity
         for order, fraction in zip(pending, fractions, strict=True):
             if not fraction:
@@ -202,9 +200,7 @@ def preflight_pending(
             fill_price = px * (1 + signed_slip)
             transition = linear_transition(q, entry, delta, fill_price, state.instrument.multiplier)
             old_marked = linear_unrealized(q, entry, px, state.instrument.multiplier)
-            new_marked = linear_unrealized(
-                transition.position, transition.entry_price, px, state.instrument.multiplier
-            )
+            new_marked = linear_unrealized(transition.position, transition.entry_price, px, state.instrument.multiplier)
             fee = abs(delta) * fill_price * state.instrument.multiplier * cap.fee_bps / _BPS
             projected_equity += transition.realized_pnl + new_marked - old_marked - fee
             holdings[order.instrument_id] = (transition.position, transition.entry_price)
