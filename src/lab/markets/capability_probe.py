@@ -14,7 +14,7 @@ import json
 def inspect_adapters() -> dict:
     result = {"nautilus_trader_version": importlib.metadata.version("nautilus_trader"), "adapters": {}}
     for name, symbols in {
-        "okx": ("OKXRegion", "OKXEnvironment", "OKXDataClientConfig", "OKXExecClientConfig"),
+        "okx": ("OKXRegion", "OKXEnvironment", "OKXDataClientConfig", "OKXExecClientConfig", "OKXExecutionClientConfig"),
         "alpaca": ("AlpacaDataClientConfig", "AlpacaExecClientConfig"),
         "interactive_brokers": ("InteractiveBrokersDataClientConfig", "InteractiveBrokersExecutionClientConfig"),
         "ctrader": (),
@@ -25,7 +25,11 @@ def inspect_adapters() -> dict:
             result["adapters"][name] = {"importable": False, "error": type(exc).__name__}
             continue
         export_names = set(dir(module))
-        data = {"importable": True, "requested_symbols": {s: s in export_names for s in symbols}}
+        data = {
+            "importable": True,
+            "requested_symbols": {s: s in export_names for s in symbols},
+            "client_exports": sorted(s for s in export_names if "Client" in s and ("Config" in s or "Factory" in s)),
+        }
         for enum_name in ("OKXRegion", "OKXEnvironment"):
             enum = getattr(module, enum_name, None)
             if enum is not None:
