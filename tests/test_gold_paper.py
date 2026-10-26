@@ -64,6 +64,7 @@ def test_owned_gold_without_stop_or_target_is_closed(tmp_path):
     assert "unresolved" in fake.status
     assert read_halt(tmp_path / "HALT")["kind"] == "reconciliation_mismatch"
 
+
 def test_stale_buy_emergency_cover_is_not_treated_as_an_entry(tmp_path):
     """An aged BUY market cover for a short must remain working until reconciled."""
     from nautilus_trader.model import OrderSide, OrderType
