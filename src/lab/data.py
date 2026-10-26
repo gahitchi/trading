@@ -237,7 +237,9 @@ def quality_warning(q: dict) -> str | None:
         )
     for ticker, d in (q.get("delistings") or {}).items():
         if d.get("assumed"):
-            issues.append(f"{ticker} delisting recovery ASSUMED {d['delist_return']:.0%} (no vendor value; not a tradable fill)")
+            issues.append(
+                f"{ticker} delisting recovery ASSUMED {d['delist_return']:.0%} (no vendor value; not a tradable fill)"
+            )
     return "; ".join(issues) or None
 
 
