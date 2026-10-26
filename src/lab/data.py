@@ -237,7 +237,7 @@ def quality_warning(q: dict) -> str | None:
         )
     for ticker, d in (q.get("delistings") or {}).items():
         if d.get("assumed"):
-            issues.append(f"{ticker} delisting settled at an ASSUMED {d['delist_return']:.0%} return (no vendor value)")
+            issues.append(f"{ticker} delisting recovery ASSUMED {d['delist_return']:.0%} (no vendor value; not a tradable fill)")
     return "; ".join(issues) or None
 
 
@@ -256,10 +256,10 @@ def delistings_path(cfg: LabConfig) -> Path:
 def save_delistings(cfg: LabConfig, path: str | Path) -> pd.DataFrame:
     """CSV of ticker, delist_date, delist_type, delist_return, settlement_price, source (Gemini audit F-R09).
 
-    Every row needs its vendor (`source`). A delisting is settled at settlement_price, else at the last close
-    x (1 + delist_return). A performance-related one (type bankruptcy, distress, performance, liquidation) with
-    neither value is settled at an ASSUMED -30% (Shumway, 1997) and flagged in every result; any other type
-    needs a value."""
+    Every row needs its vendor (`source`). A recorded settlement_price (or last close x
+    (1 + delist_return)) is recovery *metadata*, not a tradable quote. For distress with no
+    value, an ASSUMED -30% research scenario (Shumway, 1997) is recorded and warned
+    about; no simulated market settlement is authorized. Other delisting types need a value."""
     df = pd.read_csv(path, dtype=str).rename(columns=str.lower).fillna("")
     missing = set(DELISTING_COLUMNS) - set(df.columns)
     if missing:
@@ -293,7 +293,7 @@ def save_delistings(cfg: LabConfig, path: str | Path) -> pd.DataFrame:
 
 
 def delistings(cfg: LabConfig) -> dict[str, dict] | None:
-    """Read immutable settlement evidence; reject malformed/tampered records.
+    """Read persisted settlement metadata; reject malformed/tampered records.
 
     Validation on initial import is insufficient because the stored CSV can
     change after it has been approved for research.
