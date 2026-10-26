@@ -131,14 +131,18 @@ class PortableSourceFenceTests(unittest.TestCase):
         frame = self.appended(self.fence, SourceChannel.ORDERS, "order-1")
         forged = replace(frame.frames[0], sequence=3)
         forged = replace(forged, digest=frame_sha256(frame, forged))
-        fence = replace(frame, frames=(forged,), ends=(CursorAnchor(SourceChannel.ORDERS, 3, forged.digest), *frame.ends[1:]))
+        fence = replace(
+            frame, frames=(forged,), ends=(CursorAnchor(SourceChannel.ORDERS, 3, forged.digest), *frame.ends[1:])
+        )
         self.assertIn("SOURCE_CURSOR_GAP_OR_REORDER", self.evaluate(fence).findings)
 
     def test_breaking_previous_digest_fails_even_with_recomputed_frame_hash(self):
         first = self.appended(self.fence, SourceChannel.ORDERS, "order-1")
         broken = replace(first.frames[0], previous_digest=HASH)
         broken = replace(broken, digest=frame_sha256(first, broken))
-        fence = replace(first, frames=(broken,), ends=(CursorAnchor(SourceChannel.ORDERS, 1, broken.digest), *first.ends[1:]))
+        fence = replace(
+            first, frames=(broken,), ends=(CursorAnchor(SourceChannel.ORDERS, 1, broken.digest), *first.ends[1:])
+        )
         self.assertIn("SOURCE_CURSOR_HASH_BREAK", self.evaluate(fence).findings)
 
     def test_altered_payload_without_recomputing_digest_fails(self):
@@ -154,10 +158,13 @@ class PortableSourceFenceTests(unittest.TestCase):
         self.assertIn("FENCE_END_CURSOR_MISMATCH", self.evaluate(truncated).findings)
 
     def test_caller_supplied_new_cursor_anchor_does_not_match_prior_epoch(self):
-        changed = replace(self.fence, anchors=tuple(
-            CursorAnchor(item.channel, 1, HASH) if item.channel is SourceChannel.ORDERS else item
-            for item in self.fence.anchors
-        ))
+        changed = replace(
+            self.fence,
+            anchors=tuple(
+                CursorAnchor(item.channel, 1, HASH) if item.channel is SourceChannel.ORDERS else item
+                for item in self.fence.anchors
+            ),
+        )
         self.assertIn("FENCE_INITIAL_CURSOR_MISMATCH", self.evaluate(changed).findings)
 
     def test_swap_snapshot_content_is_detected_by_bound_fingerprint(self):

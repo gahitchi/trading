@@ -60,9 +60,7 @@ def reported_snapshot_sha256(snapshot: ReportedSnapshot) -> str:
         "asof_ns": snapshot.asof_ns,
         "available_ns": snapshot.available_ns,
         "position": str(snapshot.position),
-        "orders": [
-            [o.client_order_id, o.broker_order_id, o.status, str(o.cumulative_filled)] for o in snapshot.orders
-        ],
+        "orders": [[o.client_order_id, o.broker_order_id, o.status, str(o.cumulative_filled)] for o in snapshot.orders],
         "executions": [
             [e.client_order_id, e.execution_id, str(e.quantity), e.exchange_ns, e.available_ns]
             for e in snapshot.executions
