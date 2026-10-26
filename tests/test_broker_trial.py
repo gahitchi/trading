@@ -34,7 +34,9 @@ def scoped(asset: TrialAsset = TrialAsset.EQUITY, kind: TrialContract = TrialCon
 
 
 def evidence(scope: TrialScope, *, captured: int = NOW, status: ProbeStatus = ProbeStatus.OBSERVED):
-    return tuple(ProbeEvidence(scope, kind, status, captured, HASH) for kind in sorted(scope.required(), key=lambda k: k.value))
+    return tuple(
+        ProbeEvidence(scope, kind, status, captured, HASH) for kind in sorted(scope.required(), key=lambda k: k.value)
+    )
 
 
 class BrokerTrialTests(unittest.TestCase):
