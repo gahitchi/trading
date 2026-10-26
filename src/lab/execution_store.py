@@ -45,12 +45,6 @@ class History(MutableMapping):
             # replacement must not erase a conflicting receipt before save().
             if key in self.dirty and self.dirty[key] != value:
                 raise ValueError("conflicting applied trade ID in pending execution history")
-            with self.store.connect() as db:
-                old = db.execute(
-                    "SELECT value FROM history WHERE bucket='applied' AND id=?", (key,)
-                ).fetchone()
-            if old is not None and json.loads(old[0]) != value:
-                raise ValueError("conflicting applied trade ID in committed execution history")
         self.dirty[key] = value
 
     def __delitem__(self, key):
