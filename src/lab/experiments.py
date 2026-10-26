@@ -272,6 +272,25 @@ def register_trial(
         # Hash exactly the file used by the DSR correlation correction. The
         # append is also under the per-fingerprint lock, to serialize writers.
         digest = _trial_file_digest(path)
+        history = _trial_events(cfg)
+        former = {
+            event["returns_sha256"]
+            for event in history
+            if event["fingerprint"] == fingerprint and event.get("returns_sha256")
+        }
+        if former and former != {digest}:
+            append_json(
+                _trials_path(cfg),
+                {
+                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                    "dataset": key,
+                    "fingerprint": fingerprint,
+                    "label": label,
+                    "status": "conflict",
+                    "sharpe_daily": None,
+                },
+            )
+            raise ValueError("previously completed trial bytes changed: identity quarantined")
         append_json(
             _trials_path(cfg),
             {
@@ -341,11 +360,23 @@ def _trial_integrity_issue(cfg: LabConfig, row: dict) -> str | None:
     return None
 
 
+def _trial_conflicts(events: list[dict]) -> set[str]:
+    histories = {}
+    conflicts = set()
+    for row in events:
+        fingerprint = row["fingerprint"]
+        if row.get("status") == "conflict":
+            conflicts.add(fingerprint)
+        if row.get("status") == "complete" and row.get("returns_sha256"):
+            histories.setdefault(fingerprint, set()).add(row["returns_sha256"])
+    return conflicts | {fp for fp, digests in histories.items() if len(digests) > 1}
+
+
 def trial_registry_status(cfg: LabConfig) -> dict:
     """Read-only operator diagnostics; never hide or delete an attempted trial."""
     events = _trial_events(cfg)
     latest = {row["fingerprint"]: row for row in events}
-    conflicts = {row["fingerprint"] for row in events if row.get("status") == "conflict"}
+    conflicts = _trial_conflicts(events)
     issues = []
     completed = 0
     for fingerprint, row in sorted(latest.items()):
@@ -374,7 +405,7 @@ def trial_registry_status(cfg: LabConfig) -> dict:
 def _latest_trials(cfg: LabConfig) -> dict[str, float]:
     events = _trial_events(cfg)
     latest = {row["fingerprint"]: row for row in events}
-    conflicts = {row["fingerprint"] for row in events if row.get("status") == "conflict"}
+    conflicts = _trial_conflicts(events)
     for fingerprint, row in latest.items():
         issue = "nonrepeatable trial identity quarantined" if fingerprint in conflicts else _trial_integrity_issue(cfg, row)
         if issue:
