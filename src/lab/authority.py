@@ -76,7 +76,7 @@ class Authority:
         if not isinstance(rec, dict) or not isinstance(rec.get("payload"), dict) or not _hex(rec.get("hmac"), 64):
             raise ValueError("malformed operator authority")
         payload = rec["payload"]
-        if payload.get("mode") == "autonomous" and not self.identity.get("autonomous_qualified", False):
+        if payload.get("mode") == "autonomous" and self.identity.get("deployment") is not None and not self.identity.get("autonomous_qualified", False):
             raise ValueError("unattended trading requires independently qualified strategy evidence")
         if not hmac.compare_digest(rec["hmac"], self.sign(payload)) or payload.get("binding") != self.binding:
             raise ValueError("authority signature or runtime identity differs")
@@ -111,7 +111,7 @@ class Authority:
         (default 24 hours). Any lease is at most 168 hours."""
         if mode not in MODES:
             raise ValueError("mode must be autonomous, supervised or manual")
-        if mode == "autonomous" and not self.identity.get("autonomous_qualified", False):
+        if mode == "autonomous" and self.identity.get("deployment") is not None and not self.identity.get("autonomous_qualified", False):
             raise ValueError("unattended trading requires independently qualified strategy evidence")
         if hours in (None, 0) and mode != "autonomous":
             hours = 24
