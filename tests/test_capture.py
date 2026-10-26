@@ -120,9 +120,7 @@ def test_bundle_exports_the_authoritative_sqlite_ledger_and_sanitize_pseudonymiz
     raw_ids = list(h.broker().state["orders"]) + [f["trade_id"] for f in h.broker().state["fills"]]
     # The identifier must not survive as an independent token; an ISO
     # timestamp like 2026-10-26T20:00 contains "T2" as a harmless substring.
-    leaked = [
-        i for i in raw_ids if re.search(r"(?<![A-Za-z0-9])" + re.escape(i) + r"(?![A-Za-z0-9])", text)
-    ]
+    leaked = [i for i in raw_ids if re.search(r"(?<![A-Za-z0-9])" + re.escape(i) + r"(?![A-Za-z0-9])", text)]
     assert raw_ids and not leaked  # IDs remain scrubbed without corrupting timestamps
     assert "CLIENT-" in text and "TRADE-" in text
 
