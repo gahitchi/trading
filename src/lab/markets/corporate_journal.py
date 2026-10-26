@@ -97,18 +97,14 @@ class CorporateSession:
                 ) from exc
         return book
 
-    def recognize(
-        self, action: CashTermination, reconciliation: ReconciledBook, *, observed_ns: int
-    ) -> CorporateBook:
+    def recognize(self, action: CashTermination, reconciliation: ReconciledBook, *, observed_ns: int) -> CorporateBook:
         next_book = recognize(self.book, action, reconciliation, observed_ns=observed_ns)
         payload = {
             "action": action.record(),
             "reconciliation": reconciliation.record(),
             "book_digest": _digest(next_book.record()),
         }
-        self.journal.append(
-            _event_id("corp-action", action.action_id), "corporate_action", observed_ns, payload
-        )
+        self.journal.append(_event_id("corp-action", action.action_id), "corporate_action", observed_ns, payload)
         self.book = next_book
         return next_book
 
