@@ -120,6 +120,22 @@ class PortableReconciliationTests(unittest.TestCase):
         self.assertEqual(self.session.state_digest(), before)
         self.assertEqual(self.session.reserved_reduction, Decimal("1.75"))
 
+    def test_reconciliation_report_cannot_be_constructed_with_authority(self):
+        self.placed()
+        report = compare_reported_snapshot(self.session, self.snapshot())
+        self.assertFalse(report.source_authenticated)
+        self.assertFalse(report.broker_authorization)
+        self.assertFalse(report.release_reservations)
+        with self.assertRaises(TypeError):
+            type(report)(
+                account_scope="OFFLINE_TEST_ACCT",
+                snapshot_id="S1",
+                findings=(),
+                broker_authorization=True,
+            )
+        with self.assertRaises((AttributeError, TypeError)):
+            report.release_reservations = True
+
     def test_reported_position_disagrees_even_if_order_history_matches(self):
         self.placed()
         outcome = compare_reported_snapshot(self.session, self.snapshot(position=Decimal("5")))
