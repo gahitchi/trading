@@ -169,6 +169,40 @@ def config_fingerprint(cfg: LabConfig, n_tickers: int = 1, *, bound_risk: bool =
     return hashlib.sha256(json.dumps(ident, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
+def reserve_trial(
+    cfg: LabConfig,
+    key: str,
+    spec: SignalSpec,
+    data_digest: str,
+    *,
+    bound_risk: bool = False,
+) -> None:
+    """Durably record a candidate BEFORE its results can be observed.
+
+    An interrupted/unresolved trial must prevent statistical promotion rather
+    than vanish from the denominator of the Deflated Sharpe Ratio. A completed
+    retry of the identical artifact/config/dataset supersedes its reservation.
+    """
+    from lab.persistence import append_json
+    from lab.provenance import simulation_digest
+
+    fingerprint = (
+        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:"
+        f"{simulation_digest()}:{data_digest}"
+    )
+    append_json(
+        _trials_path(cfg),
+        {
+            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "dataset": key,
+            "fingerprint": fingerprint,
+            "label": spec.name,
+            "status": "started",
+            "sharpe_daily": None,
+        },
+    )
+
+
 def register_trial(
     cfg: LabConfig,
     key: str,
@@ -204,6 +238,7 @@ def register_trial(
             "dataset": key,
             "fingerprint": fingerprint,
             "label": label,
+            "status": "complete",
             "sharpe_daily": sr,
         },
     )
@@ -222,8 +257,14 @@ def _latest_trials(cfg: LabConfig) -> dict[str, float]:
         t = json.loads(line)
         # Workspace-wide family: changing labels, dates or universe cannot
         # erase earlier selection. New workspaces are explicit new protocols.
-        latest[t["fingerprint"]] = t["sharpe_daily"]
-    return latest
+        latest[t["fingerprint"]] = t
+    unfinished = [key for key, row in latest.items() if row.get("status") == "started"]
+    if unfinished:
+        raise ValueError(
+            f"unresolved candidate evaluation ({len(unfinished)} trial(s)): "
+            "rerun the exact candidate or reconcile the attempted trials before qualification"
+        )
+    return {key: row["sharpe_daily"] for key, row in latest.items()}
 
 
 def trial_sharpes(cfg: LabConfig, key: str) -> list[float]:
@@ -305,24 +346,28 @@ def _compare(
         guard_intraday(cfg, period, frames, holdout_ok=holdout_ok)
         # The control really holds: buy-and-hold at the same speed, through the nights (no flat-at-close).
         control_cfg = replace(cfg, trading=replace(cfg.trading, flat_at_close=False))
-    results = [run_spec(
-        control_cfg, BASELINE, tickers, frames, period, "buy_and_hold (control)", speed, bound_risk=bound_risk
-    )]
     cand_specs = [s for s in specs if s != BASELINE]
-    results += [run_spec(cfg, s, tickers, frames, period, speed=speed, bound_risk=bound_risk) for s in cand_specs]
     end = period.end or max(f.index[-1] for f in frames.values()).date()
     key = dataset_key(period, str(period.start), str(end), tickers)
     if not sp.daily:
         key = f"{sp.name}|{key}"  # intraday trials are their own family
+    if register:
+        from lab.provenance import frame_digest
+
+        dataset_digest = frame_digest(frames)
+        for spec in cand_specs:
+            reserve_trial(cfg, key, spec, dataset_digest, bound_risk=bound_risk)
+    results = [run_spec(
+        control_cfg, BASELINE, tickers, frames, period, "buy_and_hold (control)", speed, bound_risk=bound_risk
+    )]
+    results += [run_spec(cfg, s, tickers, frames, period, speed=speed, bound_risk=bound_risk) for s in cand_specs]
 
     if any(r.metrics.get("insolvent") for r in results):
         raise ValueError("comparison not qualified: insolvent equity cannot enter significance calculations")
     actives = [active_returns(r, results[0]) for r in results[1:]]
     if register:
         for s, r, act in zip(cand_specs, results[1:], actives, strict=True):
-            from lab.provenance import frame_digest
-
-            register_trial(cfg, key, s, r.label, act, frame_digest(frames), bound_risk=bound_risk)
+            register_trial(cfg, key, s, r.label, act, dataset_digest, bound_risk=bound_risk)
     trials = trial_sharpes(cfg, key)
     n_eff = effective_trials(cfg) if trials else None
     trials = trials or [stats.moments(a.to_numpy())[0] for a in actives]
