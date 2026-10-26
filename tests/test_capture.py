@@ -119,3 +119,43 @@ def test_bundle_exports_the_authoritative_sqlite_ledger_and_sanitize_pseudonymiz
     raw_ids = list(h.broker().state["orders"]) + [f["trade_id"] for f in h.broker().state["fills"]]
     assert raw_ids and not [i for i in raw_ids if i in text]  # every order and trade ID pseudonymized
     assert "CLIENT-" in text and "TRADE-" in text
+
+
+def test_sanitizer_pseudonymizes_trade_ids_mentioned_in_other_files_free_text(tmp_path):
+    """An ID known only from a *later* file must be scrubbed from earlier free text."""
+    src, dst = tmp_path / "raw", tmp_path / "clean"
+    src.mkdir()
+    (src / "01-risk.json").write_text(
+        json.dumps({"kind": "fill_recovered", "detail": "A BUY trade T2 filled while offline; order X-123"})
+    )
+    (src / "02-orders.json").write_text(
+        json.dumps(
+            {"broker": {"trade_id": "T2", "client_order_id": "X-123"},
+             "pending": {"X-123": {"ticker": "A", "side": "BUY", "qty": 2}}}
+        )
+    )
+    manifest = capture.sanitize(src, dst, tmp_path / "private" / "key")
+    risk = json.loads((dst / "01-risk.json").read_text())
+    orders = json.loads((dst / "02-orders.json").read_text())
+    assert "T2" not in json.dumps(risk)
+    assert "X-123" not in json.dumps(risk)
+    assert orders["broker"]["trade_id"] in risk["detail"]
+    assert orders["broker"]["client_order_id"] in risk["detail"]
+    assert manifest["manual_review_required"] and manifest["reviewer_attestation"] is None
+
+
+def test_sanitizer_handles_overlapping_execution_ids_in_text_and_jsonl(tmp_path):
+    src, dst = tmp_path / "raw", tmp_path / "clean"
+    src.mkdir()
+    (src / "risk.jsonl").write_text(
+        json.dumps({"detail": "Broker reports T23 and T2; ambiguous short IDs"}) + "\n"
+    )
+    (src / "trades.json").write_text(
+        json.dumps({"rows": [{"trade_id": "T23"}, {"trade_id": "T2"}]})
+    )
+    capture.sanitize(src, dst, tmp_path / "private" / "key")
+    note = (dst / "risk.jsonl").read_text()
+    rows = json.loads((dst / "trades.json").read_text())["rows"]
+    assert "T2" not in note and "T23" not in note
+    assert rows[0]["trade_id"] in note
+    assert rows[1]["trade_id"] in note
