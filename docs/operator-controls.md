@@ -1,13 +1,22 @@
 # Paper operating controls
 
-`lab paper` starts autonomous paper operation on the first run. It creates a local
-mandate bound to the account, strategy artifacts, universe and implementation identity.
-An autonomous mandate is **standing** by default: it does not expire, because unattended,
-continuous trading is the base (Gabriel, C003). A time limit is opt-in: `--authority-hours N`
-(at most 168) issues an autonomous lease, and supervised and manual mandates are always leases
-(default 24 hours). A restart preserves the mandate and never renews an expired lease.
-Revoke a standing mandate by issuing another (`lab control renew --mode supervised`), or stop
-trading with `lab kill`. Real-money accounts remain prohibited.
+`lab paper` uses the same paper-only engine in supervised, manual and autonomous
+modes. **Supervised paper is the default in the guided UI and Docker Compose**, and
+requires an explicit approval for each proposed order. Built-in strategies are not
+unattended merely because their code runs successfully. An autonomous mandate is
+available only for a separately approved one-strategy daily policy with matching
+train/test research, point-in-time data, source integrity, exact risk/capital settings,
+and a valid on-disk approval manifest. Run `lab research qualify-builtin` to evaluate
+an eligible built-in; results that fail are never promoted. Multiple-strategy banks
+and quick-speed built-ins remain diagnostic/supervised. Generated research strategies
+still require their existing bound promotion and approval evidence.
+
+After qualification, an autonomous mandate can be standing (no expiry) or given an
+opt-in `--authority-hours N` lease (maximum 168). Supervised and manual mandates
+have 24-hour default leases; restarts never silently renew them. Changing/removing
+the source evidence revokes autonomous permission at the next authority read.
+Use `lab control renew --mode supervised` to replace a standing mandate or
+`lab kill` to stop trading. Real-money accounts remain prohibited.
 
 ```sh
 lab paper --signals sma_trend --tickers SPY QQQ --mode supervised
