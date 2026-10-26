@@ -41,7 +41,7 @@ HASH = "a" * 64
 
 
 class _OpenOnlyConfig(StrategyConfig):
-    def __init__(self, instrument_id, side):
+    def __init__(self, *, instrument_id, side):
         super().__init__()
         self.instrument_id = instrument_id
         self.side = side
@@ -90,7 +90,7 @@ def _fixture(side, *, close=False):
     strategy = (
         _RoundTripProbe(_RoundTripConfig(instrument_id=native.id, quantity=Quantity.from_str("1.000"), entry_side=side))
         if close
-        else _OpenOnly(_OpenOnlyConfig(native.id, side))
+        else _OpenOnly(_OpenOnlyConfig(instrument_id=native.id, side=side))
     )
     engine = BacktestEngine(config=BacktestEngineConfig(logging=LoggerConfig(stdout_level=LogLevel.ERROR)))
     engine.add_venue(
