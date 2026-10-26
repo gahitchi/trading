@@ -13,7 +13,7 @@ from pathlib import Path
 
 from lab.kernel.order_lifecycle import BrokerEvidence, LifecycleError, OfflineOrderSession
 from lab.markets.domain import OrderIntent, Side
-from lab.markets.journal import EventJournal
+from lab.markets.journal import EventJournal, JournalError
 
 ROOT = Path(__file__).resolve().parents[1]
 DIGEST = hashlib.sha256(b"synthetic broker evidence bytes").hexdigest()
@@ -337,6 +337,43 @@ class IndependentLifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(LifecycleError, "quarantined"):
             session.plan(intent("NEW", at=2), action_version="v1")
         journal.close()
+
+    def test_stale_competing_order_session_cannot_append_unchecked(self):
+        left, first = self.open()
+        right, second = self.open()
+        try:
+            first.plan(intent("FIRST", quantity=Decimal("5")), action_version="v1")
+            with self.assertRaisesRegex(LifecycleError, "outside the active order session"):
+                second.plan(intent("SECOND", quantity=Decimal("5"), at=2), action_version="v1")
+            self.assertTrue(second._faulted)
+            with self.assertRaisesRegex(LifecycleError, "quarantined"):
+                second.plan(intent("THIRD", quantity=Decimal("1"), at=3), action_version="v1")
+            second.recover()
+            self.assertFalse(second._faulted)
+            second.plan(intent("SECOND", quantity=Decimal("5"), at=2), action_version="v1")
+            self.assertEqual(len(left.read_all()), 3)
+            self.assertEqual(second.reserved_reduction, Decimal("10"))
+        finally:
+            left.close()
+            right.close()
+
+    def test_sqlite_journal_atomic_head_precondition_blocks_stale_multi_writer(self):
+        first, _session = self.open()
+        with EventJournal(self.path) as other:
+            initial = first.read_all()[-1]["digest"]
+            first.append(
+                "kernel-probe1", "unknown", 2, {"test": "first"},
+                expected_previous_digest=initial,
+            )
+            with self.assertRaisesRegex(JournalError, "journal head advanced"):
+                other.append(
+                    "kernel-probe2", "unknown", 3, {"test": "second"},
+                    expected_previous_digest=initial,
+                )
+            self.assertEqual([e["event_id"] for e in first.read_all()], [
+                "session:independent-order:v1", "kernel-probe1",
+            ])
+        first.close()
 
     def test_cannot_mix_corporate_journal_with_order_journal(self):
         journal, _session = self.open()
