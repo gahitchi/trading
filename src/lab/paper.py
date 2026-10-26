@@ -474,6 +474,10 @@ def build_node(
                 reservation_costs=cfg.costs,
                 reservation_gap=max(p.reservation_gap, cfg.trading.limit_collar),
                 entry_slippage=cfg.trading.limit_collar,
+                # Same capacity policy used by backtest.run; absent bar-volume
+                # evidence must block openings rather than silently remove the cap.
+                max_participation=cfg.costs.max_participation,
+                participation_window=cfg.costs.cost_window,
                 max_order_value=p.max_order_value,
                 max_orders_per_day=p.max_orders_per_day,
                 max_daily_turnover=p.max_daily_turnover,
