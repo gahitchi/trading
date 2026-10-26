@@ -254,20 +254,24 @@ def test_custom_validation_records_the_risk_actually_used(goog_lab, monkeypatch)
     monkeypatch.setattr(worker, "load_config", lambda _: goog_lab)
     monkeypatch.setattr(worker, "available_tickers", lambda _: ["GOOG"])
     monkeypatch.setattr(worker.data, "load_many", lambda *a: {})
-    monkeypatch.setattr(
-        experiments,
-        "compare",
-        lambda *a: (SimpleNamespace(rows=[{}, {"sharpe_edge": 1, "dsr": 1, "signal_errors": 0, "fills": 1}]), []),
-    )
+    observed_bounds = []
+
+    def approved_compare(*args, **kwargs):
+        observed_bounds.append(kwargs.get("bound_risk"))
+        return SimpleNamespace(rows=[{}, {"sharpe_edge": 1, "dsr": 1, "signal_errors": 0, "fills": 1}]), []
+
+    monkeypatch.setattr(experiments, "compare", approved_compare)
     monkeypatch.setattr(experiments, "null_test", lambda *a, **kw: {"p_value": 0})
     from lab import factor_stats
 
     monkeypatch.setattr(factor_stats, "diagnose", lambda *a, **kw: {})  # Stage-0 diagnostics (F-R15) run the signal
     worker.main(["train", str(hdir), "unused"])
     record = json.loads((hdir / "train.json").read_text())
-    effective = experiments.effective_risk(goog_lab, 1)
-    assert record["validation"]["deployment"]["risk"]["max_drawdown"] == effective.max_drawdown
-    assert record["validation"]["deployment"]["risk"]["max_weight"] == effective.max_weight
+    # Custom's relaxed exploratory limits MUST NOT be mistaken for deployable risk.
+    assert observed_bounds == [True]
+    assert record["validation"]["deployment"]["risk"]["max_drawdown"] == goog_lab.risk.max_drawdown
+    assert record["validation"]["deployment"]["risk"]["max_weight"] == goog_lab.risk.max_weight
+    assert experiments.effective_risk(goog_lab, 1).max_weight != goog_lab.risk.max_weight
 
 
 def test_retry_refuses_validation_attempt_even_without_results(goog_lab):
