@@ -25,10 +25,18 @@ recovery situations:
 
 ## New invariants
 
-- An existing SQLite DB with no `snapshot` requires a genuine *legacy
-  import* candidate and an empty execution history. An existing DB with
-  surviving history is **never** resumed by importing old unbound
-  `ledger.json`, even if that projection supplies a plausible cash balance.
+- **Schema v3** adds a durable `recovery_marker.snapshot_seen` field
+  upgraded atomically alongside schema changes. It is initially `0` for
+  never-saved databases and becomes `1` in the **same transaction**
+  committing the first authoritative snapshot. Any later missing snapshot
+  fails, even if the database has no archived fills and both JSON and
+  heartbeat files have disappeared. A truly new unsaved database can still
+  admit two readers; the generation compare-and-swap prevents stale writes.
+- Historical v1/v2 databases are migrated transactionally into v3 using
+  their surviving snapshot state. A legacy first-import candidate may
+  resume only when no history has committed. A database with surviving
+  history is **never** resumed by importing unbound `ledger.json` for
+  its cash balance.
 - A missing diagnostic JSON projection **is not** a reason to discard a
   valid authoritative SQLite snapshot. A missing SQLite database while a
   projection claims an authoritative store remains a hard blocker (G036).
@@ -43,11 +51,13 @@ recovery situations:
 
 - The local SQLite database is not a broker-authenticated execution source,
   and `quick_check` is not a cryptographic integrity mechanism.
-- A completely empty SQLite database with no snapshot but a forged old
-  `ledger.json` **still cannot be conclusively distinguished** from a
-  genuinely interrupted first-time legacy import. This is an explicit
-  remaining limitation until a durable, authenticated migration-intent
-  record exists. Do not use this path for external broker qualification.
+- **Legacy schema caveat:** v1/v2 did not persist a separate
+  `snapshot_seen` marker. A pre-v3 database whose snapshot and history
+  were both erased cannot be conclusively distinguished from a genuinely
+  never-committed legacy import during automatic v3 migration. Schema v3
+  prevents this ambiguity for every snapshot committed under v3, but
+  cannot retroactively authenticate earlier history. Preserve backups and
+  require independent reconciliation before external paper qualification.
 - Hashing a local payload is not proof a provider published it. Cash,
   commissions, short financing, late executions and splits still require
   independent source-bound reconciliation and B01–B08 acceptance.
