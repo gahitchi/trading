@@ -47,8 +47,6 @@ class IndependentLifecycleTests(unittest.TestCase):
         )
 
     def test_plan_is_reservation_not_broker_submission(self):
-        with self.open()[0] as _unused:
-            pass
         journal, session = self.open()
         try:
             planned = session.plan(intent(), action_version="v1")
@@ -71,7 +69,7 @@ class IndependentLifecycleTests(unittest.TestCase):
                 session.plan(intent("SECOND", quantity=Decimal("5"), at=2), action_version="v1")
             session.plan(intent("SECOND", quantity=Decimal("4"), at=2), action_version="v1")
             with self.assertRaisesRegex(LifecycleError, "reverse"):
-                session.plan(intent("WRONG", side=Side.BUY, quantity=Decimal("1")), action_version="v1")
+                session.plan(intent("WRONG", side=Side.BUY, quantity=Decimal("1"), at=3), action_version="v1")
         finally:
             journal.close()
 
@@ -133,7 +131,8 @@ class IndependentLifecycleTests(unittest.TestCase):
             session.request_cancel("FIRST", timestamp_ns=3)
             session.observe("FIRST", "cancel_confirmed", evidence("cancelled", at=4))
             self.assertEqual(session.orders["FIRST"].terminal, "cancelled")
-            self.assertEqual(session.reserved_reduction, Decimal("0"))
+            self.assertEqual(session.reserved_reduction, Decimal("6"))
+            self.assertTrue(session.frozen)
             session.observe(
                 "FIRST", "fill", evidence("late-fill", at=5),
                 quantity=Decimal("2"), execution_id="late-exec"

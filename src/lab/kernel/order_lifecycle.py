@@ -111,6 +111,8 @@ class OrderState:
             raise LifecycleError("filled order must account for entire original quantity")
         if self.terminal == "rejected" and self.filled:
             raise LifecycleError("partial fill cannot become full order rejection")
+        if any(type(flag) is not bool for flag in (self.prepared, self.cancel_requested, self.uncertain)):
+            raise LifecycleError("lifecycle flags require explicit booleans")
 
     @property
     def remaining(self) -> Decimal:
@@ -273,7 +275,10 @@ class OfflineOrderSession:
             elif data["phase"] == "confirmed":
                 if not state.cancel_requested or state.terminal:
                     raise LifecycleError("cancel confirmation must correspond to unresolved cancellation")
-                state = replace(state, terminal="cancelled")
+                # Even a 'cancelled' status is not a complete ordered broker
+                # snapshot. Late fills and other GTC reservations may race.
+                # The v1 kernel has NO verified reconciliation release gate.
+                state = replace(state, terminal="cancelled", uncertain=True)
             else:
                 raise LifecycleError("unrecognized cancel phase")
         elif kind == "reject":
@@ -288,6 +293,49 @@ class OfflineOrderSession:
             raise LifecycleError("unrecognized order lifecycle transition")
         self.orders[oid] = state
 
+    def _verify_event_record(self, kind: str, event_id: str, timestamp_ns: int, data: dict) -> None:
+        """Bind durable IDs, source availability and event shape during replay."""
+        oid = _id(data.get("order_id"), "journal order")
+        if kind == "intent":
+            if set(data) != {"order_id", "intent", "action_version"} or event_id != "plan:" + oid:
+                raise LifecycleError("noncanonical order planning event")
+            if type(data["intent"]) is not dict or data["intent"].get("client_order_id") != oid:
+                raise LifecycleError("unbound original client intent")
+            if timestamp_ns != data["intent"].get("created_ns"):
+                raise LifecycleError("intent timestamp not bound to original intent")
+        elif kind == "submitted":
+            if set(data) != {"order_id", "transport"} or data["transport"] != "offline_no_network":
+                raise LifecycleError("dispatch must remain offline only")
+            if event_id != "prepare:" + oid:
+                raise LifecycleError("dispatch event ID not bound to intent")
+        elif kind == "cancel" and data.get("phase") == "requested":
+            if set(data) != {"order_id", "phase"} or event_id != "cancel-request:" + oid:
+                raise LifecycleError("unbound cancellation request")
+        else:
+            expected_kind = "cancel" if kind == "cancel" else kind
+            fields = {
+                "ack": {"order_id", "source", "broker_order_id"},
+                "fill": {"order_id", "source", "quantity", "execution_id"},
+                "cancel": {"order_id", "source", "phase"},
+                "reject": {"order_id", "source"},
+                "unknown": {"order_id", "source"},
+            }
+            if expected_kind not in fields or set(data) != fields[expected_kind]:
+                raise LifecycleError("unexpected source event fields")
+            if kind == "cancel" and data["phase"] != "confirmed":
+                raise LifecycleError("unexpected source cancellation phase")
+            source = data["source"]
+            if type(source) is not dict or set(source) != set(BrokerEvidence.__dataclass_fields__):
+                raise LifecycleError("broker source evidence missing fields")
+            broker = BrokerEvidence(**source)
+            if broker.action_version != self.action_version or timestamp_ns != broker.available_ns:
+                raise LifecycleError("source event is stale or incompatible with instrument")
+            if event_id != "source:" + _digest({"order_id": oid, "event_id": broker.event_id}):
+                raise LifecycleError("source event identity mismatch")
+            if kind == "fill" and type(data["quantity"]) is not str:
+                raise LifecycleError("fill must be an exact decimal string")
+        _ns(timestamp_ns, "journal observed")
+
     def _post(self, kind: str, *, order_id: str, timestamp_ns: int, data: dict, event_id: str) -> OrderState:
         _id(order_id, "client order ID")
         _id(event_id, "event identity")
@@ -298,6 +346,9 @@ class OfflineOrderSession:
             if self.seen_events[event_id] != signature:
                 raise LifecycleError("conflicting event replay under an existing ID")
             return self.orders[order_id]
+        if timestamp_ns < self.journal.read_all()[-1]["timestamp_ns"]:
+            raise LifecycleError("new journal observation regresses behind prior source availability")
+        self._verify_event_record(kind, event_id, timestamp_ns, full)
         previous_orders = self.orders.copy()
         try:
             self._apply(kind, full)
@@ -375,7 +426,11 @@ class OfflineOrderSession:
         events = self.journal.read_all()
         self.orders = {}
         self.seen_events = {}
+        previous_ts = 0
         for entry in events[1:]:
+            if entry["timestamp_ns"] < previous_ts:
+                raise LifecycleError("event availability timestamp regresses")
+            previous_ts = entry["timestamp_ns"]
             if entry["kind"] not in {"intent", "submitted", "ack", "fill", "cancel", "reject", "unknown"}:
                 raise LifecycleError("foreign journal event in offline order lifecycle")
             payload = entry["payload"]
@@ -386,6 +441,7 @@ class OfflineOrderSession:
                 raise LifecycleError("missing order identity")
             if entry["event_id"] in self.seen_events:
                 raise LifecycleError("duplicate journal event ID")
+            self._verify_event_record(entry["kind"], entry["event_id"], entry["timestamp_ns"], data)
             self._apply(entry["kind"], data)
             if payload["state_sha256"] != self.state_digest():
                 raise LifecycleError("deterministic order-state replay diverged")
