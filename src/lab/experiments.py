@@ -380,7 +380,9 @@ def trial_registry_status(cfg: LabConfig) -> dict:
     issues = []
     completed = 0
     for fingerprint, row in sorted(latest.items()):
-        issue = "nonrepeatable trial identity quarantined" if fingerprint in conflicts else _trial_integrity_issue(cfg, row)
+        issue = (
+            "nonrepeatable trial identity quarantined" if fingerprint in conflicts else _trial_integrity_issue(cfg, row)
+        )
         if issue:
             issues.append(
                 {
@@ -407,7 +409,9 @@ def _latest_trials(cfg: LabConfig) -> dict[str, float]:
     latest = {row["fingerprint"]: row for row in events}
     conflicts = _trial_conflicts(events)
     for fingerprint, row in latest.items():
-        issue = "nonrepeatable trial identity quarantined" if fingerprint in conflicts else _trial_integrity_issue(cfg, row)
+        issue = (
+            "nonrepeatable trial identity quarantined" if fingerprint in conflicts else _trial_integrity_issue(cfg, row)
+        )
         if issue:
             raise ValueError(f"trial {fingerprint[:16]} blocks research qualification: {issue}")
     return {key: row["sharpe_daily"] for key, row in latest.items()}
