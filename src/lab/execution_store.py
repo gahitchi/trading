@@ -6,6 +6,7 @@ ledger.json is a diagnostic projection; ledger.sqlite3 is authoritative once cre
 """
 
 import json
+import math
 import sqlite3
 import time
 from collections.abc import MutableMapping
@@ -20,6 +21,35 @@ def encode(value):
     return json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True)
 
 
+def decode(raw):
+    """Reject malformed SQLite JSON before evaluating any monetary state.
+
+    SQLite page-integrity checks cannot detect logically invalid JSON; Python's
+    default decoder accepts NaN, infinite exponent floats and duplicate keys.
+    """
+
+    def finite_float(value):
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError("nonfinite SQLite execution JSON float")
+        return result
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate SQLite execution JSON key")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError(f"nonfinite SQLite execution JSON constant: {value}")
+
+    return json.loads(
+        raw, parse_float=finite_float, parse_constant=invalid_constant, object_pairs_hook=unique_object
+    )
+
+
 class History(MutableMapping):
     def __init__(self, store, bucket):
         self.store, self.bucket = store, bucket
@@ -29,14 +59,20 @@ class History(MutableMapping):
         if key in self.dirty:
             return self.dirty[key]
         with self.store.connect() as db:
-            row = db.execute("SELECT value FROM history WHERE bucket=? AND id=?", (self.bucket, key)).fetchone()
+            row = db.execute("SELECT value,coid FROM history WHERE bucket=? AND id=?", (self.bucket, key)).fetchone()
         if row is None:
             raise KeyError(key)
-        value = json.loads(row[0])
+        value = decode(row[0])
         if self.bucket == "applied":
+            if not isinstance(value, list):
+                raise ValueError("invalid stored applied execution payload")
             validate_ledger({"cash": 0, "applied_trades": [[key, *value]]})
+            if value[1] != row[1]:
+                raise ValueError("execution history order index and recorded attribution differ")
         else:
             validate_ledger({"cash": 0, self.bucket: {key: value}})
+            if row[1] is not None:
+                raise ValueError("non-applied history cannot carry execution attribution")
         return value
 
     def __setitem__(self, key, value):
@@ -125,7 +161,13 @@ class ExecutionStore:
             row = db.execute("SELECT value,generation FROM snapshot WHERE id=1").fetchone()
             self._expected_snapshot = row[0] if row is not None else None
             self._expected_generation = row[1] if row is not None else 0
-        if existed and self.load() is None and self.projection.exists():
+        if existed and self.load() is None:
+            # An existing database without an authoritative monetary snapshot
+            # cannot be treated as a new account, even if ledger.json and the
+            # heartbeat were deleted. Only a genuine legacy JSON import can
+            # resume after a crash before the first SQLite snapshot commit.
+            if not self.projection.exists():
+                raise ValueError("existing execution database has no snapshot; restore complete runtime backup")
             legacy = read_json(self.projection)
             if legacy.get("authoritative_store"):
                 raise ValueError("execution snapshot missing; restore complete runtime backup")
@@ -157,7 +199,7 @@ class ExecutionStore:
             row = db.execute("SELECT value FROM snapshot WHERE id=1").fetchone()
         if row is None:
             return None
-        state = json.loads(row[0])
+        state = decode(row[0])
         validate_ledger(state)
         if state.get("authoritative_store") != self.path.name:
             raise ValueError("execution snapshot/store binding differs")
