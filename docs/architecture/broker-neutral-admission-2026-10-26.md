@@ -30,7 +30,7 @@ Primary sources, retrieved 2026-10-26:
 
 ## Implementation introduced by this branch
 
-The stdlib-only `lab.markets.broker_trial` module defines:
+The stdlib-only `lab.broker_trial` module defines:
 - A **pinned** paper-only candidate namespace for account, venue, contract
   class/kind, action version, stream epoch, and instrument.
 - An asset-appropriate list of **required provider observations**.
