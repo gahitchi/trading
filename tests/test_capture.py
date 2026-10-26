@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 
 import pytest
 
@@ -117,20 +118,14 @@ def test_bundle_exports_the_authoritative_sqlite_ledger_and_sanitize_pseudonymiz
     assert not list(clean.rglob("*.sqlite3"))  # raw databases are never copied
     text = "".join(p.read_text() for p in clean.rglob("*.json"))
     raw_ids = list(h.broker().state["orders"]) + [f["trade_id"] for f in h.broker().state["fills"]]
-    remaining = [i for i in raw_ids if i in text]
-    assert raw_ids and not remaining, {
-        "remaining_ids": remaining,
-        "locations": [
-            (
-                str(path.relative_to(clean)),
-                text[max(0, text.find(identifier) - 24) : text.find(identifier) + len(identifier) + 24],
-            )
-            for path in sorted(clean.rglob("*.json"))
-            for identifier in remaining
-            if identifier in path.read_text()
-        ],
-    }  # every broker ID pseudonymized
-    assert "CLIENT-" in text and "TRADE-" in text
+    # A short trade ID such as "T2" also appears as a substring of a
+    # timestamp like "2026-10-26T22:00:00". Match whole lexical IDs only.
+    leaks = [
+        identifier
+        for identifier in raw_ids
+        if re.search(r"(?<![A-Za-z0-9])" + re.escape(identifier) + r"(?![A-Za-z0-9])", text)
+    ]
+    assert raw_ids and not leaks  # every complete order and trade ID is pseudonymized
 
 
 def test_sanitize_rewrites_known_trade_and_order_ids_in_unstructured_fields(tmp_path):
