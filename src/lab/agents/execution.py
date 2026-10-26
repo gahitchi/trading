@@ -1281,6 +1281,15 @@ class ExecutionAgent(Strategy):
         """Book one broker fill into the ledger, once per trade ID. Returns False for a repeat."""
         trade = str(ev.trade_id)
         if trade in self.applied:
+            # Trade IDs are replay keys. A broker/reporting collision with
+            # another client order is a reconciliation failure, not an
+            # innocuous duplicate of this fill.
+            previous_order = self.applied[trade][1]
+            if previous_order != str(ev.client_order_id):
+                self._hard_halt(
+                    "reconciliation_mismatch",
+                    f"trade ID {trade} was reported for multiple order IDs; retain original attribution",
+                )
             return False
         qty, px = float(ev.last_qty), float(ev.last_px)
         fee = float(ev.commission.as_double()) if ev.commission is not None else 0.0
@@ -1293,10 +1302,26 @@ class ExecutionAgent(Strategy):
             or px <= 0
             or (info and (info["ticker"] != ticker or info["side"] != ("BUY" if buy else "SELL")))
         ):
+            # An invalid report is NOT a settled execution. Journal the
+            # unresolved discrepancy so a later terminal callback cannot
+            # erase the intent after a restart.
+            if info:
+                info["invalid_fill"] = True
+                self._save()
             self._hard_halt("reconciliation_mismatch", f"invalid or mismatched fill for order {ev.client_order_id}")
             return False
+        overfill = False
         if info:
             info["filled"] = info.get("filled", 0.0) + qty
+            allowed = info["qty"]
+            overfill = info["filled"] > allowed and not math.isclose(
+                info["filled"], allowed, rel_tol=1e-12, abs_tol=1e-9
+            )
+            if overfill:
+                # An overfill is still a real reported economic event:
+                # book the entire fill, never clip it or fabricate an
+                # offsetting order; retain the anomaly across restarts.
+                info["overfilled"] = True
         # Cash settles in cents, half away from zero, as the broker's (and the simulator's) account does.
         notional = math.floor(qty * px * 100 + 0.5) / 100
         self.cash += -notional - fee if buy else notional - fee
@@ -1305,6 +1330,12 @@ class ExecutionAgent(Strategy):
         self.applied[trade] = [time.time_ns(), str(ev.client_order_id)]
         self._prune_applied()
         self._save()
+        if overfill:
+            self._hard_halt(
+                "reconciliation_mismatch",
+                f"order {ev.client_order_id} reports {info['filled']:g} filled vs {info['qty']:g} submitted; "
+                "full economic fill booked, do not send replacement orders",
+            )
         self.publish_message(
             T_FILL,
             FillReport(
@@ -1332,13 +1363,21 @@ class ExecutionAgent(Strategy):
             return
         coid = str(client_order_id)
         if coid in self.pending:
+            if self.pending[coid].get("invalid_fill"):
+                # A terminal status alone cannot establish the economic
+                # outcome of a previously rejected/mismatched fill report.
+                return
             # A terminal notification may arrive before its fill callbacks. Recover cached
             # executions first and keep the intent for reports that arrive still later.
             order = self.cache.order(ClientOrderId(coid))
             if order is not None:
                 for event in order.events():
                     if type(event).__name__ == "OrderFilled":
-                        self._apply_fill(event, recovered=True)
+                        booked = self._apply_fill(event, recovered=True)
+                        if not booked and str(event.trade_id) not in self.applied:
+                            # Inconclusive recovery: preserve the write-ahead
+                            # intent rather than laundering it into terminal.
+                            return
             self.terminal[coid] = self.pending.pop(coid)
             self._save()
 
@@ -1486,6 +1525,7 @@ class ExecutionAgent(Strategy):
             return
         coid = str(ev.client_order_id)
         if str(ev.trade_id) in self.applied:
+            self._apply_fill(ev)  # detect conflicting trade-ID attribution
             return
         if self.config.live and coid not in self.pending and (coid in self.disposed or coid in self.terminal):
             # Keep attribution permanently and the active intent until a terminal report.
@@ -1506,7 +1546,9 @@ class ExecutionAgent(Strategy):
                 "foreign_fill", f"{ev.instrument_id}: fill of order {coid} not sent by the lab; not booked"
             )
             return
-        self._apply_fill(ev)
+        booked = self._apply_fill(ev)
+        if not booked and str(ev.trade_id) not in self.applied:
+            return  # invalid report: do not retire the unresolved intent
         order = self.cache.order(ev.client_order_id)
         if order is not None and order.is_closed:
             self._close_pending(ev.client_order_id)
