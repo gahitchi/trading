@@ -48,7 +48,9 @@ class CorporateSession:
         if type(journal) is not EventJournal or type(initial_book) is not CorporateBook:
             raise CorporateActionError("explicit original event journal and initial book required")
         if initial_book.action_id is not None:
-            raise CorporateActionError("new journal must start before action recognition, not from an already retired book")
+            raise CorporateActionError(
+                "new journal must start before action recognition, not from an already retired book"
+            )
         self.journal = journal
         self.initial_book = initial_book
         journal.verify()
