@@ -133,8 +133,9 @@ class PortableCorporateJournalTests(unittest.TestCase):
     def test_completely_wrong_initial_account_refuses_recovery(self):
         with EventJournal(self.path) as journal:
             CorporateSession(journal, initial())
-        with EventJournal(self.path) as journal, self.assertRaisesRegex(
-            CorporateActionError, "identity/account assumptions"
+        with (
+            EventJournal(self.path) as journal,
+            self.assertRaisesRegex(CorporateActionError, "identity/account assumptions"),
         ):
             CorporateSession(journal, initial(signed_basis=Decimal("500.00")))
 
