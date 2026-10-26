@@ -138,7 +138,7 @@ def main():
         print("Connect IB Gateway in PAPER mode. Credentials are saved only on this computer.")
         username = input("IBKR username: ").strip()
         account = input("Paper account ID (DU...): ").strip().upper()
-        if not re.fullmatch(r"[A-Za-z0-9_.@-]{1,100}", username) or not re.fullmatch(r"DU\d{5,}", account):
+        if not re.fullmatch(r"[A-Za-z0-9_.@-]{1,100}", username) or not re.fullmatch(r"DUR?\d{5,}", account):
             raise ValueError("Invalid username or paper account ID.")
         secret = root / "secrets" / "tws_password"
         if not secret.exists():

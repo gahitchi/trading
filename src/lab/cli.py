@@ -1139,7 +1139,7 @@ def build_parser() -> argparse.ArgumentParser:
     pp.set_defaults(fn=cmd_paper)
 
     runtime = sub.add_parser("runtime", help="cold backup, upgrade preflight and broker-attested code migration")
-    runtime.add_argument("action", choices=["backup", "preflight", "upgrade"])
+    runtime.add_argument("action", choices=["backup", "preflight", "upgrade", "enable-gold"])
     runtime.add_argument("--destination", type=Path)
     runtime.add_argument("--evidence", type=Path)
     runtime.add_argument("--reason", default="")

@@ -167,16 +167,24 @@ class Controller:
     def alive(self):
         return self.process is not None and self.process.poll() is None
 
-    def configure(self, settings):
+    def configure(self, settings, *, confirm_gold_migration=False):
         with self.lock:
             s = validate_settings(copy.deepcopy(settings), self.cfg.universe)
             if self.alive():
                 raise ValueError("Stop the app service before changing a saved trading plan.")
+            migrate_gold = False
             if (self.rt / "identity.json").exists():
                 old = {k: v for k, v in self.settings.items() if k not in ("mode", "hours")}
                 new = {k: v for k, v in s.items() if k not in ("mode", "hours")}
                 if old != new:
-                    raise ValueError("This account already has trading history. A reviewed plan migration is required.")
+                    changed = {key for key in old | new if old.get(key) != new.get(key)}
+                    migrate_gold = changed == {"gold"} and not old.get("gold") and new.get("gold")
+                    if not migrate_gold:
+                        raise ValueError(
+                            "This account already has trading history. A reviewed plan migration is required."
+                        )
+                    if confirm_gold_migration is not True:
+                        raise ValueError("Confirm the broker-checked London Gold migration before saving this plan.")
             raw = copy.deepcopy(self.base)
             raw["paths"] = {
                 "data": str(self.cfg.data_dir),
@@ -206,6 +214,13 @@ class Controller:
                 os.unlink(name)
             runtime_lock = acquire_runtime_lock(self.cfg)
             try:
+                runtime_lock.close()
+                runtime_lock = None
+                if migrate_gold:
+                    from lab.gold_migration import enable_gold
+
+                    enable_gold(self.cfg, s["tickers"], self.directory / "private-backups", self.reason)
+                runtime_lock = acquire_runtime_lock(self.cfg)
                 atomic_text(self.config_path, content)
                 atomic_json(
                     self.settings_path, {"settings": s, "config_sha256": hashlib.sha256(content.encode()).hexdigest()}
@@ -217,7 +232,8 @@ class Controller:
                     "Plan saved. Start connects to IBKR and loads real historical bars.",
                 )
             finally:
-                runtime_lock.close()
+                if runtime_lock is not None:
+                    runtime_lock.close()
         return self.status()
 
     def start(self):
@@ -340,8 +356,8 @@ class Controller:
                 return "Loading aligned history for portfolio risk estimates."
             if self.settings["gold"]:
                 gold = read_json(self.rt / "gold-status.json")
-                if gold.get("session") != self.session or not gold.get("ready"):
-                    return "Loading current London Gold history from IBKR."
+                if gold.get("session") != self.session or not gold.get("ready") or not gold.get("reconciled"):
+                    return "Loading London Gold history and reconciling its broker book."
             return None
         except (OSError, ValueError, KeyError, TypeError, OverflowError, AttributeError):
             return "Waiting for broker data and account checks."
@@ -446,6 +462,7 @@ class Controller:
                 "phase": self.phase,
                 "message": self.message,
                 "settings": self.settings,
+                "plan_locked": (self.rt / "identity.json").exists(),
                 "symbols": list(self.cfg.universe),
                 "heartbeat": hb,
                 "gold_status": gold_status,
@@ -565,7 +582,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Expected a settings object.")
             c = self.server.controller
             if self.path == "/api/setup":
-                result = c.configure(body)
+                confirm_gold_migration = body.pop("confirm_gold_migration", False)
+                result = c.configure(body, confirm_gold_migration=confirm_gold_migration)
             elif self.path == "/api/start":
                 result = c.start()
             elif self.path == "/api/pause":

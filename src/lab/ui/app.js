@@ -198,12 +198,21 @@ async function action(fn) {
   try { render(await fn()); } catch (e) { notice(e.message); }
   finally { busy = false; try { render(await api("/api/status")); } catch (e) { notice(e.message); } }
 }
-form.addEventListener("submit", e => { e.preventDefault(); action(() => api("/api/setup", settings())); });
+async function saveSettings() {
+  const value = settings();
+  if (last.plan_locked && !last.settings.gold && value.gold) {
+    const confirmed = window.confirm("Trading Lab will pause new orders, verify with IBKR that the PAPER account has no positions or open orders, make a private backup, then add London Gold. Continue?");
+    if (!confirmed) throw Error("London Gold migration cancelled.");
+    value.confirm_gold_migration = true;
+  }
+  return api("/api/setup", value);
+}
+form.addEventListener("submit", e => { e.preventDefault(); action(saveSettings); });
 form.addEventListener("change", e => { if (e.target.name === "profile") riskNote(); });
 $("start").onclick = () => action(async () => {
   if (!last.engine_alive) {
     if (!form.reportValidity()) throw Error("Complete the required setup fields.");
-    await api("/api/setup", settings());
+    await saveSettings();
   }
   return api("/api/start", {});
 });

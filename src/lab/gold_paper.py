@@ -90,6 +90,7 @@ class GoldPaperStrategy(Strategy):
         self.last_submitted = None
         self.emergency_order_id = None
         self.approval_pending = False
+        self.broker_reconciled = False
         self.known_order_ids: set[str] = set()
         self.emergency_exit = False
         if self.state_path.exists():
@@ -158,6 +159,7 @@ class GoldPaperStrategy(Strategy):
             set_halt(self.config.runtime / "HALT", "reconciliation_mismatch", "gold position or order not owned by lab")
             self._status("foreign gold position or order requires operator review")
             return
+        self.broker_reconciled = True
         now_ns = self.clock.timestamp_ns()
         for order in orders:
             if order.side == OrderSide.BUY and now_ns - order.ts_init > MAX_ENTRY_AGE.total_seconds() * 1e9:
@@ -468,6 +470,7 @@ class GoldPaperStrategy(Strategy):
                 "session": os.environ.get("LAB_APP_SESSION"),
                 "state": state,
                 "ready": self.data_ready,
+                "reconciled": self.broker_reconciled,
                 **details,
             },
         )

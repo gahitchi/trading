@@ -98,6 +98,22 @@ def upgrade_plan(runtime, cfg):
     return {"old": digest(old), "new": digest(new), "identity": new, "ledger": digest(state), "blockers": blockers}
 
 
+def gold_upgrade_plan(runtime, cfg):
+    plan = upgrade_plan(runtime, cfg)
+    runtime = Path(runtime)
+    old = read_json(runtime / "identity.json")
+    if (runtime / "HALT").exists():
+        plan["blockers"].append("a hard halt must be reconciled before enabling London Gold")
+    if old.get("gold") == "london-spot-atr-v1":
+        plan["blockers"].append("London Gold is already part of this runtime identity")
+        return plan
+    if "gold" in old:
+        plan["blockers"].append("runtime has an unknown Gold strategy identity")
+        return plan
+    identity = {**plan["identity"], "gold": "london-spot-atr-v1"}
+    return {**plan, "new": digest(identity), "identity": identity}
+
+
 def run(cfg, action, *, destination=None, evidence=None, reason=""):
     lock = acquire_runtime_lock(cfg)
     try:
@@ -115,7 +131,7 @@ def _run_locked(cfg, action, *, destination=None, evidence=None, reason=""):
         if destination is None:
             raise ValueError("backup requires --destination")
         return snapshot_locked(rt, destination)
-    plan = upgrade_plan(rt, cfg)
+    plan = gold_upgrade_plan(rt, cfg) if action == "enable-gold" else upgrade_plan(rt, cfg)
     if action == "preflight":
         return {k: v for k, v in plan.items() if k != "identity"}
     if plan["blockers"]:
@@ -136,6 +152,7 @@ def _run_locked(cfg, action, *, destination=None, evidence=None, reason=""):
     result = snapshot_locked(rt, destination)
     receipt = {
         "version": 1,
+        "action": action,
         "old": plan["old"],
         "new": plan["new"],
         "ledger": plan["ledger"],

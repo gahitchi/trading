@@ -107,6 +107,22 @@ def test_gold_is_explicit_and_cannot_change_an_existing_runtime(controller):
         controller.configure({**controller.settings, "gold": True})
 
 
+def test_confirmed_gold_migration_preserves_plan_and_uses_broker_checked_helper(controller, monkeypatch):
+    atomic_json(controller.rt / "identity.json", {"account": controller.settings["account"]})
+    calls = []
+    monkeypatch.setattr(
+        "lab.gold_migration.enable_gold",
+        lambda cfg, tickers, private_dir, reason: calls.append((cfg, tickers, private_dir, reason)),
+    )
+
+    controller.configure({**controller.settings, "gold": True}, confirm_gold_migration=True)
+
+    assert controller.settings["gold"] is True
+    assert calls[0][1] == controller.settings["tickers"]
+    assert calls[0][2].name == "private-backups"
+    assert calls[0][3] == controller.reason
+
+
 def test_delayed_feed_schedule_waits_for_completed_data(controller):
     assert controller.cfg.trading.data_delay_min == 15
     assert controller.cfg.paper.signal_time == "16:20"

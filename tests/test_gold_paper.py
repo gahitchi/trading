@@ -17,6 +17,7 @@ class FakeGoldRuntime:
         self.emergency_exit = False
         self.emergency_order_id = None
         self.approval_pending = False
+        self.broker_reconciled = False
         self.portfolio = SimpleNamespace(net_position=lambda _instrument: 1)
         self.cache = SimpleNamespace(
             orders_open=lambda **_kwargs: [],
@@ -87,6 +88,7 @@ def test_monitor_retries_a_supervised_order_after_operator_approval(tmp_path):
     GoldPaperStrategy._monitor(fake, None)
 
     assert fake.decisions == 1
+    assert fake.broker_reconciled is True
 
 
 def test_gold_uses_mandate_issued_after_strategy_start(tmp_path):
