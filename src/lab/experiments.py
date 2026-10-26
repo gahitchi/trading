@@ -188,7 +188,7 @@ def reserve_trial(
     from lab.provenance import simulation_digest
 
     fingerprint = (
-        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:{simulation_digest()}:{data_digest}"
+        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:{simulation_digest()}:{data_digest}:{key}"
     )
     append_json(
         _trials_path(cfg),
@@ -214,15 +214,16 @@ def register_trial(
     bound_risk: bool = False,
 ) -> None:
     """Every configuration ever evaluated on a dataset is a trial; the Deflated Sharpe Ratio charges for all
-    of them. A trial is the strategy (code + parameters) AND the settings that shape its result, so trying
-    the same strategy under another risk or cost setting counts again. Re-running an identical one does not."""
+    of them. A trial is the strategy (code + parameters), evaluation window, AND the settings
+    that shape its result. Distinct walk-forward windows are distinct trials, but
+    re-running the identical window/settings/artifact does not count again."""
     sr, *_ = stats.moments(active.to_numpy())
     cfg.results_dir.mkdir(parents=True, exist_ok=True)
     from lab.persistence import append_json, file_lock
     from lab.provenance import simulation_digest
 
     fingerprint = (
-        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:{simulation_digest()}:{data_digest}"
+        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:{simulation_digest()}:{data_digest}:{key}"
     )
     # Never publish a "complete" event for a partially written return stream.
     # A same-directory replace plus directory fsync makes completed evidence
