@@ -5,13 +5,7 @@ from __future__ import annotations
 import unittest
 from dataclasses import replace
 
-from lab.markets.broker_trial import (
-    ProbeEvidence,
-    ProbeKind,
-    ProbeStatus,
-    TrialScope,
-    assess_trial_claims,
-)
+from lab.markets.broker_trial import ProbeEvidence, ProbeKind, ProbeStatus, TrialScope, assess_trial_claims
 from lab.markets.domain import AssetClass, ContractKind
 
 HASH = "a" * 64
