@@ -6,8 +6,9 @@ import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 
+from lab.authority import digest
 from lab.paper import _base_node, acquire_runtime_lock, runtime_dir
-from lab.persistence import atomic_json
+from lab.persistence import atomic_json, read_json
 from lab.runtime_ops import gold_upgrade_plan, run
 from lab.safety import is_paper_account, set_kill_switch
 
@@ -67,6 +68,22 @@ def enable_gold(cfg, tickers, private_dir, reason, *, clients=None):
     """Pause, attest, back up and migrate an existing flat runtime without resetting its history."""
     rt = runtime_dir(cfg)
     set_kill_switch(rt / "KILL", "halt", reason, preserve_existing=True)
+    identity = read_json(rt / "identity.json")
+    if identity.get("gold") == "london-spot-atr-v1":
+        current = digest(identity)
+        receipt = read_json(rt / f"upgrade-{current}.json")
+        try:
+            backup = Path(receipt["backup"]["destination"])
+            valid = (
+                receipt["action"] == "enable-gold"
+                and receipt["new"] == current
+                and (backup / "backup-manifest.json").is_file()
+            )
+        except (KeyError, TypeError):
+            valid = False
+        if not valid:
+            raise ValueError("Gold identity exists without a complete migration receipt and private backup")
+        return receipt
     plan = gold_upgrade_plan(rt, cfg)
     if plan["blockers"]:
         raise ValueError("; ".join(plan["blockers"]))
