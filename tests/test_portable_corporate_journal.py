@@ -12,6 +12,7 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 
+from lab.kernel.double_entry import transition
 from lab.markets.corporate_actions import (
     CashReceipt,
     CashTermination,
@@ -21,7 +22,6 @@ from lab.markets.corporate_actions import (
     _digest,
     recognize,
 )
-from lab.kernel.double_entry import transition
 from lab.markets.corporate_journal import CorporateSession, _financial
 from lab.markets.journal import EventJournal, JournalError
 
