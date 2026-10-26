@@ -62,7 +62,7 @@ services:
       LAB_TELEGRAM_TOKEN: ${LAB_TELEGRAM_TOKEN:-}
       LAB_TELEGRAM_CHAT_ID: ${LAB_TELEGRAM_CHAT_ID:-}
       TZ: America/New_York
-    command: paper --signals ${LAB_SIGNALS:-sma_trend} --tickers ${LAB_TICKERS:-SPY QQQ}
+    command: paper --mode supervised --authority-hours 24 --signals ${LAB_SIGNALS:-sma_trend} --tickers ${LAB_TICKERS:-SPY QQQ}
     volumes:
       - ./lab.toml:/lab/lab.toml:ro
       - ./results:/lab/results          # ledger, journal, heartbeat, kill switch: survives restarts
