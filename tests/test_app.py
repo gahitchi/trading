@@ -547,3 +547,55 @@ def test_public_crypto_endpoint_requires_local_authentication(controller, monkey
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_gold_paper_and_multimarket_reference_keep_independent_authority(controller, monkeypatch):
+    """Selecting gold may only affect IBKR PAPER startup, not crypto reference actions."""
+    controller.configure({**controller.settings, "gold": True})
+    before_config = controller.config_path.read_bytes()
+    before_settings = dict(controller.settings)
+
+    sample = controller.offline_demo({"side": "buy", "quantity": "0.001", "capital": "1000"})
+    assert sample["orders_routed"] is False
+    assert sample["broker_connected"] is False
+    assert sample["strategy_qualified"] is False
+
+    from lab.markets import preview
+
+    observed = []
+    monkeypatch.setattr(
+        preview,
+        "public_preview",
+        lambda instrument, *, depth: (
+            observed.append((instrument, depth)) or {"orders_routed": False, "snapshot_tradable": False}
+        ),
+    )
+    observation = controller.public_crypto_snapshot({"instrument": "BTC-USDT-SWAP", "depth": "5"})
+    assert observation["orders_routed"] is False
+    assert observation["snapshot_tradable"] is False
+    assert observed == [("BTC-USDT-SWAP", 5)]
+    assert controller.config_path.read_bytes() == before_config
+    assert controller.settings == before_settings
+    assert not controller.alive()
+
+    launched = []
+
+    def fake_spawn(args, **kwargs):
+        assert read_kill_switch(controller.rt / "KILL")["mode"] == "halt"
+        launched.append((args, kwargs))
+        proc = Mock()
+        proc.poll.return_value = None
+        proc.stdout = iter(())
+        return proc
+
+    monkeypatch.setattr(app.subprocess, "Popen", fake_spawn)
+    monkeypatch.setattr(controller, "_logs", lambda process: None)
+    controller.start()
+    assert len(launched) == 1
+    args, env = launched[0]
+    assert "paper" in args and "--gold" in args
+    assert args[args.index("--mode") + 1] == "supervised"
+    assert "LAB_APP_SESSION" in env["env"]
+    assert all(name not in env["env"] for name in app.CONNECTION_ENV)
+    with pytest.raises(ValueError, match="Pause the broker engine"):
+        controller.offline_demo({"side": "buy", "quantity": "0.001", "capital": "1000"})
