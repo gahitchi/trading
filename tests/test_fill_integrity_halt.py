@@ -79,6 +79,18 @@ def test_cached_invalid_terminal_fill_keeps_unsettled_intent(tmp_path):
     assert agent.halts and all(kind == "reconciliation_mismatch" for kind, _ in agent.halts)
 
 
+def test_invalid_order_side_cannot_be_interpreted_as_sell(tmp_path):
+    agent = active(tmp_path, closed=True)
+    agent.pending["X"]["side"] = "SELL"
+    bad = _fill("T1", 4)
+    bad.order_side = "UNKNOWN_SIDE"
+    agent.orders["X"].events = lambda: [bad]
+    ExecutionAgent.on_order_filled(agent, bad)
+    assert agent.cash == 1000 and agent.held["A"] == 0 and not agent.applied
+    assert agent.pending["X"]["invalid_fill"] is True
+    assert "X" not in agent.terminal and agent.halts
+
+
 def test_invalid_fill_latch_survives_sqlite_restart(tmp_path):
     agent = active(tmp_path, closed=True)
     store = ExecutionStore(tmp_path / "ledger.json")
