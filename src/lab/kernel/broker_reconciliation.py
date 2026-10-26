@@ -107,6 +107,7 @@ class ParityAssessment:
     account_scope: str
     snapshot_id: str
     findings: tuple[str, ...]
+
     @property
     def source_authenticated(self) -> bool:
         return False
