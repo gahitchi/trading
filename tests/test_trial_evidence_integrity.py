@@ -102,6 +102,19 @@ def test_rewriting_valid_npz_cannot_rebind_past_statistical_evidence(tmp_path, g
         experiments.trial_sharpes(cfg, "train")
 
 
+def test_distinct_evaluation_windows_are_distinct_trials_on_the_same_data(tmp_path, goog_lab):
+    cfg, spec, active = _trial(tmp_path, goog_lab)
+    experiments.reserve_trial(cfg, "train|2026-02-02|2026-02-05|GOOG", spec, "identical-panel")
+    experiments.register_trial(cfg, "train|2026-02-02|2026-02-05|GOOG", spec, "first", active, "identical-panel")
+    shifted = active * 3
+    experiments.reserve_trial(cfg, "walk|2026-02-06|2026-02-11|GOOG", spec, "identical-panel")
+    experiments.register_trial(
+        cfg, "walk|2026-02-06|2026-02-11|GOOG", spec, "second", shifted, "identical-panel"
+    )
+    assert len(experiments.trial_sharpes(cfg, "train")) == 2
+    assert experiments.trial_registry_status(cfg)["verified"] == 2
+
+
 def test_crash_before_npz_commit_leaves_an_unresolved_attempt(tmp_path, goog_lab, monkeypatch):
     cfg, spec, active = _trial(tmp_path, goog_lab)
     experiments.reserve_trial(cfg, "train", spec, "source")
