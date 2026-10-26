@@ -270,8 +270,7 @@ def test_known_delisting_cannot_trade_fictitious_post_delisting_bars(goog_lab, t
     f = tmp_path / "delistings.csv"
     day = dying.index[-1].date()
     f.write_text(
-        f"ticker,delist_date,delist_type,delist_return,settlement_price,source\n"
-        f"D,{day},merger,-0.5,,test vendor\n"
+        f"ticker,delist_date,delist_type,delist_return,settlement_price,source\nD,{day},merger,-0.5,,test vendor\n"
     )
     data.save_delistings(cfg, f)
     with pytest.raises(data.DataError, match="post-delisting market fills are forbidden"):
