@@ -132,17 +132,23 @@ class ExecutionStore:
         with self.connect() as db:
             if existed:
                 version = db.execute("PRAGMA user_version").fetchone()[0]
-                if version not in (1, 2):
+                if version not in (1, 2, 3):
                     raise ValueError("unknown execution database version")
                 if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                     raise ValueError("execution database failed integrity check")
-                if version == 1:
-                    # A context manager does not BEGIN a SQLite transaction for
-                    # DDL. Explicitly cover both ALTER and version bump so a
-                    # crash cannot leave a v1 header with a v2 table.
+                if version < 3:
                     db.execute("BEGIN IMMEDIATE")
-                    db.execute("ALTER TABLE snapshot ADD COLUMN generation INTEGER NOT NULL DEFAULT 0")
-                    db.execute("PRAGMA user_version=2")
+                    if version == 1:
+                        db.execute("ALTER TABLE snapshot ADD COLUMN generation INTEGER NOT NULL DEFAULT 0")
+                    # Existing v1/v2 stores did not persist a separate 'ever
+                    # committed' marker; migrate the state that survives.
+                    db.execute(
+                        "CREATE TABLE recovery_marker (id INTEGER PRIMARY KEY CHECK(id=1), "
+                        "snapshot_seen INTEGER NOT NULL CHECK(snapshot_seen IN (0,1)))"
+                    )
+                    seen = db.execute("SELECT 1 FROM snapshot WHERE id=1").fetchone() is not None
+                    db.execute("INSERT INTO recovery_marker VALUES(1,?)", (int(seen),))
+                    db.execute("PRAGMA user_version=3")
             else:
                 db.execute("BEGIN IMMEDIATE")
                 db.execute(
@@ -153,10 +159,22 @@ class ExecutionStore:
                     "CREATE TABLE history (bucket TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, coid TEXT, PRIMARY KEY(bucket,id)) WITHOUT ROWID"
                 )
                 db.execute("CREATE INDEX history_order ON history(bucket,coid)")
-                db.execute("PRAGMA user_version=2")
-            # Pin both value and monotonic generation. A value-only CAS permits
-            # an ABA overwrite if the same snapshot bytes are saved again.
+                db.execute(
+                    "CREATE TABLE recovery_marker (id INTEGER PRIMARY KEY CHECK(id=1), "
+                    "snapshot_seen INTEGER NOT NULL CHECK(snapshot_seen IN (0,1)))"
+                )
+                db.execute("INSERT INTO recovery_marker VALUES(1,0)")
+                db.execute("PRAGMA user_version=3")
+            # Pin both value and monotonic generation. The persistent marker
+            # independently distinguishes a never-saved DB from an erased
+            # monetary snapshot, including after ledger.json is lost.
             row = db.execute("SELECT value,generation FROM snapshot WHERE id=1").fetchone()
+            marker = db.execute("SELECT snapshot_seen FROM recovery_marker WHERE id=1").fetchone()
+            if marker is None or type(marker[0]) is not int or marker[0] not in (0, 1):
+                raise ValueError("missing or invalid execution recovery marker")
+            self._snapshot_seen = bool(marker[0])
+            if (row is None and self._snapshot_seen) or (row is not None and not self._snapshot_seen):
+                raise ValueError("execution snapshot and durable recovery marker disagree")
             self._expected_snapshot = row[0] if row is not None else None
             self._expected_generation = row[1] if row is not None else 0
         if existed and self.load() is None:
@@ -169,11 +187,15 @@ class ExecutionStore:
                 if db.execute("SELECT 1 FROM history LIMIT 1").fetchone() is not None:
                     raise ValueError("execution snapshot missing with recorded history; restore complete backup")
             if not self.projection.exists():
-                raise ValueError("existing execution database has no snapshot; restore complete runtime backup")
-            legacy = read_json(self.projection)
-            if legacy.get("authoritative_store"):
-                raise ValueError("execution snapshot missing; restore complete runtime backup")
-            validate_ledger(legacy)
+                # A second writer can observe a genuinely new, never-saved DB.
+                # Its own generation-CAS will reject any later competing save.
+                legacy = None
+            else:
+                legacy = read_json(self.projection)
+            if legacy is not None:
+                if legacy.get("authoritative_store"):
+                    raise ValueError("execution snapshot missing; restore complete runtime backup")
+                validate_ledger(legacy)
         if legacy is not None:
             for b in ("terminal", "disposed"):
                 self.maps[b].update(legacy.pop(b, {}))
@@ -248,6 +270,7 @@ class ExecutionStore:
                 "ON CONFLICT(id) DO UPDATE SET value=excluded.value,generation=excluded.generation",
                 (snapshot, generation + 1),
             )
+            db.execute("UPDATE recovery_marker SET snapshot_seen=1 WHERE id=1")
         # SQLite committed the new authoritative head. Advance the local
         # baseline BEFORE writing the best-effort JSON projection: a crash in
         # the latter cannot make a later save reuse a stale head.
