@@ -54,10 +54,20 @@ def _opening(current: float, target: float) -> float:
 
 
 def _liquidity_cap(seen, participation: float | None) -> float | None:
-    """Shares of new exposure one order may add: `participation` x the average volume of the bars `seen`
-    ((ts, volume) pairs). None (no cap) without the setting or before five bars of volume are known."""
-    if not participation or not seen or len(seen) < 5:
+    """Conservative opening capacity in shares, or None only when unconfigured.
+
+    A configured participation limit without five qualified positive-volume
+    observations authorizes ZERO new exposure, never unlimited exposure.
+    Reductions are unaffected by this opening-only limit.
+    """
+    if participation is None:
         return None
+    if not math.isfinite(participation) or not 0 < participation <= 1:
+        return 0
+    if not seen or len(seen) < 5:
+        return 0
+    if any(not math.isfinite(v) or v <= 0 for _, v in seen):
+        return 0
     return math.floor(participation * sum(v for _, v in seen) / len(seen))
 
 
