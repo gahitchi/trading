@@ -3,10 +3,12 @@
 ## Decision and current state
 
 The operator selected IBKR **London Gold** in Commodities. IBKR documents the API
-contract as `XAUUSD`, `CMDTY`, `SMART`, `USD`; the minimum order is one troy ounce and
-the price increment is USD 0.001. This is not a COMEX gold future and not the
-`OANDA:XAUUSD` TradingView feed. Account-specific contract details and Metals trading
-permission still need to be confirmed by the connected IBKR PAPER account.
+contract as `XAUUSD`, `CMDTY`, `SMART`, `USD`; the minimum order is one troy ounce.
+The authenticated PAPER contract lookup on 2026-10-26 returned a USD 0.01 minimum
+tick, while the general IBKR training page describes USD 0.001. The preview therefore
+requires a verified tick as input. This is not a COMEX gold future and not the
+`OANDA:XAUUSD` TradingView feed. Metals trading permission remains to be confirmed
+for the PAPER account.
 
 `lab.gold.gold_atr_trend_preview` is an isolated, **read-only** strategy preview. It
 cannot submit an order or modify the existing stock-only paper node. Do not put
@@ -33,8 +35,9 @@ stock session, and uses stock-share accounting without protective bracket orders
 
 1. Read the authenticated PAPER contract details and confirm its contract ID,
    `CMDTY`, `SMART`, `USD`, minimum size, tick, permissions and usable quotes.
-   A TWS search result alone does not prove API authorization. The local read-only
-   probe on 2026-10-25 timed out while IB Gateway reported broken farm connectivity.
+   A TWS search result alone does not prove API authorization. A read-only
+   contract lookup succeeded on 2026-10-26, and the configured PAPER account was
+   accessible; trading permission, market rules and usable quotes remain to verify.
 2. Implement a metal-aware instrument, calendar, multiplier, EUR/USD conversion,
    financing/cost model and account ledger. Keep the existing US equity logic
    unchanged and preserve every PAPER-only/account/kill-switch guard.

@@ -24,9 +24,19 @@ def _bars():
     ]
 
 
-def test_gold_trend_allocates_one_percent_and_uses_two_to_one_atr_levels():
+def _preview(bars, *, capital_usd=Decimal(1_000_000), as_of=None, price_tick_usd=Decimal("0.01")):
+    return gold_atr_trend_preview(
+        bars,
+        as_of=as_of or bars[-1].available_at,
+        capital_usd=capital_usd,
+        price_tick_usd=price_tick_usd,
+    )
+
+
+@pytest.mark.parametrize("tick", ["0.01", "0.05"])
+def test_gold_trend_allocates_one_percent_and_uses_two_to_one_atr_levels(tick):
     bars = _bars()
-    plan = gold_atr_trend_preview(bars, as_of=bars[-1].available_at, capital_usd=Decimal(1_000_000))
+    plan = _preview(bars, price_tick_usd=Decimal(tick))
     assert plan is not None
     assert plan.ounces == 2
     assert plan.notional_usd == Decimal(8000)
@@ -36,11 +46,13 @@ def test_gold_trend_allocates_one_percent_and_uses_two_to_one_atr_levels():
         plan.entry_reference_usd - plan.stop_reference_usd
     )
     assert plan.entry_reference_usd - plan.stop_reference_usd >= 2 * plan.atr_usd
+    assert plan.stop_reference_usd % plan.price_tick_usd == 0
+    assert plan.target_reference_usd % plan.price_tick_usd == 0
 
 
 def test_gold_preview_abstains_without_signal_or_minimum_one_ounce():
     bars = _bars()
-    assert gold_atr_trend_preview(bars, as_of=bars[-1].available_at, capital_usd=Decimal(300_000)) is None
+    assert _preview(bars, capital_usd=Decimal(300_000)) is None
     bars[-1] = GoldBar(
         bars[-1].end,
         bars[-1].available_at,
@@ -49,19 +61,19 @@ def test_gold_preview_abstains_without_signal_or_minimum_one_ounce():
         Decimal(3790),
         Decimal(3800),
     )
-    assert gold_atr_trend_preview(bars, as_of=bars[-1].available_at, capital_usd=Decimal(1_000_000)) is None
+    assert _preview(bars) is None
 
 
 def test_gold_preview_rejects_a_bar_not_yet_available():
     bars = _bars()
     with pytest.raises(ValueError, match="available"):
-        gold_atr_trend_preview(bars, as_of=bars[-1].end, capital_usd=Decimal(1_000_000))
+        _preview(bars, as_of=bars[-1].end)
 
 
 def test_gold_preview_rejects_stale_data():
     bars = _bars()
     with pytest.raises(ValueError, match="stale"):
-        gold_atr_trend_preview(bars, as_of=bars[-1].available_at + timedelta(hours=25), capital_usd=Decimal(1_000_000))
+        _preview(bars, as_of=bars[-1].available_at + timedelta(hours=25))
 
 
 def test_gold_preview_rejects_mixed_or_non_daily_bars():
@@ -75,4 +87,10 @@ def test_gold_preview_rejects_mixed_or_non_daily_bars():
         bars[-1].close,
     )
     with pytest.raises(ValueError, match="ordered"):
-        gold_atr_trend_preview(bars, as_of=bars[-1].available_at, capital_usd=Decimal(1_000_000))
+        _preview(bars)
+
+
+def test_gold_preview_requires_verified_tick():
+    bars = _bars()
+    with pytest.raises(ValueError, match="price_tick_usd"):
+        _preview(bars, price_tick_usd=Decimal(0))

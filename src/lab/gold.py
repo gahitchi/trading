@@ -15,7 +15,6 @@ SECURITY_TYPE = "CMDTY"
 EXCHANGE = "SMART"
 CURRENCY = "USD"
 MIN_OUNCES = 1
-PRICE_TICK = Decimal("0.001")
 ALLOCATION = Decimal("0.01")
 STOP_ATR_MULTIPLE = Decimal("2")
 REWARD_RISK = Decimal("2")
@@ -47,6 +46,7 @@ class GoldPreview:
     stop_reference_usd: Decimal
     target_reference_usd: Decimal
     atr_usd: Decimal
+    price_tick_usd: Decimal
     allocated_usd: Decimal
     notional_usd: Decimal
 
@@ -83,7 +83,9 @@ def _mean(values: list[Decimal]) -> Decimal:
     return sum(values, Decimal(0)) / len(values)
 
 
-def gold_atr_trend_preview(bars: list[GoldBar], *, as_of: datetime, capital_usd: Decimal) -> GoldPreview | None:
+def gold_atr_trend_preview(
+    bars: list[GoldBar], *, as_of: datetime, capital_usd: Decimal, price_tick_usd: Decimal
+) -> GoldPreview | None:
     """Long after a closed-bar return above SMA50 while SMA50 exceeds SMA200.
 
     At most 1% of verified USD-equivalent equity is allocated. The indicative
@@ -91,6 +93,8 @@ def gold_atr_trend_preview(bars: list[GoldBar], *, as_of: datetime, capital_usd:
     Return None when there is no entry or one ounce exceeds the allocation.
     """
     _validate(bars, as_of, capital_usd)
+    if not price_tick_usd.is_finite() or price_tick_usd <= 0:
+        raise ValueError("price_tick_usd must be finite and positive")
     closes = [bar.close for bar in bars]
     fast_now = _mean(closes[-FAST_DAYS:])
     fast_previous = _mean(closes[-FAST_DAYS - 1 : -1])
@@ -113,8 +117,12 @@ def gold_atr_trend_preview(bars: list[GoldBar], *, as_of: datetime, capital_usd:
     if ounces < MIN_OUNCES:
         return None
     distance = STOP_ATR_MULTIPLE * atr
-    stop = (entry - distance).quantize(PRICE_TICK, rounding=ROUND_DOWN)
-    target = (entry + REWARD_RISK * (entry - stop)).quantize(PRICE_TICK, rounding=ROUND_UP)
+    stop = ((entry - distance) / price_tick_usd).to_integral_value(rounding=ROUND_DOWN) * price_tick_usd
+    target = ((entry + REWARD_RISK * (entry - stop)) / price_tick_usd).to_integral_value(
+        rounding=ROUND_UP
+    ) * price_tick_usd
     if stop <= 0:
         return None
-    return GoldPreview(SYMBOL, bars[-1].end, ounces, entry, stop, target, atr, allocated, ounces * entry)
+    return GoldPreview(
+        SYMBOL, bars[-1].end, ounces, entry, stop, target, atr, price_tick_usd, allocated, ounces * entry
+    )
