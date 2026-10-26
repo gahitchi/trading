@@ -76,6 +76,10 @@ def test_marker_tampering_is_not_accepted_as_a_new_database(tmp_path):
         db.execute("UPDATE recovery_marker SET snapshot_seen=0 WHERE id=1")
     with pytest.raises(ValueError, match="snapshot and durable recovery marker disagree"):
         ExecutionStore(path)
+    with pytest.raises(ValueError, match="snapshot and durable recovery marker disagree"):
+        store.save({"cash": 2000})
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT value FROM snapshot WHERE id=1").fetchone()[0].find('"cash":1000') > -1
 
 
 def test_legacy_json_import_without_sqlite_snapshot_still_recovers(tmp_path):
@@ -84,6 +88,30 @@ def test_legacy_json_import_without_sqlite_snapshot_still_recovers(tmp_path):
     created = ExecutionStore(path)
     assert created.load()["cash"] == 875
     assert created.maps["applied"]["T1"] == [1, "O1"]
+
+
+
+def test_lost_marker_must_roll_back_the_cash_commit(tmp_path):
+    path = tmp_path / "ledger.json"
+    store = ExecutionStore(path)
+    store.save({"cash": 1000})
+    with sqlite3.connect(store.path) as db:
+        db.execute("DELETE FROM recovery_marker")
+    with pytest.raises(ValueError, match="snapshot and durable recovery marker disagree"):
+        store.save({"cash": 700})
+    with sqlite3.connect(store.path) as db:
+        assert '"cash":1000' in db.execute("SELECT value FROM snapshot WHERE id=1").fetchone()[0]
+
+
+def test_erased_snapshot_with_forged_unbound_projection_is_refused_after_first_save(tmp_path):
+    path = tmp_path / "ledger.json"
+    store = ExecutionStore(path)
+    store.save({"cash": 700})
+    with sqlite3.connect(store.path) as db:
+        db.execute("DELETE FROM snapshot")
+    atomic_json(path, {"cash": 1200})
+    with pytest.raises(ValueError, match="snapshot and durable recovery marker disagree"):
+        ExecutionStore(path)
 
 
 @pytest.mark.parametrize(
