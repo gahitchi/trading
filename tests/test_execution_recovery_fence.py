@@ -70,9 +70,9 @@ def test_sqlite_financial_snapshot_rejects_duplicate_or_nonfinite_fields(tmp_pat
     store.save({"cash": 1000})
     with sqlite3.connect(store.path) as db:
         db.execute("UPDATE snapshot SET value=? WHERE id=1", (raw,))
-    with pytest.raises(ValueError, match="duplicate|nonfinite"):
+    with pytest.raises(ValueError, match=r"duplicate|nonfinite"):
         ExecutionStore(path)
-    with pytest.raises(ValueError, match="duplicate|nonfinite"):
+    with pytest.raises(ValueError, match=r"duplicate|nonfinite"):
         store.load()
 
 
