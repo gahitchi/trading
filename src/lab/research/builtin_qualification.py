@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -93,11 +94,32 @@ def _quality_gate(quality: dict) -> None:
         raise ApprovalError("short-capable research needs recorded historical borrow evidence")
 
 
+def _number(value) -> float | None:
+    try:
+        num = float(value)
+        return num if math.isfinite(num) else None
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def _summary(row: dict) -> dict:
+    return {
+        "sharpe_edge": _number(row.get("sharpe_edge")),
+        "dsr": _number(row.get("dsr")),
+        "signal_errors": int(row.get("signal_errors", 0)),
+        "fills": int(row.get("fills", 0)),
+    }
+
+
 def _passes_train(candidate: dict, null: dict, cfg) -> bool:
+    edge, dsr, p = candidate.get("sharpe_edge"), candidate.get("dsr"), null.get("p_value")
     return (
-        candidate.get("sharpe_edge", float("-inf")) >= cfg.research.min_sharpe_edge
-        and null.get("p_value", float("inf")) <= cfg.research.max_p_value
-        and candidate.get("dsr", float("-inf")) >= cfg.research.min_dsr
+        edge is not None
+        and dsr is not None
+        and p is not None
+        and edge >= cfg.research.min_sharpe_edge
+        and p <= cfg.research.max_p_value
+        and dsr >= cfg.research.min_dsr
         and candidate.get("signal_errors") == 0
         and candidate.get("fills", 0) > 0
     )
@@ -116,11 +138,12 @@ def evaluate_builtin(cfg, spec: SignalSpec, tickers: list[str]) -> dict:
     train, _ = experiments.compare(
         research_cfg, [spec], tickers, research_cfg.period("train"), frames, **bounds
     )
-    candidate = train.rows[1]
-    null = experiments.null_test(
+    candidate = _summary(train.rows[1])
+    null_result = experiments.null_test(
         research_cfg, spec, tickers, research_cfg.period("train"), cfg.research.null_samples,
         frames, observed_edge=candidate["sharpe_edge"], **bounds
     )
+    null = {"p_value": _number(null_result.get("p_value"))}
     train_pass = _passes_train(candidate, null, cfg) and not any(
         row.get("delistings_settled") for row in train.rows
     )
@@ -133,9 +156,10 @@ def evaluate_builtin(cfg, spec: SignalSpec, tickers: list[str]) -> dict:
             "qualified": False,
         }
     test, _ = experiments.compare(research_cfg, [spec], tickers, research_cfg.period("test"), frames, **bounds)
-    test_row = test.rows[1]
+    test_row = _summary(test.rows[1])
     survived = (
-        test_row.get("sharpe_edge", 0) > 0
+        test_row.get("sharpe_edge") is not None
+        and test_row["sharpe_edge"] > 0
         and test_row.get("signal_errors") == 0
         and test_row.get("fills", 0) > 0
         and not any(row.get("delistings_settled") for row in test.rows)
@@ -186,7 +210,7 @@ def verify_builtin(cfg, spec: SignalSpec, tickers: list[str]) -> str:
     if not _passes_train(train["candidate"], train["null"], cfg):
         raise ApprovalError("built-in training metrics no longer satisfy configured research thresholds")
     candidate = test["candidate"]
-    if candidate.get("sharpe_edge", 0) <= 0 or candidate.get("signal_errors") != 0 or candidate.get("fills", 0) <= 0:
+    if candidate.get("sharpe_edge") is None or candidate["sharpe_edge"] <= 0 or candidate.get("signal_errors") != 0 or candidate.get("fills", 0) <= 0:
         raise ApprovalError("built-in out-of-sample evidence is not qualified")
     if identity.get("schema") != SCHEMA or identity.get("spec") != {
         "name": spec.name, "params": spec.params, "source_sha256": artifact_digest(spec)
