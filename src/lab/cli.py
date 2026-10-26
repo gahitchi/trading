@@ -512,8 +512,10 @@ def cmd_research_trials(cfg, a):
         for issue in report["issues"]:
             print(f"  {issue['fingerprint'][:16]} {issue['label']}: {issue['reason']}")
         if report["blocked"]:
-            print("Re-run the exact attempted candidate with the same source, data and configuration. "
-                  "Never delete a failed trial to improve statistical significance.")
+            print(
+                "Re-run the exact attempted candidate with the same source, data and configuration. "
+                "Never delete a failed trial to improve statistical significance."
+            )
     return 0 if report["integrity_ok"] else 1
 
 
