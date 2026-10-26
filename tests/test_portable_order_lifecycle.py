@@ -126,7 +126,7 @@ class IndependentLifecycleTests(unittest.TestCase):
             self.assertEqual(session.reserved_reduction, Decimal("6"))
             with self.assertRaisesRegex(LifecycleError, "freezes"):
                 session.plan(intent("NEXT", quantity=Decimal("1"), at=4), action_version="v1")
-            with self.assertRaisesRegex(LifecycleError, "duplicate/terminal"):
+            with self.assertRaisesRegex(LifecycleError, "conflicting event"):
                 session.prepare_dispatch("FIRST", timestamp_ns=4)
         finally:
             journal.close()
