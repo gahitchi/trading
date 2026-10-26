@@ -155,7 +155,6 @@ def test_v1_database_upgrades_without_losing_state_or_history(tmp_path):
     assert ExecutionStore(path).maps["applied"]["OLD"] == [2, "O-OLD"]
 
 
-
 def test_interrupted_schema_upgrade_rolls_back_ddl_and_version(tmp_path):
     path = tmp_path / "ledger.json"
     database = path.with_suffix(".sqlite3")
