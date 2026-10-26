@@ -272,7 +272,7 @@ reports and tables print a warning when the data is biased.
   (date, open, high, low, close, volume), e.g. exports from IBKR or vendors that include delisted stocks.
 - `lab data membership members.csv`: a point-in-time universe (`ticker,start,end`; several spells per ticker
   allowed). Stocks are only held while they are members; capital is shared among the members of each day; when a
-  stock's data ends early, a run requires a declared membership exit with subsequent real prices; otherwise it is refused. EOF does not establish delisting proceeds or a foreknown exit.
+  stock's data ends early, a run requires a declared membership exit with subsequent real prices; otherwise it is refused. EOF does not establish delisting proceeds or a foreknown exit.\n   Recorded corporate-action recovery is metadata, **not** executable market liquidity. A delisted name at the final actual price now makes the backtest fail closed until a verified Nautilus account/position **and** independent-ledger settlement handler exists; no phantom next-day volume or positive penny-floor is substituted.
 
 Survivorship-free data with a membership file is what makes results credible; free data gives a biased first look.
 
