@@ -42,23 +42,28 @@ def main(argv=None) -> int:
     frames = data.load_many(cfg, tickers)
     from lab.provenance import frame_digest
 
+    # Custom has a legacy relaxed *exploratory* screen, but promotion must
+    # validate exactly the actual configured paper risk policy. Never hash
+    # scientific screening limits as though the broker would enforce them.
+    bound_risk = cfg.risk.profile == "custom"
+    bounds = {"bound_risk": True} if bound_risk else {}
     validation = {
         "dataset_sha256": frame_digest(frames),
         "source_sha256": digest,
         "params": {},
-        "config_fingerprint": experiments.config_fingerprint(cfg, len(tickers)),
-        "deployment": deployment_context(
-            replace(cfg, risk=experiments.effective_risk(cfg, len(tickers))).snapshot(), tickers=tickers
-        ),
+        "config_fingerprint": experiments.config_fingerprint(cfg, len(tickers), **bounds),
+        "deployment": deployment_context(cfg.snapshot(), tickers=tickers),
     }
     r = cfg.research
 
     if mode == "train":
         period = cfg.period("train")
-        comp, _ = experiments.compare(cfg, [spec], tickers, period, frames)
+        comp, _ = experiments.compare(cfg, [spec], tickers, period, frames, **bounds)
         cand = comp.rows[1]
         edge = cand["sharpe_edge"]
-        null = experiments.null_test(cfg, spec, tickers, period, r.null_samples, frames, observed_edge=edge)
+        null = experiments.null_test(
+            cfg, spec, tickers, period, r.null_samples, frames, observed_edge=edge, **bounds
+        )
         checks = {
             "sharpe_edge >= min_sharpe_edge": edge >= r.min_sharpe_edge,
             "p_value <= max_p_value": null["p_value"] <= r.max_p_value,
@@ -86,7 +91,7 @@ def main(argv=None) -> int:
         if train.get("passed") is not True or train.get("validation") != validation:
             raise ValueError("test requires passing train evidence for the same source and configuration")
         period = cfg.period("test")
-        comp, _ = experiments.compare(cfg, [spec], tickers, period, frames)
+        comp, _ = experiments.compare(cfg, [spec], tickers, period, frames, **bounds)
         edge = comp.rows[1]["sharpe_edge"]
         out = {
             "validation": validation,
