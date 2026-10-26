@@ -501,8 +501,7 @@ def _redact(
 ):
     if isinstance(value, dict) and field in _KEYED_BY_ORDER:
         return {
-            _pseudo(key, "CLIENT", str(k)): _redact(key, v, aliases=aliases, matcher=matcher)
-            for k, v in value.items()
+            _pseudo(key, "CLIENT", str(k)): _redact(key, v, aliases=aliases, matcher=matcher) for k, v in value.items()
         }
     if isinstance(value, dict):
         out = {}
@@ -542,11 +541,15 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
                 _capture_id_aliases(key, json.loads(f.read_bytes()), aliases)
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
-    matcher = re.compile(
-                r"(?<![A-Za-z0-9])(?:"
-                + "|".join(re.escape(raw) for raw in sorted(aliases, key=len, reverse=True))
-                + r")(?![A-Za-z0-9])"
-            ) if aliases else None
+    matcher = (
+        re.compile(
+            r"(?<![A-Za-z0-9])(?:"
+            + "|".join(re.escape(raw) for raw in sorted(aliases, key=len, reverse=True))
+            + r")(?![A-Za-z0-9])"
+        )
+        if aliases
+        else None
+    )
     entries = []
     for f in files:
         rel = f.relative_to(src)
@@ -564,7 +567,9 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
                 ]
                 text = "\n".join(lines) + ("\n" if lines else "")
             elif f.suffix == ".json" or f.name in ("HALT", "KILL"):
-                text = json.dumps(_redact(key, json.loads(raw), aliases=aliases, matcher=matcher), indent=1, sort_keys=True)
+                text = json.dumps(
+                    _redact(key, json.loads(raw), aliases=aliases, matcher=matcher), indent=1, sort_keys=True
+                )
             else:
                 text = None
         except (UnicodeDecodeError, json.JSONDecodeError):
