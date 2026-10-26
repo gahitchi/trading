@@ -22,18 +22,21 @@ def test_snapshot_erasure_without_projection_never_resets_account(tmp_path):
     path.unlink()
     with sqlite3.connect(original.path) as db:
         db.execute("DELETE FROM snapshot WHERE id=1")
-    with pytest.raises(ValueError, match="snapshot missing with recorded history"):
+    with pytest.raises(ValueError, match="snapshot and durable recovery marker disagree"):
         ExecutionStore(path)
     with sqlite3.connect(original.path) as db:
         assert db.execute("SELECT COUNT(*) FROM history WHERE bucket='applied'").fetchone()[0] == 1
 
 
-def test_uninitialized_old_database_is_not_mistaken_for_fresh_run(tmp_path):
+def test_truly_new_database_allows_second_initial_reader_but_rejects_stale_save(tmp_path):
     path = tmp_path / "ledger.json"
     created = ExecutionStore(path)
-    assert created.load() is None
-    with pytest.raises(ValueError, match="existing execution database has no snapshot"):
-        ExecutionStore(path)
+    competing = ExecutionStore(path)
+    assert created.load() is None and competing.load() is None
+    created.save({"cash": 900})
+    with pytest.raises(ValueError, match="stale execution snapshot writer"):
+        competing.save({"cash": 1200})
+    assert ExecutionStore(path).load()["cash"] == 900
 
 
 def test_orphaned_history_cannot_be_reimported_from_unbound_old_json(tmp_path):
@@ -42,7 +45,10 @@ def test_orphaned_history_cannot_be_reimported_from_unbound_old_json(tmp_path):
     store.maps["applied"]["T1"] = [10, "O1"]
     store.save({"cash": 900, "positions": {"A": 1}})
     with sqlite3.connect(store.path) as db:
+        # Simulate a historical v2 database, before the v3 marker existed.
         db.execute("DELETE FROM snapshot WHERE id=1")
+        db.execute("DROP TABLE recovery_marker")
+        db.execute("PRAGMA user_version=2")
     # Forging an old, unbound projection must not hide surviving trade IDs
     # while fabricating a fresh monetary opening balance.
     atomic_json(path, {"cash": 1000})
@@ -58,7 +64,18 @@ def test_missing_snapshot_with_authoritative_projection_is_blocked(tmp_path):
     store.save({"cash": 1000})
     with sqlite3.connect(store.path) as db:
         db.execute("DELETE FROM snapshot")
-    with pytest.raises(ValueError, match="execution snapshot missing"):
+    with pytest.raises(ValueError, match="snapshot and durable recovery marker disagree"):
+        ExecutionStore(path)
+
+
+
+def test_marker_tampering_is_not_accepted_as_a_new_database(tmp_path):
+    path = tmp_path / "ledger.json"
+    store = ExecutionStore(path)
+    store.save({"cash": 1000})
+    with sqlite3.connect(store.path) as db:
+        db.execute("UPDATE recovery_marker SET snapshot_seen=0 WHERE id=1")
+    with pytest.raises(ValueError, match="snapshot and durable recovery marker disagree"):
         ExecutionStore(path)
 
 
