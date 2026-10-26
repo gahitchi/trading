@@ -52,7 +52,9 @@ def _hash(value: str, field: str) -> str:
 
 
 def _digest(value: dict) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, allow_nan=False, separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, allow_nan=False, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _currency(value: str) -> str:
@@ -87,9 +89,7 @@ class CashTermination:
         amount = _decimal(self.cash_per_unit, "consideration")
         if amount < 0:
             raise CorporateActionError("negative cash consideration")
-        if (self.kind == "bankruptcy_writeoff" and amount != 0) or (
-            self.kind == "cash_merger" and amount <= 0
-        ):
+        if (self.kind == "bankruptcy_writeoff" and amount != 0) or (self.kind == "cash_merger" and amount <= 0):
             raise CorporateActionError("explicit zero writeoff and positive cash-merger must be classified separately")
         _ns(self.effective_ns, "effective")
         _ns(self.available_ns, "source availability")
