@@ -75,6 +75,7 @@ def test_null_bootstrap_uses_deployment_risk_for_both_candidate_and_control(goog
     )
     assert seen == [True, True]
 
+
 def test_synthetic_delisting_cannot_pass_research_promotion(goog_lab, monkeypatch):
     """Native-account compatibility bars may remain diagnostic, never qualify alpha."""
     import json
