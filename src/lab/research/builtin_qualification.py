@@ -75,9 +75,14 @@ def _identity(cfg, spec: SignalSpec, tickers: list[str], frames: dict) -> dict:
 
 
 def evidence_path(cfg, spec: SignalSpec, tickers: list[str]) -> Path:
-    # All variants are retained rather than overwriting earlier decisions.
-    raw = json.dumps({"name": spec.name, "params": spec.params, "tickers": sorted(tickers)}, sort_keys=True)
-    key = hashlib.sha256(raw.encode()).hexdigest()[:24]
+    """Immutable version per *entire* evaluated policy, market data, and evidence gates."""
+    try:
+        frames = data.load_many(cfg, tickers)
+    except data.DataError as exc:
+        raise ApprovalError("builtin policy approval data unavailable; supervised mode only") from exc
+    identity = _identity(cfg, spec, tickers, frames)
+    raw = json.dumps(identity, sort_keys=True, default=str, allow_nan=False)
+    key = hashlib.sha256(raw.encode()).hexdigest()[:32]
     return cfg.research_dir / "builtin_qualifications" / f"{key}.json"
 
 
