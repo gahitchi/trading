@@ -4,7 +4,7 @@
 
 ## Durable state and conservative release
 
-`src/lab/kernel/order_lifecycle.py` reuses the existing `EventJournal` rather than building a second OMS database. Its `OfflineOrderSession` is scoped to one instrument and a pinned action version and **an operator-asserted initial position**. All state transitions append an exact event, closing digest and source metadata before in-memory acknowledgement. A restart rebuilds states and projection from that same journal and checks every resulting state digest. No network, account credentials, broker API, Nautilus dependency or actual order sending exists.
+`src/lab/kernel/order_lifecycle.py` reuses the existing `EventJournal` rather than building a second OMS database. Its `OfflineOrderSession` is scoped to one instrument and a pinned action version and **an operator-asserted initial position**. All state transitions append an exact event, closing digest and source metadata before in-memory acknowledgement. A restart rebuilds states and projection from that same journal and checks every resulting state digest. `EventJournal.append(expected_previous_digest=...)` atomically checks the predecessor SHA-256 **inside SQLite BEGIN IMMEDIATE**, then commits; a stale competing session cannot append an event based on a superseded order book. Before appending, the reducer checks its observed journal head and quarantines itself on a mismatch; failed replay likewise quarantines the instance. A single-owner session is still required for thread-level state mutation; this is not a distributed lock or broker-ack atomicity. No network, account credentials, broker API, Nautilus dependency or actual order sending exists.
 
 | Transition | Preconditions | Consequence |
 | --- | --- | --- |
@@ -18,7 +18,7 @@
 | `unknown` | an unresolved dispatch/ack has uncertain broker status | freezes new intents and new preparations; no automatic retry |
 | rejected | full unfilled rejection only | terminal in offline projection; production must prove broker/venue evidence before release |
 
-Idempotency is scoped to a stable source event ID plus exact payload and availability time. The same event can be reprocessed only without any second accounting effect. Conflicting reuse, duplicate executions across orders, non-monotone observation availability, unrecognized journal events, forged source IDs/digests, foreign instrument/split version or replay digest divergence fail closed.
+Idempotency is scoped to a stable source event ID plus exact payload and availability time. The same event can be reprocessed only without any second accounting effect. Conflicting reuse, duplicate executions across orders, non-monotone observation availability, unrecognized journal events, unbound source IDs/digests, foreign instrument/split version or replay digest divergence fail closed.
 
 The **starting position is NOT a broker readback** and `BrokerEvidence` source fields are **metadata, not cryptographic authentication**. Internal fills adjust only `position_from_fills`, a clearly unauthenticated projection; it is not a brokerage position and never updates cash, margin or the independent double-entry kernel yet. The session is deliberately one instrument: there is no multi-asset portfolio-capital planner, venue-level risk approval or cross-account lock.
 
@@ -46,6 +46,6 @@ python tools/collab.py check
 git rev-parse HEAD
 ```
 
-`tests/test_portable_order_lifecycle.py` covers retry prevention, partial fills, conflicting source events, unknown placement state, cancellation races, late fills, idempotent recovery, global execution identity, arbitrary Decimal lot steps, forged but hash-valid journals and no-third-party imports.
+`tests/test_portable_order_lifecycle.py` covers retry prevention, partial fills, conflicting source events, unknown placement state, cancellation races, late fills, idempotent recovery, global execution identity, arbitrary Decimal lot steps, competing stale journals, forged but hash-valid journals and no-third-party imports.
 
 **Release status:** F1 accounting foundation is partial. F3/F4 independent OMS reference is partial. Broker-native parity, authenticated reconciliation, capital risk, F5 strategy qualification, F6 supervised paper trading and F8 release/security signoff remain separately blocked.
