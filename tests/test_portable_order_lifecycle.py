@@ -254,6 +254,64 @@ class IndependentLifecycleTests(unittest.TestCase):
         finally:
             journal.close()
 
+    def test_cross_account_source_event_cannot_change_the_journal(self):
+        from dataclasses import replace
+
+        journal, session = self.open()
+        try:
+            session.plan(intent(), action_version="v1")
+            session.prepare_dispatch("FIRST", timestamp_ns=2)
+            before = session.state_digest()
+            with self.assertRaisesRegex(LifecycleError, "different account scope"):
+                session.observe(
+                    "FIRST",
+                    "ack",
+                    replace(evidence("wrong-account", at=3), account_scope="ANOTHER_ACCOUNT"),
+                    broker_order_id="broker-in-another-account",
+                )
+            self.assertEqual(session.state_digest(), before)
+            self.assertEqual(len(journal.read_all()), 3)
+        finally:
+            journal.close()
+
+    def test_different_account_cannot_replay_the_same_offline_journal(self):
+        journal, session = self.open()
+        session.plan(intent(), action_version="v1")
+        journal.close()
+        with (
+            EventJournal(self.path) as recovered,
+            self.assertRaisesRegex(LifecycleError, "opening broker-state assumptions differ"),
+        ):
+            OfflineOrderSession(
+                recovered,
+                account_scope="ANOTHER_ACCOUNT",
+                instrument_id="SIM:TEST-SHARE",
+                action_version="v1",
+                starting_position=Decimal("10"),
+                quantity_step=Decimal("1"),
+            )
+
+    def test_unbound_old_v1_journal_cannot_be_silently_upgraded(self):
+        with EventJournal(self.path) as journal:
+            journal.append("session:independent-order:v1", "session", 0, {
+                "schema": 1,
+                "mode": "OFFLINE_ONLY",
+                "instrument_id": "SIM:TEST-SHARE",
+                "action_version": "v1",
+                "starting_position": "10",
+                "quantity_step": "1",
+            })
+            journal.verify()
+            with self.assertRaisesRegex(LifecycleError, "opening broker-state assumptions differ"):
+                OfflineOrderSession(
+                    journal,
+                    account_scope="OFFLINE_ACCOUNT_A",
+                    instrument_id="SIM:TEST-SHARE",
+                    action_version="v1",
+                    starting_position=Decimal("10"),
+                    quantity_step=Decimal("1"),
+                )
+
     def test_exact_restart_recovers_all_executions_and_rejects_new_opening_position(self):
         journal, session = self.open()
         session.plan(intent(), action_version="v1")
