@@ -304,6 +304,28 @@ def build_node(
     }
     if bank is not None:
         identity["strategy_bank"] = bank.manifest
+
+    # Paper diagnostics and supervised/manual operation remain available, but
+    # unattended authority is reserved for a separately qualified EXACT policy.
+    # An ensemble/bank requires whole-policy evidence, not a sum of individual
+    # winning backtests. This conservative v1 gate only qualifies one daily signal.
+    evidence_digest = None
+    if len(specs) == 1 and session is None and bank is None:
+        spec = specs[0]
+        if spec.path is not None:
+            # Generated signal was already verified against train, test,
+            # approved source, parameters and deployment context above.
+            evidence_digest = digest
+        else:
+            from lab.research.builtin_qualification import verify_builtin
+
+            try:
+                evidence_digest = verify_builtin(cfg, spec, tickers)
+            except (ApprovalError, OSError, ValueError, KeyError, TypeError):
+                pass
+    identity["autonomous_qualified"] = evidence_digest is not None
+    identity["autonomous_evidence_sha256"] = evidence_digest
+
     with file_lock(runtime_dir(cfg) / "identity.lock"):
         if identity_path.exists() and read_json(identity_path) != identity:
             raise ValueError("runtime identity changed; reconcile existing state before an explicit migration")
