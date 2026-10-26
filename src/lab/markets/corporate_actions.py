@@ -250,7 +250,7 @@ class CorporateBook:
             _decimal(getattr(self, field), field)
         if self.position == 0 and self.signed_basis != 0:
             raise CorporateActionError("flat book cannot retain position cost basis")
-        if self.position and self.position * self.signed_basis <= 0:
+        if self.position and self.position * self.signed_basis < 0:
             raise CorporateActionError("signed cost basis must match nonzero position sign")
         for field in ("cash", "realized_pnl", "pending_cash", "signed_basis"):
             if getattr(self, field) % self.quantum:
