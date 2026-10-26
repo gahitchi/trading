@@ -467,9 +467,7 @@ def _capture_id_aliases(key: bytes, value, aliases: dict[str, str], field: str |
                 continue
             if name in _ID_KEYS and isinstance(entry, str) and len(entry) >= 2 and entry != "None":
                 kind = "ACCT" if name.startswith("account") else name.split("_")[0].upper()
-                aliases.setdefault(
-                    entry, _pseudo(key, kind, entry.removeprefix("IB-") if kind == "ACCT" else entry)
-                )
+                aliases.setdefault(entry, _pseudo(key, kind, entry.removeprefix("IB-") if kind == "ACCT" else entry))
             _capture_id_aliases(key, entry, aliases, str(name))
     elif isinstance(value, list):
         for item in value:
