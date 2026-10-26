@@ -1,5 +1,6 @@
 """Unattended PAPER authority requires independently reviewed, source-bound evidence."""
 
+import hashlib
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -9,8 +10,8 @@ from lab import data, experiments
 from lab.authority import Authority
 from lab.cli import build_parser
 from lab.persistence import atomic_json, read_json
-from lab.research.approval import ApprovalError
 from lab.research import builtin_qualification as qualification
+from lab.research.approval import ApprovalError
 from lab.signals.registry import SignalSpec
 
 
@@ -45,10 +46,24 @@ def test_autonomous_mandate_requires_actual_deployment_evidence(tmp_path):
 
 
 def test_autonomous_mandate_cannot_be_restarted_under_unqualified_identity(tmp_path):
-    qualified = {"tickers": ["GOOG"], "deployment": {"risk": "balanced"}, "autonomous_qualified": True}
+    source = tmp_path / "approved.json"
+    source.write_text('{"approved":true}')
+    qualified = {
+        "tickers": ["GOOG"],
+        "deployment": {"risk": "balanced"},
+        "autonomous_qualified": True,
+        "autonomous_evidence_path": str(source),
+        "autonomous_evidence_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+    }
     authority = Authority(tmp_path, qualified)
     authority.issue("autonomous")
     assert authority.read()["mode"] == "autonomous"
+    source.write_text('{"approved":false}')
+    with pytest.raises(ValueError, match="approval evidence changed"):
+        authority.read()
+    source.unlink()
+    with pytest.raises(ValueError, match="evidence is unavailable"):
+        authority.read()
     invalid = {**qualified, "autonomous_qualified": False}
     with pytest.raises(ValueError, match="independently qualified"):
         Authority(tmp_path, invalid).read()
