@@ -142,7 +142,7 @@ def test_v1_database_upgrades_without_losing_state_or_history(tmp_path):
         )
         db.execute(
             "INSERT INTO history(bucket,id,value,coid) VALUES(?,?,?,?)",
-            ("applied", "OLD", "[2,\"O-OLD\"]", "O-OLD"),
+            ("applied", "OLD", '[2,"O-OLD"]', "O-OLD"),
         )
     store = ExecutionStore(path)
     assert store.load()["cash"] == 750
