@@ -111,8 +111,13 @@ class EventJournal:
         self.close()
 
     def append(
-        self, event_id: str, kind: str, timestamp_ns: int, payload: dict,
-        *, expected_previous_digest: str | None = None,
+        self,
+        event_id: str,
+        kind: str,
+        timestamp_ns: int,
+        payload: dict,
+        *,
+        expected_previous_digest: str | None = None,
     ) -> int:
         if not isinstance(event_id, str) or not re.fullmatch(r"[A-Za-z0-9_:-]{1,256}", event_id):
             raise JournalError("invalid event ID")
@@ -124,8 +129,7 @@ class EventJournal:
             raise JournalError("event payload must be an object")
         _validate_payload(payload)
         if expected_previous_digest is not None and (
-            type(expected_previous_digest) is not str
-            or not re.fullmatch(r"[0-9a-f]{64}", expected_previous_digest)
+            type(expected_previous_digest) is not str or not re.fullmatch(r"[0-9a-f]{64}", expected_previous_digest)
         ):
             raise JournalError("invalid optimistic journal-head SHA-256")
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)

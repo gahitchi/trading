@@ -362,17 +362,27 @@ class IndependentLifecycleTests(unittest.TestCase):
         with EventJournal(self.path) as other:
             initial = first.read_all()[-1]["digest"]
             first.append(
-                "kernel-probe1", "unknown", 2, {"test": "first"},
+                "kernel-probe1",
+                "unknown",
+                2,
+                {"test": "first"},
                 expected_previous_digest=initial,
             )
             with self.assertRaisesRegex(JournalError, "journal head advanced"):
                 other.append(
-                    "kernel-probe2", "unknown", 3, {"test": "second"},
+                    "kernel-probe2",
+                    "unknown",
+                    3,
+                    {"test": "second"},
                     expected_previous_digest=initial,
                 )
-            self.assertEqual([e["event_id"] for e in first.read_all()], [
-                "session:independent-order:v1", "kernel-probe1",
-            ])
+            self.assertEqual(
+                [e["event_id"] for e in first.read_all()],
+                [
+                    "session:independent-order:v1",
+                    "kernel-probe1",
+                ],
+            )
         first.close()
 
     def test_cannot_mix_corporate_journal_with_order_journal(self):

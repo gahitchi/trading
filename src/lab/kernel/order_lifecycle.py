@@ -382,9 +382,7 @@ class OfflineOrderSession:
             self._apply(kind, full)
             after_digest = self.state_digest()
             payload = {"event": full, "state_sha256": after_digest}
-            self.journal.append(
-                event_id, kind, timestamp_ns, payload, expected_previous_digest=self._head_digest
-            )
+            self.journal.append(event_id, kind, timestamp_ns, payload, expected_previous_digest=self._head_digest)
         except JournalError:
             self.orders = previous_orders
             self._faulted = True
