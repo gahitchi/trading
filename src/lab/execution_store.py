@@ -45,9 +45,7 @@ def decode(raw):
     def invalid_constant(value):
         raise ValueError(f"nonfinite SQLite execution JSON constant: {value}")
 
-    return json.loads(
-        raw, parse_float=finite_float, parse_constant=invalid_constant, object_pairs_hook=unique_object
-    )
+    return json.loads(raw, parse_float=finite_float, parse_constant=invalid_constant, object_pairs_hook=unique_object)
 
 
 class History(MutableMapping):
