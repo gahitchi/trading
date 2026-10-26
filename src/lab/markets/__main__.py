@@ -235,6 +235,10 @@ def main() -> None:
     )
     nd = sub.add_parser("native-demo", help="read-only native Nautilus replay of a bundled synthetic fixture")
     nd.add_argument("--balance", type=Decimal, default=Decimal("1000"))
+    vc = sub.add_parser("verify-book-capture", help="verify externally pinned offline WS session bytes and sequence")
+    vc.add_argument("--input", type=Path, required=True, help="operator-recorded NDJSON; never contacts an exchange")
+    vc.add_argument("--sha256", required=True, help="SHA-256 pinned independently of the recording")
+    vc.add_argument("--instrument", required=True, help="expected exact contract ID, e.g. BTC-USD-SWAP")
     recover = sub.add_parser("recover", help="verify and resume a durable OFFLINE_SIM journal; no broker orders")
     recover.add_argument("--journal", type=Path, required=True)
     recover.add_argument("--balance", type=Decimal, default=Decimal("1000"))
@@ -263,6 +267,32 @@ def main() -> None:
         print(json.dumps(native_fill_parity_demo(), indent=2))
     elif args.command == "native-demo":
         print(json.dumps(native_demo(args.balance), indent=2))
+    elif args.command == "verify-book-capture":
+        from lab.markets.book_capture import verify_recorded_book_capture
+
+        capture = verify_recorded_book_capture(args.input, args.sha256, args.instrument)
+        print(
+            json.dumps(
+                {
+                    "source": capture.source,
+                    "instrument": capture.instrument_id,
+                    "sha256": capture.sha256,
+                    "frames_verified": capture.frame_count,
+                    "first_received_ns": capture.first_received_ns,
+                    "last_received_ns": capture.last_received_ns,
+                    "first_sequence": capture.first_sequence,
+                    "last_sequence": capture.last_sequence,
+                    "best_bid": str(capture.final_book.best_bid),
+                    "best_ask": str(capture.final_book.best_ask),
+                    "source_authenticated": capture.source_authenticated,
+                    "feed_complete": capture.feed_complete,
+                    "market_data_execution_qualified": capture.market_data_execution_qualified,
+                    "broker_execution_enabled": capture.broker_execution_enabled,
+                    "qualified_for_live_trading": False,
+                },
+                indent=2,
+            )
+        )
     elif args.command == "recover":
         with EventJournal(args.journal) as journal:
             sim = recover_offline(fixture_instrument(), journal, starting_balance=args.balance)
