@@ -22,6 +22,8 @@ cleared halts), journal-YYYYMM.jsonl, smoke-*.json
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
@@ -310,21 +312,25 @@ def build_node(
     # An ensemble/bank requires whole-policy evidence, not a sum of individual
     # winning backtests. This conservative v1 gate only qualifies one daily signal.
     evidence_digest = None
+    evidence_path = None
     if len(specs) == 1 and session is None and bank is None:
         spec = specs[0]
         if spec.path is not None:
-            # Generated signal was already verified against train, test,
-            # approved source, parameters and deployment context above.
-            evidence_digest = digest
+            # Generated signal was already verified against train/test, approved
+            # source, parameters and deployment context above. Bind the manifest,
+            # not just the source code; approvals must survive every heartbeat.
+            evidence_path = Path(spec.path).parent / "approval.json"
+            evidence_digest = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
         else:
+            from lab.research.builtin_qualification import evidence_path as builtin_path
             from lab.research.builtin_qualification import verify_builtin
 
-            try:
+            with contextlib.suppress(ApprovalError, OSError, ValueError, KeyError, TypeError):
                 evidence_digest = verify_builtin(cfg, spec, tickers)
-            except (ApprovalError, OSError, ValueError, KeyError, TypeError):
-                pass
+                evidence_path = builtin_path(cfg, spec, tickers)
     identity["autonomous_qualified"] = evidence_digest is not None
     identity["autonomous_evidence_sha256"] = evidence_digest
+    identity["autonomous_evidence_path"] = str(evidence_path.resolve()) if evidence_digest else None
 
     with file_lock(runtime_dir(cfg) / "identity.lock"):
         if identity_path.exists() and read_json(identity_path) != identity:
