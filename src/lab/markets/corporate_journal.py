@@ -20,10 +20,11 @@ from lab.markets.corporate_actions import (
     receive,
     recognize,
 )
+from lab.kernel.double_entry import AccountingState, transition, verify_record
 from lab.markets.journal import EventJournal, JournalError
 
 _SESSION = "session:corporate-cash:v1"
-_SCHEMA = 1
+_SCHEMA = 2
 
 
 def _event_id(prefix: str, event_key: str) -> str:
@@ -33,6 +34,18 @@ def _event_id(prefix: str, event_key: str) -> str:
 def _keys(payload: dict, expected: set[str]) -> None:
     if type(payload) is not dict or set(payload) != expected:
         raise CorporateActionError("unsupported or malformed corporate-action journal record")
+
+
+def _financial(book: CorporateBook) -> AccountingState:
+    """Project the domain book into balanced engine-independent cash accounts."""
+    return AccountingState(
+        currency=book.currency,
+        quantum=book.quantum,
+        cash=book.cash,
+        security_basis=book.signed_basis,
+        corporate_claim=book.pending_cash,
+        realized_earnings=-book.realized_pnl,
+    )
 
 
 class CorporateSession:
@@ -55,7 +68,11 @@ class CorporateSession:
         self.initial_book = initial_book
         journal.verify()
         events = journal.read_all()
-        identity = {"schema": _SCHEMA, "book": initial_book.record()}
+        identity = {
+            "schema": _SCHEMA,
+            "book": initial_book.record(),
+            "opening_capital": str(_financial(initial_book).owner_capital),
+        }
         if not events:
             journal.append(_SESSION, "session", initial_book.last_observed_ns, identity)
         else:
@@ -79,18 +96,24 @@ class CorporateSession:
             kind, payload, stamp = event["kind"], event["payload"], event["timestamp_ns"]
             try:
                 if kind == "corporate_action":
-                    _keys(payload, {"action", "reconciliation", "book_digest"})
+                    _keys(payload, {"action", "reconciliation", "book_digest", "postings"})
                     action = CashTermination.from_record(payload["action"])
                     recon = ReconciledBook.from_record(payload["reconciliation"])
                     if event["event_id"] != _event_id("corp-action", action.action_id):
                         raise CorporateActionError("action event ID does not bind action identity")
-                    book = recognize(book, action, recon, observed_ns=stamp)
+                    next_book = recognize(book, action, recon, observed_ns=stamp)
+                    verify_record(
+                        payload["postings"], _financial(book), _financial(next_book), kind="corporate_action"
+                    )
+                    book = next_book
                 elif kind == "corporate_cash":
-                    _keys(payload, {"receipt", "book_digest"})
+                    _keys(payload, {"receipt", "book_digest", "postings"})
                     receipt = CashReceipt.from_record(payload["receipt"])
                     if event["event_id"] != _event_id("corp-cash", receipt.receipt_id):
                         raise CorporateActionError("cash event ID does not bind transfer identity")
-                    book = receive(book, receipt, observed_ns=stamp)
+                    next_book = receive(book, receipt, observed_ns=stamp)
+                    verify_record(payload["postings"], _financial(book), _financial(next_book), kind="corporate_cash")
+                    book = next_book
                 else:
                     raise CorporateActionError("foreign order/fill/cash or unclassified journal event")
                 if payload["book_digest"] != _digest(book.record()):
@@ -107,6 +130,7 @@ class CorporateSession:
             "action": action.record(),
             "reconciliation": reconciliation.record(),
             "book_digest": _digest(next_book.record()),
+            "postings": transition(_financial(self.book), _financial(next_book), kind="corporate_action").record(),
         }
         self.journal.append(_event_id("corp-action", action.action_id), "corporate_action", observed_ns, payload)
         self.book = next_book
@@ -116,7 +140,11 @@ class CorporateSession:
         next_book = receive(self.book, receipt, observed_ns=observed_ns)
         if next_book is self.book:
             return self.book
-        payload = {"receipt": receipt.record(), "book_digest": _digest(next_book.record())}
+        payload = {
+            "receipt": receipt.record(),
+            "book_digest": _digest(next_book.record()),
+            "postings": transition(_financial(self.book), _financial(next_book), kind="corporate_cash").record(),
+        }
         self.journal.append(_event_id("corp-cash", receipt.receipt_id), "corporate_cash", observed_ns, payload)
         self.book = next_book
         return next_book
