@@ -182,3 +182,16 @@ def test_trade_redaction_preserves_iso_timestamp_and_hides_exact_id(tmp_path):
     assert original_timestamp in event["detail"]
     assert event["fill"]["trade_id"] in event["detail"]
     assert not re.search(r"(?<![A-Za-z0-9])T2(?![A-Za-z0-9])", event["detail"])
+
+
+def test_numeric_trade_id_does_not_corrupt_market_prices_or_session_times(tmp_path):
+    src, dst = tmp_path / "raw", tmp_path / "clean"
+    src.mkdir()
+    original = "trade:123; execution at 20:34, price 123.45, 1,234 shares, on 2026-10-26."
+    (src / "events.json").write_text(json.dumps({"trade_id": "123", "detail": original}))
+    capture.sanitize(src, dst, tmp_path / "key")
+    event = json.loads((dst / "events.json").read_text())
+    assert event["trade_id"] in event["detail"]
+    assert "trade:123" not in event["detail"]
+    for economic in ("20:34", "123.45", "1,234", "2026-10-26"):
+        assert economic in event["detail"]
