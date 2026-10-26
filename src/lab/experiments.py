@@ -587,7 +587,9 @@ NULL_MAX_FALLBACK = 0.25
 
 
 def _null_worker(args):
-    cfg, spec, tickers, frames, period, seed, bound_risk = args
+    cfg, spec, tickers, frames, period, seed, *extras = args
+    bound_risk = extras[0] if extras else False
+    bounds = {"bound_risk": True} if bound_risk else {}
     # Resample only data available by the end of the evaluated period (G007-F6: drawing donors from the
     # whole file let later test/holdout rows shape the training noise floor). Warm-up history before the
     # period start is past data and stays in the donor pool.
@@ -595,8 +597,8 @@ def _null_worker(args):
     past = {t: frames[t] if end is None else frames[t][frames[t].index <= end] for t in tickers}
     # One synchronized draw for the whole panel keeps the stocks' co-movement (ChatGPT, G002).
     boot, diag = data.block_bootstrap_panel(past, seed, return_diagnostics=True)
-    cand = run_spec(cfg, spec, tickers, boot, period, bound_risk=bound_risk).metrics
-    base = run_spec(cfg, BASELINE, tickers, boot, period, bound_risk=bound_risk).metrics
+    cand = run_spec(cfg, spec, tickers, boot, period, **bounds).metrics
+    base = run_spec(cfg, BASELINE, tickers, boot, period, **bounds).metrics
     worst = max((v["fallback_fraction"] for v in diag["per_instrument"].values()), default=0.0)
     if cand.get("insolvent") or base.get("insolvent"):
         raise ValueError("null experiment not qualified: insolvent equity")
