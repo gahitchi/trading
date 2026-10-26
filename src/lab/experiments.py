@@ -188,7 +188,8 @@ def reserve_trial(
     from lab.provenance import simulation_digest
 
     fingerprint = (
-        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:{simulation_digest()}:{data_digest}:{key}"
+        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:"
+        f"{simulation_digest()}:{data_digest}:{key}"
     )
     append_json(
         _trials_path(cfg),
@@ -223,7 +224,8 @@ def register_trial(
     from lab.provenance import simulation_digest
 
     fingerprint = (
-        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:{simulation_digest()}:{data_digest}:{key}"
+        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:"
+        f"{simulation_digest()}:{data_digest}:{key}"
     )
     # Never publish a "complete" event for a partially written return stream.
     # A same-directory replace plus directory fsync makes completed evidence
