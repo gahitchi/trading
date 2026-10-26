@@ -53,7 +53,7 @@ def _opening(current: float, target: float) -> float:
     return max(0.0, abs(target) - abs(current))
 
 
-def _liquidity_cap(seen, participation: float | None) -> float | None:
+def _liquidity_cap(seen, participation: float | None, *, decision_ts: int | None = None) -> float | None:
     """Conservative opening capacity in shares, or None only when unconfigured.
 
     A configured participation limit without five qualified positive-volume
@@ -67,6 +67,10 @@ def _liquidity_cap(seen, participation: float | None) -> float | None:
     if not seen or len(seen) < 5:
         return 0
     if any(not math.isfinite(v) or v <= 0 for _, v in seen):
+        return 0
+    # The most recent volume must describe the SAME completed bar used to
+    # determine this order. A zero-volume data outage must not reuse old size.
+    if decision_ts is not None and seen[-1][0] != decision_ts:
         return 0
     return math.floor(participation * sum(v for _, v in seen) / len(seen))
 
@@ -936,7 +940,9 @@ class ExecutionAgent(Strategy):
                     borrow_blocked = True
                     self._risk_event("borrow_unavailable", reason + "; new short exposure blocked")
             cap = _liquidity_cap(
-                getattr(self, "volumes", {}).get(ticker), getattr(self.config, "max_participation", None)
+                getattr(self, "volumes", {}).get(ticker),
+                getattr(self.config, "max_participation", None),
+                decision_ts=self.price_stamps.get(ticker),
             )
             if cap is not None and _opening(current, target) > cap:
                 # Gemini audit F-R06: new exposure trades at most max_participation of the average bar volume;
