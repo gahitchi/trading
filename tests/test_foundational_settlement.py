@@ -81,8 +81,8 @@ def test_price_history_after_recorded_delisting_is_a_provenance_error():
 def test_delisting_import_rejects_nonfinite_or_negative_recoveries(goog_lab, tmp_path, delist_return, settlement_price):
     path = tmp_path / "untrusted.csv"
     path.write_text(
-        "ticker,delist_date,delist_type,delist_return,settlement_price,source\\n"
-        f"D,2026-01-08,merger,{delist_return},{settlement_price},vendor\\n"
+        "ticker,delist_date,delist_type,delist_return,settlement_price,source\n"
+        f"D,2026-01-08,merger,{delist_return},{settlement_price},vendor\n"
     )
     with pytest.raises(data.DataError, match="finite"):
         data.save_delistings(goog_lab, path)
@@ -94,15 +94,15 @@ def test_delisting_import_rejects_nonfinite_or_negative_recoveries(goog_lab, tmp
         "D,2026-01-08,merger,nan,,vendor",
         "D,2026-01-08,merger,,-inf,vendor",
         "D,2026-01-08,merger,-0.5,,",
-        "D,2026-01-08,merger,-0.5,,vendor\\nD,2026-01-08,merger,-0.5,,vendor",
+        "D,2026-01-08,merger,-0.5,,vendor\nD,2026-01-08,merger,-0.5,,vendor",
     ],
 )
 def test_stored_delisting_data_is_revalidated_after_import(goog_lab, tmp_path, tamper):
-    header = "ticker,delist_date,delist_type,delist_return,settlement_price,source\\n"
+    header = "ticker,delist_date,delist_type,delist_return,settlement_price,source\n"
     path = tmp_path / "source.csv"
-    path.write_text(header + "D,2026-01-08,merger,-0.5,,vendor\\n")
+    path.write_text(header + "D,2026-01-08,merger,-0.5,,vendor\n")
     data.save_delistings(goog_lab, path)
     # An imported CSV is not a permanently trusted artifact.
-    data.delistings_path(goog_lab).write_text(header + tamper + "\\n")
+    data.delistings_path(goog_lab).write_text(header + tamper + "\n")
     with pytest.raises(data.DataError):
         data.delistings(goog_lab)
