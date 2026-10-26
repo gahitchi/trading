@@ -73,7 +73,7 @@ class _OpenOnly(Strategy):
 
 
 def _fixture(side, *, close=False):
-    instrument = replace(fixture_instrument(), symbol="CASH-ACTION-PILOT")
+    instrument = replace(fixture_instrument(), symbol="BTC-USD-SWAP")
     spec = LinearContractDefinition(
         instrument=instrument,
         base_currency="BTC",
