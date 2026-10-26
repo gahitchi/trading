@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+
 class TrialAsset(StrEnum):
     """Broker trial asset category; aligned with future market domain values."""
 
