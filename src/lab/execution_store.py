@@ -103,11 +103,14 @@ class ExecutionStore:
                 if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                     raise ValueError("execution database failed integrity check")
                 if version == 1:
-                    # Atomic v1 -> v2 upgrade. Earlier binaries reject version 2
-                    # rather than writing behind the new generation fence.
+                    # A context manager does not BEGIN a SQLite transaction for
+                    # DDL. Explicitly cover both ALTER and version bump so a
+                    # crash cannot leave a v1 header with a v2 table.
+                    db.execute("BEGIN IMMEDIATE")
                     db.execute("ALTER TABLE snapshot ADD COLUMN generation INTEGER NOT NULL DEFAULT 0")
                     db.execute("PRAGMA user_version=2")
             else:
+                db.execute("BEGIN IMMEDIATE")
                 db.execute(
                     "CREATE TABLE snapshot (id INTEGER PRIMARY KEY CHECK(id=1), "
                     "value TEXT NOT NULL, generation INTEGER NOT NULL CHECK(generation >= 1))"
