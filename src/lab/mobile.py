@@ -12,6 +12,8 @@ import hashlib
 import html
 import json
 import platform
+from decimal import Decimal
+from importlib.resources import files
 import sqlite3
 import sys
 import unittest
@@ -46,7 +48,11 @@ def doctor() -> dict:
         "broker_connection_enabled": False,
         "order_submission_enabled": False,
         "live_money_enabled": False,
-        "available": ["portable reference invariants", "read-only exported execution-state inspection"],
+        "available": [
+            "portable reference invariants",
+            "offline deterministic reference simulator with explicit synthetic fixture",
+            "read-only exported execution-state inspection",
+        ],
         "not_available": ["Nautilus backtest", "IBKR/OKX adapter", "autonomous trading", "release qualification"],
     }
 
@@ -138,13 +144,37 @@ def check() -> bool:
     return unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful()
 
 
-def _page(snapshot: dict | None) -> bytes:
+def offline_demo() -> dict:
+    """Run the *existing* Decimal reference simulator, never a second mobile engine.
+
+    Only the bundled, explicitly synthetic fixture is accepted by this entry
+    point. No market download, network client, credentials or broker adapter.
+    """
+    from lab.markets.__main__ import demo
+
+    fixture = Path(str(files("lab.markets").joinpath("fixture.csv")))
+    result = demo(fixture, Decimal("0.001"), side=_buy(), starting_balance=Decimal("1000"))
+    if result.get("input_kind") != "synthetic_fixture" or result.get("market_data_validated") is not False:
+        raise MobileDiagnosticError("offline reference fixture provenance is not verified")
+    result["execution_authority"] = "NONE_OFFLINE_ONLY"
+    result["nautilus_engine_used"] = False
+    result["broker_connection_enabled"] = False
+    return result
+
+
+def _buy():
+    from lab.markets.domain import Side
+
+    return Side.BUY
+
+
+def _page(snapshot: dict | None, simulation: dict | None = None) -> bytes:
     report = doctor()
     items = [
         ("Execution authority", "DISABLED — offline diagnostics only"),
         ("Python", report["python"]),
         ("Architecture", report["architecture"]),
-        ("Engine", "Unavailable in native Termux; no simulated broker attached"),
+        ("Engine", "Native Nautilus unavailable; existing offline reference simulator supported"),
     ]
     if snapshot:
         items.extend(
@@ -154,6 +184,16 @@ def _page(snapshot: dict | None) -> bytes:
                 ("Positions", str(snapshot["positions_recorded"])),
                 ("Pending orders", str(snapshot["pending_orders_recorded"])),
                 ("Snapshot SHA-256", snapshot["artifact_sha256"]),
+            ]
+        )
+    if simulation is not None:
+        items.extend(
+            [
+                ("Fixture", "Explicitly synthetic, not market-qualified"),
+                ("Reference simulator", str(simulation.get("mode", "offline_sim"))),
+                ("Simulated fills", str(simulation.get("fills", "unavailable"))),
+                ("Simulated ending equity", str(simulation.get("equity", "unavailable"))),
+                ("Broker execution", "DISABLED"),
             ]
         )
     lines = "".join(f"<dt>{html.escape(label)}</dt><dd>{html.escape(value)}</dd>" for label, value in items)
@@ -177,9 +217,11 @@ def _page(snapshot: dict | None) -> bytes:
     ).encode()
 
 
-def serve(*, port: int, snapshot: str | None = None) -> None:
+def serve(*, port: int, snapshot: str | None = None, demo_mode: bool = False) -> None:
     if not 0 <= port <= 65535:
         raise MobileDiagnosticError("port must be 0–65535")
+
+    simulation = offline_demo() if demo_mode else None
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -192,9 +234,9 @@ def serve(*, port: int, snapshot: str | None = None) -> None:
                 self.send_error(422, "Snapshot verification failed")
                 return
             payload = (
-                _page(state)
+                _page(state, simulation)
                 if self.path == "/"
-                else json.dumps({"doctor": doctor(), "snapshot": state}, allow_nan=False).encode()
+                else json.dumps({"doctor": doctor(), "snapshot": state, "offline_demo": simulation}, allow_nan=False).encode()
             )
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8" if self.path == "/" else "application/json")
@@ -220,21 +262,25 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor", help="Show portable-only capability boundaries")
     sub.add_parser("check", help="Run existing stdlib portable reference tests")
+    sub.add_parser("demo", help="Execute the existing offline Decimal simulator on a synthetic fixture")
     audit = sub.add_parser("inspect", help="Validate an isolated exported ledger (read-only)")
     audit.add_argument("snapshot", help="Exported .json or .sqlite3; never an active broker runtime")
     server = sub.add_parser("serve", help="Serve a read-only phone dashboard on 127.0.0.1")
     server.add_argument("--port", type=int, default=8787)
     server.add_argument("--snapshot", help="Optional isolated exported ledger")
+    server.add_argument("--demo", action="store_true", help="Show an explicitly synthetic offline simulator scenario")
     args = p.parse_args(argv)
     try:
         if args.command == "doctor":
             print(json.dumps(doctor(), indent=2))
         elif args.command == "check":
             return 0 if check() else 1
+        elif args.command == "demo":
+            print(json.dumps(offline_demo(), indent=2, allow_nan=False))
         elif args.command == "inspect":
             print(json.dumps(inspect_snapshot(args.snapshot), indent=2))
         else:
-            serve(port=args.port, snapshot=args.snapshot)
+            serve(port=args.port, snapshot=args.snapshot, demo_mode=args.demo)
         return 0
     except (MobileDiagnosticError, KeyboardInterrupt) as exc:
         print(f"mobile diagnostics: {exc or 'stopped'}", file=sys.stderr)
