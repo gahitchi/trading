@@ -88,11 +88,7 @@ def _fixture(side, *, close=False):
     venue = Venue(instrument.venue)
     currency = Currency.from_str(instrument.quote_currency)
     strategy = (
-        _RoundTripProbe(
-            _RoundTripConfig(
-                instrument_id=native.id, quantity=Quantity.from_str("1.000"), entry_side=side
-            )
-        )
+        _RoundTripProbe(_RoundTripConfig(instrument_id=native.id, quantity=Quantity.from_str("1.000"), entry_side=side))
         if close
         else _OpenOnly(_OpenOnlyConfig(native.id, side))
     )
@@ -155,9 +151,7 @@ def test_native_position_remains_open_when_only_python_book_is_retired(side):
     try:
         engine.run()
         assert probe.seen == 4 and len(probe.fills) == 1
-        observed = read_native_corporate_state(
-            engine, instrument_id=instrument.id, venue=venue, currency=currency
-        )
+        observed = read_native_corporate_state(engine, instrument_id=instrument.id, venue=venue, currency=currency)
         assert observed.fill_count == 1
         assert observed.account_total.is_finite()
         assert not observed.position_flat
@@ -179,9 +173,7 @@ def test_market_order_close_cannot_be_disguised_as_nonfill_settlement():
     try:
         engine.run()
         assert probe.quotes_seen == 4 and len(probe.fills) == 2
-        observed = read_native_corporate_state(
-            engine, instrument_id=instrument.id, venue=venue, currency=currency
-        )
+        observed = read_native_corporate_state(engine, instrument_id=instrument.id, venue=venue, currency=currency)
         assert observed.position_flat and observed.cache_open_positions == 0
         assert observed.cache_open_orders == 0
         assert observed.fill_count == 2
