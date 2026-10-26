@@ -36,6 +36,23 @@ def test_uninitialized_old_database_is_not_mistaken_for_fresh_run(tmp_path):
         ExecutionStore(path)
 
 
+
+def test_orphaned_history_cannot_be_reimported_from_unbound_old_json(tmp_path):
+    path = tmp_path / "ledger.json"
+    store = ExecutionStore(path)
+    store.maps["applied"]["T1"] = [10, "O1"]
+    store.save({"cash": 900, "positions": {"A": 1}})
+    with sqlite3.connect(store.path) as db:
+        db.execute("DELETE FROM snapshot WHERE id=1")
+    # Forging an old, unbound projection must not hide surviving trade IDs
+    # while fabricating a fresh monetary opening balance.
+    atomic_json(path, {"cash": 1000})
+    with pytest.raises(ValueError, match="snapshot missing with recorded history"):
+        ExecutionStore(path)
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT COUNT(*) FROM history WHERE bucket='applied'").fetchone()[0] == 1
+
+
 def test_missing_snapshot_with_authoritative_projection_is_blocked(tmp_path):
     path = tmp_path / "ledger.json"
     store = ExecutionStore(path)
