@@ -155,6 +155,7 @@ def settle_delistings(
         )
     return frames, membership, {}
 
+
 def equal_weight(signal_factory, tickers: list[str]) -> list[Sleeve]:
     w = 1.0 / len(tickers)
     return [Sleeve(signal_factory(), t, w) for t in tickers]
