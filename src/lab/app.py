@@ -1,5 +1,6 @@
 """Local setup and control UI. Never places orders outside the existing paper engine."""
 
+import contextlib
 import copy
 import hashlib
 import hmac
@@ -84,8 +85,11 @@ def toml(raw):
 
 def validate_settings(s, universe):
     keys = {"host", "port", "account", "capital", "profile", "tickers", "strategy", "data", "mode", "hours"}
-    if not isinstance(s, dict) or set(s) != keys:
+    if not isinstance(s, dict) or set(s) not in (keys, keys | {"gold"}):
         raise ValueError("Complete all setup fields.")
+    s.setdefault("gold", False)
+    if type(s["gold"]) is not bool:
+        raise ValueError("Choose whether London Gold is enabled.")
     if not isinstance(s["host"], str) or not re.fullmatch(r"[a-zA-Z0-9._-]{1,253}", s["host"]):
         raise ValueError("Enter the Gateway hostname or IPv4 address.")
     if type(s["port"]) is not int:
@@ -127,6 +131,7 @@ class Controller:
             "profile": self.cfg.risk.profile if self.cfg.risk.profile in PROFILES else "balanced",
             "tickers": [t for t in ("SPY", "QQQ") if t in self.cfg.universe] or list(self.cfg.universe)[:2],
             "strategy": "combined",
+            "gold": False,
             "data": p.market_data,
             "mode": "autonomous",
             "hours": 0,  # no time limit: unattended, continuous trading is the base
@@ -156,7 +161,7 @@ class Controller:
         record = record or read_json(self.settings_path)
         if record.get("config_sha256") != hashlib.sha256(self.config_path.read_bytes()).hexdigest():
             raise ValueError("Saved setup and configuration differ. Review and save setup again before starting.")
-        if record.get("settings") != self.settings:
+        if validate_settings(copy.deepcopy(record.get("settings")), self.cfg.universe) != self.settings:
             raise ValueError("Saved setup changed; restart the app before starting.")
 
     def alive(self):
@@ -261,6 +266,8 @@ class Controller:
                     "--tickers",
                     *self.settings["tickers"],
                 ]
+                if self.settings["gold"]:
+                    args.append("--gold")
                 if self.cfg.risk.max_short_gross > 0 and "sma_trend" in STRATEGIES[self.settings["strategy"]]:
                     args += ["--set", "sma_trend.short=1"]
                 self.process = subprocess.Popen(
@@ -331,6 +338,10 @@ class Controller:
             histories = [set(evidence["history"][t]) for t in self.settings["tickers"]]
             if len(set.intersection(*histories)) < self.cfg.portfolio.vol_window + 1:
                 return "Loading aligned history for portfolio risk estimates."
+            if self.settings["gold"]:
+                gold = read_json(self.rt / "gold-status.json")
+                if gold.get("session") != self.session or not gold.get("ready"):
+                    return "Loading current London Gold history from IBKR."
             return None
         except (OSError, ValueError, KeyError, TypeError, OverflowError, AttributeError):
             return "Waiting for broker data and account checks."
@@ -410,6 +421,12 @@ class Controller:
     def status(self):
         with self.lock:
             hb, requests, authority = {}, [], None
+            gold_status = None
+            if self.settings["gold"]:
+                with contextlib.suppress(OSError, ValueError):
+                    candidate = read_json(self.rt / "gold-status.json")
+                    if isinstance(candidate, dict) and candidate.get("session") == self.session:
+                        gold_status = candidate
             try:
                 hb = read_json(self.rt / "heartbeat.json")
                 control = Authority(self.rt, read_json(self.rt / "identity.json"))
@@ -431,6 +448,7 @@ class Controller:
                 "settings": self.settings,
                 "symbols": list(self.cfg.universe),
                 "heartbeat": hb,
+                "gold_status": gold_status,
                 "authority": authority,
                 "requests": requests,
                 "engine_alive": self.alive(),
