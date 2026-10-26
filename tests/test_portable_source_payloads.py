@@ -101,8 +101,7 @@ class SourcePayloadTests(unittest.TestCase):
         frame = SourceFrame(channel, payload.sequence, key, at - 1, at, payload.sha256, current.digest, ZERO)
         frame = replace(frame, digest=frame_sha256(proof, frame))
         ends = tuple(
-            CursorAnchor(x.channel, frame.sequence, frame.digest) if x.channel is channel else x
-            for x in proof.ends
+            CursorAnchor(x.channel, frame.sequence, frame.digest) if x.channel is channel else x for x in proof.ends
         )
         self.fence = replace(proof, frames=(*proof.frames, frame), ends=ends)
         return payload
@@ -151,9 +150,7 @@ class SourcePayloadTests(unittest.TestCase):
 
     def test_non_genesis_history_never_qualifies(self):
         payload = self.append(SourceChannel.POSITIONS, "P1", {"position": "3"})
-        anchored = tuple(
-            CursorAnchor(x.channel, 1, HASH) if x.channel is SourceChannel.ORDERS else x for x in anchor()
-        )
+        anchored = tuple(CursorAnchor(x.channel, 1, HASH) if x.channel is SourceChannel.ORDERS else x for x in anchor())
         self.fence = replace(self.fence, anchors=anchored)
         self.assertIn("SOURCE_PAYLOAD_REPLAY_NOT_FROM_GENESIS", self.assess(payload).findings)
 
@@ -176,10 +173,15 @@ class SourcePayloadTests(unittest.TestCase):
                 SourceChannel.EXECUTIONS,
                 1,
                 "EX",
-                canonical({
-                    "client_order_id": "A", "execution_id": "EX", "quantity": "1",
-                    "exchange_ns": True, "available_ns": 3,
-                }),
+                canonical(
+                    {
+                        "client_order_id": "A",
+                        "execution_id": "EX",
+                        "quantity": "1",
+                        "exchange_ns": True,
+                        "available_ns": 3,
+                    }
+                ),
             )
         with self.assertRaises(LifecycleError):
             CapturedPayload(SourceChannel.ORDERS, 1, "O1", canonical({"position": "3"}))
@@ -193,18 +195,34 @@ class SourcePayloadTests(unittest.TestCase):
 
     def test_extra_execution_cannot_be_hidden_by_complete_snapshot(self):
         pos = self.append(SourceChannel.POSITIONS, "P1", {"position": "3"})
-        execution = self.append(SourceChannel.EXECUTIONS, "EX1", {
-            "client_order_id": "A", "execution_id": "EX1", "quantity": "1",
-            "exchange_ns": 4, "available_ns": 5,
-        }, at=5)
+        execution = self.append(
+            SourceChannel.EXECUTIONS,
+            "EX1",
+            {
+                "client_order_id": "A",
+                "execution_id": "EX1",
+                "quantity": "1",
+                "exchange_ns": 4,
+                "available_ns": 5,
+            },
+            at=5,
+        )
         self.assertIn("SOURCE_EXECUTION_PAYLOAD_DISAGREES", self.assess(pos, execution).findings)
 
     def test_source_time_forgery_is_detected_even_with_valid_frame_hash(self):
         pos = self.append(SourceChannel.POSITIONS, "P1", {"position": "3"})
-        execution = self.append(SourceChannel.EXECUTIONS, "EX1", {
-            "client_order_id": "A", "execution_id": "EX1", "quantity": "1",
-            "exchange_ns": 1, "available_ns": 5,
-        }, at=5)
+        execution = self.append(
+            SourceChannel.EXECUTIONS,
+            "EX1",
+            {
+                "client_order_id": "A",
+                "execution_id": "EX1",
+                "quantity": "1",
+                "exchange_ns": 1,
+                "available_ns": 5,
+            },
+            at=5,
+        )
         self.assertIn("SOURCE_EXECUTION_TIME_MISMATCH", self.assess(pos, execution).findings)
 
     def test_duplicate_source_payloads_cannot_qualify(self):
