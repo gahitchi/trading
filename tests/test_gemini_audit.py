@@ -254,8 +254,8 @@ def test_an_unlevered_book_in_cash_earns_credit_interest(goog_lab):
     assert r.equity.iloc[-1] > 100_000
 
 
-def test_a_delisting_is_settled_at_its_recorded_value(goog_lab, tmp_path):
-    """F-R09: the stock's prices end on its delisting date; the position settles at close x (1 + return)."""
+def test_known_delisting_cannot_trade_fictitious_post_delisting_bars(goog_lab, tmp_path):
+    """F-R09 / FP-01: cash recovery needs a native corporate-action settlement, not a fill."""
     from lab import backtest
     from lab.config import RiskSettings
     from lab.signals import BuyAndHold
@@ -266,19 +266,16 @@ def test_a_delisting_is_settled_at_its_recorded_value(goog_lab, tmp_path):
     risk = RiskSettings(1.0, 1.0, 0.9999)
     with pytest.raises(data.DataError, match="terminal/delisting"):
         backtest.run(cfg, sleeves, {"A": alive, "D": dying}, alive.index[30].date(), None, risk=risk)
+
     f = tmp_path / "delistings.csv"
     day = dying.index[-1].date()
     f.write_text(
-        f"ticker,delist_date,delist_type,delist_return,settlement_price,source\nD,{day},merger,-0.5,,test vendor\n"
+        f"ticker,delist_date,delist_type,delist_return,settlement_price,source\\n"
+        f"D,{day},merger,-0.5,,test vendor\\n"
     )
     data.save_delistings(cfg, f)
-    r = backtest.run(cfg, sleeves, {"A": alive, "D": dying}, alive.index[30].date(), None, risk=risk)
-    sells = [x for x in r.fills if x.ticker == "D" and x.side == "SELL"]
-    assert len(sells) == 1 and sells[0].price == pytest.approx(dying["close"].iloc[-1] * 0.5, abs=0.005)  # a cent tick
-    held = sum(x.qty if x.side == "BUY" else -x.qty for x in r.fills if x.ticker == "D")
-    assert held == 0 and r.metrics["delistings_settled"]["D"]["source"] == "test vendor"
-    assert r.metrics["execution_qualified"] is False
-    assert r.metrics["delisting_execution_model"] == "synthetic_settlement_bars_not_executable"
+    with pytest.raises(data.DataError, match="post-delisting market fills are forbidden"):
+        backtest.run(cfg, sleeves, {"A": alive, "D": dying}, alive.index[30].date(), None, risk=risk)
 
 
 def test_delisting_records_need_a_vendor_and_a_value(goog_lab, tmp_path):
