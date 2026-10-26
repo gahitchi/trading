@@ -104,22 +104,31 @@ class ExecutionStore:
         self.maps = {b: History(self, b) for b in ("terminal", "disposed", "applied")}
         with self.connect() as db:
             if existed:
-                if db.execute("PRAGMA user_version").fetchone()[0] != 1:
+                version = db.execute("PRAGMA user_version").fetchone()[0]
+                if version not in (1, 2):
                     raise ValueError("unknown execution database version")
                 if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                     raise ValueError("execution database failed integrity check")
+                if version == 1:
+                    # Atomic v1 -> v2 upgrade. Earlier binaries reject version 2
+                    # rather than writing behind the new generation fence.
+                    db.execute("ALTER TABLE snapshot ADD COLUMN generation INTEGER NOT NULL DEFAULT 0")
+                    db.execute("PRAGMA user_version=2")
             else:
-                db.execute("CREATE TABLE snapshot (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)")
+                db.execute(
+                    "CREATE TABLE snapshot (id INTEGER PRIMARY KEY CHECK(id=1), "
+                    "value TEXT NOT NULL, generation INTEGER NOT NULL CHECK(generation >= 1))"
+                )
                 db.execute(
                     "CREATE TABLE history (bucket TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, coid TEXT, PRIMARY KEY(bucket,id)) WITHOUT ROWID"
                 )
                 db.execute("CREATE INDEX history_order ON history(bucket,coid)")
-                db.execute("PRAGMA user_version=1")
-            # The snapshot is a single-writer compare-and-swap head. An older
-            # process may read current history, but cannot overwrite a later
-            # writer's cash, positions, pending orders or replay checkpoint.
-            row = db.execute("SELECT value FROM snapshot WHERE id=1").fetchone()
+                db.execute("PRAGMA user_version=2")
+            # Pin both value and monotonic generation. A value-only CAS permits
+            # an ABA overwrite if the same snapshot bytes are saved again.
+            row = db.execute("SELECT value,generation FROM snapshot WHERE id=1").fetchone()
             self._expected_snapshot = row[0] if row is not None else None
+            self._expected_generation = row[1] if row is not None else 0
         if existed and self.load() is None and self.projection.exists():
             legacy = read_json(self.projection)
             if legacy.get("authoritative_store"):
@@ -169,9 +178,10 @@ class ExecutionStore:
         snapshot = encode(state)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT value FROM snapshot WHERE id=1").fetchone()
+            row = db.execute("SELECT value,generation FROM snapshot WHERE id=1").fetchone()
             current = row[0] if row is not None else None
-            if current != self._expected_snapshot:
+            generation = row[1] if row is not None else 0
+            if current != self._expected_snapshot or generation != self._expected_generation:
                 raise ValueError("stale execution snapshot writer: authoritative state changed")
             for bucket, records in self.maps.items():
                 if bucket == "applied":
@@ -194,13 +204,15 @@ class ExecutionStore:
                         ((bucket, k, encode(v), None) for k, v in records.dirty.items()),
                     )
             db.execute(
-                "INSERT INTO snapshot VALUES(1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
-                (snapshot,),
+                "INSERT INTO snapshot(id,value,generation) VALUES(1,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET value=excluded.value,generation=excluded.generation",
+                (snapshot, generation + 1),
             )
         # SQLite committed the new authoritative head. Advance the local
         # baseline BEFORE writing the best-effort JSON projection: a crash in
         # the latter cannot make a later save reuse a stale head.
         self._expected_snapshot = snapshot
+        self._expected_generation = generation + 1
         for records in self.maps.values():
             records.dirty.clear()
         atomic_json(self.projection, state)
