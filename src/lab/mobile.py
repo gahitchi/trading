@@ -11,7 +11,6 @@ import argparse
 import hashlib
 import html
 import json
-import os
 import platform
 import sqlite3
 import sys
