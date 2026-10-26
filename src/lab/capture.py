@@ -450,28 +450,61 @@ def _pseudo(key: bytes, kind: str, value: str) -> str:
     return f"{kind}-" + hmac.new(key, f"{kind}:{value}".encode(), hashlib.sha256).hexdigest()[:12]
 
 
-def _redact_text(key: bytes, text: str) -> str:
-    return _ACCOUNT.sub(lambda m: _pseudo(key, "ACCT", m.group(0).removeprefix("IB-")), text)
+def _capture_id_aliases(key: bytes, value, aliases: dict[str, str], field: str | None = None):
+    """Discover structured IDs before redacting *any* file in a bundle.
+
+    Broker messages and risk events may repeat an ID inside ordinary prose.
+    Those occurrences must use the same pseudonym as the structured field.
+    """
+    if isinstance(value, dict):
+        if field in _KEYED_BY_ORDER:
+            for raw in value:
+                raw = str(raw)
+                if len(raw) >= 2:
+                    aliases.setdefault(raw, _pseudo(key, "CLIENT", raw))
+        for name, entry in value.items():
+            if _SECRET_KEYS.search(str(name)):
+                continue
+            if name in _ID_KEYS and isinstance(entry, str) and len(entry) >= 2 and entry != "None":
+                kind = "ACCT" if name.startswith("account") else name.split("_")[0].upper()
+                aliases.setdefault(
+                    entry, _pseudo(key, kind, entry.removeprefix("IB-") if kind == "ACCT" else entry)
+                )
+            _capture_id_aliases(key, entry, aliases, str(name))
+    elif isinstance(value, list):
+        for item in value:
+            _capture_id_aliases(key, item, aliases, field)
 
 
-def _redact(key: bytes, value, field: str | None = None):
+def _redact_text(key: bytes, text: str, aliases: dict[str, str] | None = None) -> str:
+    text = _ACCOUNT.sub(lambda m: _pseudo(key, "ACCT", m.group(0).removeprefix("IB-")), text)
+    if aliases:
+        # Longest first avoids partially substituting overlapping order IDs.
+        # Treat arbitrary free text conservatively: it may over-redact, but
+        # must not leak an execution ID that also exists in a structured field.
+        for raw in sorted(aliases, key=len, reverse=True):
+            text = text.replace(raw, aliases[raw])
+    return text
+
+
+def _redact(key: bytes, value, field: str | None = None, aliases: dict[str, str] | None = None):
     if isinstance(value, dict) and field in _KEYED_BY_ORDER:
-        return {_pseudo(key, "CLIENT", str(k)): _redact(key, v) for k, v in value.items()}
+        return {_pseudo(key, "CLIENT", str(k)): _redact(key, v, aliases=aliases) for k, v in value.items()}
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
             if _SECRET_KEYS.search(str(k)):
                 out[k] = "[REDACTED]"
             else:
-                out[_redact_text(key, str(k))] = _redact(key, v, str(k))
+                out[_redact_text(key, str(k), aliases)] = _redact(key, v, str(k), aliases)
         return out
     if isinstance(value, list):
-        return [_redact(key, v, field) for v in value]
+        return [_redact(key, v, field, aliases) for v in value]
     if isinstance(value, str):
         if field in _ID_KEYS and value and value != "None":
             kind = "ACCT" if field.startswith("account") else field.split("_")[0].upper()
             return _pseudo(key, kind, value.removeprefix("IB-") if kind == "ACCT" else value)
-        return _redact_text(key, value)
+        return _redact_text(key, value, aliases)
     return value
 
 
@@ -481,8 +514,22 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
     if dst == src or src in dst.parents:
         raise ValueError("write the sanitized copy outside the raw capture directory")
     key = _key(key_path)
+    files = sorted(p for p in src.rglob("*") if p.is_file())
+    aliases: dict[str, str] = {}
+    for f in files:
+        if f.name in _NEVER_COPY:
+            continue
+        try:
+            if f.suffix == ".jsonl":
+                for line in f.read_text().splitlines():
+                    if line.strip():
+                        _capture_id_aliases(key, json.loads(line), aliases)
+            elif f.suffix == ".json" or f.name in ("HALT", "KILL"):
+                _capture_id_aliases(key, json.loads(f.read_bytes()), aliases)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
     entries = []
-    for f in sorted(p for p in src.rglob("*") if p.is_file()):
+    for f in files:
         rel = f.relative_to(src)
         if f.name in _NEVER_COPY:
             continue
@@ -492,13 +539,13 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
         try:
             if f.suffix == ".jsonl":
                 lines = [
-                    json.dumps(_redact(key, json.loads(line)), sort_keys=True)
+                    json.dumps(_redact(key, json.loads(line), aliases=aliases), sort_keys=True)
                     for line in raw.decode().splitlines()
                     if line.strip()
                 ]
                 text = "\n".join(lines) + ("\n" if lines else "")
             elif f.suffix == ".json" or f.name in ("HALT", "KILL"):
-                text = json.dumps(_redact(key, json.loads(raw)), indent=1, sort_keys=True)
+                text = json.dumps(_redact(key, json.loads(raw), aliases=aliases), indent=1, sort_keys=True)
             else:
                 text = None
         except (UnicodeDecodeError, json.JSONDecodeError):
