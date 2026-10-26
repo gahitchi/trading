@@ -106,6 +106,13 @@ class PortableCorporateJournalTests(unittest.TestCase):
             self.assertEqual(CorporateSession(journal, original).book.cash, Decimal("1500.00"))
             self.assertEqual(len(journal.read_all()), 4)
 
+    def test_journal_cannot_start_from_a_silently_pre_settled_book(self):
+        already = recognize(initial(), action(), readiness(), observed_ns=20)
+        with EventJournal(self.path) as journal, self.assertRaises(CorporateActionError):
+            CorporateSession(journal, already)
+        with EventJournal(self.path) as journal:
+            self.assertEqual(journal.read_all(), ())
+
     def test_short_pending_liability_and_debits_replay(self):
         start = initial(position=Decimal("-10"), signed_basis=Decimal("-400.00"))
         with EventJournal(self.path) as journal:
