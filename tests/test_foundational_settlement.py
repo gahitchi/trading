@@ -32,9 +32,7 @@ def test_no_phantom_exchange_print_even_with_recorded_recovery(recovery):
     bars = _bars()
     frame = {"D": bars}
     delist_date = bars.index[-1].date()
-    evidence = {
-        "D": {"delist_date": delist_date, "settlement_price": recovery, "source": "vendor", "assumed": False}
-    }
+    evidence = {"D": {"delist_date": delist_date, "settlement_price": recovery, "source": "vendor", "assumed": False}}
     with pytest.raises(data.DataError, match="post-delisting market fills are forbidden"):
         backtest.settle_delistings(frame, None, evidence)
     # Failure cannot mutate the caller's bars into a synthetic executable market.
