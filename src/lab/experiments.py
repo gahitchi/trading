@@ -162,6 +162,7 @@ def config_fingerprint(cfg: LabConfig, n_tickers: int = 1, *, bound_risk: bool =
         "capital": cfg.capital,
         "warmup_start": str(cfg.warmup_start),
         "membership": file_digest(data.membership_path(cfg)),
+        "delistings": file_digest(data.delistings_path(cfg)),
         "risk_free": file_digest(data.risk_free_path(cfg)),
         "borrow": file_digest(cfg.borrow.history),
         "borrow_max_age_days": cfg.borrow.max_age_days,
