@@ -100,7 +100,10 @@ class SourcePayloadTests(unittest.TestCase):
         payload = CapturedPayload(channel, current.sequence + 1, key, canonical(value))
         frame = SourceFrame(channel, payload.sequence, key, at - 1, at, payload.sha256, current.digest, ZERO)
         frame = replace(frame, digest=frame_sha256(proof, frame))
-        ends = tuple(CursorAnchor(x.channel, frame.sequence, frame.digest) if x.channel is channel else x for x in proof.ends)
+        ends = tuple(
+            CursorAnchor(x.channel, frame.sequence, frame.digest) if x.channel is channel else x
+            for x in proof.ends
+        )
         self.fence = replace(proof, frames=(*proof.frames, frame), ends=ends)
         return payload
 
@@ -148,7 +151,9 @@ class SourcePayloadTests(unittest.TestCase):
 
     def test_non_genesis_history_never_qualifies(self):
         payload = self.append(SourceChannel.POSITIONS, "P1", {"position": "3"})
-        anchored = tuple(CursorAnchor(x.channel, 1, HASH) if x.channel is SourceChannel.ORDERS else x for x in anchor())
+        anchored = tuple(
+            CursorAnchor(x.channel, 1, HASH) if x.channel is SourceChannel.ORDERS else x for x in anchor()
+        )
         self.fence = replace(self.fence, anchors=anchored)
         self.assertIn("SOURCE_PAYLOAD_REPLAY_NOT_FROM_GENESIS", self.assess(payload).findings)
 
@@ -167,10 +172,15 @@ class SourcePayloadTests(unittest.TestCase):
 
     def test_reject_boolean_execution_timestamps_and_unsupported_event_types(self):
         with self.assertRaises(LifecycleError):
-            CapturedPayload(SourceChannel.EXECUTIONS, 1, "EX", canonical({
-                "client_order_id": "A", "execution_id": "EX", "quantity": "1",
-                "exchange_ns": True, "available_ns": 3,
-            }))
+            CapturedPayload(
+                SourceChannel.EXECUTIONS,
+                1,
+                "EX",
+                canonical({
+                    "client_order_id": "A", "execution_id": "EX", "quantity": "1",
+                    "exchange_ns": True, "available_ns": 3,
+                }),
+            )
         with self.assertRaises(LifecycleError):
             CapturedPayload(SourceChannel.ORDERS, 1, "O1", canonical({"position": "3"}))
 
