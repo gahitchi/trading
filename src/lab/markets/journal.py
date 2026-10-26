@@ -27,6 +27,8 @@ _ALLOWED_KINDS = {
     "mark",
     "trade",
     "funding",
+    "corporate_action",
+    "corporate_cash",
     "halt",
 }
 _GENESIS = "0" * 64
