@@ -268,6 +268,8 @@ class CorporateBook:
             _name(self.action_version, "book action version")
             if self.position or self.signed_basis:
                 raise CorporateActionError("recognized corporate action must retire equity units")
+        if type(self.receipt_digests) is not tuple:
+            raise CorporateActionError("receipt history must be immutable")
         ids = []
         for entry in self.receipt_digests:
             if type(entry) is not tuple or len(entry) != 2:
