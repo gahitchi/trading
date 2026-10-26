@@ -1300,6 +1300,7 @@ class ExecutionAgent(Strategy):
             not all(math.isfinite(v) for v in (qty, px, fee))
             or qty <= 0
             or px <= 0
+            or ev.order_side not in (OrderSide.BUY, OrderSide.SELL)
             or (info and (info["ticker"] != ticker or info["side"] != ("BUY" if buy else "SELL")))
         ):
             # An invalid report is NOT a settled execution. Journal the
