@@ -277,10 +277,10 @@ def save_delistings(cfg: LabConfig, path: str | Path) -> pd.DataFrame:
             price = float(r["settlement_price"]) if r["settlement_price"] else None
         except ValueError as e:
             raise DataError(f"{where}: {e}") from e
-        if ret is not None and not -1 <= ret <= 10:
-            raise DataError(f"{where}: delist_return must be a fraction between -1 and 10")
-        if price is not None and price < 0:
-            raise DataError(f"{where}: settlement_price cannot be negative")
+        if ret is not None and (not math.isfinite(ret) or not -1 <= ret <= 10):
+            raise DataError(f"{where}: delist_return must be finite and between -1 and 10")
+        if price is not None and (not math.isfinite(price) or price < 0):
+            raise DataError(f"{where}: settlement_price must be finite and nonnegative")
         if ret is None and price is None and r["delist_type"] not in DISTRESS_TYPES:
             raise DataError(
                 f"{where}: a {r['delist_type'] or 'untyped'} delisting needs delist_return or settlement_price"
@@ -293,19 +293,51 @@ def save_delistings(cfg: LabConfig, path: str | Path) -> pd.DataFrame:
 
 
 def delistings(cfg: LabConfig) -> dict[str, dict] | None:
+    """Read immutable settlement evidence; reject malformed/tampered records.
+
+    Validation on initial import is insufficient because the stored CSV can
+    change after it has been approved for research.
+    """
     p = delistings_path(cfg)
     if not p.exists():
         return None
-    df = pd.read_csv(p, dtype=str).fillna("")
+    try:
+        df = pd.read_csv(p, dtype=str).fillna("")
+    except (OSError, ValueError) as exc:
+        raise DataError(f"{p}: invalid delisting evidence") from exc
+    missing = set(DELISTING_COLUMNS) - set(df.columns)
+    if missing:
+        raise DataError(f"{p}: missing columns {sorted(missing)}")
     out = {}
-    for _, r in df.iterrows():
-        assumed = not r["delist_return"] and not r["settlement_price"]
-        out[r["ticker"]] = {
-            "delist_date": date.fromisoformat(r["delist_date"]),
-            "delist_type": r["delist_type"],
-            "delist_return": ASSUMED_DISTRESS_RETURN if assumed else float(r["delist_return"] or "nan"),
-            "settlement_price": float(r["settlement_price"]) if r["settlement_price"] else None,
-            "source": r["source"],
+    for i, r in df.iterrows():
+        ticker = str(r["ticker"]).strip().upper()
+        where = f"{p}: row {i + 2} ({ticker or '?'})"
+        if not ticker or not str(r["source"]).strip():
+            raise DataError(f"{where}: ticker and source are required")
+        if ticker in out:
+            raise DataError(f"{where}: one delisting per ticker")
+        try:
+            when = date.fromisoformat(str(r["delist_date"]))
+            has_return = bool(str(r["delist_return"]).strip())
+            has_price = bool(str(r["settlement_price"]).strip())
+            ret = float(r["delist_return"]) if has_return else None
+            price = float(r["settlement_price"]) if has_price else None
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise DataError(f"{where}: malformed delisting date or recovery value") from exc
+        if ret is not None and (not math.isfinite(ret) or not -1 <= ret <= 10):
+            raise DataError(f"{where}: delist_return must be finite and between -1 and 10")
+        if price is not None and (not math.isfinite(price) or price < 0):
+            raise DataError(f"{where}: settlement_price must be finite and nonnegative")
+        kind = str(r["delist_type"]).strip().lower()
+        assumed = ret is None and price is None
+        if assumed and kind not in DISTRESS_TYPES:
+            raise DataError(f"{where}: {kind or 'untyped'} delisting needs a recovery value")
+        out[ticker] = {
+            "delist_date": when,
+            "delist_type": kind,
+            "delist_return": ASSUMED_DISTRESS_RETURN if assumed else (ret if ret is not None else float("nan")),
+            "settlement_price": price,
+            "source": str(r["source"]).strip(),
             "assumed": assumed,
         }
     return out
