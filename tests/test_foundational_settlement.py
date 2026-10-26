@@ -127,8 +127,7 @@ def test_explicit_zero_recovery_is_canonical_ledger_metadata(goog_lab, tmp_path)
 
     source = tmp_path / "zero.csv"
     source.write_text(
-        "ticker,delist_date,delist_type,delist_return,settlement_price,source\n"
-        "D,2026-01-08,bankruptcy,,0.0,vendor\n"
+        "ticker,delist_date,delist_type,delist_return,settlement_price,source\nD,2026-01-08,bankruptcy,,0.0,vendor\n"
     )
     data.save_delistings(goog_lab, source)
     evidence = data.delistings(goog_lab)["D"]
