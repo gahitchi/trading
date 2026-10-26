@@ -23,7 +23,7 @@ from pathlib import Path
 # 4004: paper API relayed by the ib-gateway container (ghcr.io/gnzsnz/ib-gateway)
 PAPER_PORTS = {4002: "IB Gateway paper", 7497: "TWS paper", 4004: "IB Gateway paper (Docker relay)"}
 LIVE_PORTS = {4001: "IB Gateway live", 7496: "TWS live", 4003: "IB Gateway live (Docker relay)"}
-_PAPER_ACCOUNT = re.compile(r"DU\d{5,}")
+_PAPER_ACCOUNT = re.compile(r"DU(?:R)?\d{5,}")
 
 
 class SafetyError(Exception):
@@ -43,12 +43,12 @@ def check_paper_settings(port: int, account_id: str) -> None:
         )
     if not _PAPER_ACCOUNT.fullmatch(account_id):
         raise SafetyError(
-            f"account {account_id!r} is not an IB paper account ID (paper accounts look like 'DU1234567')."
+            f"account {account_id!r} is not an IB paper account ID (expected DU or DUR followed by digits)."
         )
 
 
 def is_paper_account(account_id: str) -> bool:
-    """Accepts Nautilus account IDs such as 'IB-DU1234567'."""
+    """Accepts Nautilus paper IDs such as 'IB-DU1234567' or 'IB-DUR123456'."""
     number = str(account_id).split("-", 1)[-1]
     return bool(_PAPER_ACCOUNT.fullmatch(number))
 

@@ -401,6 +401,26 @@ docker compose up -d                    # agents run daily; health, alerts, jour
 Daily cycle (New York time): 16:10 the signal agents fetch completed daily bars from IB; 16:15 the execution agent
 reconciles its ledger with IB and sends **market-on-open** orders; 09:30 they fill in the opening auction.
 
+### Optional London Gold PAPER strategy
+
+`lab paper --gold` adds London Spot Gold (`XAUUSD`, IBKR commodity) to the same PAPER node; the local app has a
+separate London Gold checkbox. It does not add gold to the stock universe. The strategy downloads IBKR daily
+MID bars before start, then refreshes recent gold bars and gold/EURUSD quotes at 00:20 UTC. It looks for a
+closed-bar return above SMA50 while SMA50 is above SMA200. The planned stop is 2 ATR(14) below the current
+gold quote; the take profit is at least twice the worst-case entry-to-stop distance. A limit entry, stop and
+target are submitted as one bracket. An unfilled entry is canceled after 30 minutes. A rejected leg or missing
+protective order hard-halts new entries and triggers an emergency PAPER exit after outstanding gold orders settle.
+
+The normal gold notional is at most 1% of the lesser of configured `[paper] capital` and verified broker equity
+converted to USD using an IBKR EUR/USD quote. If that budget cannot buy the broker's minimum of one ounce, one
+ounce is allowed and marked as an explicit minimum-lot exception. The hard per-order value limit still applies;
+the paper account must also have capacity above the stock allocation. IBKR Metals → Global permission is needed
+for London Gold. The feature defaults off, and existing app runtimes require a reviewed plan migration before
+enabling it. Updating a branch or merging a PR does not update an already installed Trading Lab: update the
+local checkout and rebuild/restart its Docker app. Historical-data loading and a guarded PAPER-node startup
+have been exercised against IBKR; acceptance and fill handling for the new bracket still need a controlled
+PAPER order test before unattended enablement.
+
 ### Sharing capital among stocks
 
 `[portfolio] weighting` decides how a per-stock strategy's capital is split among its stocks: `equal` (default),

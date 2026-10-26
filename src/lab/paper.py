@@ -182,14 +182,19 @@ def check_pacing(cfg: LabConfig, specs: list[SignalSpec], tickers: list[str]) ->
 Clients = Callable[[LabConfig, dict], LiveNodeBuilder]
 
 
-def _base_node(cfg: LabConfig, tickers: list[str], clients: Clients | None = None):
+def _base_node(cfg: LabConfig, tickers: list[str], clients: Clients | None = None, *, gold: bool = False):
     p = cfg.paper
     check_paper_settings(p.port, p.account_id)
     unknown = [t for t in tickers if t not in cfg.universe]
     if not tickers or unknown:
         raise ValueError(f"tickers must be in [universe] of lab.toml (unknown: {unknown})")
     iids = {t: instrument_id(t, cfg.universe[t]) for t in tickers}
-    builder = (clients or _ib_clients)(cfg, iids)
+    loaded = dict(iids)
+    if gold:
+        from lab.gold_paper import GOLD
+
+        loaded["GOLD"] = GOLD
+    builder = (clients or _ib_clients)(cfg, loaded)
     node = (
         builder.with_risk_engine_config(LiveRiskEngineConfig(max_order_submit_rate=p.order_rate))
         .with_reconciliation(True)
@@ -241,6 +246,7 @@ def build_node(
     mode: str | None = None,
     authority_hours: float | None = None,
     bank_path: str | None = None,
+    gold: bool = False,
 ) -> LiveNode:
     from lab.config import validate_effective
 
@@ -304,6 +310,8 @@ def build_node(
         # only the simulation code an approval was validated with.
         "runtime_sha256": runtime_digest(),
     }
+    if gold:
+        identity["gold"] = "london-spot-atr-v1"
     if bank is not None:
         identity["strategy_bank"] = bank.manifest
 
@@ -344,7 +352,7 @@ def build_node(
         if mode is not None or not authority.path.exists():
             authority.issue(mode or "autonomous", authority_hours)
         authority.read()  # A restart never silently renews an expired lease (a standing mandate never expires).
-    node, iids = _base_node(cfg, tickers, clients)
+    node, iids = _base_node(cfg, tickers, clients, gold=gold)
     p = cfg.paper
     rt = runtime_dir(cfg)
     speed_kw = (
@@ -521,6 +529,28 @@ def build_node(
             )
         )
     )
+    if gold:
+        from lab.gold_paper import GOLD, GoldPaperConfig, GoldPaperStrategy
+
+        node.add_strategy(
+            GoldPaperStrategy(
+                GoldPaperConfig(
+                    order_id_tag="GOLD",
+                    use_uuid_client_order_ids=True,
+                    external_order_instrument_ids=[GOLD],
+                    paper_account=p.account_id,
+                    host=p.host,
+                    port=p.port,
+                    data_client_id=p.client_id + 3,
+                    runtime=str(rt),
+                    capital_usd=p.capital,
+                    max_order_value=p.max_order_value,
+                    authority=authority,
+                    data_delay_min=cfg.trading.data_delay_min,
+                    notification_health=notifier.health if notifier is not None else None,
+                )
+            )
+        )
     return node
 
 

@@ -80,6 +80,7 @@ def test_metrics():
         (7496, "DU1234567", "live port"),
         (4002, "", "account_id"),
         (4002, "U1234567", "not an IB paper"),
+        (4002, "DUX1234567", "not an IB paper"),
         (5555, "DU1234567", "not a known paper port"),
     ],
 )
@@ -90,8 +91,10 @@ def test_paper_settings_guard(port, acct, msg):
 
 def test_paper_settings_ok():
     check_paper_settings(4002, "DU1234567")
+    check_paper_settings(4002, "DUR123456")
     check_paper_settings(7497, "DU1234567")
-    assert is_paper_account("IB-DU1234567") and not is_paper_account("IB-U1234567")
+    assert is_paper_account("IB-DU1234567") and is_paper_account("IB-DUR123456")
+    assert not is_paper_account("IB-U1234567")
 
 
 def test_paper_node_builds_without_connecting(goog_lab):

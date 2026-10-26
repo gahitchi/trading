@@ -78,6 +78,7 @@ def prepared(c):
         {"tickers": ["UNKNOWN"]},
         {"strategy": "unreviewed"},
         {"mode": "live"},
+        {"gold": "yes"},
     ],
 )
 def test_invalid_setup_never_changes_config(controller, change):
@@ -96,6 +97,14 @@ def test_saved_setup_is_bound_to_config_and_ignores_connection_environment(contr
     controller.config_path.write_text(controller.config_path.read_text() + "\n# changed\n")
     with pytest.raises(ValueError, match="configuration differ"):
         restored.start()
+
+
+def test_gold_is_explicit_and_cannot_change_an_existing_runtime(controller):
+    legacy = {key: value for key, value in controller.settings.items() if key != "gold"}
+    assert app.validate_settings(legacy, controller.cfg.universe)["gold"] is False
+    atomic_json(controller.rt / "identity.json", {"account": controller.settings["account"]})
+    with pytest.raises(ValueError, match="migration"):
+        controller.configure({**controller.settings, "gold": True})
 
 
 def test_delayed_feed_schedule_waits_for_completed_data(controller):
