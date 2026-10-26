@@ -90,7 +90,6 @@ def test_legacy_json_import_without_sqlite_snapshot_still_recovers(tmp_path):
     assert created.maps["applied"]["T1"] == [1, "O1"]
 
 
-
 def test_lost_marker_must_roll_back_the_cash_commit(tmp_path):
     path = tmp_path / "ledger.json"
     store = ExecutionStore(path)
