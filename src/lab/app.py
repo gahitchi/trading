@@ -129,8 +129,8 @@ class Controller:
             "tickers": [t for t in ("SPY", "QQQ") if t in self.cfg.universe] or list(self.cfg.universe)[:2],
             "strategy": "combined",
             "data": p.market_data,
-            "mode": "autonomous",
-            "hours": 0,  # no time limit: unattended, continuous trading is the base
+            "mode": "supervised",
+            "hours": 24,  # unattended operation requires separately qualified research evidence
         }
         if self.settings_path.exists():
             record = read_json(self.settings_path)
@@ -229,6 +229,24 @@ class Controller:
                 raise ValueError("An existing stop must be reviewed and explicitly cleared with lab resume.")
             if kill and kill.get("mode") == "flatten":
                 raise ValueError("An exit is in progress. Reconcile positions before clearing it with lab resume.")
+            if self.settings["mode"] == "autonomous":
+                from lab.research.builtin_qualification import verify_builtin
+                from lab.signals.registry import resolve
+
+                names = STRATEGIES[self.settings["strategy"]]
+                if len(names) != 1:
+                    raise ValueError("autonomous ensembles need independent whole-policy qualification; use supervised")
+                name = names[0]
+                params = {"short": 1} if name == "sma_trend" and self.cfg.risk.max_short_gross > 0 else {}
+                try:
+                    verify_builtin(
+                        self.cfg, resolve(name, self.cfg.research_dir, params), self.settings["tickers"]
+                    )
+                except (OSError, ValueError) as exc:
+                    raise ValueError(
+                        "autonomous paper requires qualified strategy evidence; use supervised or "
+                        "lab research qualify-builtin"
+                    ) from exc
             if self.alive() and self.phase in ("running", "preparing"):
                 return self.status()
             if self.alive():
