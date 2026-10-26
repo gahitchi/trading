@@ -23,7 +23,7 @@ from lab.markets.corporate_actions import (
 )
 from lab.markets.journal import EventJournal, JournalError
 
-_SESSION = "session:corporate-cash:v1"
+_SESSION = "session:corporate-cash:v2"
 _SCHEMA = 2
 
 
