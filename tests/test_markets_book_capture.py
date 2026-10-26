@@ -146,3 +146,68 @@ def test_truncation_duplicate_json_keys_and_symlink_refused(tmp_path):
     link.symlink_to(path)
     with pytest.raises(BookCaptureError, match="symlink"):
         verify_recorded_book_capture(link, hashlib.sha256(dup).hexdigest(), "BTC-USD-SWAP")
+
+
+def test_verified_capture_replays_as_read_only_quotes_through_existing_native_actor(tmp_path):
+    """Original bytes -> validated book states -> existing native Nautilus DataActor."""
+    from decimal import Decimal
+
+    from lab.markets.domain import AssetClass, ContractKind, Instrument
+    from lab.markets.nautilus_data import build_causal_tape
+    from lab.markets.nautilus_instruments import LinearContractDefinition
+    from lab.markets.nautilus_runtime import replay_native_observations
+
+    path, digest = save(tmp_path)
+    evidence = verify_recorded_book_capture(path, digest, "BTC-USD-SWAP", retain_books=True)
+    assert len(evidence.recorded_books) == 2
+    assert evidence.recorded_books[0].seq_id == 10
+    assert evidence.recorded_books[1].seq_id == 11
+    assert evidence.recorded_books[-1] == evidence.final_book
+    assert not evidence.market_data_execution_qualified
+
+    d = Decimal
+    instrument = Instrument(
+        "SIM", "BTC-USD-SWAP", AssetClass.CRYPTO, ContractKind.LINEAR_DERIVATIVE,
+        "USD", d("0.1"), d("0.001"), d("0.001"), d("5"), multiplier=d("1"),
+    )
+    contract = LinearContractDefinition(
+        instrument, "BTC", "USD", d("2"), d("5"), 0, 0, "offline_fixture",
+    )
+    tape = build_causal_tape(instrument, evidence.recorded_books)
+    assert all(type(event).__name__ == "QuoteTick" for event in tape.events)
+    assert tuple(event.ts_init for event in tape.events) == (
+        1_000_000_001, 1_001_000_001,
+    )
+    first = replay_native_observations(contract, tape)
+    second = replay_native_observations(contract, tape)
+    assert first == second
+    assert first.quote_observations == 2
+    assert first.trade_observations == 0
+    assert first.mark_observations == 0
+    assert first.native_data_engine_used and first.event_integrity_verified
+    assert first.clock_receipt_verified
+    assert not first.broker_execution_enabled
+    assert not first.strategies_qualified
+
+
+def test_capture_retention_is_explicit_and_fails_closed_on_large_books(tmp_path):
+    path, digest = save(tmp_path)
+    ordinary = verify_recorded_book_capture(path, digest, "BTC-USD-SWAP")
+    assert ordinary.recorded_books == ()
+    with pytest.raises(BookCaptureError, match="explicit boolean"):
+        verify_recorded_book_capture(path, digest, "BTC-USD-SWAP", retain_books=1)
+
+    frames = [
+        {"received_ns": 1_000_000_001, "frame": frame("snapshot", 10, -1, 1000)}
+    ]
+    frames.extend(
+        {"received_ns": 1_000_000_001 + i * 1_000_000, "frame": frame("update", 10 + i, 9 + i, 1000 + i)}
+        for i in range(1, 257)
+    )
+    path, digest = save(tmp_path, frames)
+    # A large recording may still be checked without retaining the whole book.
+    validated = verify_recorded_book_capture(path, digest, "BTC-USD-SWAP")
+    assert validated.frame_count == 257
+    assert validated.recorded_books == ()
+    with pytest.raises(BookCaptureError, match="retention bound"):
+        verify_recorded_book_capture(path, digest, "BTC-USD-SWAP", retain_books=True)
