@@ -480,13 +480,14 @@ def _redact_text(
     text = _ACCOUNT.sub(lambda m: _pseudo(key, "ACCT", m.group(0).removeprefix("IB-")), text)
     if aliases:
         # The matcher is compiled ONCE per bundle, not once per message.
-        # Token boundaries avoid corrupting timestamps (T20:... is not
-        # the trade ID T2), while longest-first alternatives handle overlaps.
+        # Boundaries protect timestamps and decimal numbers: trade T2 is
+        # not the T2 prefix in T20:..., and ID 123 is not price 123.45.
+        # Longest-first alternatives handle overlapping complete IDs.
         if matcher is None:
             matcher = re.compile(
-                r"(?<![A-Za-z0-9])(?:"
+                r"(?<![A-Za-z0-9.,-])(?<![0-9]:)(?:"
                 + "|".join(re.escape(raw) for raw in sorted(aliases, key=len, reverse=True))
-                + r")(?![A-Za-z0-9])"
+                + r")(?![A-Za-z0-9]|[.,:-][0-9])"
             )
         text = matcher.sub(lambda match: aliases[match.group()], text)
     return text
@@ -543,9 +544,9 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
             continue
     matcher = (
         re.compile(
-            r"(?<![A-Za-z0-9])(?:"
+            r"(?<![A-Za-z0-9.,-])(?<![0-9]:)(?:"
             + "|".join(re.escape(raw) for raw in sorted(aliases, key=len, reverse=True))
-            + r")(?![A-Za-z0-9])"
+            + r")(?![A-Za-z0-9]|[.,:-][0-9])"
         )
         if aliases
         else None
