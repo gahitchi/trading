@@ -36,7 +36,6 @@ def test_uninitialized_old_database_is_not_mistaken_for_fresh_run(tmp_path):
         ExecutionStore(path)
 
 
-
 def test_orphaned_history_cannot_be_reimported_from_unbound_old_json(tmp_path):
     path = tmp_path / "ledger.json"
     store = ExecutionStore(path)
