@@ -1,8 +1,10 @@
 # Trading Lab on Android / Termux — pocket diagnostic mode
 
-**State:** experimental portable companion; **not** a second OMS, broker node,
-or full NautilusTrader deployment. Native Android/Termux can run this with
-**Python 3.13+ standard library alone**, no pip installs or heavyweight wheels.
+**State:** experimental portable companion plus the existing **offline Decimal
+reference simulator**. This is **not** a second OMS, broker node, strategy
+research stack, or full NautilusTrader deployment. Native Android/Termux can
+run these scoped paths with **Python 3.13+ standard library alone**: no pip
+installs, heavy wheels or market credentials.
 
 The standard `lab` CLI uses NautilusTrader, NumPy, pandas and Arrow and is
 **not portable to native Termux** as-is. The pinned NautilusTrader 2.0.0rc7
@@ -23,20 +25,59 @@ git pull --ff-only
 
 PYTHONPATH=src python -m lab.mobile doctor
 PYTHONPATH=src python -m lab.mobile check
-PYTHONPATH=src python -m lab.mobile serve --port 8787
+PYTHONPATH=src python -m lab.mobile demo
+PYTHONPATH=src python -m lab.mobile serve --port 8787 --demo
 ```
 
 In the Android browser open **http://127.0.0.1:8787/** while the Termux
 command is running. `Ctrl+C` stops the server. It binds exclusively to
-loopback and serves read-only status; it deliberately has **no order entry,
-external account, automated gateway, network listener or remote authority**.
-No generated profit, recommendation or qualified live market data is shown.
+loopback and serves read-only status; it deliberately has **no external order
+entry, account connection, automated gateway, remote network listener or
+remote authority**. The optional `--demo` shows an **explicitly synthetic,
+unqualified** price/mark fixture through the *existing*
+`lab.markets.simulator.OfflineSimulator`; its simulated fills and PnL are
+**not** a broker result or investment strategy. Without `--demo` this
+remains the previously tested diagnostic-only dashboard.
 
 The `check` command runs exactly `tests/test_portable_*.py` using Python's
 standard `unittest`; it does **not** silently skip or claim to run the
-unavailable heavy full-system tests. The existing Decimals, lot-rounding and
-corporate-action guards use the same source modules in desktop and mobile
-diagnostics. This is additive coverage, **not** a separate simulator.
+unavailable heavy full-system tests. The existing Decimals, lot-rounding,
+corporate-action guards and offline deterministic simulator reuse the same
+code paths as the desktop reference. Vectorized minute aggregation retains
+NumPy and is imported only on demand; it is **not** reimplemented with a
+lower-fidelity mobile alternative.
+
+### Actual offline simulation and crash-durable replay on the phone
+
+The broker-neutral reference simulator is now directly callable in native
+Termux, including its original SQLite event journal and recoverer:
+
+```sh
+# A synthetic fixture; no venue connection, quotes, credentials or orders
+PYTHONPATH=src python -m lab.markets demo --side buy
+
+# An isolated, disposable NEW reference-run journal
+mkdir -p ~/trading-lab-pocket
+PYTHONPATH=src python -m lab.markets demo --side buy \
+  --journal ~/trading-lab-pocket/offline-demo.sqlite3
+
+# Reconstruct and verify exactly the same session with the original engine
+PYTHONPATH=src python -m lab.markets recover \
+  --journal ~/trading-lab-pocket/offline-demo.sqlite3
+```
+
+The simulator refuses to silently reset a nonempty journal. Choose a **new
+journal filename** for each trial; never point it at an authenticated broker
+journal or production state directory. The inputs are synthetic. The reference
+execution model uses next observed trades, explicit unfavorable slippage,
+participation ceilings, fees and independent marks; it cannot qualify real
+market order-book fills or corporate-action settlement. Both
+`TradingMode.BROKER_DEMO` and `TradingMode.LIVE` remain explicitly rejected.
+
+The native `python -S -m lab.markets demo` regression deliberately excludes
+site-packages and verifies the reference simulator runs without NumPy,
+NautilusTrader, pandas or PyArrow. Other `lab.markets` subcommands require
+the full desktop environment and have **not** been qualified on Termux.
 
 ### Inspect a copied/sanitized execution snapshot, offline
 
@@ -70,13 +111,16 @@ python --version
 uname -m
 git rev-parse HEAD
 PYTHONPATH=src python -m lab.mobile check
+PYTHONPATH=src python -m lab.mobile demo
+PYTHONPATH=src python -m lab.markets demo --side buy
 python -m compileall -q src/lab/mobile.py src/lab/order_quantity.py
 python tools/collab.py check
 ```
 
-Report the SHA and exact output. This records portable reference and
-read-only inspection acceptance **only**; F1 native settlements, F3/F4
-production order lifecycle, and all external release gates remain unchanged.
+Report the SHA and exact output. For the new branch this checks *actual
+reference-engine* compatibility and read-only inspection on-device, but
+**not** native Nautilus accounting, F1 corporate-action settlements, F3/F4
+broker-state parity or any independent external release gate.
 
 ## Can the *entire* Nautilus engine run locally on the phone?
 
