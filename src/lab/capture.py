@@ -475,12 +475,72 @@ def _redact(key: bytes, value, field: str | None = None):
     return value
 
 
+
+def _known_source_ids(src: Path, key: bytes) -> dict[str, str]:
+    """Bind known typed IDs to consistent HMAC pseudonyms across source files.
+
+    Unknown identifiers in unstructured messages still require manual review.
+    """
+    aliases: dict[str, str] = {}
+
+    def remember(original: str, kind: str) -> None:
+        if original in ("", "None", "[REDACTED]") or len(original) < 2:
+            return
+        normalized = original.removeprefix("IB-") if kind == "ACCT" else original
+        pseudonym = _pseudo(key, kind, normalized)
+        previous = aliases.setdefault(original, pseudonym)
+        if previous != pseudonym:
+            raise ValueError("one source ID has conflicting typed identities; refusing evidence export")
+
+    def visit(value) -> None:
+        if isinstance(value, list):
+            for item in value:
+                visit(item)
+        elif isinstance(value, dict):
+            for field, item in value.items():
+                if field in _ID_KEYS and isinstance(item, str):
+                    kind = "ACCT" if field.startswith("account") else field.split("_")[0].upper()
+                    remember(item, kind)
+                if field in _KEYED_BY_ORDER and isinstance(item, dict):
+                    for identifier in item:
+                        remember(str(identifier), "CLIENT")
+                visit(item)
+
+    for path in sorted(p for p in src.rglob("*") if p.is_file()):
+        if path.suffix not in (".json", ".jsonl") and path.name not in ("HALT", "KILL"):
+            continue
+        try:
+            source = path.read_text()
+            if path.suffix == ".jsonl":
+                for line in source.splitlines():
+                    if line.strip():
+                        visit(json.loads(line))
+            else:
+                visit(json.loads(source))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            # The sanitization pass already refuses to publish undecodable input.
+            continue
+    return aliases
+
+
+def _id_reference_pattern(ids: dict[str, str]) -> re.Pattern[str] | None:
+    """Match lexical whole IDs: T2 must not match an unrelated T20."""
+    sources = sorted(ids, key=lambda raw: (-len(raw), raw))
+    if not sources:
+        return None
+    if len(sources) > 20_000:
+        raise ValueError("too many source identifiers for bounded evidence redaction")
+    return re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(map(re.escape, sources)) + r")(?![A-Za-z0-9])")
+
+
 def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
     """Redact every capture file under src into dst. Returns the manifest (also written to dst)."""
     src, dst = src.expanduser().resolve(), dst.expanduser().resolve()
     if dst == src or src in dst.parents:
         raise ValueError("write the sanitized copy outside the raw capture directory")
     key = _key(key_path)
+    references = _known_source_ids(src, key)
+    reference_pattern = _id_reference_pattern(references)
     entries = []
     for f in sorted(p for p in src.rglob("*") if p.is_file()):
         rel = f.relative_to(src)
@@ -513,6 +573,8 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
                 }
             )
             continue
+        if reference_pattern is not None:
+            text = reference_pattern.sub(lambda match: references[match.group()], text)
         target.write_text(text)
         entries.append(
             {"path": str(rel), "original_sha256": hashlib.sha256(raw).hexdigest(), "redacted_sha256": _sha256(target)}
@@ -522,6 +584,7 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
         "procedure": (
             "lab.capture.sanitize: account IDs (DU…/U…, IB-…) and order/trade/account ID fields pseudonymized "
             "with HMAC-SHA256 under a private key kept outside Git (same key for every phase, so joins hold); "
+            "known typed order/trade IDs appearing elsewhere in JSON are also scrubbed at lexical boundaries; "
             "fields named like password/token/secret/api key/hmac/chat id/user id replaced by [REDACTED]; "
             "authority.key never copied; SQLite databases are represented by their deterministic JSON export; "
             "non-JSON files (raw databases included) listed with their hash but not copied. Free text (operator "
