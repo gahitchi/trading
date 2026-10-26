@@ -106,9 +106,7 @@ class IndependentLifecycleTests(unittest.TestCase):
             session.plan(intent(), action_version="v1")
             session.prepare_dispatch("FIRST", timestamp_ns=2)
             session.observe("FIRST", "ack", evidence("ack", at=3), broker_order_id="b-order-01")
-            session.observe(
-                "FIRST", "fill", evidence("fill1", at=4), quantity=Decimal("2"), execution_id="exec-01"
-            )
+            session.observe("FIRST", "fill", evidence("fill1", at=4), quantity=Decimal("2"), execution_id="exec-01")
             self.assertEqual(session.position_from_fills, Decimal("8"))
             self.assertEqual(session.orders["FIRST"].filled, Decimal("2"))
             self.assertEqual(session.reserved_reduction, Decimal("4"))
@@ -175,19 +173,13 @@ class IndependentLifecycleTests(unittest.TestCase):
             session.plan(intent(), action_version="v1")
             session.prepare_dispatch("FIRST", timestamp_ns=2)
             receipt = evidence("fill-01", at=4)
-            first = session.observe(
-                "FIRST", "fill", receipt, quantity=Decimal("2"), execution_id="exec-01"
-            )
+            first = session.observe("FIRST", "fill", receipt, quantity=Decimal("2"), execution_id="exec-01")
             before = len(journal.read_all())
-            duplicate = session.observe(
-                "FIRST", "fill", receipt, quantity=Decimal("2"), execution_id="exec-01"
-            )
+            duplicate = session.observe("FIRST", "fill", receipt, quantity=Decimal("2"), execution_id="exec-01")
             self.assertEqual(duplicate, first)
             self.assertEqual(len(journal.read_all()), before)
             with self.assertRaisesRegex(LifecycleError, "conflicting event"):
-                session.observe(
-                    "FIRST", "fill", receipt, quantity=Decimal("3"), execution_id="exec-01"
-                )
+                session.observe("FIRST", "fill", receipt, quantity=Decimal("3"), execution_id="exec-01")
             self.assertEqual(session.orders["FIRST"].filled, Decimal("2"))
         finally:
             journal.close()
@@ -216,9 +208,7 @@ class IndependentLifecycleTests(unittest.TestCase):
             session.prepare_dispatch("FIRST", timestamp_ns=2)
             for qty in (Decimal("1.1"), Decimal("0.11"), Decimal("NaN"), Decimal("-1")):
                 with self.subTest(qty=qty), self.assertRaises(LifecycleError):
-                    session.observe(
-                        "FIRST", "fill", evidence("bad", at=3), quantity=qty, execution_id="bad-exec"
-                    )
+                    session.observe("FIRST", "fill", evidence("bad", at=3), quantity=qty, execution_id="bad-exec")
             self.assertEqual(session.orders["FIRST"].filled, Decimal("0"))
             self.assertEqual(len(journal.read_all()), 3)
         finally:
@@ -266,9 +256,7 @@ class IndependentLifecycleTests(unittest.TestCase):
         journal, session = self.open()
         session.plan(intent(), action_version="v1")
         session.prepare_dispatch("FIRST", timestamp_ns=2)
-        session.observe(
-            "FIRST", "fill", evidence("fill1", at=3), quantity=Decimal("2"), execution_id="exec1"
-        )
+        session.observe("FIRST", "fill", evidence("fill1", at=3), quantity=Decimal("2"), execution_id="exec1")
         before = session.state_digest()
         journal.close()
         with EventJournal(self.path) as journal:
