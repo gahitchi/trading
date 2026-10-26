@@ -437,6 +437,11 @@ def run(
         metrics["impact_costs"] = round(fees.totals["impact"], 2)
         if settlements:
             metrics["delistings_settled"] = settlements
+            # Compatibility bars close Nautilus positions via simulated fills,
+            # but their supplied market volume is NOT historical exchange depth.
+            # Useful for diagnostic research, never qualified executable evidence.
+            metrics["execution_qualified"] = False
+            metrics["delisting_execution_model"] = "synthetic_settlement_bars_not_executable"
         # Realized hard-limit breaches at decision marks, reported apart from the limits themselves (G013-F2).
         kinds = [e.kind for e in recorder.risk]
         metrics["cap_breach_decisions"] = kinds.count("cap_breach")
