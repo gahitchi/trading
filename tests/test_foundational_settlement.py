@@ -106,3 +106,18 @@ def test_stored_delisting_data_is_revalidated_after_import(goog_lab, tmp_path, t
     data.delistings_path(goog_lab).write_text(header + tamper + "\n")
     with pytest.raises(data.DataError):
         data.delistings(goog_lab)
+
+
+def test_delisting_evidence_revision_creates_new_research_identity(goog_lab, tmp_path):
+    from lab import experiments
+
+    path = tmp_path / "revision.csv"
+    header = "ticker,delist_date,delist_type,delist_return,settlement_price,source\n"
+    before = experiments.config_fingerprint(goog_lab)
+    path.write_text(header + "D,2026-01-08,merger,-0.5,,vendor-a\n")
+    data.save_delistings(goog_lab, path)
+    first = experiments.config_fingerprint(goog_lab)
+    path.write_text(header + "D,2026-01-08,merger,-0.5,,vendor-b\n")
+    data.save_delistings(goog_lab, path)
+    second = experiments.config_fingerprint(goog_lab)
+    assert len({before, first, second}) == 3
