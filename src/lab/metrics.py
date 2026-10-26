@@ -39,7 +39,9 @@ def excess_returns(equity: pd.Series, risk_free: pd.Series | None) -> pd.Series:
     if risk_free is None or rets.empty:
         return rets
     rate = risk_free.reindex(equity.index, method="ffill").fillna(0.0).to_numpy()[:-1]
-    days = np.diff(equity.index.to_numpy()).astype("timedelta64[D]").astype(float)
+    # Normalize first: Pandas 3 can store datetime indexes at microsecond resolution.
+    # Casting timedelta to whole days would truncate the elapsed time at DST.
+    days = np.diff(equity.index.as_unit("ns").asi8) / 86_400_000_000_000
     return rets - ((1 + rate) ** (days / 365) - 1)
 
 
