@@ -239,9 +239,7 @@ class Controller:
                 name = names[0]
                 params = {"short": 1} if name == "sma_trend" and self.cfg.risk.max_short_gross > 0 else {}
                 try:
-                    verify_builtin(
-                        self.cfg, resolve(name, self.cfg.research_dir, params), self.settings["tickers"]
-                    )
+                    verify_builtin(self.cfg, resolve(name, self.cfg.research_dir, params), self.settings["tickers"])
                 except (OSError, ValueError) as exc:
                     raise ValueError(
                         "autonomous paper requires qualified strategy evidence; use supervised or "
