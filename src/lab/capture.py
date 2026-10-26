@@ -479,11 +479,15 @@ def _redact_text(
 ) -> str:
     text = _ACCOUNT.sub(lambda m: _pseudo(key, "ACCT", m.group(0).removeprefix("IB-")), text)
     if aliases:
-        # The matcher is compiled ONCE per bundle, not once per message:
-        # 10,000 historical executions must not cost 10,000 replacements
-        # for every field. Longest-first alternatives handle overlaps.
+        # The matcher is compiled ONCE per bundle, not once per message.
+        # Token boundaries avoid corrupting timestamps (T20:... is not
+        # the trade ID T2), while longest-first alternatives handle overlaps.
         if matcher is None:
-            matcher = re.compile("|".join(re.escape(raw) for raw in sorted(aliases, key=len, reverse=True)))
+            matcher = re.compile(
+                r"(?<![A-Za-z0-9])(?:"
+                + "|".join(re.escape(raw) for raw in sorted(aliases, key=len, reverse=True))
+                + r")(?![A-Za-z0-9])"
+            )
         text = matcher.sub(lambda match: aliases[match.group()], text)
     return text
 
@@ -538,7 +542,11 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
                 _capture_id_aliases(key, json.loads(f.read_bytes()), aliases)
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
-    matcher = re.compile("|".join(re.escape(raw) for raw in sorted(aliases, key=len, reverse=True))) if aliases else None
+    matcher = re.compile(
+                r"(?<![A-Za-z0-9])(?:"
+                + "|".join(re.escape(raw) for raw in sorted(aliases, key=len, reverse=True))
+                + r")(?![A-Za-z0-9])"
+            ) if aliases else None
     entries = []
     for f in files:
         rel = f.relative_to(src)
