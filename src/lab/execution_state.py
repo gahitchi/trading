@@ -63,7 +63,7 @@ def validate_ledger(state):
                     number(intent[key], key, 0, integer=True)
             if intent.get("decision_price") is not None:
                 number(intent["decision_price"], "decision_price", 0)
-            for key in ("adds", "reactivated"):
+            for key in ("adds", "reactivated", "overfilled", "invalid_fill"):
                 if key in intent and type(intent[key]) is not bool:
                     raise ValueError(f"invalid {bucket} {key}")
             if bucket == "disposed" and (not isinstance(intent.get("evidence"), str) or not intent["evidence"].strip()):
