@@ -158,7 +158,11 @@ class GoldPaperStrategy(Strategy):
             return
         now_ns = self.clock.timestamp_ns()
         for order in orders:
-            if order.side == OrderSide.BUY and now_ns - order.ts_init > MAX_ENTRY_AGE.total_seconds() * 1e9:
+            if (
+                order.side == OrderSide.BUY
+                and order.order_type == OrderType.LIMIT
+                and now_ns - order.ts_init > MAX_ENTRY_AGE.total_seconds() * 1e9
+            ):
                 self.cancel_order(order.client_order_id)
         kill = read_kill_switch(self.config.runtime / "KILL")
         if kill and kill.get("mode") == "flatten":
