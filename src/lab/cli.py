@@ -557,6 +557,42 @@ def cmd_research_promote(cfg, a):
     print(f"{a.id} promoted; it can now be used with: lab paper --signals {a.id}")
 
 
+def cmd_research_qualify_builtin(cfg, a):
+    """Explicit, reviewed train/test qualification of ONE built-in unattended policy."""
+    from lab.research.approval import ApprovalError
+    from lab.research.builtin_qualification import approve_builtin, evaluate_builtin
+
+    specs = _specs(cfg, [a.signal], a.set)
+    (spec,) = specs
+    if spec.path is not None:
+        raise SystemExit("qualify-builtin accepts built-in strategies only")
+    tickers = _tickers(cfg, a.tickers)
+    try:
+        evaluation = evaluate_builtin(cfg, spec, tickers)
+        train = evaluation["train"]
+        print(
+            f"{spec.name} training: edge={train['candidate']['sharpe_edge']}, "
+            f"DSR={train['candidate']['dsr']}, null p={train['null']['p_value']}; "
+            f"train {'PASS' if train['passed'] else 'FAIL'}"
+        )
+        if evaluation["test"] is not None:
+            print(
+                f"out of sample: edge={evaluation['test']['candidate']['sharpe_edge']}; "
+                f"{'PASS' if evaluation['test']['survived'] else 'FAIL'}"
+            )
+        if not evaluation["qualified"]:
+            print("NO autonomous authorization. Results remain diagnostic.")
+            return 1
+        if not a.yes and input("Review this policy and evidence. Approve autonomous PAPER only? [y/N] ").strip().lower() != "y":
+            print("No approval created.")
+            return 1
+        path = approve_builtin(cfg, spec, tickers, evaluation)
+    except (ApprovalError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"Autonomous PAPER evidence approved: {path}. Broker and data-source acceptance remain separate.")
+    return 0
+
+
 # ----------------------------------------------------------------------------- active profile
 
 
@@ -1110,6 +1146,12 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("id")
     rp.add_argument("--yes", action="store_true")
     rp.set_defaults(fn=cmd_research_promote)
+    bq = r.add_parser("qualify-builtin", help="independently qualify a built-in daily strategy for autonomous PAPER")
+    bq.add_argument("signal")
+    bq.add_argument("--tickers", nargs="+")
+    bq.add_argument("--set", action="append", help="parameter, e.g. sma_trend.short=1")
+    bq.add_argument("--yes", action="store_true", help="explicitly approve if all research gates pass")
+    bq.set_defaults(fn=cmd_research_qualify_builtin)
 
     c = sub.add_parser("llm-check", help="verify the AI provider works (one tiny call)")
     c.add_argument("--provider", choices=["claude_code", "ollama"])
