@@ -110,7 +110,10 @@ class EventJournal:
     def __exit__(self, *_exc) -> None:
         self.close()
 
-    def append(self, event_id: str, kind: str, timestamp_ns: int, payload: dict) -> int:
+    def append(
+        self, event_id: str, kind: str, timestamp_ns: int, payload: dict,
+        *, expected_previous_digest: str | None = None,
+    ) -> int:
         if not isinstance(event_id, str) or not re.fullmatch(r"[A-Za-z0-9_:-]{1,256}", event_id):
             raise JournalError("invalid event ID")
         if kind not in _ALLOWED_KINDS:
@@ -120,9 +123,18 @@ class EventJournal:
         if not isinstance(payload, dict):
             raise JournalError("event payload must be an object")
         _validate_payload(payload)
+        if expected_previous_digest is not None and (
+            type(expected_previous_digest) is not str
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_previous_digest)
+        ):
+            raise JournalError("invalid optimistic journal-head SHA-256")
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
         self._db.execute("BEGIN IMMEDIATE")
         try:
+            row = self._db.execute("SELECT digest FROM events ORDER BY sequence DESC LIMIT 1").fetchone()
+            previous = row[0] if row else _GENESIS
+            if expected_previous_digest is not None and expected_previous_digest != previous:
+                raise JournalError("journal head advanced since validated order state; reconciliation required")
             existing = self._db.execute(
                 "SELECT sequence, kind, timestamp_ns, payload FROM events WHERE event_id=?", (event_id,)
             ).fetchone()
@@ -131,8 +143,6 @@ class EventJournal:
                     raise JournalError("idempotency ID reused with different execution evidence")
                 self._db.execute("COMMIT")
                 return int(existing[0])
-            row = self._db.execute("SELECT digest FROM events ORDER BY sequence DESC LIMIT 1").fetchone()
-            previous = row[0] if row else _GENESIS
             digest = _digest(previous, event_id, kind, timestamp_ns, canonical)
             cursor = self._db.execute(
                 "INSERT INTO events (event_id,kind,timestamp_ns,payload,previous_digest,digest) VALUES(?,?,?,?,?,?)",

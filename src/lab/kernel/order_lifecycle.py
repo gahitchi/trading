@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from lab.markets.domain import OrderIntent, Side
-from lab.markets.journal import EventJournal
+from lab.markets.journal import EventJournal, JournalError, _digest as _journal_digest
 
 _NS_MAX = 2**63 - 1
 _ID = re.compile(r"[A-Za-z0-9_.:/-]{1,128}\Z")
@@ -172,6 +172,7 @@ class OfflineOrderSession:
         self.orders: dict[str, OrderState] = {}
         self.seen_events: dict[str, dict] = {}
         self._faulted = False
+        self._head_digest = "0" * 64
         journal.verify()
         header = {
             "schema": 1,
@@ -368,17 +369,30 @@ class OfflineOrderSession:
             if self.seen_events[event_id] != signature:
                 raise LifecycleError("conflicting event replay under an existing ID")
             return self.orders[order_id]
-        if timestamp_ns < self.journal.read_all()[-1]["timestamp_ns"]:
+        tail = self.journal.read_all()[-1]
+        if tail["digest"] != self._head_digest:
+            self._faulted = True
+            raise LifecycleError("journal changed outside the active order session; reconcile before retry")
+        if timestamp_ns < tail["timestamp_ns"]:
             raise LifecycleError("new journal observation regresses behind prior source availability")
         self._verify_event_record(kind, event_id, timestamp_ns, full)
         previous_orders = self.orders.copy()
         try:
             self._apply(kind, full)
             after_digest = self.state_digest()
-            self.journal.append(event_id, kind, timestamp_ns, {"event": full, "state_sha256": after_digest})
+            payload = {"event": full, "state_sha256": after_digest}
+            self.journal.append(
+                event_id, kind, timestamp_ns, payload, expected_previous_digest=self._head_digest
+            )
+        except JournalError:
+            self.orders = previous_orders
+            self._faulted = True
+            raise
         except Exception:
             self.orders = previous_orders
             raise
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+        self._head_digest = _journal_digest(self._head_digest, event_id, kind, timestamp_ns, canonical)
         self.seen_events[event_id] = signature
         return self.orders[order_id]
 
@@ -491,6 +505,7 @@ class OfflineOrderSession:
                 "timestamp_ns": entry["timestamp_ns"],
                 "data": data,
             }
+        self._head_digest = events[-1]["digest"]
         self._faulted = False
 
     def assert_recovered(self) -> None:
