@@ -7,10 +7,15 @@ order generation or statistical threshold changes.
 
 While validating G038, the existing integration test
 `tests/test_capture.py::test_bundle_exports_the_authoritative_sqlite_ledger_and_sanitize_pseudonymizes_it`
-failed on the sanitizer output: the broker's two-character trade ID
-`T2` survived in a sanitized JSON bundle. All monetary and fill-integrity
-regressions passed on the same Python 3.13 CI run. This evidence was
-not marked as flaky or the assertion relaxed.
+failed on a global-substring assertion: the broker's trade ID `T2`
+also appears as a **harmless substring** of any ISO timestamp containing
+`T20:...`. It was not valid evidence of a privacy leak. The test now checks
+whole-ID-token boundaries while preserving time data.
+
+Independent of that false positive, the original field-only redactor
+did leave **actual** identifiers in free-text messages such as
+`"broker trade T2 recovered"`. The added cross-file JSON/JSONL regression
+demonstrates that real, separately reproducible coverage gap.
 
 Existing `_redact` pseudonymized values only in recognized ID fields,
 map keys and account-pattern strings. It left matching execution IDs
@@ -24,11 +29,13 @@ but the software should eliminate known repeat occurrences itself.
   order/trade/account IDs and order-keyed dictionaries.
 - Compute stable HMAC aliases using the same private key and existing
   `_pseudo` mechanism.
-- Second pass recursively redacts ID fields as before and also
-  substitutes the recognized IDs in ordinary text across the **entire
-  bundle**, including in a different file and in JSONL risk events.
-- Longest-first replacement handles overlapping IDs such as `T2`
-  and `T23` without leaving suffixes or re-processing pseudonyms.
+- Second pass recursively redacts ID fields as before and substitutes
+  recognized IDs in ordinary text, including different files and JSONL.
+  Only full-token matches are replaced, not substrings in timestamps
+  or unrelated longer identifiers.
+- One precompiled, escaped longest-first pattern handles overlapping
+  IDs such as `T2` and `T23` in linear passes over the text,
+  avoiding an explicit scan of every ID for every evidence field.
 - Structured ID handling remains unchanged, and no raw SQLite DB or
   secret material is copied into the sanitized output.
 - The output remains **review-required** with
