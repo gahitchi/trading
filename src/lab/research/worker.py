@@ -61,9 +61,7 @@ def main(argv=None) -> int:
         comp, _ = experiments.compare(cfg, [spec], tickers, period, frames, **bounds)
         cand = comp.rows[1]
         edge = cand["sharpe_edge"]
-        null = experiments.null_test(
-            cfg, spec, tickers, period, r.null_samples, frames, observed_edge=edge, **bounds
-        )
+        null = experiments.null_test(cfg, spec, tickers, period, r.null_samples, frames, observed_edge=edge, **bounds)
         checks = {
             "sharpe_edge >= min_sharpe_edge": edge >= r.min_sharpe_edge,
             "p_value <= max_p_value": null["p_value"] <= r.max_p_value,
