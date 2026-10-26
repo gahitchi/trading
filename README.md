@@ -230,7 +230,8 @@ Offline check on real prices: `cd examples/goog-offline && lab data sample && la
 | `lab risk-profile` | the limits the selected profile really trades with |
 | `lab null-test`, `lab pbo`, `lab walk-forward` | noise floor, overfitting probability, walk-forward analysis |
 | `lab holdout <signal> [--speed]` | the one-time final exam (ledgered; intraday has its own) |
-| `lab research run / list / show / retry / promote` | the AI research swarm |
+| `lab research run / list / show / retry / promote / trials` | AI research, read-only trial evidence inventory |
+| `lab research qualify-builtin <signal> --tickers TICKER [--yes]` | train/test a built-in strategy on qualified market data; explicit autonomous PAPER approval only after all gates |
 | `lab llm-check`, `lab notify-test`, `lab doctor` | provider check, alert check, pre-flight check |
 | `lab paper [--mode autonomous/supervised/manual] [--bank] [--smoke] [--check-only]` | paper trading on Interactive Brokers |
 | `lab control status / approve / renew` | inspect expiring authority, approve an exact proposal, or set manual targets |
@@ -344,12 +345,21 @@ cross-sectional strategies are human-written for now.
 Step by step: **[RUNBOOK.md](RUNBOOK.md)**. This is a release candidate pending the
 [external acceptance gates](docs/release-criteria.json), not an approved production release.
 
-The first `lab paper` start creates a **standing autonomous mandate**: it does not expire, so
-unattended, continuous paper trading is the default. A time limit is opt-in (`--authority-hours N`,
-at most 168); supervised and manual modes (`--mode`) are always leases, 24 hours by default, and a
-restart never renews an expired lease. `lab control renew --mode supervised` revokes a standing
-mandate; `lab kill` stops trading. See [operating controls](docs/operator-controls.md) and
-[storage and recovery](docs/runtime-storage.md).
+**Research approval is separate from paper connectivity.** The browser setup and Docker launcher default
+to supervised paper mode (24-hour lease); a built-in signal can be inspected and traded only after an
+operator accepts each proposed order. A research-generated signal retains its separately verified source
+approval. Unattended/autonomous mandates require independently reviewed train/test evidence for the **exact
+one-strategy daily policy**, with versioned source digest, data provenance, operator limits and paper capital.
+For a built-in, run `lab research qualify-builtin sma_trend --tickers SPY QQQ` with sufficiently qualified
+point-in-time market data, inspect the verdict, and approve it explicitly. Quick-speed or multi-strategy
+banks have no autonomous qualification workflow yet and remain supervised/diagnostic only.
+
+The gate refuses sample/Yahoo-only research, missing point-in-time membership, unadjusted or incomplete
+vendor data, or short-capable policies without historical borrow evidence. Passing the research gate does
+**not** establish exchange connectivity, executable fills or profits. `lab paper --mode autonomous` and
+`lab control renew --mode autonomous` refuse missing, changed or revoked evidence; a standing mandate,
+if qualified, can be limited using `--authority-hours N` (maximum 168). A restart never silently renews an
+expired lease. See [operating controls](docs/operator-controls.md) and [storage and recovery](docs/runtime-storage.md).
 
 Deployment commands:
 
