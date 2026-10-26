@@ -211,6 +211,8 @@ class CorporateActionPortableTests(unittest.TestCase):
             book(position=Decimal("-1"), signed_basis=Decimal("1.00"))
         with self.assertRaises(CorporateActionError):
             book(quantum=Decimal("0.03"))
+        with self.assertRaisesRegex(CorporateActionError, "immutable"):
+            book(receipt_digests=[])
         with self.assertRaises(CorporateActionError):
             receipt(signed_amount=Decimal("NaN"))
 
