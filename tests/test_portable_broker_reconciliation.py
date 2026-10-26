@@ -201,7 +201,7 @@ class PortableReconciliationTests(unittest.TestCase):
 
     def test_stale_broker_asof_or_incompatible_split_version_block(self):
         self.placed()
-        stale = self.snapshot(asof_ns=2)
+        stale = self.snapshot(asof_ns=3)
         self.assertIn(
             "SNAPSHOT_BEFORE_LOCAL_EVIDENCE",
             compare_reported_snapshot(self.session, stale).findings,
