@@ -22,6 +22,8 @@ from lab.markets.book_sequence import SequencedBook, apply_recorded_book_frame
 
 _MAX_BYTES = 4 * 1024 * 1024
 _MAX_FRAMES = 10_000
+# Retaining whole book states is deliberately separate from cheap integrity checks.
+_MAX_RETAINED_BOOKS = 256
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
@@ -39,6 +41,7 @@ class BookCaptureEvidence:
     first_sequence: int
     last_sequence: int
     final_book: SequencedBook
+    recorded_books: tuple[SequencedBook, ...] = ()
     source: str = "unverified_operator_recorded_ws_ndjson"
     source_authenticated: bool = False
     feed_complete: bool = False
@@ -66,6 +69,7 @@ def verify_recorded_book_capture(
     *,
     max_bytes: int = _MAX_BYTES,
     max_frames: int = _MAX_FRAMES,
+    retain_books: bool = False,
 ) -> BookCaptureEvidence:
     """Validate a recorded session without networking, trusting or replaying orders.
 
@@ -86,6 +90,8 @@ def verify_recorded_book_capture(
         raise BookCaptureError("invalid bounded capture byte limit")
     if type(max_frames) is not int or not 0 < max_frames <= _MAX_FRAMES:
         raise BookCaptureError("invalid bounded capture frame limit")
+    if type(retain_books) is not bool:
+        raise BookCaptureError("retain_books must be an explicit boolean")
 
     descriptor = None
     try:
@@ -123,12 +129,15 @@ def verify_recorded_book_capture(
     state = None
     first = None
     count = 0
+    retained: list[SequencedBook] = []
     for line in content.splitlines():
         if not line:
             raise BookCaptureError("blank recording row is not a market event")
         count += 1
         if count > max_frames:
             raise BookCaptureError("capture exceeds bounded frame count")
+        if retain_books and count > _MAX_RETAINED_BOOKS:
+            raise BookCaptureError("capture exceeds native replay book retention bound")
         try:
             item = json.loads(
                 line,
@@ -148,6 +157,8 @@ def verify_recorded_book_capture(
             raise BookCaptureError("recorded instrument identity mismatch")
         if first is None:
             first = state
+        if retain_books:
+            retained.append(state)
 
     if not count or first is None or state is None:
         raise BookCaptureError("empty book recording")
@@ -160,4 +171,5 @@ def verify_recorded_book_capture(
         first_sequence=first.seq_id,
         last_sequence=state.seq_id,
         final_book=state,
+        recorded_books=tuple(retained),
     )
