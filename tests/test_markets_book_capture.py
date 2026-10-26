@@ -148,7 +148,6 @@ def test_truncation_duplicate_json_keys_and_symlink_refused(tmp_path):
         verify_recorded_book_capture(link, hashlib.sha256(dup).hexdigest(), "BTC-USD-SWAP")
 
 
-
 def test_verified_capture_replays_as_read_only_quotes_through_existing_native_actor(tmp_path):
     """Original bytes -> validated book states -> existing native Nautilus DataActor."""
     from decimal import Decimal
