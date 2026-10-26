@@ -21,7 +21,8 @@ from lab.markets.corporate_actions import (
     _digest,
     recognize,
 )
-from lab.markets.corporate_journal import CorporateSession
+from lab.kernel.double_entry import transition
+from lab.markets.corporate_journal import CorporateSession, _financial
 from lab.markets.journal import EventJournal, JournalError
 
 REPO = Path(__file__).resolve().parents[1]
@@ -166,6 +167,11 @@ class PortableCorporateJournalTests(unittest.TestCase):
                     "action": action().record(),
                     "reconciliation": readiness().record(),
                     "book_digest": "0" * 64,
+                    "postings": transition(
+                        _financial(initial()),
+                        _financial(recognize(initial(), action(), readiness(), observed_ns=20)),
+                        kind="corporate_action",
+                    ).record(),
                 },
             )
             journal.verify()  # The bytes are intact; the claimed arithmetic is not.
@@ -184,6 +190,7 @@ class PortableCorporateJournalTests(unittest.TestCase):
                     "action": action().record(),
                     "reconciliation": readiness().record(),
                     "book_digest": _digest(next_book.record()),
+                    "postings": transition(_financial(initial()), _financial(next_book), kind="corporate_action").record(),
                 },
             )
             with self.assertRaisesRegex(JournalError, "disagrees"):
