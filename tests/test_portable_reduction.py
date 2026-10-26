@@ -28,9 +28,7 @@ def case(**override):
 class ReductionSafetyTests(unittest.TestCase):
     def test_fractional_positive_lot_truncates_toward_zero(self):
         self.assertEqual(
-            capped_reduction(
-                **case(broker_position="2.75", requested_change="-2.75", lot_step="1")
-            ),
+            capped_reduction(**case(broker_position="2.75", requested_change="-2.75", lot_step="1")),
             Decimal("-2"),
         )
 
@@ -48,9 +46,7 @@ class ReductionSafetyTests(unittest.TestCase):
 
     def test_untradeable_fractional_stub_is_not_rounded_up(self):
         self.assertEqual(
-            capped_reduction(
-                **case(broker_position="-0.009", requested_change="0.009", lot_step="0.01")
-            ),
+            capped_reduction(**case(broker_position="-0.009", requested_change="0.009", lot_step="0.01")),
             Decimal("0"),
         )
 
