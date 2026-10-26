@@ -14,7 +14,6 @@ from lab.research import builtin_qualification as qualification
 from lab.research.approval import ApprovalError
 from lab.signals.registry import SignalSpec
 
-
 GOOD_SOURCE = {
     "survivorship_free": True,
     "point_in_time_universe": True,
