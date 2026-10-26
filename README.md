@@ -265,7 +265,8 @@ converted to USD using an IBKR EUR/USD quote. If that budget cannot buy the brok
 ounce is allowed and marked as an explicit minimum-lot exception. The hard per-order value limit still applies;
 the paper account must also have capacity above the stock allocation. IBKR Metals → Global permission is needed
 for London Gold. The feature defaults off, and existing app runtimes require a reviewed plan migration before
-enabling it. When the operator explicitly confirms that change, the app keeps trading halted, connects to the
+enabling it. When the operator explicitly confirms that change, the app keeps trading halted, spends about a
+minute connecting to the
 configured PAPER account with a read-only actor, requires no broker positions or open orders, makes a private
 cold backup, and preserves the ledger and permanent order history while adding the Gold identity. A hard halt,
 non-flat ledger or non-flat broker account refuses the migration. On the next start, orders remain paused until

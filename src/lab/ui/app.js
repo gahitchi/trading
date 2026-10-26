@@ -201,7 +201,7 @@ async function action(fn) {
 async function saveSettings() {
   const value = settings();
   if (last.plan_locked && !last.settings.gold && value.gold) {
-    const confirmed = window.confirm("Trading Lab will pause new orders, verify with IBKR that the PAPER account has no positions or open orders, make a private backup, then add London Gold. Continue?");
+    const confirmed = window.confirm("Trading Lab will pause new orders, spend about a minute verifying with IBKR that the PAPER account has no positions or open orders, make a private backup, then add London Gold. Continue?");
     if (!confirmed) throw Error("London Gold migration cancelled.");
     value.confirm_gold_migration = true;
   }

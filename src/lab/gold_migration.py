@@ -12,7 +12,7 @@ from lab.runtime_ops import gold_upgrade_plan, run
 from lab.safety import is_paper_account, set_kill_switch
 
 
-def broker_attestation(cfg, tickers, plan, *, wait_s=15, clients=None):
+def broker_attestation(cfg, tickers, plan, *, wait_s=45, clients=None):
     """Connect with a DataActor, which has no order factory, and inspect the PAPER account."""
     from nautilus_trader.common import DataActor, DataActorConfig
     from nautilus_trader.model import Venue
