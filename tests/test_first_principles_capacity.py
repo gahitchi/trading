@@ -26,6 +26,9 @@ def test_cap_requires_explicit_disabled_setting():
     observed = [(i, 2000.0) for i in range(5)]
     assert _liquidity_cap(observed, None) is None
     assert _liquidity_cap(observed, 0.05) == 100
+    assert _liquidity_cap(observed, 0.05, decision_ts=4) == 100
+    # An arriving no-volume bar is never authorized using prior bar's volume.
+    assert _liquidity_cap(observed, 0.05, decision_ts=5) == 0
     assert _liquidity_cap(observed, 0.0) == 0
     assert _liquidity_cap(observed, float("nan")) == 0
 
