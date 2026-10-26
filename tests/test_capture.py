@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 
 import pytest
 
@@ -117,7 +118,12 @@ def test_bundle_exports_the_authoritative_sqlite_ledger_and_sanitize_pseudonymiz
     assert not list(clean.rglob("*.sqlite3"))  # raw databases are never copied
     text = "".join(p.read_text() for p in clean.rglob("*.json"))
     raw_ids = list(h.broker().state["orders"]) + [f["trade_id"] for f in h.broker().state["fills"]]
-    assert raw_ids and not [i for i in raw_ids if i in text]  # every order and trade ID pseudonymized
+    # The identifier must not survive as an independent token; an ISO
+    # timestamp like 2026-10-26T20:00 contains "T2" as a harmless substring.
+    leaked = [
+        i for i in raw_ids if re.search(r"(?<![A-Za-z0-9])" + re.escape(i) + r"(?![A-Za-z0-9])", text)
+    ]
+    assert raw_ids and not leaked  # IDs remain scrubbed without corrupting timestamps
     assert "CLIENT-" in text and "TRADE-" in text
 
 
@@ -157,3 +163,24 @@ def test_sanitizer_handles_overlapping_execution_ids_in_text_and_jsonl(tmp_path)
     assert "T2" not in note and "T23" not in note
     assert rows[0]["trade_id"] in note
     assert rows[1]["trade_id"] in note
+
+
+def test_trade_redaction_preserves_iso_timestamp_and_hides_exact_id(tmp_path):
+    src, dst = tmp_path / "raw", tmp_path / "clean"
+    src.mkdir()
+    original_timestamp = "2026-10-26T20:15:24Z"
+    (src / "events.json").write_text(
+        json.dumps(
+            {
+                "created_at": original_timestamp,
+                "detail": "the broker reported trade T2 at " + original_timestamp,
+                "fill": {"trade_id": "T2"},
+            }
+        )
+    )
+    capture.sanitize(src, dst, tmp_path / "key")
+    event = json.loads((dst / "events.json").read_text())
+    assert event["created_at"] == original_timestamp
+    assert original_timestamp in event["detail"]
+    assert event["fill"]["trade_id"] in event["detail"]
+    assert not re.search(r"(?<![A-Za-z0-9])T2(?![A-Za-z0-9])", event["detail"])
