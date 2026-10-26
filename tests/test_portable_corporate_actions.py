@@ -214,6 +214,27 @@ class CorporateActionPortableTests(unittest.TestCase):
         with self.assertRaises(CorporateActionError):
             receipt(signed_amount=Decimal("NaN"))
 
+    def test_genuine_zero_basis_equity_is_not_assumed_corrupt(self):
+        prior = book(signed_basis=Decimal("0.00"))
+        settled = recognize(prior, action(), readiness(), observed_ns=130)
+        self.assertEqual(settled.realized_pnl, Decimal("500.00"))
+        self.assertEqual(settled.pending_cash, Decimal("500.00"))
+        self.assertEqual(settled.cash, prior.cash)
+
+    def test_json_replay_rejects_float_coercion_and_string_order_lists(self):
+        action_record = action().record()
+        action_record["cash_per_unit"] = 50.0
+        with self.assertRaisesRegex(CorporateActionError, "exact decimal string"):
+            CashTermination.from_record(action_record)
+        receipt_record = receipt().record()
+        receipt_record["signed_amount"] = 200.0
+        with self.assertRaisesRegex(CorporateActionError, "exact decimal string"):
+            CashReceipt.from_record(receipt_record)
+        recon_record = readiness().record()
+        recon_record["open_order_ids"] = "oops"
+        with self.assertRaisesRegex(CorporateActionError, "orders a list"):
+            ReconciledBook.from_record(recon_record)
+
     def test_wrong_instrument_receipt_action_or_currency_refused(self):
         for kwargs in ({"instrument_id": "SIM:OTHER"}, {"currency": "EUR"}):
             with self.subTest(kwargs=kwargs), self.assertRaisesRegex(CorporateActionError, "differs"):
