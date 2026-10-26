@@ -107,9 +107,17 @@ class ParityAssessment:
     account_scope: str
     snapshot_id: str
     findings: tuple[str, ...]
-    source_authenticated: bool = False
-    broker_authorization: bool = False
-    release_reservations: bool = False
+    @property
+    def source_authenticated(self) -> bool:
+        return False
+
+    @property
+    def broker_authorization(self) -> bool:
+        return False
+
+    @property
+    def release_reservations(self) -> bool:
+        return False
 
     @property
     def internally_consistent(self) -> bool:
