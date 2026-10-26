@@ -142,6 +142,8 @@ def compare_reported_snapshot(session: OfflineOrderSession, snapshot: ReportedSn
             issues.add("SNAPSHOT_BEFORE_LOCAL_EVIDENCE")
     except Exception:
         issues.add("LOCAL_JOURNAL_CORRUPT")
+    if snapshot.account_scope != session.account_scope:
+        issues.add("ACCOUNT_SCOPE_MISMATCH")
     if snapshot.instrument_id != session.instrument_id or snapshot.action_version != session.action_version:
         issues.add("SCOPE_OR_ACTION_VERSION_MISMATCH")
     for complete, code in (
@@ -167,7 +169,9 @@ def compare_reported_snapshot(session: OfflineOrderSession, snapshot: ReportedSn
         if remote is None:
             issues.add("BROKER_ORDER_MISSING_FROM_HISTORY")
             continue
-        if state.broker_order_id is not None and state.broker_order_id != remote.broker_order_id:
+        if state.broker_order_id is None:
+            issues.add("BROKER_ORDER_ID_UNACKNOWLEDGED_LOCALLY")
+        elif state.broker_order_id != remote.broker_order_id:
             issues.add("BROKER_ORDER_ID_CONFLICT")
         if state.filled != remote.cumulative_filled:
             issues.add("BROKER_CUMULATIVE_FILL_MISMATCH")

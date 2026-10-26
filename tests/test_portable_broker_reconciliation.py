@@ -29,6 +29,7 @@ HASH = hashlib.sha256(b"test broker export bytes").hexdigest()
 def evidence(event_id: str, at: int) -> BrokerEvidence:
     return BrokerEvidence(
         event_id=event_id,
+        account_scope="OFFLINE_TEST_ACCT",
         source_id="fixture",
         source_sha256=HASH,
         exchange_ns=at - 1,
@@ -46,6 +47,7 @@ class PortableReconciliationTests(unittest.TestCase):
         self.addCleanup(self.journal.close)
         self.session = OfflineOrderSession(
             self.journal,
+            account_scope="OFFLINE_TEST_ACCT",
             instrument_id="SIM:RECON",
             action_version="v1",
             starting_position=Decimal("5"),
@@ -262,6 +264,7 @@ class PortableReconciliationTests(unittest.TestCase):
         with EventJournal(self.path) as second:
             other = OfflineOrderSession(
                 second,
+                account_scope="OFFLINE_TEST_ACCT",
                 instrument_id="SIM:RECON",
                 action_version="v1",
                 starting_position=Decimal("5"),

@@ -55,6 +55,7 @@ class BrokerEvidence:
     """Untrusted until verified by a future authenticated broker adapter."""
 
     event_id: str
+    account_scope: str
     source_id: str
     source_sha256: str
     exchange_ns: int
@@ -63,6 +64,7 @@ class BrokerEvidence:
 
     def __post_init__(self) -> None:
         _id(self.event_id, "source event ID")
+        _id(self.account_scope, "source account scope")
         _id(self.source_id, "source identity")
         if type(self.source_sha256) is not str or not re.fullmatch(r"[a-f0-9]{64}", self.source_sha256):
             raise LifecycleError("source evidence SHA-256 required")
@@ -75,6 +77,7 @@ class BrokerEvidence:
     def record(self) -> dict:
         return {
             "event_id": self.event_id,
+            "account_scope": self.account_scope,
             "source_id": self.source_id,
             "source_sha256": self.source_sha256,
             "exchange_ns": self.exchange_ns,
@@ -158,6 +161,7 @@ class OfflineOrderSession:
         self,
         journal: EventJournal,
         *,
+        account_scope: str,
         instrument_id: str,
         action_version: str,
         starting_position: Decimal,
@@ -166,6 +170,7 @@ class OfflineOrderSession:
         if type(journal) is not EventJournal:
             raise LifecycleError("verified EventJournal required")
         self.journal = journal
+        self.account_scope = _id(account_scope, "broker account scope")
         self.instrument_id = _id(instrument_id, "instrument")
         self.action_version = _id(action_version, "instrument version")
         self.starting_position = _quantity(starting_position, "opening position")
@@ -176,8 +181,9 @@ class OfflineOrderSession:
         self._head_digest = "0" * 64
         journal.verify()
         header = {
-            "schema": 1,
+            "schema": 2,
             "mode": "OFFLINE_ONLY",
+            "account_scope": self.account_scope,
             "instrument_id": self.instrument_id,
             "action_version": self.action_version,
             "starting_position": str(self.starting_position),
@@ -185,11 +191,11 @@ class OfflineOrderSession:
         }
         events = journal.read_all()
         if not events:
-            journal.append("session:independent-order:v1", "session", 0, header)
+            journal.append("session:independent-order:v2", "session", 0, header)
         else:
             first = events[0]
             if (
-                first["event_id"] != "session:independent-order:v1"
+                first["event_id"] != "session:independent-order:v2"
                 or first["kind"] != "session"
                 or first["payload"] != header
                 or first["timestamp_ns"] != 0
@@ -200,6 +206,7 @@ class OfflineOrderSession:
     def state_digest(self) -> str:
         return _digest(
             {
+                "account_scope": self.account_scope,
                 "orders": [self.orders[key].record() for key in sorted(self.orders)],
                 "position_from_fills": str(self.position_from_fills),
             }
@@ -350,7 +357,11 @@ class OfflineOrderSession:
             if type(source) is not dict or set(source) != set(BrokerEvidence.__dataclass_fields__):
                 raise LifecycleError("broker source evidence missing fields")
             broker = BrokerEvidence(**source)
-            if broker.action_version != self.action_version or timestamp_ns != broker.available_ns:
+            if (
+                broker.account_scope != self.account_scope
+                or broker.action_version != self.action_version
+                or timestamp_ns != broker.available_ns
+            ):
                 raise LifecycleError("source event is stale or incompatible with instrument")
             if event_id != "source:" + _digest({"order_id": oid, "event_id": broker.event_id}):
                 raise LifecycleError("source event identity mismatch")
@@ -451,6 +462,8 @@ class OfflineOrderSession:
             raise LifecycleError("unsupported external evidence event")
         if type(evidence) is not BrokerEvidence:
             raise LifecycleError("typed source evidence required")
+        if evidence.account_scope != self.account_scope:
+            raise LifecycleError("broker evidence belongs to a different account scope")
         if evidence.action_version != self.action_version:
             raise LifecycleError("instrument definition or split version mismatch; freeze and reconcile")
         if order_id not in self.orders or evidence.available_ns < self.orders[order_id].intent.created_ns:

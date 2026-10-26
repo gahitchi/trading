@@ -33,6 +33,7 @@ def intent(key="FIRST", *, side=Side.SELL, quantity=Decimal("6"), at=1, reduce_o
 def evidence(key, *, at=10, version="v1"):
     return BrokerEvidence(
         event_id=key,
+        account_scope="OFFLINE_ACCOUNT_A",
         source_id="offline_fixture",
         source_sha256=DIGEST,
         exchange_ns=at - 1,
@@ -51,6 +52,7 @@ class IndependentLifecycleTests(unittest.TestCase):
         journal = EventJournal(self.path)
         return journal, OfflineOrderSession(
             journal,
+            account_scope="OFFLINE_ACCOUNT_A",
             instrument_id="SIM:TEST-SHARE",
             action_version=version,
             starting_position=position,
@@ -262,6 +264,7 @@ class IndependentLifecycleTests(unittest.TestCase):
         with EventJournal(self.path) as journal:
             resumed = OfflineOrderSession(
                 journal,
+                account_scope="OFFLINE_ACCOUNT_A",
                 instrument_id="SIM:TEST-SHARE",
                 action_version="v1",
                 starting_position=Decimal("10"),
@@ -277,6 +280,7 @@ class IndependentLifecycleTests(unittest.TestCase):
         ):
             OfflineOrderSession(
                 journal,
+                account_scope="OFFLINE_ACCOUNT_A",
                 instrument_id="SIM:TEST-SHARE",
                 action_version="v1",
                 starting_position=Decimal("11"),
@@ -397,7 +401,7 @@ class IndependentLifecycleTests(unittest.TestCase):
             self.assertEqual(
                 [e["event_id"] for e in first.read_all()],
                 [
-                    "session:independent-order:v1",
+                    "session:independent-order:v2",
                     "kernel-probe1",
                 ],
             )
@@ -409,6 +413,7 @@ class IndependentLifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(LifecycleError, "foreign journal event"):
             OfflineOrderSession(
                 journal,
+                account_scope="OFFLINE_ACCOUNT_A",
                 instrument_id="SIM:TEST-SHARE",
                 action_version="v1",
                 starting_position=Decimal("10"),
