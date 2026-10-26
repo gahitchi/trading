@@ -40,11 +40,10 @@ class History(MutableMapping):
         return value
 
     def __setitem__(self, key, value):
-        if self.bucket == "applied":
-            # An execution ID is an immutable attribution key. In-memory
-            # replacement must not erase a conflicting receipt before save().
-            if key in self.dirty and self.dirty[key] != value:
-                raise ValueError("conflicting applied trade ID in pending execution history")
+        # An execution ID is an immutable attribution key. In-memory
+        # replacement must not erase a conflicting receipt before save().
+        if self.bucket == "applied" and key in self.dirty and self.dirty[key] != value:
+            raise ValueError("conflicting applied trade ID in pending execution history")
         self.dirty[key] = value
 
     def __delitem__(self, key):
