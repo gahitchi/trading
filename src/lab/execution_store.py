@@ -245,6 +245,9 @@ class ExecutionStore:
             generation = row[1] if row is not None else 0
             if current != self._expected_snapshot or generation != self._expected_generation:
                 raise ValueError("stale execution snapshot writer: authoritative state changed")
+            marker = db.execute("SELECT snapshot_seen FROM recovery_marker WHERE id=1").fetchone()
+            if marker is None or marker[0] != int(current is not None):
+                raise ValueError("execution snapshot and durable recovery marker disagree")
             for bucket, records in self.maps.items():
                 if bucket == "applied":
                     for key, value in records.dirty.items():
@@ -270,7 +273,8 @@ class ExecutionStore:
                 "ON CONFLICT(id) DO UPDATE SET value=excluded.value,generation=excluded.generation",
                 (snapshot, generation + 1),
             )
-            db.execute("UPDATE recovery_marker SET snapshot_seen=1 WHERE id=1")
+            if db.execute("UPDATE recovery_marker SET snapshot_seen=1 WHERE id=1").rowcount != 1:
+                raise ValueError("execution recovery marker disappeared during transaction")
         # SQLite committed the new authoritative head. Advance the local
         # baseline BEFORE writing the best-effort JSON projection: a crash in
         # the latter cannot make a later save reuse a stale head.
