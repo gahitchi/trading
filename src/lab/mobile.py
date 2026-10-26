@@ -12,12 +12,12 @@ import hashlib
 import html
 import json
 import platform
-from decimal import Decimal
-from importlib.resources import files
 import sqlite3
 import sys
 import unittest
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.resources import files
 from pathlib import Path
 
 from lab.execution_state import validate_ledger
