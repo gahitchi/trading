@@ -10,6 +10,7 @@ from pathlib import Path
 
 from nautilus_trader.model import (
     BarType,
+    ClientOrderId,
     InstrumentId,
     OrderSide,
     OrderType,
@@ -85,12 +86,14 @@ class GoldPaperStrategy(Strategy):
         self.state_path = config.runtime / "gold-state.json"
         self.status_path = config.runtime / "gold-status.json"
         self.last_submitted = None
+        self.emergency_order_id = None
         self.authority_nonce = None
         self.known_order_ids: set[str] = set()
         self.emergency_exit = False
         if self.state_path.exists():
             state = read_json(self.state_path)
             self.last_submitted = state.get("last_submitted_session")
+            self.emergency_order_id = state.get("emergency_order_id")
             self.known_order_ids = set(state.get("order_ids", []))
 
     def on_start(self):
@@ -123,6 +126,16 @@ class GoldPaperStrategy(Strategy):
             f"gold-monitor-{int(at.timestamp() * 1e9)}", int(at.timestamp() * 1e9), callback=self._monitor
         )
 
+    def _persist_state(self):
+        atomic_json(
+            self.state_path,
+            {
+                "last_submitted_session": self.last_submitted,
+                "emergency_order_id": self.emergency_order_id,
+                "order_ids": sorted(self.known_order_ids),
+            },
+        )
+
     def _monitor(self, _event):
         self._schedule_monitor(60)
         if not self._paper_account_ok():
@@ -131,6 +144,11 @@ class GoldPaperStrategy(Strategy):
         all_orders = self.cache.orders_open(instrument_id=GOLD)
         orders = [o for o in all_orders if str(o.client_order_id) in self.known_order_ids]
         positions = self.cache.positions_open(instrument_id=GOLD)
+        if position == 0 and self.emergency_order_id:
+            resolved = self.cache.order(ClientOrderId(self.emergency_order_id))
+            if resolved is not None and resolved.is_closed:
+                self.emergency_order_id = None
+                self._persist_state()
         if any(str(o.client_order_id) not in self.known_order_ids for o in all_orders) or (
             position != 0
             and (not positions or any(str(p.opening_order_id) not in self.known_order_ids for p in positions))
@@ -166,7 +184,8 @@ class GoldPaperStrategy(Strategy):
                     self.config.runtime / "HALT", "reconciliation_mismatch", "gold position lacks bracket protection"
                 )
         if self.emergency_exit:
-            closing = [o for o in orders if o.side == OrderSide.SELL and o.order_type == OrderType.MARKET]
+            closing_side = OrderSide.SELL if position > 0 else OrderSide.BUY
+            closing = [o for o in orders if o.side == closing_side and o.order_type == OrderType.MARKET]
             other = [o for o in orders if o not in closing]
             if other:
                 for order in other:
@@ -175,7 +194,19 @@ class GoldPaperStrategy(Strategy):
             elif closing:
                 self._status("waiting for emergency gold exit fill", position_oz=float(position))
             elif position != 0:
-                self.close_all_positions(GOLD)
+                if self.emergency_order_id:
+                    self._status("emergency gold exit unresolved; operator review", position_oz=float(position))
+                    return
+                if abs(position) != int(abs(position)):
+                    self._status("gold position size requires operator exit", position_oz=float(position))
+                    return
+                exit_order = self.order_factory.market(
+                    GOLD, closing_side, Quantity.from_int(int(abs(position))), time_in_force=TimeInForce.DAY
+                )
+                self.known_order_ids.add(str(exit_order.client_order_id))
+                self.emergency_order_id = str(exit_order.client_order_id)
+                self._persist_state()
+                self.submit_order(exit_order)
                 self._status("closing unprotected gold position", position_oz=float(position))
             else:
                 self.emergency_exit = False
@@ -205,6 +236,9 @@ class GoldPaperStrategy(Strategy):
         self._schedule()
         if read_kill_switch(self.config.runtime / "KILL") or read_halt(self.config.runtime / "HALT"):
             self._status("paused by control")
+            return
+        if self.emergency_order_id:
+            self._status("emergency gold exit requires reconciliation")
             return
         self.cycle = True
         self.received.clear()
@@ -394,15 +428,9 @@ class GoldPaperStrategy(Strategy):
             tp_post_only=False,
             sl_trigger_price=Price.from_str(str(stop)),
         )
-        atomic_json(
-            self.state_path,
-            {
-                "last_submitted_session": plan.session.isoformat(),
-                "order_ids": [str(o.client_order_id) for o in bracket],
-            },
-        )
         self.last_submitted = plan.session.isoformat()
         self.known_order_ids = {str(o.client_order_id) for o in bracket}
+        self._persist_state()
         self.submit_order_list(bracket)
         self._status("gold bracket submitted", **order)
 
