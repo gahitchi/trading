@@ -63,3 +63,51 @@ def test_owned_gold_without_stop_or_target_is_closed(tmp_path):
     assert fake.submitted == [GOLD]
     assert "unresolved" in fake.status
     assert read_halt(tmp_path / "HALT")["kind"] == "reconciliation_mismatch"
+
+def test_stale_buy_emergency_cover_is_not_treated_as_an_entry(tmp_path):
+    """An aged BUY market cover for a short must remain working until reconciled."""
+    from nautilus_trader.model import OrderSide, OrderType
+
+    fake = FakeGoldRuntime(tmp_path, "ours")
+    fake.portfolio.net_position = lambda _instrument: -1
+    fake.emergency_exit = True
+    fake.known_order_ids.add("cover")
+    fake.clock.timestamp_ns = lambda: 3_601_000_000_000
+    fake.cache.orders_open = lambda **_kwargs: [
+        SimpleNamespace(
+            client_order_id="cover",
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            ts_init=1_000_000_000,
+        )
+    ]
+    cancelled = []
+    fake.cancel_order = lambda order_id: cancelled.append(str(order_id))
+
+    GoldPaperStrategy._monitor(fake, None)
+
+    assert cancelled == []
+    assert "waiting for emergency gold exit" in fake.status
+
+
+def test_stale_buy_limit_entry_is_still_cancelled(tmp_path):
+    from nautilus_trader.model import OrderSide, OrderType
+
+    fake = FakeGoldRuntime(tmp_path, "ours")
+    fake.portfolio.net_position = lambda _instrument: 0
+    fake.known_order_ids.add("entry")
+    fake.clock.timestamp_ns = lambda: 3_601_000_000_000
+    fake.cache.orders_open = lambda **_kwargs: [
+        SimpleNamespace(
+            client_order_id="entry",
+            side=OrderSide.BUY,
+            order_type=OrderType.LIMIT,
+            ts_init=1_000_000_000,
+        )
+    ]
+    cancelled = []
+    fake.cancel_order = lambda order_id: cancelled.append(str(order_id))
+
+    GoldPaperStrategy._monitor(fake, None)
+
+    assert cancelled == ["entry"]
