@@ -506,7 +506,7 @@ def cmd_research_trials(cfg, a):
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         print(
-            f"research trials: {report['candidates']} candidate(s), {report['verified']} verified, "
+            f"research trials: {report['candidates']} candidate(s), {report['verified']} integrity-verified, "
             f"{report['blocked']} blocked ({report['events']} append-only events)"
         )
         for issue in report["issues"]:
@@ -514,7 +514,7 @@ def cmd_research_trials(cfg, a):
         if report["blocked"]:
             print("Re-run the exact attempted candidate with the same source, data and configuration. "
                   "Never delete a failed trial to improve statistical significance.")
-    return 0 if report["qualification_allowed"] else 1
+    return 0 if report["integrity_ok"] else 1
 
 
 def cmd_research_show(cfg, a):
