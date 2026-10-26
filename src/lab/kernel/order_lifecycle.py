@@ -154,8 +154,13 @@ class OfflineOrderSession:
     """
 
     def __init__(
-        self, journal: EventJournal, *, instrument_id: str, action_version: str,
-        starting_position: Decimal, quantity_step: Decimal
+        self,
+        journal: EventJournal,
+        *,
+        instrument_id: str,
+        action_version: str,
+        starting_position: Decimal,
+        quantity_step: Decimal,
     ) -> None:
         if type(journal) is not EventJournal:
             raise LifecycleError("verified EventJournal required")
@@ -181,22 +186,31 @@ class OfflineOrderSession:
             journal.append("session:independent-order:v1", "session", 0, header)
         else:
             first = events[0]
-            if first["event_id"] != "session:independent-order:v1" or first["kind"] != "session" or first["payload"] != header or first["timestamp_ns"] != 0:
+            if (
+                first["event_id"] != "session:independent-order:v1"
+                or first["kind"] != "session"
+                or first["payload"] != header
+                or first["timestamp_ns"] != 0
+            ):
                 raise LifecycleError("opening broker-state assumptions differ or journal uses an incompatible stream")
         self.recover()
 
     def state_digest(self) -> str:
-        return _digest({
-            "orders": [self.orders[key].record() for key in sorted(self.orders)],
-            "position_from_fills": str(self.position_from_fills),
-        })
+        return _digest(
+            {
+                "orders": [self.orders[key].record() for key in sorted(self.orders)],
+                "position_from_fills": str(self.position_from_fills),
+            }
+        )
 
     @property
     def position_from_fills(self) -> Decimal:
         """UNAUTHENTICATED local projection, never brokerage position."""
         return self.starting_position + sum(
-            (order.filled * (Decimal(1) if order.intent.side is Side.BUY else Decimal(-1))
-             for order in self.orders.values()),
+            (
+                order.filled * (Decimal(1) if order.intent.side is Side.BUY else Decimal(-1))
+                for order in self.orders.values()
+            ),
             Decimal(0),
         )
 
@@ -222,7 +236,11 @@ class OfflineOrderSession:
                 created_ns=intent_data["created_ns"],
                 reduce_only=intent_data["reduce_only"],
             )
-            if not intent.reduce_only or intent.instrument_id != self.instrument_id or data["action_version"] != self.action_version:
+            if (
+                not intent.reduce_only
+                or intent.instrument_id != self.instrument_id
+                or data["action_version"] != self.action_version
+            ):
                 raise LifecycleError("only same-version reduce-only reference orders are supported")
             if intent.quantity % self.quantity_step:
                 raise LifecycleError("requested quantity violates current instrument lot step")
@@ -263,7 +281,8 @@ class OfflineOrderSession:
                 raise LifecycleError("overfill or invalid venue step")
             late = state.terminal == "cancelled"
             state = replace(
-                state, filled=state.filled + qty,
+                state,
+                filled=state.filled + qty,
                 terminal="cancelled" if late else ("filled" if state.filled + qty == state.intent.quantity else None),
                 uncertain=state.uncertain or late,
                 executions=(*state.executions, exec_id),
@@ -378,27 +397,41 @@ class OfflineOrderSession:
             "action_version": _id(action_version, "action version"),
         }
         return self._post(
-            "intent", order_id=intent.client_order_id, timestamp_ns=intent.created_ns,
-            data=data, event_id="plan:" + intent.client_order_id
+            "intent",
+            order_id=intent.client_order_id,
+            timestamp_ns=intent.created_ns,
+            data=data,
+            event_id="plan:" + intent.client_order_id,
         )
 
     def prepare_dispatch(self, order_id: str, *, timestamp_ns: int) -> OrderState:
         """Durable intent boundary; does NOT dispatch to a real broker."""
         return self._post(
-            "submitted", order_id=order_id, timestamp_ns=timestamp_ns,
-            data={"transport": "offline_no_network"}, event_id="prepare:" + order_id
+            "submitted",
+            order_id=order_id,
+            timestamp_ns=timestamp_ns,
+            data={"transport": "offline_no_network"},
+            event_id="prepare:" + order_id,
         )
 
     def request_cancel(self, order_id: str, *, timestamp_ns: int) -> OrderState:
         """Only records a cancel request; the full remainder remains reserved."""
         return self._post(
-            "cancel", order_id=order_id, timestamp_ns=timestamp_ns,
-            data={"phase": "requested"}, event_id="cancel-request:" + order_id
+            "cancel",
+            order_id=order_id,
+            timestamp_ns=timestamp_ns,
+            data={"phase": "requested"},
+            event_id="cancel-request:" + order_id,
         )
 
     def observe(
-        self, order_id: str, kind: str, evidence: BrokerEvidence, *,
-        broker_order_id: str | None = None, quantity: Decimal | None = None,
+        self,
+        order_id: str,
+        kind: str,
+        evidence: BrokerEvidence,
+        *,
+        broker_order_id: str | None = None,
+        quantity: Decimal | None = None,
         execution_id: str | None = None,
     ) -> OrderState:
         if kind not in {"ack", "fill", "cancel_confirmed", "reject", "unknown"}:
@@ -420,8 +453,11 @@ class OfflineOrderSession:
         elif kind == "cancel_confirmed":
             data["phase"] = "confirmed"
         return self._post(
-            event_kind, order_id=order_id, timestamp_ns=evidence.available_ns, data=data,
-            event_id="source:" + _digest({"order_id": order_id, "event_id": evidence.event_id})
+            event_kind,
+            order_id=order_id,
+            timestamp_ns=evidence.available_ns,
+            data=data,
+            event_id="source:" + _digest({"order_id": order_id, "event_id": evidence.event_id}),
         )
 
     def recover(self) -> None:
@@ -451,7 +487,9 @@ class OfflineOrderSession:
             if payload["state_sha256"] != self.state_digest():
                 raise LifecycleError("deterministic order-state replay diverged")
             self.seen_events[entry["event_id"]] = {
-                "kind": entry["kind"], "timestamp_ns": entry["timestamp_ns"], "data": data
+                "kind": entry["kind"],
+                "timestamp_ns": entry["timestamp_ns"],
+                "data": data,
             }
         self._faulted = False
 

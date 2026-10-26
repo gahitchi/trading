@@ -21,15 +21,23 @@ DIGEST = hashlib.sha256(b"synthetic broker evidence bytes").hexdigest()
 
 def intent(key="FIRST", *, side=Side.SELL, quantity=Decimal("6"), at=1, reduce_only=True):
     return OrderIntent(
-        client_order_id=key, instrument_id="SIM:TEST-SHARE", side=side,
-        quantity=quantity, created_ns=at, reduce_only=reduce_only
+        client_order_id=key,
+        instrument_id="SIM:TEST-SHARE",
+        side=side,
+        quantity=quantity,
+        created_ns=at,
+        reduce_only=reduce_only,
     )
 
 
 def evidence(key, *, at=10, version="v1"):
     return BrokerEvidence(
-        event_id=key, source_id="offline_fixture", source_sha256=DIGEST,
-        exchange_ns=at - 1, available_ns=at, action_version=version
+        event_id=key,
+        source_id="offline_fixture",
+        source_sha256=DIGEST,
+        exchange_ns=at - 1,
+        available_ns=at,
+        action_version=version,
     )
 
 
@@ -42,8 +50,11 @@ class IndependentLifecycleTests(unittest.TestCase):
     def open(self, *, position=Decimal("10"), step=Decimal("1"), version="v1"):
         journal = EventJournal(self.path)
         return journal, OfflineOrderSession(
-            journal, instrument_id="SIM:TEST-SHARE", action_version=version,
-            starting_position=position, quantity_step=step,
+            journal,
+            instrument_id="SIM:TEST-SHARE",
+            action_version=version,
+            starting_position=position,
+            quantity_step=step,
         )
 
     def test_plan_is_reservation_not_broker_submission(self):
@@ -96,8 +107,7 @@ class IndependentLifecycleTests(unittest.TestCase):
             session.prepare_dispatch("FIRST", timestamp_ns=2)
             session.observe("FIRST", "ack", evidence("ack", at=3), broker_order_id="b-order-01")
             session.observe(
-                "FIRST", "fill", evidence("fill1", at=4),
-                quantity=Decimal("2"), execution_id="exec-01"
+                "FIRST", "fill", evidence("fill1", at=4), quantity=Decimal("2"), execution_id="exec-01"
             )
             self.assertEqual(session.position_from_fills, Decimal("8"))
             self.assertEqual(session.orders["FIRST"].filled, Decimal("2"))
@@ -117,7 +127,7 @@ class IndependentLifecycleTests(unittest.TestCase):
             self.assertTrue(session.frozen)
             self.assertEqual(session.reserved_reduction, Decimal("6"))
             with self.assertRaisesRegex(LifecycleError, "freezes"):
-                session.plan(intent("NEXT", quantity=Decimal("1")), action_version="v1")
+                session.plan(intent("NEXT", quantity=Decimal("1"), at=4), action_version="v1")
             with self.assertRaisesRegex(LifecycleError, "duplicate/terminal"):
                 session.prepare_dispatch("FIRST", timestamp_ns=4)
         finally:
@@ -148,15 +158,14 @@ class IndependentLifecycleTests(unittest.TestCase):
             self.assertEqual(session.reserved_reduction, Decimal("6"))
             self.assertTrue(session.frozen)
             session.observe(
-                "FIRST", "fill", evidence("late-fill", at=5),
-                quantity=Decimal("2"), execution_id="late-exec"
+                "FIRST", "fill", evidence("late-fill", at=5), quantity=Decimal("2"), execution_id="late-exec"
             )
             self.assertEqual(session.orders["FIRST"].filled, Decimal("2"))
             self.assertEqual(session.position_from_fills, Decimal("8"))
             self.assertTrue(session.frozen)
             self.assertEqual(session.reserved_reduction, Decimal("4"))
             with self.assertRaisesRegex(LifecycleError, "freezes"):
-                session.plan(intent("NEXT", quantity=Decimal("1")), action_version="v1")
+                session.plan(intent("NEXT", quantity=Decimal("1"), at=6), action_version="v1")
         finally:
             journal.close()
 
@@ -191,13 +200,11 @@ class IndependentLifecycleTests(unittest.TestCase):
             session.prepare_dispatch("FIRST", timestamp_ns=3)
             session.prepare_dispatch("SECOND", timestamp_ns=4)
             session.observe(
-                "FIRST", "fill", evidence("first-fill", at=5),
-                quantity=Decimal("1"), execution_id="shared-exec"
+                "FIRST", "fill", evidence("first-fill", at=5), quantity=Decimal("1"), execution_id="shared-exec"
             )
             with self.assertRaisesRegex(LifecycleError, "replay"):
                 session.observe(
-                    "SECOND", "fill", evidence("second-fill", at=6),
-                    quantity=Decimal("1"), execution_id="shared-exec"
+                    "SECOND", "fill", evidence("second-fill", at=6), quantity=Decimal("1"), execution_id="shared-exec"
                 )
         finally:
             journal.close()
@@ -210,8 +217,7 @@ class IndependentLifecycleTests(unittest.TestCase):
             for qty in (Decimal("1.1"), Decimal("0.11"), Decimal("NaN"), Decimal("-1")):
                 with self.subTest(qty=qty), self.assertRaises(LifecycleError):
                     session.observe(
-                        "FIRST", "fill", evidence("bad", at=3),
-                        quantity=qty, execution_id="bad-exec"
+                        "FIRST", "fill", evidence("bad", at=3), quantity=qty, execution_id="bad-exec"
                     )
             self.assertEqual(session.orders["FIRST"].filled, Decimal("0"))
             self.assertEqual(len(journal.read_all()), 3)
@@ -261,36 +267,50 @@ class IndependentLifecycleTests(unittest.TestCase):
         session.plan(intent(), action_version="v1")
         session.prepare_dispatch("FIRST", timestamp_ns=2)
         session.observe(
-            "FIRST", "fill", evidence("fill1", at=3),
-            quantity=Decimal("2"), execution_id="exec1"
+            "FIRST", "fill", evidence("fill1", at=3), quantity=Decimal("2"), execution_id="exec1"
         )
         before = session.state_digest()
         journal.close()
         with EventJournal(self.path) as journal:
             resumed = OfflineOrderSession(
-                journal, instrument_id="SIM:TEST-SHARE", action_version="v1",
-                starting_position=Decimal("10"), quantity_step=Decimal("1"),
+                journal,
+                instrument_id="SIM:TEST-SHARE",
+                action_version="v1",
+                starting_position=Decimal("10"),
+                quantity_step=Decimal("1"),
             )
             self.assertEqual(resumed.state_digest(), before)
             self.assertEqual(resumed.reserved_reduction, Decimal("4"))
             self.assertEqual(resumed.position_from_fills, Decimal("8"))
             resumed.assert_recovered()
-        with EventJournal(self.path) as journal, self.assertRaisesRegex(LifecycleError, "opening broker-state assumptions differ"):
+        with (
+            EventJournal(self.path) as journal,
+            self.assertRaisesRegex(LifecycleError, "opening broker-state assumptions differ"),
+        ):
             OfflineOrderSession(
-                journal, instrument_id="SIM:TEST-SHARE", action_version="v1",
-                starting_position=Decimal("11"), quantity_step=Decimal("1"),
+                journal,
+                instrument_id="SIM:TEST-SHARE",
+                action_version="v1",
+                starting_position=Decimal("11"),
+                quantity_step=Decimal("1"),
             )
 
     def test_hash_valid_economic_state_forgery_fails_replay(self):
         journal, session = self.open()
         journal.append(
-            "plan:FORGED", "intent", 1,
+            "plan:FORGED",
+            "intent",
+            1,
             {
                 "event": {
                     "order_id": "FORGED",
                     "intent": {
-                        "client_order_id": "FORGED", "instrument_id": "SIM:TEST-SHARE",
-                        "side": "sell", "quantity": "1", "created_ns": 1, "reduce_only": True,
+                        "client_order_id": "FORGED",
+                        "instrument_id": "SIM:TEST-SHARE",
+                        "side": "sell",
+                        "quantity": "1",
+                        "created_ns": 1,
+                        "reduce_only": True,
                     },
                     "action_version": "v1",
                 },
@@ -305,13 +325,19 @@ class IndependentLifecycleTests(unittest.TestCase):
     def test_corrupted_replay_quarantines_the_same_instance(self):
         journal, session = self.open()
         journal.append(
-            "plan:FORGED", "intent", 1,
+            "plan:FORGED",
+            "intent",
+            1,
             {
                 "event": {
                     "order_id": "FORGED",
                     "intent": {
-                        "client_order_id": "FORGED", "instrument_id": "SIM:TEST-SHARE",
-                        "side": "sell", "quantity": "1", "created_ns": 1, "reduce_only": True,
+                        "client_order_id": "FORGED",
+                        "instrument_id": "SIM:TEST-SHARE",
+                        "side": "sell",
+                        "quantity": "1",
+                        "created_ns": 1,
+                        "reduce_only": True,
                     },
                     "action_version": "v1",
                 },
@@ -329,8 +355,11 @@ class IndependentLifecycleTests(unittest.TestCase):
         journal.append("corp-event", "corporate_action", 3, {"some": "data"})
         with self.assertRaisesRegex(LifecycleError, "foreign journal event"):
             OfflineOrderSession(
-                journal, instrument_id="SIM:TEST-SHARE", action_version="v1",
-                starting_position=Decimal("10"), quantity_step=Decimal("1"),
+                journal,
+                instrument_id="SIM:TEST-SHARE",
+                action_version="v1",
+                starting_position=Decimal("10"),
+                quantity_step=Decimal("1"),
             )
         journal.close()
 
@@ -341,8 +370,12 @@ class IndependentLifecycleTests(unittest.TestCase):
         )
         result = subprocess.run(
             [sys.executable, "-S", "-c", statement],
-            cwd=ROOT, env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
-            capture_output=True, text=True, check=False, timeout=15,
+            cwd=ROOT,
+            env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "portable-oms")
