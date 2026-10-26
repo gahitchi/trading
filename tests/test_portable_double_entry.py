@@ -101,7 +101,9 @@ class PortableDoubleEntryTests(unittest.TestCase):
         self.assertEqual(batch.currency, "USD")
         self.assertEqual(batch.closing_state_sha256, _financial(after).fingerprint)
         self.assertEqual(batch.record()["version"], 1)
-        self.assertEqual(verify_record(batch.record(), _financial(before), _financial(after), kind="corporate_action"), batch)
+        self.assertEqual(
+            verify_record(batch.record(), _financial(before), _financial(after), kind="corporate_action"), batch
+        )
 
     def test_short_merger_keeps_payable_as_negative_claim(self):
         before = book(held=Decimal("-10"), basis=Decimal("-400.00"))
@@ -147,7 +149,9 @@ class PortableDoubleEntryTests(unittest.TestCase):
                 after = recognize(before, zero, reconciliation(held), observed_ns=2)
                 batch = transition(_financial(before), _financial(after), kind="corporate_action")
                 self.assertEqual(sum((entry.debit for entry in batch.entries), Decimal(0)), 0)
-                self.assertEqual([entry.account for entry in batch.entries], [Account.SECURITY_BASIS, Account.REALIZED_EARNINGS])
+                self.assertEqual(
+                    [entry.account for entry in batch.entries], [Account.SECURITY_BASIS, Account.REALIZED_EARNINGS]
+                )
                 self.assertEqual(after.pending_cash, 0)
 
     def test_unbalanced_cash_credit_or_pnl_injection_fails(self):

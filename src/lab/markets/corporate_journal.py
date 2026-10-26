@@ -102,9 +102,7 @@ class CorporateSession:
                     if event["event_id"] != _event_id("corp-action", action.action_id):
                         raise CorporateActionError("action event ID does not bind action identity")
                     next_book = recognize(book, action, recon, observed_ns=stamp)
-                    verify_record(
-                        payload["postings"], _financial(book), _financial(next_book), kind="corporate_action"
-                    )
+                    verify_record(payload["postings"], _financial(book), _financial(next_book), kind="corporate_action")
                     book = next_book
                 elif kind == "corporate_cash":
                     _keys(payload, {"receipt", "book_digest", "postings"})

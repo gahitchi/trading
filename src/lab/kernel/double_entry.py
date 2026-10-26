@@ -67,7 +67,13 @@ class AccountingState:
     realized_earnings: Decimal
 
     def __post_init__(self) -> None:
-        if type(self.currency) is not str or not 3 <= len(self.currency) <= 8 or not self.currency.isalpha() or not self.currency.isupper():
+        if (
+            type(self.currency) is not str
+            or not 3 <= len(self.currency) <= 8
+            or not self.currency.isascii()
+            or not self.currency.isalpha()
+            or not self.currency.isupper()
+        ):
             raise AccountingInvariantError("invalid accounting settlement currency")
         q = _quantum(self.quantum)
         for field in _ACCOUNTS:
@@ -116,8 +122,10 @@ class PostingBatch:
     closing_state_sha256: str
 
     def __post_init__(self) -> None:
-        if self.kind not in _KINDS:
+        if type(self.kind) is not str or self.kind not in _KINDS:
             raise AccountingInvariantError("unsupported financial event type")
+        if type(self.currency) is not str or not 3 <= len(self.currency) <= 8 or not self.currency.isascii():
+            raise AccountingInvariantError("invalid posting settlement currency")
         if not isinstance(self.entries, tuple):
             raise AccountingInvariantError("postings must be immutable")
         if any(type(entry) is not Posting for entry in self.entries):
@@ -128,8 +136,10 @@ class PostingBatch:
             raise AccountingInvariantError("postings must be unique in canonical account order")
         if sum((entry.debit for entry in self.entries), Decimal(0)) != 0:
             raise AccountingInvariantError("unbalanced postings cannot enter accounting journal")
-        if type(self.closing_state_sha256) is not str or len(self.closing_state_sha256) != 64 or any(
-            c not in "0123456789abcdef" for c in self.closing_state_sha256
+        if (
+            type(self.closing_state_sha256) is not str
+            or len(self.closing_state_sha256) != 64
+            or any(c not in "0123456789abcdef" for c in self.closing_state_sha256)
         ):
             raise AccountingInvariantError("invalid closing financial-state digest")
 
@@ -161,7 +171,8 @@ def transition(before: AccountingState, after: AccountingState, *, kind: str) ->
     if kind == "corporate_action" and diffs[Account.CASH] != 0:
         raise AccountingInvariantError("corporate action recognition must not move actual cash")
     if kind == "corporate_cash" and (
-        diffs[Account.SECURITY_BASIS] != 0 or diffs[Account.REALIZED_EARNINGS] != 0
+        diffs[Account.SECURITY_BASIS] != 0
+        or diffs[Account.REALIZED_EARNINGS] != 0
         or diffs[Account.CASH] != -diffs[Account.CORPORATE_CLAIM]
     ):
         raise AccountingInvariantError("corporate receipt changes only cash and outstanding claim")
@@ -171,9 +182,7 @@ def transition(before: AccountingState, after: AccountingState, *, kind: str) ->
     return PostingBatch(kind=kind, currency=before.currency, entries=entries, closing_state_sha256=after.fingerprint)
 
 
-def verify_record(
-    record: dict, before: AccountingState, after: AccountingState, *, kind: str
-) -> PostingBatch:
+def verify_record(record: dict, before: AccountingState, after: AccountingState, *, kind: str) -> PostingBatch:
     """Reconstruct the entire expected batch, including account order and hash.
 
     This is stronger than accepting a caller's claim that entries summed to

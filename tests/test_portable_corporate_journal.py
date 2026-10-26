@@ -190,7 +190,9 @@ class PortableCorporateJournalTests(unittest.TestCase):
                     "action": action().record(),
                     "reconciliation": readiness().record(),
                     "book_digest": _digest(next_book.record()),
-                    "postings": transition(_financial(initial()), _financial(next_book), kind="corporate_action").record(),
+                    "postings": transition(
+                        _financial(initial()), _financial(next_book), kind="corporate_action"
+                    ).record(),
                 },
             )
             with self.assertRaisesRegex(JournalError, "disagrees"):
