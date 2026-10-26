@@ -60,6 +60,7 @@ def run_spec(
     label: str | None = None,
     speed: str = "daily",
     keep_signals: bool = False,
+    bound_risk: bool = False,
 ) -> backtest.RunResult:
     """Equal-weight portfolio of `tickers`. With a point-in-time membership file, each day's
     capital is shared among the stocks that were in the universe that day."""
@@ -79,7 +80,7 @@ def run_spec(
         period.start,
         period.end,
         label=label or first.label(),
-        risk=effective_risk(cfg, len(tickers)),
+        risk=cfg.risk if bound_risk else effective_risk(cfg, len(tickers)),
         membership=data.membership(cfg),
         normalize_active=True,
         cross_sectional=xs,
@@ -143,7 +144,7 @@ def _trials_path(cfg: LabConfig) -> Path:
     return cfg.results_dir / "trials.jsonl"
 
 
-def config_fingerprint(cfg: LabConfig, n_tickers: int = 1) -> str:
+def config_fingerprint(cfg: LabConfig, n_tickers: int = 1, *, bound_risk: bool = False) -> str:
     """Identity of every setting that changes a backtest's result (G007-F8): the effective research risk
     limits, margin and financing, portfolio construction, costs, capital, warm-up, and the identity of the
     point-in-time universe and borrow history files. Paths, paper and research-gate settings are excluded."""
@@ -152,7 +153,7 @@ def config_fingerprint(cfg: LabConfig, n_tickers: int = 1) -> str:
         return hashlib.sha256(Path(p).read_bytes()).hexdigest() if p and Path(p).exists() else None
 
     ident = {
-        "risk": asdict(effective_risk(cfg, n_tickers)),
+        "risk": asdict(cfg.risk if bound_risk else effective_risk(cfg, n_tickers)),
         "margin": asdict(cfg.margin),
         "portfolio": asdict(cfg.portfolio),
         "costs": asdict(cfg.costs),
@@ -169,7 +170,14 @@ def config_fingerprint(cfg: LabConfig, n_tickers: int = 1) -> str:
 
 
 def register_trial(
-    cfg: LabConfig, key: str, spec: SignalSpec, label: str, active: pd.Series, data_digest: str = "unspecified"
+    cfg: LabConfig,
+    key: str,
+    spec: SignalSpec,
+    label: str,
+    active: pd.Series,
+    data_digest: str = "unspecified",
+    *,
+    bound_risk: bool = False,
 ) -> None:
     """Every configuration ever evaluated on a dataset is a trial; the Deflated Sharpe Ratio charges for all
     of them. A trial is the strategy (code + parameters) AND the settings that shape its result, so trying
@@ -179,7 +187,10 @@ def register_trial(
     from lab.persistence import append_json
     from lab.provenance import simulation_digest
 
-    fingerprint = f"{spec_fingerprint(spec)}:{config_fingerprint(cfg)}:{simulation_digest()}:{data_digest}"
+    fingerprint = (
+        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:"
+        f"{simulation_digest()}:{data_digest}"
+    )
     # The return stream itself, so correlated trials can be counted as fewer independent ones (F-R02).
     path = _trial_returns_path(cfg, fingerprint)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -246,7 +257,8 @@ def effective_trials(cfg: LabConfig) -> float | None:
 
 
 def compare(
-    cfg, specs, tickers, period, frames=None, *, register=True, holdout_ok=False, speed="daily", holdout_reason=""
+    cfg, specs, tickers, period, frames=None, *, register=True, holdout_ok=False,
+    speed="daily", holdout_reason="", bound_risk=False
 ):
     from lab.config import validate_effective
 
@@ -255,7 +267,10 @@ def compare(
 
     if holdout_ok:
         with holdout_attempt(cfg, specs, period, speed, holdout_reason):
-            return _compare(cfg, specs, tickers, period, frames, register=register, holdout_ok=True, speed=speed)
+            return _compare(
+                cfg, specs, tickers, period, frames,
+                register=register, holdout_ok=True, speed=speed, bound_risk=bound_risk
+            )
     # Guard and record exposure before loading/evaluating strategies. Failed runs
     # are exposure too; this record cannot be removed by a retry or new label.
     if speed == "daily":
@@ -264,7 +279,7 @@ def compare(
         frames = frames or intraday.load_many(cfg, tickers, intraday.speed(speed))
         guard_intraday(cfg, period, frames)
     record_research(cfg, period, speed)
-    return _compare(cfg, specs, tickers, period, frames, register=register, speed=speed)
+    return _compare(cfg, specs, tickers, period, frames, register=register, speed=speed, bound_risk=bound_risk)
 
 
 def _compare(
@@ -277,6 +292,7 @@ def _compare(
     register: bool = True,
     holdout_ok: bool = False,
     speed: str = "daily",
+    bound_risk: bool = False,
 ) -> tuple[Comparison, list[backtest.RunResult]]:
     sp = intraday.speed(speed)
     cfg = replace(cfg, trading=replace(cfg.trading, speed=speed))
@@ -289,9 +305,11 @@ def _compare(
         guard_intraday(cfg, period, frames, holdout_ok=holdout_ok)
         # The control really holds: buy-and-hold at the same speed, through the nights (no flat-at-close).
         control_cfg = replace(cfg, trading=replace(cfg.trading, flat_at_close=False))
-    results = [run_spec(control_cfg, BASELINE, tickers, frames, period, "buy_and_hold (control)", speed)]
+    results = [run_spec(
+        control_cfg, BASELINE, tickers, frames, period, "buy_and_hold (control)", speed, bound_risk=bound_risk
+    )]
     cand_specs = [s for s in specs if s != BASELINE]
-    results += [run_spec(cfg, s, tickers, frames, period, speed=speed) for s in cand_specs]
+    results += [run_spec(cfg, s, tickers, frames, period, speed=speed, bound_risk=bound_risk) for s in cand_specs]
     end = period.end or max(f.index[-1] for f in frames.values()).date()
     key = dataset_key(period, str(period.start), str(end), tickers)
     if not sp.daily:
@@ -304,7 +322,7 @@ def _compare(
         for s, r, act in zip(cand_specs, results[1:], actives, strict=True):
             from lab.provenance import frame_digest
 
-            register_trial(cfg, key, s, r.label, act, frame_digest(frames))
+            register_trial(cfg, key, s, r.label, act, frame_digest(frames), bound_risk=bound_risk)
     trials = trial_sharpes(cfg, key)
     n_eff = effective_trials(cfg) if trials else None
     trials = trials or [stats.moments(a.to_numpy())[0] for a in actives]
@@ -510,7 +528,7 @@ NULL_MAX_FALLBACK = 0.25
 
 
 def _null_worker(args):
-    cfg, spec, tickers, frames, period, seed = args
+    cfg, spec, tickers, frames, period, seed, bound_risk = args
     # Resample only data available by the end of the evaluated period (G007-F6: drawing donors from the
     # whole file let later test/holdout rows shape the training noise floor). Warm-up history before the
     # period start is past data and stays in the donor pool.
@@ -518,8 +536,8 @@ def _null_worker(args):
     past = {t: frames[t] if end is None else frames[t][frames[t].index <= end] for t in tickers}
     # One synchronized draw for the whole panel keeps the stocks' co-movement (ChatGPT, G002).
     boot, diag = data.block_bootstrap_panel(past, seed, return_diagnostics=True)
-    cand = run_spec(cfg, spec, tickers, boot, period).metrics
-    base = run_spec(cfg, BASELINE, tickers, boot, period).metrics
+    cand = run_spec(cfg, spec, tickers, boot, period, bound_risk=bound_risk).metrics
+    base = run_spec(cfg, BASELINE, tickers, boot, period, bound_risk=bound_risk).metrics
     worst = max((v["fallback_fraction"] for v in diag["per_instrument"].values()), default=0.0)
     if cand.get("insolvent") or base.get("insolvent"):
         raise ValueError("null experiment not qualified: insolvent equity")
@@ -535,6 +553,8 @@ def null_test(
     frames: dict | None = None,
     workers: int | None = None,
     observed_edge: float | None = None,
+    *,
+    bound_risk: bool = False,
 ) -> dict:
     if type(samples) is not int or samples <= 0 or (workers is not None and (type(workers) is not int or workers <= 0)):
         raise ValueError("null samples and workers must be positive integers")
@@ -546,9 +566,9 @@ def null_test(
         )
     frames = frames or data.load_many(cfg, tickers)
     if observed_edge is None:
-        comp, _ = compare(cfg, [spec], tickers, period, frames)
+        comp, _ = compare(cfg, [spec], tickers, period, frames, bound_risk=bound_risk)
         observed_edge = comp.rows[1]["sharpe_edge"] if len(comp.rows) > 1 else 0.0
-    jobs = [(cfg, spec, tickers, frames, period, s) for s in range(1, samples + 1)]
+    jobs = [(cfg, spec, tickers, frames, period, s, bound_risk) for s in range(1, samples + 1)]
     workers = workers or max(1, min(samples, (os.cpu_count() or 2) - 1))
     if workers == 1:
         measured = [_null_worker(j) for j in jobs]
