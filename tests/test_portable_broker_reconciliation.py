@@ -213,6 +213,27 @@ class PortableReconciliationTests(unittest.TestCase):
             compare_reported_snapshot(self.session, phantom).findings,
         )
 
+    def test_matching_snapshot_from_another_account_is_never_parity(self):
+        self.placed()
+        copied = self.snapshot(account_scope="OTHER_ACCOUNT")
+        result = compare_reported_snapshot(self.session, copied)
+        self.assertIn("ACCOUNT_SCOPE_MISMATCH", result.findings)
+        self.assertFalse(result.internally_consistent)
+        self.assertFalse(result.broker_authorization)
+        self.assertFalse(result.release_reservations)
+
+    def test_unacknowledged_external_broker_order_cannot_be_consistent(self):
+        self.plan()
+        self.session.prepare_dispatch("A", timestamp_ns=2)
+        external = self.snapshot(
+            position=Decimal("5"),
+            orders=(ReportedOrder("A", "BK1", "open", Decimal("0")),),
+            executions=(),
+        )
+        issues = compare_reported_snapshot(self.session, external).findings
+        self.assertIn("BROKER_ORDER_ID_UNACKNOWLEDGED_LOCALLY", issues)
+        self.assertFalse(compare_reported_snapshot(self.session, external).release_reservations)
+
     def test_stale_broker_asof_or_incompatible_split_version_block(self):
         self.placed()
         stale = self.snapshot(asof_ns=3)
