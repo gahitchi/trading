@@ -171,12 +171,7 @@ class TrialEvidenceAssessment:
     def claimed_coverage_complete(self) -> bool:
         """Only a checklist of local *claims*, never verified broker coverage."""
         return not (
-            self.missing
-            or self.conflicting
-            or self.stale
-            or self.future_dated
-            or self.duplicate
-            or self.cross_scope
+            self.missing or self.conflicting or self.stale or self.future_dated or self.duplicate or self.cross_scope
         )
 
     @property
@@ -227,8 +222,7 @@ def assess_trial_claims(
         if item.status is ProbeStatus.CONFLICT:
             conflict.add(item.kind)
     missing = {
-        kind for kind in expected.required()
-        if kind not in by_kind or by_kind[kind].status is ProbeStatus.MISSING
+        kind for kind in expected.required() if kind not in by_kind or by_kind[kind].status is ProbeStatus.MISSING
     }
     return TrialEvidenceAssessment(
         venue=expected.venue,
