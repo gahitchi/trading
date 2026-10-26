@@ -367,7 +367,7 @@ def trial_registry_status(cfg: LabConfig) -> dict:
         "verified": completed,
         "blocked": len(issues),
         "issues": issues,
-        "qualification_allowed": not issues,
+        "integrity_ok": not issues,
     }
 
 
