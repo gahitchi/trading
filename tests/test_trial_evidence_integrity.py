@@ -24,13 +24,13 @@ def test_complete_trial_is_checksum_bound_and_visible_through_cli(tmp_path, goog
     experiments.reserve_trial(cfg, "train", spec, "vendor-input")
     experiments.register_trial(cfg, "train", spec, "tested", active, "vendor-input")
     report = experiments.trial_registry_status(cfg)
-    assert report["qualification_allowed"] and report["events"] == 2
+    assert report["integrity_ok"] and report["events"] == 2
     assert report["candidates"] == report["verified"] == 1 and not report["issues"]
     assert len(experiments.trial_sharpes(cfg, "train")) == 1
 
     assert build_parser().parse_args(["research", "trials", "--json"]).fn is cmd_research_trials
     assert cmd_research_trials(cfg, SimpleNamespace(json=True)) == 0
-    assert '"qualification_allowed": true' in capsys.readouterr().out
+    assert '"integrity_ok": true' in capsys.readouterr().out
 
 
 def test_missing_completed_npz_blocks_significance(tmp_path, goog_lab):
@@ -41,7 +41,7 @@ def test_missing_completed_npz_blocks_significance(tmp_path, goog_lab):
     assert len(completed["returns_sha256"]) == 64
     experiments._trial_returns_path(cfg, completed["fingerprint"]).unlink()
     report = experiments.trial_registry_status(cfg)
-    assert not report["qualification_allowed"]
+    assert not report["integrity_ok"]
     assert "missing completed" in report["issues"][0]["reason"]
     with pytest.raises(ValueError, match="missing completed return stream"):
         experiments.effective_trials(cfg)
@@ -83,7 +83,7 @@ def test_divergent_retry_is_quarantined_permanently_even_if_retried_again(tmp_pa
     experiments.register_trial(cfg, "train", spec, "third", active)
     with pytest.raises(ValueError, match="quarantined"):
         experiments.trial_sharpes(cfg, "train")
-    assert not experiments.trial_registry_status(cfg)["qualification_allowed"]
+    assert not experiments.trial_registry_status(cfg)["integrity_ok"]
 
 
 def test_crash_before_npz_commit_leaves_an_unresolved_attempt(tmp_path, goog_lab, monkeypatch):
@@ -102,7 +102,7 @@ def test_crash_before_npz_commit_leaves_an_unresolved_attempt(tmp_path, goog_lab
     assert experiments.trial_registry_status(cfg)["blocked"] == 1
     monkeypatch.setattr(np, "savez_compressed", original_save)
     experiments.register_trial(cfg, "train", spec, "replayed", active, "source")
-    assert experiments.trial_registry_status(cfg)["qualification_allowed"]
+    assert experiments.trial_registry_status(cfg)["integrity_ok"]
 
 
 def test_cli_reports_interrupted_trial_without_changing_any_data(tmp_path, goog_lab, capsys):
