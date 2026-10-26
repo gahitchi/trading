@@ -475,7 +475,6 @@ def _redact(key: bytes, value, field: str | None = None):
     return value
 
 
-
 def _known_source_ids(src: Path, key: bytes) -> dict[str, str]:
     """Bind known typed IDs to consistent HMAC pseudonyms across source files.
 
