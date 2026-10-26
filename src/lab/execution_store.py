@@ -164,8 +164,12 @@ class ExecutionStore:
         if existed and self.load() is None:
             # An existing database without an authoritative monetary snapshot
             # cannot be treated as a new account, even if ledger.json and the
-            # heartbeat were deleted. Only a genuine legacy JSON import can
-            # resume after a crash before the first SQLite snapshot commit.
+            # heartbeat were deleted. A legacy JSON import may resume only if
+            # no history ever committed: importing it onto orphaned fills or
+            # orders could silently invent new cash or omit executions.
+            with self.connect() as db:
+                if db.execute("SELECT 1 FROM history LIMIT 1").fetchone() is not None:
+                    raise ValueError("execution snapshot missing with recorded history; restore complete backup")
             if not self.projection.exists():
                 raise ValueError("existing execution database has no snapshot; restore complete runtime backup")
             legacy = read_json(self.projection)
