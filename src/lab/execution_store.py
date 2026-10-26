@@ -40,6 +40,17 @@ class History(MutableMapping):
         return value
 
     def __setitem__(self, key, value):
+        if self.bucket == "applied":
+            # An execution ID is an immutable attribution key. In-memory
+            # replacement must not erase a conflicting receipt before save().
+            if key in self.dirty and self.dirty[key] != value:
+                raise ValueError("conflicting applied trade ID in pending execution history")
+            with self.store.connect() as db:
+                old = db.execute(
+                    "SELECT value FROM history WHERE bucket='applied' AND id=?", (key,)
+                ).fetchone()
+            if old is not None and json.loads(old[0]) != value:
+                raise ValueError("conflicting applied trade ID in committed execution history")
         self.dirty[key] = value
 
     def __delitem__(self, key):
@@ -104,6 +115,11 @@ class ExecutionStore:
                 )
                 db.execute("CREATE INDEX history_order ON history(bucket,coid)")
                 db.execute("PRAGMA user_version=1")
+            # The snapshot is a single-writer compare-and-swap head. An older
+            # process may read current history, but cannot overwrite a later
+            # writer's cash, positions, pending orders or replay checkpoint.
+            row = db.execute("SELECT value FROM snapshot WHERE id=1").fetchone()
+            self._expected_snapshot = row[0] if row is not None else None
         if existed and self.load() is None and self.projection.exists():
             legacy = read_json(self.projection)
             if legacy.get("authoritative_store"):
@@ -150,16 +166,41 @@ class ExecutionStore:
                 validate_ledger({"cash": 0, "applied_trades": [[k, *v] for k, v in records.dirty.items()]})
             else:
                 validate_ledger({"cash": 0, bucket: records.dirty})
+        snapshot = encode(state)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT value FROM snapshot WHERE id=1").fetchone()
+            current = row[0] if row is not None else None
+            if current != self._expected_snapshot:
+                raise ValueError("stale execution snapshot writer: authoritative state changed")
             for bucket, records in self.maps.items():
-                db.executemany(
-                    "INSERT INTO history VALUES(?,?,?,?) ON CONFLICT(bucket,id) DO UPDATE SET value=excluded.value,coid=excluded.coid",
-                    ((bucket, k, encode(v), v[1] if bucket == "applied" else None) for k, v in records.dirty.items()),
-                )
+                if bucket == "applied":
+                    for key, value in records.dirty.items():
+                        raw = encode(value)
+                        existing = db.execute(
+                            "SELECT value FROM history WHERE bucket='applied' AND id=?", (key,)
+                        ).fetchone()
+                        if existing is not None and existing[0] != raw:
+                            raise ValueError("conflicting applied trade ID in committed execution history")
+                        if existing is None:
+                            db.execute(
+                                "INSERT INTO history(bucket,id,value,coid) VALUES(?,?,?,?)",
+                                (bucket, key, raw, value[1]),
+                            )
+                else:
+                    db.executemany(
+                        "INSERT INTO history VALUES(?,?,?,?) "
+                        "ON CONFLICT(bucket,id) DO UPDATE SET value=excluded.value,coid=excluded.coid",
+                        ((bucket, k, encode(v), None) for k, v in records.dirty.items()),
+                    )
             db.execute(
-                "INSERT INTO snapshot VALUES(1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value", (encode(state),)
+                "INSERT INTO snapshot VALUES(1,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value",
+                (snapshot,),
             )
+        # SQLite committed the new authoritative head. Advance the local
+        # baseline BEFORE writing the best-effort JSON projection: a crash in
+        # the latter cannot make a later save reuse a stale head.
+        self._expected_snapshot = snapshot
         for records in self.maps.values():
             records.dirty.clear()
         atomic_json(self.projection, state)
