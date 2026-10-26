@@ -32,6 +32,7 @@ async function api(path, body) {
 }
 function settings() {
   const s = Object.fromEntries(new FormData(form));
+  s.gold = form.elements.gold.checked;
   for (const k of ["port", "capital", "hours"]) s[k] = Number(s[k]);
   delete s.symbol;
   s.tickers = [...form.querySelectorAll('input[name="symbol"]:checked')].map(el => el.value);
@@ -51,12 +52,13 @@ function el(tag, text, className) {
   if (className) node.className = className;
   return node;
 }
-function positions(hb) {
+function positions(hb, gold) {
   const box = $("positions");
   const held = Object.entries(hb.positions || {}).filter(([, qty]) => qty);
+  if (gold && gold.position_oz) held.push(["XAUUSD (oz)", gold.position_oz]);
   if (!held.length) { box.replaceChildren(el("p", hb.positions ? "No open positions. The plan is in cash." : "No account snapshot yet.", "empty")); return; }
   const table = el("table"), head = el("tr");
-  for (const name of ["Stock", "Side", "Shares"]) head.append(el("th", name));
+  for (const name of ["Instrument", "Side", "Quantity"]) head.append(el("th", name));
   table.append(el("thead"), el("tbody"));
   table.tHead.append(head);
   for (const [ticker, qty] of held.sort()) {
@@ -97,6 +99,7 @@ function riskTable(r) {
 function alarms(state, hb) {
   const box = $("alarms"), out = [];
   const held = Object.entries(hb.positions || {}).filter(([, q]) => q);
+  if (state.gold_status && state.gold_status.position_oz) held.push(["XAUUSD (oz)", state.gold_status.position_oz]);
   const r = hb.risk;
   if (!state.engine_alive && held.length) {
     out.push(["red", "The engine is not running, and the broker may still hold positions: " + held.map(([t, q]) => `${t} ${shares.format(q)}`).join(", ") + ".",
@@ -139,6 +142,7 @@ function render(state) {
   $("schedule").textContent = `History is checked at ${state.schedule.signal} and decisions are made at ${state.schedule.decision}, New York time.`;
   if (!initialized) {
     for (const [key, value] of Object.entries(state.settings)) if (form.elements[key]) form.elements[key].value = value;
+    form.elements.gold.checked = state.settings.gold;
     const box = $("symbols");
     box.replaceChildren();
     for (const ticker of state.symbols) {
@@ -151,6 +155,12 @@ function render(state) {
     initialized = true;
   }
   riskNote();
+  const gold = state.gold_status;
+  $("gold-status").textContent = !state.settings.gold ? "London Gold is off."
+    : !gold ? "London Gold: waiting for broker data"
+    : gold.state === "gold bracket submitted"
+      ? `London Gold: ${shares.format(gold.qty)} oz order, limit ${usd.format(gold.entry_limit)}, stop ${usd.format(gold.stop)}, target ${usd.format(gold.target)}${gold.minimum_lot_override ? " (minimum lot exceeds 1% budget)" : ""}.`
+      : `London Gold: ${gold.state}${gold.position_oz ? ` (${shares.format(gold.position_oz)} oz)` : ""}.`;
   $("front").dataset.phase = state.phase;
   $("phase").textContent = phases[state.phase] || state.phase;
   $("status-title").textContent = titles[state.phase] || state.phase;
@@ -169,7 +179,7 @@ function render(state) {
   $("snapshot-age").textContent = hb.at
     ? (state.snapshot_current ? "Live engine snapshot from " : "Older snapshot, not verified, from ") + new Date(hb.at).toLocaleString()
     : "No current account snapshot.";
-  positions(hb);
+  positions(hb, state.gold_status);
   $("log").textContent = state.log.join("\n") || "No activity yet.";
   const block = hb.hard_halt || hb.blocked;
   $("block").textContent = block || "";

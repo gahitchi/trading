@@ -87,6 +87,9 @@
           <label>Strategy<select name="strategy"><option value="combined">Trend and mean reversion</option><option value="trend">Trend following</option><option value="reversion">Mean reversion</option></select></label>
           <p class="label">Stocks to trade</p>
           <div id="symbols" class="symbols"></div>
+          <label><input type="checkbox" name="gold"><span>Trade London Gold (XAUUSD) with the daily ATR strategy</span></label>
+          <p id="gold-status" class="help">London Gold is off.</p>
+          <p class="help">Gold uses its own 1% budget. The stock risk table does not include gold exposure.</p>
           <p class="help">The built-in strategies are research hypotheses. Holding cash is a valid outcome when nothing qualifies.</p>
         </fieldset>
 

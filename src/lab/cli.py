@@ -576,6 +576,8 @@ _HELD_LOCKS: list = []  # runtime locks: closing (or garbage-collecting) one wou
 
 
 def cmd_paper(cfg, a):
+    import asyncio
+
     from lab.notify import Notifier
     from lab.paper import RuntimeLocked, acquire_runtime_lock, build_node, build_smoke_node, runtime_dir
     from lab.research.approval import ApprovalError
@@ -583,8 +585,15 @@ def cmd_paper(cfg, a):
 
     tickers = [t.upper() for t in (a.tickers or cfg.universe)]
     try:
+        if a.gold and a.smoke:
+            raise ValueError("--gold cannot be combined with --smoke")
         _HELD_LOCKS.append(acquire_runtime_lock(cfg))
         notifier = Notifier(spool_path=str(runtime_dir(cfg) / "notifications.sqlite3"))
+        if a.gold and not a.check_only:
+            from lab.gold_data import download_gold_history
+
+            count = asyncio.run(download_gold_history(cfg.paper, runtime_dir(cfg) / "gold-history.json"))
+            print(f"IBKR London Gold: downloaded {count} closed daily bars")
         if a.smoke:
             node, report = build_smoke_node(cfg, tickers, test_order=a.test_order)
         else:
@@ -598,6 +607,7 @@ def cmd_paper(cfg, a):
                 cfg,
                 specs,
                 tickers,
+                gold=a.gold,
                 adopt_broker=a.adopt_broker,
                 notifier=notifier,
                 operator_control=not a.check_only,
@@ -607,7 +617,11 @@ def cmd_paper(cfg, a):
             )
     except (SafetyError, ValueError, SignalNotFound, RuntimeLocked, ApprovalError) as e:
         raise SystemExit(str(e)) from e
-    what = "smoke test" if a.smoke else f"{len(a.signals)} signal(s) x {len(tickers)} stocks"
+    what = (
+        "smoke test"
+        if a.smoke
+        else f"{len(a.signals)} signal(s) x {len(tickers)} stocks" + (" + London Gold ATR" if a.gold else "")
+    )
     print(f"paper node ready: {what}, account {cfg.paper.account_id} via {cfg.paper.host}:{cfg.paper.port}")
     if not a.smoke:
         t = cfg.trading
@@ -1099,6 +1113,7 @@ def build_parser() -> argparse.ArgumentParser:
     pp = sub.add_parser("paper", help="paper trade on Interactive Brokers (paper accounts only)")
     pp.add_argument("--signals", nargs="+", default=["sma_trend"])
     pp.add_argument("--tickers", nargs="+")
+    pp.add_argument("--gold", action="store_true", help="include London Gold ATR PAPER strategy")
     pp.add_argument("--set", action="append")
     pp.add_argument("--bank", help="predeclared daily strategy-bank manifest")
     pp.add_argument(
