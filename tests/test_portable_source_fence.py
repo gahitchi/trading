@@ -219,7 +219,9 @@ class PortableSourceFenceTests(unittest.TestCase):
         bad_source = replace(self.snapshot, source_id="other-offline-source")
         self.assertIn("SNAPSHOT_PINNED_SOURCE_IDENTITY_MISMATCH", self.evaluate(snapshot=bad_source).findings)
         with self.assertRaisesRegex(LifecycleError, "typed causal fence"):
-            assess_fenced_report(self.session, self.snapshot, self.fence, expected_anchors=anchors(), expected_identity=None)
+            assess_fenced_report(
+                self.session, self.snapshot, self.fence, expected_anchors=anchors(), expected_identity=None
+            )
 
     def test_reordered_cross_channel_delivery_time_is_reported(self):
         first = self.appended(self.fence, SourceChannel.ORDERS, "order-after", available=8)
