@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 
+from lab.kernel.double_entry import AccountingState, transition, verify_record
 from lab.markets.corporate_actions import (
     CashReceipt,
     CashTermination,
@@ -20,7 +21,6 @@ from lab.markets.corporate_actions import (
     receive,
     recognize,
 )
-from lab.kernel.double_entry import AccountingState, transition, verify_record
 from lab.markets.journal import EventJournal, JournalError
 
 _SESSION = "session:corporate-cash:v1"
