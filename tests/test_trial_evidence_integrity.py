@@ -61,7 +61,6 @@ def test_corrupted_npz_blocks_significance_even_if_sharpe_is_present(tmp_path, g
 def test_repeated_identical_attempt_preserves_the_original_sha(tmp_path, goog_lab):
     cfg, spec, active = _trial(tmp_path, goog_lab)
     experiments.register_trial(cfg, "train", spec, "first", active)
-    initial = experiments._trial_events(cfg)[-1]
     experiments.register_trial(cfg, "train", spec, "second", active)
     events = experiments._trial_events(cfg)
     assert len(events) == 2 and events[0]["returns_sha256"] == events[-1]["returns_sha256"]
