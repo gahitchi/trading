@@ -116,7 +116,12 @@ class CashTermination:
     def from_record(cls, d: dict) -> CashTermination:
         if type(d) is not dict or set(d) != set(cls.__dataclass_fields__):
             raise CorporateActionError("noncanonical action record")
-        return cls(**{**d, "cash_per_unit": Decimal(d["cash_per_unit"])})
+        if type(d["cash_per_unit"]) is not str:
+            raise CorporateActionError("cash consideration must be an exact decimal string")
+        try:
+            return cls(**{**d, "cash_per_unit": Decimal(d["cash_per_unit"])})
+        except (ValueError, ArithmeticError) as exc:
+            raise CorporateActionError("unparseable cash consideration") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,8 +159,14 @@ class ReconciledBook:
     def from_record(cls, d: dict) -> ReconciledBook:
         if type(d) is not dict or set(d) != set(cls.__dataclass_fields__):
             raise CorporateActionError("noncanonical reconciliation record")
+        if type(d["position"]) is not str or type(d["open_order_ids"]) is not list:
+            raise CorporateActionError("reconciled position must be a decimal string, orders a list")
+        try:
+            position = Decimal(d["position"])
+        except (ValueError, ArithmeticError) as exc:
+            raise CorporateActionError("unparseable reconciled position") from exc
         return cls(
-            position=Decimal(d["position"]),
+            position=position,
             positions_verified=d["positions_verified"],
             orders_verified=d["orders_verified"],
             open_order_ids=tuple(d["open_order_ids"]),
@@ -195,7 +206,12 @@ class CashReceipt:
     def from_record(cls, d: dict) -> CashReceipt:
         if type(d) is not dict or set(d) != set(cls.__dataclass_fields__):
             raise CorporateActionError("noncanonical cash receipt record")
-        return cls(**{**d, "signed_amount": Decimal(d["signed_amount"])})
+        if type(d["signed_amount"]) is not str:
+            raise CorporateActionError("cash receipt amount must be an exact decimal string")
+        try:
+            return cls(**{**d, "signed_amount": Decimal(d["signed_amount"])})
+        except (ValueError, ArithmeticError) as exc:
+            raise CorporateActionError("unparseable receipt amount") from exc
 
 
 @dataclass(frozen=True, slots=True)
