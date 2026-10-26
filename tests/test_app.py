@@ -205,10 +205,28 @@ def test_complete_broker_evidence_activates_only_selected_authority_then_pause_s
     controller.tick()
     assert controller.phase == "running" and not read_kill_switch(controller.rt / "KILL")
     a = Authority(controller.rt, read_json(controller.rt / "identity.json"))
-    assert a.read()["mode"] == "autonomous"
+    assert a.read()["mode"] == "supervised"
     controller.pause()
     controller.tick()
     assert controller.phase == "paused" and read_kill_switch(controller.rt / "KILL")
+
+
+def test_unapproved_autonomous_app_does_not_open_gateway(controller, monkeypatch):
+    controller.configure({**controller.settings, "mode": "autonomous", "hours": 0, "strategy": "trend"})
+    spawned = Mock()
+    monkeypatch.setattr(app.subprocess, "Popen", spawned)
+    with pytest.raises(ValueError, match="qualified strategy evidence"):
+        controller.start()
+    spawned.assert_not_called()
+
+
+def test_unqualified_combined_strategy_cannot_become_unattended(controller, monkeypatch):
+    controller.configure({**controller.settings, "mode": "autonomous", "hours": 0, "strategy": "combined"})
+    spawned = Mock()
+    monkeypatch.setattr(app.subprocess, "Popen", spawned)
+    with pytest.raises(ValueError, match="whole-policy qualification"):
+        controller.start()
+    spawned.assert_not_called()
 
 
 def test_expired_permission_pauses_and_requires_explicit_restart(controller, monkeypatch):
