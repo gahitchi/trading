@@ -68,6 +68,7 @@ def main(argv=None) -> int:
             "deflated Sharpe >= min_dsr": cand["dsr"] >= r.min_dsr,
             "no signal errors": cand["signal_errors"] == 0,
             "traded at all": cand.get("fills", 0) > 0,
+            "no synthetic delisting settlement": not any(row.get("delistings_settled") for row in comp.rows),
         }
         from lab.factor_stats import diagnose
 
@@ -97,7 +98,11 @@ def main(argv=None) -> int:
             "tickers": tickers,
             "rows": comp.rows,
             "sharpe_edge": edge,
-            "survived": edge > 0 and comp.rows[1]["signal_errors"] == 0,
+            "survived": (
+                edge > 0
+                and comp.rows[1]["signal_errors"] == 0
+                and not any(row.get("delistings_settled") for row in comp.rows)
+            ),
         }
         (hdir / "test.json").write_text(json.dumps(out, indent=2, default=str))
     else:
