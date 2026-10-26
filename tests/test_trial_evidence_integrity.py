@@ -86,6 +86,21 @@ def test_divergent_retry_is_quarantined_permanently_even_if_retried_again(tmp_pa
     assert not experiments.trial_registry_status(cfg)["integrity_ok"]
 
 
+def test_rewriting_valid_npz_cannot_rebind_past_statistical_evidence(tmp_path, goog_lab):
+    cfg, spec, active = _trial(tmp_path, goog_lab)
+    experiments.register_trial(cfg, "train", spec, "first", active)
+    old = experiments._trial_events(cfg)[-1]
+    path = experiments._trial_returns_path(cfg, old["fingerprint"])
+    revised = active * 2
+    # An attacker replacing both the old NPZ and a future replay's observed
+    # returns must not erase the old committed digest from selection history.
+    np.savez_compressed(path, ts=pd.DatetimeIndex(active.index).as_unit("ns").asi8, r=revised.to_numpy(dtype=np.float32))
+    with pytest.raises(ValueError, match="previously completed trial bytes changed"):
+        experiments.register_trial(cfg, "train", spec, "rebound", revised)
+    with pytest.raises(ValueError, match="quarantined"):
+        experiments.trial_sharpes(cfg, "train")
+
+
 def test_crash_before_npz_commit_leaves_an_unresolved_attempt(tmp_path, goog_lab, monkeypatch):
     cfg, spec, active = _trial(tmp_path, goog_lab)
     experiments.reserve_trial(cfg, "train", spec, "source")
