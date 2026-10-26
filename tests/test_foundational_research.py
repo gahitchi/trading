@@ -74,3 +74,30 @@ def test_null_bootstrap_uses_deployment_risk_for_both_candidate_and_control(goog
         (goog_lab, SignalSpec("sma_trend"), ["GOOG"], {"GOOG": frame}, goog_lab.period("train"), 1, True)
     )
     assert seen == [True, True]
+
+def test_synthetic_delisting_cannot_pass_research_promotion(goog_lab, monkeypatch):
+    """Native-account compatibility bars may remain diagnostic, never qualify alpha."""
+    import json
+
+    from lab import factor_stats
+    from lab.research import worker
+
+    hdir = goog_lab.research_dir / "hypotheses" / "synthetic_delisting_block"
+    hdir.mkdir(parents=True)
+    (hdir / "signal.py").write_text("# generated strategy source is mocked here")
+    monkeypatch.setattr(worker, "load_config", lambda _: goog_lab)
+    monkeypatch.setattr(worker, "available_tickers", lambda _: ["GOOG"])
+    monkeypatch.setattr(worker.data, "load_many", lambda *args: {})
+
+    rows = [
+        {"delistings_settled": {"GOOG": {"assumed": False}}},
+        {"sharpe_edge": 1, "dsr": 1, "signal_errors": 0, "fills": 1},
+    ]
+    monkeypatch.setattr(experiments, "compare", lambda *args, **kw: (SimpleNamespace(rows=rows), []))
+    monkeypatch.setattr(experiments, "null_test", lambda *args, **kw: {"p_value": 0})
+    monkeypatch.setattr(factor_stats, "diagnose", lambda *args, **kw: {})
+
+    assert worker.main(["train", str(hdir), "unused"]) == 0
+    train = json.loads((hdir / "train.json").read_text())
+    assert train["checks"]["no synthetic delisting settlement"] is False
+    assert train["passed"] is False
