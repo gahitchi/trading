@@ -15,7 +15,8 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from lab.markets.domain import OrderIntent, Side
-from lab.markets.journal import EventJournal, JournalError, _digest as _journal_digest
+from lab.markets.journal import EventJournal, JournalError
+from lab.markets.journal import _digest as _journal_digest
 
 _NS_MAX = 2**63 - 1
 _ID = re.compile(r"[A-Za-z0-9_.:/-]{1,128}\Z")
