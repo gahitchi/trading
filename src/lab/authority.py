@@ -76,8 +76,8 @@ class Authority:
         if not isinstance(rec, dict) or not isinstance(rec.get("payload"), dict) or not _hex(rec.get("hmac"), 64):
             raise ValueError("malformed operator authority")
         payload = rec["payload"]
-        if payload.get("mode") == "autonomous" and self.identity.get("deployment") is not None and not self.identity.get("autonomous_qualified", False):
-            raise ValueError("unattended trading requires independently qualified strategy evidence")
+        if payload.get("mode") == "autonomous":
+            self._check_unattended_evidence()
         if not hmac.compare_digest(rec["hmac"], self.sign(payload)) or payload.get("binding") != self.binding:
             raise ValueError("authority signature or runtime identity differs")
         if (
@@ -106,13 +106,33 @@ class Authority:
             t in self.identity["tickers"] and _finite(w) for t, w in targets.items()
         )
 
+    def _check_unattended_evidence(self):
+        # Lightweight unit-test authorities may have no deployment context;
+        # every real paper identity includes a deployment and its evidence.
+        if self.identity.get("deployment") is None:
+            return
+        if not self.identity.get("autonomous_qualified", False):
+            raise ValueError("unattended trading requires independently qualified strategy evidence")
+        location = self.identity.get("autonomous_evidence_path")
+        expected = self.identity.get("autonomous_evidence_sha256")
+        if not isinstance(location, str) or not _hex(expected, 64):
+            raise ValueError("unattended trading is missing approval manifest binding")
+        try:
+            fd = os.open(location, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, "rb") as file:
+                content = file.read(1_048_577)
+            if len(content) > 1_048_576 or hashlib.sha256(content).hexdigest() != expected:
+                raise ValueError("unattended trading approval evidence changed")
+        except OSError as exc:
+            raise ValueError("unattended trading approval evidence is unavailable") from exc
+
     def issue(self, mode, hours=None, targets=None):
         """hours None or 0: a standing autonomous mandate (no expiry). Supervised and manual mandates are leases
         (default 24 hours). Any lease is at most 168 hours."""
         if mode not in MODES:
             raise ValueError("mode must be autonomous, supervised or manual")
-        if mode == "autonomous" and self.identity.get("deployment") is not None and not self.identity.get("autonomous_qualified", False):
-            raise ValueError("unattended trading requires independently qualified strategy evidence")
+        if mode == "autonomous":
+            self._check_unattended_evidence()
         if hours in (None, 0) and mode != "autonomous":
             hours = 24
         standing = hours in (None, 0)
