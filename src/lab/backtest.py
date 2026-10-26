@@ -122,47 +122,38 @@ def active_windows(frames: dict[str, pd.DataFrame], membership: dict | None) -> 
 def settle_delistings(
     frames: dict[str, pd.DataFrame], membership: dict | None, delisted: dict | None
 ) -> tuple[dict[str, pd.DataFrame], dict | None, dict]:
-    """Settle stocks that delisted inside the run (Gemini audit F-R09, lab.data.delistings).
+    """Guard the boundary between exchange trading and corporate-action cash settlement.
 
-    A stock's prices must end on its delisting date. Its membership ends that day, and two bars at the
-    settlement value follow: the agents see the stock leave at the delisting close and the exit fills at the
-    settlement price at the next opening print, through the same path as any membership exit, without a
-    prescient exit two days before the delisting. Returns (frames, membership, settlements)."""
+    A recovery value is not an executable quote. In particular, there is no
+    permissible post-delisting volume, ordinary market order, minimum positive
+    recovery price, or synthetic closeout fill. An explicit native Nautilus
+    position/account plus independent-ledger settlement integration is required
+    before delisted names can participate in a qualified backtest.
+
+    This fail-closed guard intentionally prevents misleading research results;
+    callers must not backdate membership exits to circumvent it.
+    """
     from lab.data import DataError
 
     hits = {t: d for t, d in (delisted or {}).items() if t in frames}
     if not hits:
         return frames, membership, {}
-    frames = dict(frames)
-    membership = dict(membership) if membership is not None else {t: [(None, None)] for t in frames}
-    settled = {}
-    for t, d in hits.items():
-        df = frames[t]
-        day = pd.Timestamp(d["delist_date"])
-        if day > df.index[-1]:
-            continue  # delisted after this run's data: nothing to settle here
-        if df.index[-1] != day:
-            raise DataError(f"{t}: prices continue past its delisting date {day.date()}; fix the data or the record")
-        last = float(df["close"].iloc[-1])
-        price = d["settlement_price"] if d["settlement_price"] is not None else last * (1 + d["delist_return"])
-        price = max(price, 0.0001)  # a worthless stock still needs a positive print to be sold at
-        after = pd.bdate_range(day + pd.Timedelta(days=1), periods=2)
-        volume = float(df["volume"].max())
-        extra = pd.DataFrame(
-            {"open": price, "high": price, "low": price, "close": price, "volume": volume}, index=after
+    for ticker, record in hits.items():
+        last_bar = frames[ticker].index[-1]
+        delist_date = pd.Timestamp(record["delist_date"])
+        if delist_date > last_bar:
+            continue  # Future event: never invent a trade or change the feed.
+        if delist_date != last_bar:
+            raise DataError(
+                f"{ticker}: prices continue past its delisting date {delist_date.date()}; "
+                "fix the data or the corporate-action record"
+            )
+        raise DataError(
+            f"{ticker}: delisting settlement requires a native-account and ledger "
+            "corporate-action event; post-delisting market fills are forbidden. "
+            "The supplied recovery price is not executable liquidity."
         )
-        frames[t] = pd.concat([df, extra])
-        spells = membership.get(t) or [(None, None)]
-        membership[t] = [(a, min(b, d["delist_date"]) if b else d["delist_date"]) for a, b in spells]
-        settled[t] = {
-            "date": str(day.date()),
-            "price": price,
-            "return": price / last - 1,
-            "source": d["source"],
-            "assumed": d["assumed"],
-        }
-    return frames, membership, settled
-
+    return frames, membership, {}
 
 def equal_weight(signal_factory, tickers: list[str]) -> list[Sleeve]:
     w = 1.0 / len(tickers)
