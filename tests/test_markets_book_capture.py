@@ -148,6 +148,7 @@ def test_truncation_duplicate_json_keys_and_symlink_refused(tmp_path):
         verify_recorded_book_capture(link, hashlib.sha256(dup).hexdigest(), "BTC-USD-SWAP")
 
 
+
 def test_verified_capture_replays_as_read_only_quotes_through_existing_native_actor(tmp_path):
     """Original bytes -> validated book states -> existing native Nautilus DataActor."""
     from decimal import Decimal
@@ -167,17 +168,21 @@ def test_verified_capture_replays_as_read_only_quotes_through_existing_native_ac
 
     d = Decimal
     instrument = Instrument(
-        "SIM", "BTC-USD-SWAP", AssetClass.CRYPTO, ContractKind.LINEAR_DERIVATIVE,
-        "USD", d("0.1"), d("0.001"), d("0.001"), d("5"), multiplier=d("1"),
+        "SIM",
+        "BTC-USD-SWAP",
+        AssetClass.CRYPTO,
+        ContractKind.LINEAR_DERIVATIVE,
+        "USD",
+        d("0.1"),
+        d("0.001"),
+        d("0.001"),
+        d("5"),
+        multiplier=d("1"),
     )
-    contract = LinearContractDefinition(
-        instrument, "BTC", "USD", d("2"), d("5"), 0, 0, "offline_fixture",
-    )
+    contract = LinearContractDefinition(instrument, "BTC", "USD", d("2"), d("5"), 0, 0, "offline_fixture")
     tape = build_causal_tape(instrument, evidence.recorded_books)
     assert all(type(event).__name__ == "QuoteTick" for event in tape.events)
-    assert tuple(event.ts_init for event in tape.events) == (
-        1_000_000_001, 1_001_000_001,
-    )
+    assert tuple(event.ts_init for event in tape.events) == (1_000_000_001, 1_001_000_001)
     first = replay_native_observations(contract, tape)
     second = replay_native_observations(contract, tape)
     assert first == second
@@ -197,9 +202,7 @@ def test_capture_retention_is_explicit_and_fails_closed_on_large_books(tmp_path)
     with pytest.raises(BookCaptureError, match="explicit boolean"):
         verify_recorded_book_capture(path, digest, "BTC-USD-SWAP", retain_books=1)
 
-    frames = [
-        {"received_ns": 1_000_000_001, "frame": frame("snapshot", 10, -1, 1000)}
-    ]
+    frames = [{"received_ns": 1_000_000_001, "frame": frame("snapshot", 10, -1, 1000)}]
     frames.extend(
         {"received_ns": 1_000_000_001 + i * 1_000_000, "frame": frame("update", 10 + i, 9 + i, 1000 + i)}
         for i in range(1, 257)
