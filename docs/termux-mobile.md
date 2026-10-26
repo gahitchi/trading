@@ -20,7 +20,7 @@ From the user's existing Termux clone:
 ```sh
 cd ~/trading-portable-check
 git fetch origin
-git switch chatgpt/termux-portable-20261026
+git switch chatgpt/termux-offline-20261026
 git pull --ff-only
 
 PYTHONPATH=src python -m lab.mobile doctor
