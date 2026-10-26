@@ -8,6 +8,27 @@
 > [institutional application-flow and open-source review](docs/audits/2026-10-25-institutional-flow-open-source-review.md)
 > for verified capabilities, unimplemented release gates and source/license selection.
 
+## Pocket diagnostics on Termux / Android
+
+Trading Lab now has a **native Termux standard-library companion** for
+credential-free reference checks, isolated execution-ledger export validation
+and a loopback-only, read-only browser view:
+
+```sh
+PYTHONPATH=src python -m lab.mobile doctor
+PYTHONPATH=src python -m lab.mobile check
+PYTHONPATH=src python -m lab.mobile serve --port 8787
+```
+
+Open `http://127.0.0.1:8787/` on the same phone. No heavy package installation
+is needed; no broker credentials, trading decisions, simulated profits or
+orders are exposed. This mobile diagnostic mode **does not run the full
+NautilusTrader trading engine**, because native Android is not a qualified
+glibc/Manylinux runtime. An optional experimental Linux ARM64 PRoot route
+is documented but remains unvalidated and is never broker-authorized. See
+[Termux portable operation](docs/termux-mobile.md) for limitations,
+snapshot privacy and operator acceptance.
+
 ## Multi-market proof of concept (this branch only)
 
 After the standard `uv sync --frozen --extra dev` installation, no broker credentials are needed:
