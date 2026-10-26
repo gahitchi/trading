@@ -357,6 +357,24 @@ class IndependentLifecycleTests(unittest.TestCase):
             left.close()
             right.close()
 
+    def test_stale_session_cannot_claim_duplicate_event_success(self):
+        left, first = self.open()
+        right, second = self.open()
+        try:
+            original = intent("FIRST", quantity=Decimal("5"))
+            first.plan(original, action_version="v1")
+            with self.assertRaisesRegex(LifecycleError, "journal changed outside"):
+                second.plan(original, action_version="v1")
+            second.recover()
+            second.plan(original, action_version="v1")
+            second.prepare_dispatch("FIRST", timestamp_ns=2)
+            with self.assertRaisesRegex(LifecycleError, "journal changed outside"):
+                first.plan(original, action_version="v1")
+            self.assertTrue(first._faulted)
+        finally:
+            left.close()
+            right.close()
+
     def test_sqlite_journal_atomic_head_precondition_blocks_stale_multi_writer(self):
         first, _session = self.open()
         with EventJournal(self.path) as other:
