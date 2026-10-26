@@ -293,14 +293,19 @@ class IndependentLifecycleTests(unittest.TestCase):
 
     def test_unbound_old_v1_journal_cannot_be_silently_upgraded(self):
         with EventJournal(self.path) as journal:
-            journal.append("session:independent-order:v1", "session", 0, {
-                "schema": 1,
-                "mode": "OFFLINE_ONLY",
-                "instrument_id": "SIM:TEST-SHARE",
-                "action_version": "v1",
-                "starting_position": "10",
-                "quantity_step": "1",
-            })
+            journal.append(
+                "session:independent-order:v1",
+                "session",
+                0,
+                {
+                    "schema": 1,
+                    "mode": "OFFLINE_ONLY",
+                    "instrument_id": "SIM:TEST-SHARE",
+                    "action_version": "v1",
+                    "starting_position": "10",
+                    "quantity_step": "1",
+                },
+            )
             journal.verify()
             with self.assertRaisesRegex(LifecycleError, "opening broker-state assumptions differ"):
                 OfflineOrderSession(
