@@ -218,7 +218,7 @@ def register_trial(
     the same strategy under another risk or cost setting counts again. Re-running an identical one does not."""
     sr, *_ = stats.moments(active.to_numpy())
     cfg.results_dir.mkdir(parents=True, exist_ok=True)
-    from lab.persistence import append_json
+    from lab.persistence import append_json, file_lock
     from lab.provenance import simulation_digest
 
     fingerprint = (
@@ -231,36 +231,60 @@ def register_trial(
     path.parent.mkdir(parents=True, exist_ok=True)
     stamps = pd.DatetimeIndex(active.index).as_unit("ns").asi8
     values = active.to_numpy(dtype=np.float32)
-    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            np.savez_compressed(stream, ts=stamps, r=values)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    # An identical fingerprint is a reproducibility contract. A retry with
+    # different numeric outcomes must quarantine the family; replacing the old
+    # file would erase an observed trial and bias model selection.
+    with file_lock(path.with_name(path.name + ".lock")):
+        fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
         try:
-            os.fsync(directory)
+            with os.fdopen(fd, "wb") as stream:
+                np.savez_compressed(stream, ts=stamps, r=values)
+                stream.flush()
+                os.fsync(stream.fileno())
+            if path.exists():
+                try:
+                    with np.load(path, allow_pickle=False) as previous:
+                        repeatable = np.array_equal(previous["ts"], stamps) and np.array_equal(previous["r"], values)
+                except (OSError, ValueError, KeyError, TypeError):
+                    repeatable = False
+                if not repeatable:
+                    append_json(
+                        _trials_path(cfg),
+                        {
+                            "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                            "dataset": key,
+                            "fingerprint": fingerprint,
+                            "label": label,
+                            "status": "conflict",
+                            "sharpe_daily": None,
+                        },
+                    )
+                    raise ValueError("nonrepeatable or corrupted trial return evidence: identity quarantined")
+            else:
+                os.replace(temporary, path)
+                directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
         finally:
-            os.close(directory)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
-    # The digest commits exactly the immutable evidence bytes used by the DSR
-    # correlation correction. Rewriting/deleting this file later blocks approval.
-    digest = _trial_file_digest(path)
-    append_json(
-        _trials_path(cfg),
-        {
-            "at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "dataset": key,
-            "fingerprint": fingerprint,
-            "label": label,
-            "status": "complete",
-            "sharpe_daily": sr,
-            "returns_sha256": digest,
-            "returns_count": len(values),
-        },
-    )
+            Path(temporary).unlink(missing_ok=True)
+        # Hash exactly the file used by the DSR correlation correction. The
+        # append is also under the per-fingerprint lock, to serialize writers.
+        digest = _trial_file_digest(path)
+        append_json(
+            _trials_path(cfg),
+            {
+                "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "dataset": key,
+                "fingerprint": fingerprint,
+                "label": label,
+                "status": "complete",
+                "sharpe_daily": sr,
+                "returns_sha256": digest,
+                "returns_count": len(values),
+            },
+        )
 
 
 def _trial_returns_path(cfg: LabConfig, fingerprint: str) -> Path:
@@ -321,10 +345,11 @@ def trial_registry_status(cfg: LabConfig) -> dict:
     """Read-only operator diagnostics; never hide or delete an attempted trial."""
     events = _trial_events(cfg)
     latest = {row["fingerprint"]: row for row in events}
+    conflicts = {row["fingerprint"] for row in events if row.get("status") == "conflict"}
     issues = []
     completed = 0
     for fingerprint, row in sorted(latest.items()):
-        issue = _trial_integrity_issue(cfg, row)
+        issue = "nonrepeatable trial identity quarantined" if fingerprint in conflicts else _trial_integrity_issue(cfg, row)
         if issue:
             issues.append(
                 {
@@ -349,8 +374,9 @@ def trial_registry_status(cfg: LabConfig) -> dict:
 def _latest_trials(cfg: LabConfig) -> dict[str, float]:
     events = _trial_events(cfg)
     latest = {row["fingerprint"]: row for row in events}
+    conflicts = {row["fingerprint"] for row in events if row.get("status") == "conflict"}
     for fingerprint, row in latest.items():
-        issue = _trial_integrity_issue(cfg, row)
+        issue = "nonrepeatable trial identity quarantined" if fingerprint in conflicts else _trial_integrity_issue(cfg, row)
         if issue:
             raise ValueError(f"trial {fingerprint[:16]} blocks research qualification: {issue}")
     return {key: row["sharpe_daily"] for key, row in latest.items()}
