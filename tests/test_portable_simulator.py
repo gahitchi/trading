@@ -17,7 +17,6 @@ from pathlib import Path
 from lab.markets.domain import TradingMode, UnsupportedMode
 from lab.markets.simulator import OfflineSimulator
 
-
 REPO = Path(__file__).resolve().parents[1]
 
 
