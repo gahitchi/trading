@@ -436,6 +436,20 @@ _ID_KEYS = ("client_order_id", "venue_order_id", "trade_id", "order_id", "accoun
 _KEYED_BY_ORDER = ("pending", "terminal", "disposed")  # maps whose keys are client order IDs
 
 
+def _source_id_kind(field: str) -> str:
+    """Treat equivalent client/order aliases as the same source identity."""
+    kinds = {
+        "client_order_id": "CLIENT",
+        "order_id": "CLIENT",
+        "coid": "CLIENT",
+        "venue_order_id": "VENUE",
+        "trade_id": "TRADE",
+        "account_id": "ACCT",
+        "account": "ACCT",
+    }
+    return kinds[field]
+
+
 def _key(path: Path) -> bytes:
     path = path.expanduser()
     if not path.exists():
@@ -469,7 +483,7 @@ def _redact(key: bytes, value, field: str | None = None):
         return [_redact(key, v, field) for v in value]
     if isinstance(value, str):
         if field in _ID_KEYS and value and value != "None":
-            kind = "ACCT" if field.startswith("account") else field.split("_")[0].upper()
+            kind = _source_id_kind(field)
             return _pseudo(key, kind, value.removeprefix("IB-") if kind == "ACCT" else value)
         return _redact_text(key, value)
     return value
@@ -498,7 +512,7 @@ def _known_source_ids(src: Path, key: bytes) -> dict[str, str]:
         elif isinstance(value, dict):
             for field, item in value.items():
                 if field in _ID_KEYS and isinstance(item, str):
-                    kind = "ACCT" if field.startswith("account") else field.split("_")[0].upper()
+                    kind = _source_id_kind(field)
                     remember(item, kind)
                 if field in _KEYED_BY_ORDER and isinstance(item, dict):
                     for identifier in item:
