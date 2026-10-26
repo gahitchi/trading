@@ -119,3 +119,20 @@ def test_delisting_evidence_revision_creates_new_research_identity(goog_lab, tmp
     data.save_delistings(goog_lab, path)
     second = experiments.config_fingerprint(goog_lab)
     assert len({before, first, second}) == 3
+
+
+def test_explicit_zero_recovery_is_canonical_ledger_metadata(goog_lab, tmp_path):
+    """Zero price is not converted to 0.0001 or to NaN in serialized evidence."""
+    import json
+
+    source = tmp_path / "zero.csv"
+    source.write_text(
+        "ticker,delist_date,delist_type,delist_return,settlement_price,source\n"
+        "D,2026-01-08,bankruptcy,,0.0,vendor\n"
+    )
+    data.save_delistings(goog_lab, source)
+    evidence = data.delistings(goog_lab)["D"]
+    assert evidence["settlement_price"] == 0.0
+    assert evidence["delist_return"] is None
+    assert not evidence["assumed"]
+    json.dumps(evidence, sort_keys=True, default=str, allow_nan=False)
