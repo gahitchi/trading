@@ -474,35 +474,47 @@ def _capture_id_aliases(key: bytes, value, aliases: dict[str, str], field: str |
             _capture_id_aliases(key, item, aliases, field)
 
 
-def _redact_text(key: bytes, text: str, aliases: dict[str, str] | None = None) -> str:
+def _redact_text(
+    key: bytes, text: str, aliases: dict[str, str] | None = None, matcher: re.Pattern | None = None
+) -> str:
     text = _ACCOUNT.sub(lambda m: _pseudo(key, "ACCT", m.group(0).removeprefix("IB-")), text)
     if aliases:
-        # Longest first avoids partially substituting overlapping order IDs.
-        # Treat arbitrary free text conservatively: it may over-redact, but
-        # must not leak an execution ID that also exists in a structured field.
-        for raw in sorted(aliases, key=len, reverse=True):
-            text = text.replace(raw, aliases[raw])
+        # The matcher is compiled ONCE per bundle, not once per message:
+        # 10,000 historical executions must not cost 10,000 replacements
+        # for every field. Longest-first alternatives handle overlaps.
+        if matcher is None:
+            matcher = re.compile("|".join(re.escape(raw) for raw in sorted(aliases, key=len, reverse=True)))
+        text = matcher.sub(lambda match: aliases[match.group()], text)
     return text
 
 
-def _redact(key: bytes, value, field: str | None = None, aliases: dict[str, str] | None = None):
+def _redact(
+    key: bytes,
+    value,
+    field: str | None = None,
+    aliases: dict[str, str] | None = None,
+    matcher: re.Pattern | None = None,
+):
     if isinstance(value, dict) and field in _KEYED_BY_ORDER:
-        return {_pseudo(key, "CLIENT", str(k)): _redact(key, v, aliases=aliases) for k, v in value.items()}
+        return {
+            _pseudo(key, "CLIENT", str(k)): _redact(key, v, aliases=aliases, matcher=matcher)
+            for k, v in value.items()
+        }
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
             if _SECRET_KEYS.search(str(k)):
                 out[k] = "[REDACTED]"
             else:
-                out[_redact_text(key, str(k), aliases)] = _redact(key, v, str(k), aliases)
+                out[_redact_text(key, str(k), aliases, matcher)] = _redact(key, v, str(k), aliases, matcher)
         return out
     if isinstance(value, list):
-        return [_redact(key, v, field, aliases) for v in value]
+        return [_redact(key, v, field, aliases, matcher) for v in value]
     if isinstance(value, str):
         if field in _ID_KEYS and value and value != "None":
             kind = "ACCT" if field.startswith("account") else field.split("_")[0].upper()
             return _pseudo(key, kind, value.removeprefix("IB-") if kind == "ACCT" else value)
-        return _redact_text(key, value, aliases)
+        return _redact_text(key, value, aliases, matcher)
     return value
 
 
@@ -526,6 +538,7 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
                 _capture_id_aliases(key, json.loads(f.read_bytes()), aliases)
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
+    matcher = re.compile("|".join(re.escape(raw) for raw in sorted(aliases, key=len, reverse=True))) if aliases else None
     entries = []
     for f in files:
         rel = f.relative_to(src)
@@ -537,13 +550,13 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
         try:
             if f.suffix == ".jsonl":
                 lines = [
-                    json.dumps(_redact(key, json.loads(line), aliases=aliases), sort_keys=True)
+                    json.dumps(_redact(key, json.loads(line), aliases=aliases, matcher=matcher), sort_keys=True)
                     for line in raw.decode().splitlines()
                     if line.strip()
                 ]
                 text = "\n".join(lines) + ("\n" if lines else "")
             elif f.suffix == ".json" or f.name in ("HALT", "KILL"):
-                text = json.dumps(_redact(key, json.loads(raw), aliases=aliases), indent=1, sort_keys=True)
+                text = json.dumps(_redact(key, json.loads(raw), aliases=aliases, matcher=matcher), indent=1, sort_keys=True)
             else:
                 text = None
         except (UnicodeDecodeError, json.JSONDecodeError):
