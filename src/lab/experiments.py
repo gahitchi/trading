@@ -22,6 +22,7 @@ import json
 import math
 import multiprocessing
 import os
+import tempfile
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime
@@ -223,12 +224,30 @@ def register_trial(
     fingerprint = (
         f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:{simulation_digest()}:{data_digest}"
     )
-    # The return stream itself, so correlated trials can be counted as fewer independent ones (F-R02).
+    # Never publish a "complete" event for a partially written return stream.
+    # A same-directory replace plus directory fsync makes completed evidence
+    # visible atomically after process death, not only on a clean shutdown.
     path = _trial_returns_path(cfg, fingerprint)
     path.parent.mkdir(parents=True, exist_ok=True)
     stamps = pd.DatetimeIndex(active.index).as_unit("ns").asi8
-    with path.open("wb") as f:
-        np.savez_compressed(f, ts=stamps, r=active.to_numpy(dtype=np.float32))
+    values = active.to_numpy(dtype=np.float32)
+    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            np.savez_compressed(stream, ts=stamps, r=values)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    # The digest commits exactly the immutable evidence bytes used by the DSR
+    # correlation correction. Rewriting/deleting this file later blocks approval.
+    digest = _trial_file_digest(path)
     append_json(
         _trials_path(cfg),
         {
@@ -238,6 +257,8 @@ def register_trial(
             "label": label,
             "status": "complete",
             "sharpe_daily": sr,
+            "returns_sha256": digest,
+            "returns_count": len(values),
         },
     )
 
@@ -246,22 +267,92 @@ def _trial_returns_path(cfg: LabConfig, fingerprint: str) -> Path:
     return cfg.results_dir / "trial_returns" / f"{hashlib.sha256(fingerprint.encode()).hexdigest()[:32]}.npz"
 
 
+def _trial_file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for part in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(part)
+    return digest.hexdigest()
+
+
+def _trial_events(cfg: LabConfig) -> list[dict]:
+    from lab.persistence import file_lock
+
+    path = _trials_path(cfg)
+    with file_lock(path.with_name(path.name + ".lock")):
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def _trial_integrity_issue(cfg: LabConfig, row: dict) -> str | None:
+    if row.get("status") != "complete":
+        return f"unresolved candidate evaluation: {row.get('status', 'unknown')}"
+    digest = row.get("returns_sha256")
+    if digest is None:
+        # Pre-digest trials may remain in old research workspaces, but must be
+        # re-evaluated before their results qualify for selection correction.
+        return "unverified legacy return stream: rerun the exact candidate"
+    if not isinstance(digest, str) or len(digest) != 64:
+        return "invalid return-stream SHA-256"
+    path = _trial_returns_path(cfg, row["fingerprint"])
+    if not path.is_file():
+        return "missing completed return stream"
+    if _trial_file_digest(path) != digest:
+        return "return-stream digest mismatch"
+    try:
+        with np.load(path, allow_pickle=False) as stream:
+            stamps, values = stream["ts"], stream["r"]
+            if (
+                stamps.ndim != 1
+                or values.ndim != 1
+                or len(stamps) != row.get("returns_count")
+                or len(values) != len(stamps)
+                or not np.isfinite(values).all()
+                or (len(stamps) > 1 and not np.all(np.diff(stamps) > 0))
+            ):
+                return "invalid completed return stream"
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return f"unreadable return stream: {type(exc).__name__}"
+    return None
+
+
+def trial_registry_status(cfg: LabConfig) -> dict:
+    """Read-only operator diagnostics; never hide or delete an attempted trial."""
+    events = _trial_events(cfg)
+    latest = {row["fingerprint"]: row for row in events}
+    issues = []
+    completed = 0
+    for fingerprint, row in sorted(latest.items()):
+        issue = _trial_integrity_issue(cfg, row)
+        if issue:
+            issues.append(
+                {
+                    "fingerprint": fingerprint,
+                    "label": row.get("label", ""),
+                    "dataset": row.get("dataset", ""),
+                    "reason": issue,
+                }
+            )
+        else:
+            completed += 1
+    return {
+        "events": len(events),
+        "candidates": len(latest),
+        "verified": completed,
+        "blocked": len(issues),
+        "issues": issues,
+        "qualification_allowed": not issues,
+    }
+
+
 def _latest_trials(cfg: LabConfig) -> dict[str, float]:
-    p = _trials_path(cfg)
-    if not p.exists():
-        return {}
-    latest = {}
-    for line in p.read_text().splitlines():
-        t = json.loads(line)
-        # Workspace-wide family: changing labels, dates or universe cannot
-        # erase earlier selection. New workspaces are explicit new protocols.
-        latest[t["fingerprint"]] = t
-    unfinished = [key for key, row in latest.items() if row.get("status") == "started"]
-    if unfinished:
-        raise ValueError(
-            f"unresolved candidate evaluation ({len(unfinished)} trial(s)): "
-            "rerun the exact candidate or reconcile the attempted trials before qualification"
-        )
+    events = _trial_events(cfg)
+    latest = {row["fingerprint"]: row for row in events}
+    for fingerprint, row in latest.items():
+        issue = _trial_integrity_issue(cfg, row)
+        if issue:
+            raise ValueError(f"trial {fingerprint[:16]} blocks research qualification: {issue}")
     return {key: row["sharpe_daily"] for key, row in latest.items()}
 
 
