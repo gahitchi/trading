@@ -22,7 +22,7 @@ def test_snapshot_erasure_without_projection_never_resets_account(tmp_path):
     path.unlink()
     with sqlite3.connect(original.path) as db:
         db.execute("DELETE FROM snapshot WHERE id=1")
-    with pytest.raises(ValueError, match="existing execution database has no snapshot"):
+    with pytest.raises(ValueError, match="snapshot missing with recorded history"):
         ExecutionStore(path)
     with sqlite3.connect(original.path) as db:
         assert db.execute("SELECT COUNT(*) FROM history WHERE bucket='applied'").fetchone()[0] == 1
