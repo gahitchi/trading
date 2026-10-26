@@ -78,7 +78,9 @@ class GoldPaperStrategy(Strategy):
         super().__init__(config)
         self.bars: list[GoldBar] = []
         self.gold_quote = None
+        self.gold_quote_at = None
         self.fx_quote = None
+        self.fx_quote_at = None
         self.cycle = False
         self.fetch_task = None
         self.received: set[str] = set()
@@ -87,7 +89,7 @@ class GoldPaperStrategy(Strategy):
         self.status_path = config.runtime / "gold-status.json"
         self.last_submitted = None
         self.emergency_order_id = None
-        self.authority_nonce = None
+        self.approval_pending = False
         self.known_order_ids: set[str] = set()
         self.emergency_exit = False
         if self.state_path.exists():
@@ -99,7 +101,7 @@ class GoldPaperStrategy(Strategy):
     def on_start(self):
         if self.config.authority is None:
             raise ValueError("gold requires operator authority")
-        self.authority_nonce = self.config.authority.read()["nonce"]
+        self.config.authority.read()
         history = read_json(self.config.runtime / "gold-history.json")
         if history.get("source") != "IBKR-XAUUSD-CMDTY-SMART-MID":
             raise ValueError("unverified gold history source")
@@ -221,6 +223,9 @@ class GoldPaperStrategy(Strategy):
         if position != 0:
             self._status("gold position open", position_oz=float(position), open_orders=len(orders))
         elif not orders:
+            if self.approval_pending:
+                self._decide()
+                return
             self._status("gold flat", position_oz=0, open_orders=0)
 
     def _schedule(self):
@@ -240,6 +245,7 @@ class GoldPaperStrategy(Strategy):
         if self.emergency_order_id:
             self._status("emergency gold exit requires reconciliation")
             return
+        self.approval_pending = False
         self.cycle = True
         self.received.clear()
         self.fetch_task = asyncio.create_task(self._download_cycle())
@@ -292,10 +298,10 @@ class GoldPaperStrategy(Strategy):
                 self.data_ready = True
                 self._status("gold data ready", bars=len(self.bars))
         elif bar_type == GOLD_MINUTE:
-            self.gold_quote = self._latest_quote(bars, now)
+            self.gold_quote, self.gold_quote_at = self._latest_quote(bars, now)
             self.received.add("gold_quote")
         elif bar_type == FX_MINUTE:
-            self.fx_quote = self._latest_quote(bars, now)
+            self.fx_quote, self.fx_quote_at = self._latest_quote(bars, now)
             self.received.add("fx_quote")
         if self.cycle and self.received == {"daily", "gold_quote", "fx_quote"}:
             self.cycle = False
@@ -305,9 +311,19 @@ class GoldPaperStrategy(Strategy):
     def _latest_quote(bars, now):
         eligible = [b for b in bars if 0 <= (now.timestamp() - b.ts_event / 1e9) <= MAX_QUOTE_AGE.total_seconds()]
         if not eligible:
-            return None
+            return None, None
         bar = max(eligible, key=lambda b: b.ts_event)
-        return Decimal(str(bar.close))
+        return Decimal(str(bar.close)), datetime.fromtimestamp(bar.ts_event / 1e9, UTC)
+
+    def _authorize_order(self, order):
+        """Authorize against the mandate which is active at decision time.
+
+        The app can renew the mandate after this strategy starts. Passing the
+        freshly read nonce still protects against a concurrent mandate change,
+        without pinning the strategy to the startup mandate forever.
+        """
+        mandate = self.config.authority.read()
+        return self.config.authority.authorize(order, expected_nonce=mandate["nonce"])
 
     def _paper_account_ok(self):
         account = self.cache.account_id(Venue("IB"))
@@ -332,6 +348,7 @@ class GoldPaperStrategy(Strategy):
         return None
 
     def _decide(self):
+        self.approval_pending = False
         if not self._paper_account_ok():
             return
         if read_kill_switch(self.config.runtime / "KILL") or read_halt(self.config.runtime / "HALT"):
@@ -344,6 +361,14 @@ class GoldPaperStrategy(Strategy):
             self._status("gold or FX history unavailable")
             return
         now = datetime.now(UTC)
+        if (
+            self.gold_quote_at is None
+            or self.fx_quote_at is None
+            or now - self.gold_quote_at > MAX_QUOTE_AGE
+            or now - self.fx_quote_at > MAX_QUOTE_AGE
+        ):
+            self._status("gold or FX quote stale")
+            return
         last_close = datetime.combine(self.bars[-1].session + timedelta(days=1), datetime.min.time(), UTC)
         if now - last_close > MAX_GOLD_CLOSE_AGE:
             self._status("gold daily bar stale")
@@ -405,7 +430,8 @@ class GoldPaperStrategy(Strategy):
             "minimum_lot_override": quantity * entry_limit > plan.allocated_usd,
         }
         try:
-            if not self.config.authority.authorize(order, expected_nonce=self.authority_nonce):
+            if not self._authorize_order(order):
+                self.approval_pending = True
                 self._status("gold order awaiting operator approval")
                 return
         except (OSError, ValueError) as exc:
