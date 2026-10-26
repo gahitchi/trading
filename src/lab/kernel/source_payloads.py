@@ -28,7 +28,9 @@ _GENESIS = "0" * 64
 _MAX_PAYLOAD = 8192
 _FIELDS = {
     SourceChannel.ORDERS: frozenset({"client_order_id", "broker_order_id", "status", "cumulative_filled"}),
-    SourceChannel.EXECUTIONS: frozenset({"client_order_id", "execution_id", "quantity", "exchange_ns", "available_ns"}),
+    SourceChannel.EXECUTIONS: frozenset(
+        {"client_order_id", "execution_id", "quantity", "exchange_ns", "available_ns"}
+    ),
     SourceChannel.POSITIONS: frozenset({"position"}),
 }
 
