@@ -337,7 +337,7 @@ def delistings(cfg: LabConfig) -> dict[str, dict] | None:
         out[ticker] = {
             "delist_date": when,
             "delist_type": kind,
-            "delist_return": ASSUMED_DISTRESS_RETURN if assumed else (ret if ret is not None else float("nan")),
+            "delist_return": ASSUMED_DISTRESS_RETURN if assumed else ret,
             "settlement_price": price,
             "source": str(r["source"]).strip(),
             "assumed": assumed,
