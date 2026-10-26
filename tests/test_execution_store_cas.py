@@ -150,7 +150,7 @@ def test_v1_database_upgrades_without_losing_state_or_history(tmp_path):
     assert store.maps["applied"]["OLD"] == [2, "O-OLD"]
     store.save({"cash": 735})
     with sqlite3.connect(database) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
         assert db.execute("SELECT generation FROM snapshot WHERE id=1").fetchone()[0] == 1
     assert ExecutionStore(path).maps["applied"]["OLD"] == [2, "O-OLD"]
 
@@ -175,7 +175,7 @@ def test_interrupted_schema_upgrade_rolls_back_ddl_and_version(tmp_path):
 
             class InterruptedConnection:
                 def execute(self, sql, *args):
-                    if sql == "PRAGMA user_version=2":
+                    if sql == "PRAGMA user_version=3":
                         raise OSError("simulated migration interruption")
                     return db.execute(sql, *args)
 
@@ -191,7 +191,7 @@ def test_interrupted_schema_upgrade_rolls_back_ddl_and_version(tmp_path):
         assert "generation" not in {column[1] for column in db.execute("PRAGMA table_info(snapshot)")}
     assert ExecutionStore(path)._expected_generation == 0
     with sqlite3.connect(database) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
 
 
 def test_failed_projection_after_commit_does_not_reuse_stale_generation(tmp_path):
