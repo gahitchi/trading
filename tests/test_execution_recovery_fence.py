@@ -68,7 +68,6 @@ def test_missing_snapshot_with_authoritative_projection_is_blocked(tmp_path):
         ExecutionStore(path)
 
 
-
 def test_marker_tampering_is_not_accepted_as_a_new_database(tmp_path):
     path = tmp_path / "ledger.json"
     store = ExecutionStore(path)
