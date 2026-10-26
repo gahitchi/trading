@@ -119,3 +119,21 @@ def test_bundle_exports_the_authoritative_sqlite_ledger_and_sanitize_pseudonymiz
     raw_ids = list(h.broker().state["orders"]) + [f["trade_id"] for f in h.broker().state["fills"]]
     assert raw_ids and not [i for i in raw_ids if i in text]  # every order and trade ID pseudonymized
     assert "CLIENT-" in text and "TRADE-" in text
+
+
+def test_sanitize_rewrites_known_trade_and_order_ids_in_unstructured_fields(tmp_path):
+    """IDs copied into broker messages and generic lists must not survive publication."""
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "typed.json").write_text(json.dumps({"trade_id": "T2", "client_order_id": "ORDER-9"}))
+    (raw / "notes.json").write_text(
+        json.dumps({"broker_message": "filled T2 for ORDER-9", "free_form": ["T2", "ORDER-9", "T20"]})
+    )
+    clean = tmp_path / "clean"
+    key = tmp_path / "secret.key"
+    capture.sanitize(raw, clean, key)
+    note = (clean / "notes.json").read_text()
+    assert "T2" not in note and "ORDER-9" not in note
+    assert "T20" in note  # no unrelated identifier-prefix substitution
+    assert capture._pseudo(key.read_bytes(), "TRADE", "T2") in note
+    assert capture._pseudo(key.read_bytes(), "CLIENT", "ORDER-9") in note
