@@ -68,9 +68,7 @@ class PortableReconciliationTests(unittest.TestCase):
         self.session.prepare_dispatch("A", timestamp_ns=2)
         self.session.observe("A", "ack", evidence("ack", 3), broker_order_id="BK1")
         if filled:
-            self.session.observe(
-                "A", "fill", evidence("part1", 4), quantity=Decimal("1.25"), execution_id="EX1"
-            )
+            self.session.observe("A", "fill", evidence("part1", 4), quantity=Decimal("1.25"), execution_id="EX1")
 
     def snapshot(self, *, orders: tuple | None = None, executions: tuple | None = None, **overrides):
         default_orders = (
@@ -141,9 +139,7 @@ class PortableReconciliationTests(unittest.TestCase):
     def test_outside_journal_execution_not_silently_imported(self):
         self.placed()
         extra = ReportedExecution("A", "EX2", Decimal("0.25"), 5, 6)
-        result = compare_reported_snapshot(
-            self.session, self.snapshot(executions=(*self.snapshot().executions, extra))
-        )
+        result = compare_reported_snapshot(self.session, self.snapshot(executions=(*self.snapshot().executions, extra)))
         self.assertIn("EXTERNAL_OR_UNKNOWN_EXECUTION", result.findings)
 
     def test_broker_order_id_conflict_and_unknown_external_order(self):
@@ -191,9 +187,9 @@ class PortableReconciliationTests(unittest.TestCase):
 
     def test_unprepared_intent_must_not_appear_in_broker_history(self):
         self.plan()
-        phantom = self.snapshot(position=Decimal("5"), orders=(
-            ReportedOrder("A", "BK1", "open", Decimal("0")),
-        ), executions=())
+        phantom = self.snapshot(
+            position=Decimal("5"), orders=(ReportedOrder("A", "BK1", "open", Decimal("0")),), executions=()
+        )
         self.assertIn(
             "UNSUBMITTED_INTENT_AT_BROKER",
             compare_reported_snapshot(self.session, phantom).findings,
@@ -239,14 +235,10 @@ class PortableReconciliationTests(unittest.TestCase):
     def test_duplicate_execution_wrong_order_and_quantity_discrepancy(self):
         self.placed()
         wrong = ReportedExecution("B", "EX1", Decimal("1.25"), 3, 4)
-        errors = compare_reported_snapshot(
-            self.session, self.snapshot(executions=(wrong,))
-        ).findings
+        errors = compare_reported_snapshot(self.session, self.snapshot(executions=(wrong,))).findings
         self.assertIn("BROKER_EXECUTION_WRONG_ORDER", errors)
         altered = ReportedExecution("A", "EX1", Decimal("0.75"), 3, 4)
-        errors = compare_reported_snapshot(
-            self.session, self.snapshot(executions=(altered,))
-        ).findings
+        errors = compare_reported_snapshot(self.session, self.snapshot(executions=(altered,))).findings
         self.assertIn("BROKER_EXECUTION_SUM_MISMATCH", errors)
 
     def test_competing_session_stale_head_is_reported(self):
