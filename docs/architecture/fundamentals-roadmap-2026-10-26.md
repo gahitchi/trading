@@ -39,6 +39,12 @@ while an earlier gate is unresolved.
    settlement payable/write-off/cash-merger model using the pinned Nautilus
    API. Prove zero value and deferred settlement without synthesizing tradable
    quotes; reconcile native and independent state after restarts.
+   An ex-date split/reverse split or other quantity-changing action invalidates
+   cached lot sizes, holdings, residual order quantities and open GTC assumptions.
+   Freeze automated reductions/opens until the broker's action-adjusted positions
+   **and** every still-open, cancelled, or unconfirmed order have been reconciled;
+   do not assume the broker adjusted or cancelled GTC orders automatically.
+   Bind the reconciled instrument-definition/action version to subsequent sizing.
 3. **Decision evidence:** define one immutable decision payload with actual
    availability time and risk/cost snapshot; deny **OPEN / INCREASE** when
    source, participation, authority or marks are unqualified. Preserve strict
@@ -46,7 +52,10 @@ while an earlier gate is unresolved.
    independent broker/cache state proves owned position, outstanding-order
    exposure and a safe non-reversing quantity. Reduce-only must neither
    bypass venue/order lifecycle controls nor silently create a short or long
-   after a late fill. If that evidence is missing, fail closed on new orders,
+   after a late fill. For a verified instrument lot/quantity step, truncate
+   the remaining permissible reduction **toward zero**, never round to nearest;
+   reject unknown fractional entitlements or lot sizes. If that evidence is
+   missing, fail closed on new orders,
    cancel or reconcile pending intents, raise a critical operator alert and
    surface the manual broker-close pathway. A stale mark alone must not trap a
    validated reduction.
@@ -82,6 +91,21 @@ while an earlier gate is unresolved.
   keep reconciliation/alerts working and make the manual broker-close option
   prominent. A venue-native reduce-only flag helps when verified, but may be
   unavailable on some brokers and cannot be assumed.
+- **Fractional-lot safety:** after reverse splits, partial fills or fractional
+  dividends, the available reducible quantity may not be a multiple of the
+  venue's current order step. Truncate toward zero using exact decimal
+  arithmetic after conservatively reserving unsettled same-side reductions.
+  Examples: held +2.75, requested SELL 2.75, lot step 1 => at most SELL 2;
+  held -0.009, requested BUY 0.009, lot step 0.01 => no automated order.
+  Reject absent/changed instrument step and never round to a larger lot.
+- **Ex-date + GTC race:** split/reverse split while a pending GTC, pending
+  cancel, or partially filled order exists must invalidate pre-action
+  position/quantity/step assumptions. Freeze automated submissions until the
+  broker explicitly reconciles post-action positions, open order identities,
+  adjusted vs cancelled status, residual quantities and execution history.
+  The broker may adjust, cancel or preserve orders differently per venue;
+  never infer cancellation from a local request. Retain an auditable
+  action-version change and test splits of both long and short books.
 - **Clock-skew faults:** backward or duplicate receipt timestamps, a vendor
   event timestamp after locally observed availability beyond the **measured**
   clock uncertainty, inconsistent gateway ordering, or an unknown clock
@@ -123,4 +147,8 @@ The tested outcome must be a rejection of unsupported settlement, not a
 profitably simulated cash merger. Do **not** run a paper gateway or touch a
 production journal for this validation. Report the checked-out SHA, precise
 command failures and environment. Hosted CI passing is a necessary condition,
-not independent Arch or broker acceptance.
+not independent Arch or broker acceptance. While Arch is unavailable, a
+Termux **standard-library only** sanity check can run the standalone order
+quantity oracle and collaboration checker (see `tools/termux-smoke.md`).
+This must **not** be used to close F1, F3, F4 or release gates: native Android
+is not the pinned Linux/Windows Nautilus engine or the authenticated broker.
