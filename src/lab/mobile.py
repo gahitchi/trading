@@ -236,7 +236,9 @@ def serve(*, port: int, snapshot: str | None = None, demo_mode: bool = False) ->
             payload = (
                 _page(state, simulation)
                 if self.path == "/"
-                else json.dumps({"doctor": doctor(), "snapshot": state, "offline_demo": simulation}, allow_nan=False).encode()
+                else json.dumps(
+                    {"doctor": doctor(), "snapshot": state, "offline_demo": simulation}, allow_nan=False
+                ).encode()
             )
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8" if self.path == "/" else "application/json")
