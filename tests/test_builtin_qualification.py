@@ -135,8 +135,21 @@ def test_verifiable_builtin_approval_invalidates_data_and_parameter_changes(goog
         qualification.verify_builtin(goog_lab, spec, ["GOOG"])
     atomic_json(file, good | {"reviewed": True})
     monkeypatch.setattr(qualification.data, "load_many", lambda *_: {"GOOG": data.gbm(100, 33)})
-    with pytest.raises(ApprovalError, match="research data"):
+    with pytest.raises(ApprovalError, match="missing built-in"):
         qualification.verify_builtin(goog_lab, spec, ["GOOG"])
+
+
+def test_policy_change_preserves_prior_manifest_and_requires_separate_approval(goog_lab, monkeypatch):
+    verified_environment(goog_lab, monkeypatch)
+    spec = SignalSpec("sma_trend")
+    previous = qualification.evidence_path(goog_lab, spec, ["GOOG"])
+    another_risk = replace(goog_lab.risk, max_drawdown=goog_lab.risk.max_drawdown / 2)
+    variant = replace(goog_lab, risk=another_risk)
+    current = qualification.evidence_path(variant, spec, ["GOOG"])
+    assert previous != current
+    assert previous.parent == current.parent
+    with pytest.raises(ApprovalError, match="missing built-in"):
+        qualification.verify_builtin(variant, spec, ["GOOG"])
 
 
 def test_unofficial_or_survivor_only_data_never_qualifies(goog_lab, monkeypatch):
