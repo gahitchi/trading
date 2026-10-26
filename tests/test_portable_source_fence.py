@@ -16,6 +16,7 @@ from lab.kernel.broker_reconciliation import ReportedSnapshot
 from lab.kernel.order_lifecycle import LifecycleError, OfflineOrderSession
 from lab.kernel.source_fence import (
     CursorAnchor,
+    ExpectedSourceIdentity,
     SourceChannel,
     SourceFence,
     SourceFrame,
@@ -65,6 +66,15 @@ class PortableSourceFenceTests(unittest.TestCase):
             executions_complete=True,
             causal_boundary_complete=True,
         )
+        self.expected_identity = ExpectedSourceIdentity(
+            account_scope="SIM_ACCOUNT",
+            source_id="offline-source",
+            venue="FIXTURE",
+            environment="offline_fixture",
+            instrument_id="SIM:FENCE",
+            action_version="version-1",
+            epoch="boot-1",
+        )
         self.fence = SourceFence(
             account_scope="SIM_ACCOUNT",
             source_id="offline-source",
@@ -83,12 +93,13 @@ class PortableSourceFenceTests(unittest.TestCase):
             source_claims_complete=True,
         )
 
-    def evaluate(self, fence=None, snapshot=None, expected=None):
+    def evaluate(self, fence=None, snapshot=None, expected=None, identity=None):
         return assess_fenced_report(
             self.session,
             self.snapshot if snapshot is None else snapshot,
             self.fence if fence is None else fence,
             expected_anchors=anchors() if expected is None else expected,
+            expected_identity=self.expected_identity if identity is None else identity,
         )
 
     def appended(self, proof: SourceFence, channel: SourceChannel, event: str, *, seq=None, available=4):
@@ -185,6 +196,35 @@ class PortableSourceFenceTests(unittest.TestCase):
                 found = self.evaluate(replace(self.fence, **{key: value}))
                 self.assertIn(expected, found.findings)
                 self.assertFalse(found.release_reservations)
+
+    def test_valid_rehashed_frame_cannot_switch_venue_or_session_epoch(self):
+        for field, value in (("venue", "IMPOSTOR"), ("epoch", "new-reconnect")):
+            with self.subTest(field=field):
+                swapped = replace(self.fence, **{field: value})
+                swapped = self.appended(swapped, SourceChannel.ORDERS, "order-1")
+                self.assertIn("FENCE_PINNED_SOURCE_IDENTITY_MISMATCH", self.evaluate(swapped).findings)
+
+    def test_venue_and_epoch_are_checked_even_for_empty_claimed_stream(self):
+        for field, value in (("venue", "OTHER_VENUE"), ("epoch", "OTHER_EPOCH")):
+            with self.subTest(field=field):
+                report = self.evaluate(replace(self.fence, **{field: value}))
+                self.assertFalse(report.internally_consistent)
+                self.assertFalse(report.broker_authorization)
+
+    def test_pinned_identity_must_be_independent_of_the_claimed_fence(self):
+        incompatible = replace(self.expected_identity, epoch="earlier-session")
+        self.assertIn("FENCE_PINNED_SOURCE_IDENTITY_MISMATCH", self.evaluate(identity=incompatible).findings)
+        wrong_account = replace(self.expected_identity, account_scope="DIFFERENT_ACCOUNT")
+        self.assertIn("PINNED_IDENTITY_LOCAL_SCOPE_MISMATCH", self.evaluate(identity=wrong_account).findings)
+        bad_source = replace(self.snapshot, source_id="other-offline-source")
+        self.assertIn("SNAPSHOT_PINNED_SOURCE_IDENTITY_MISMATCH", self.evaluate(snapshot=bad_source).findings)
+        with self.assertRaisesRegex(LifecycleError, "typed causal fence"):
+            assess_fenced_report(self.session, self.snapshot, self.fence, expected_anchors=anchors(), expected_identity=None)
+
+    def test_reordered_cross_channel_delivery_time_is_reported(self):
+        first = self.appended(self.fence, SourceChannel.ORDERS, "order-after", available=8)
+        second = self.appended(first, SourceChannel.POSITIONS, "position-before", available=5)
+        self.assertIn("SOURCE_MERGED_DELIVERY_TIME_REGRESSION", self.evaluate(second).findings)
 
     def test_source_frame_after_broker_snapshot_boundary_fails(self):
         proof = self.appended(self.fence, SourceChannel.ORDERS, "late-1", available=13)

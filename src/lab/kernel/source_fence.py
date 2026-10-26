@@ -192,6 +192,37 @@ class SourceFence:
 
 
 @dataclass(frozen=True, slots=True)
+class ExpectedSourceIdentity:
+    """Operator-pinned source namespace, NOT verified broker authentication.
+
+    This is an independent expectation distinct from the submitted proof.
+    Production must replace operator configuration with a broker-attested
+    identity obtained from a validated session before using source claims.
+    """
+
+    account_scope: str
+    source_id: str
+    venue: str
+    environment: str
+    instrument_id: str
+    action_version: str
+    epoch: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "account_scope",
+            "source_id",
+            "venue",
+            "instrument_id",
+            "action_version",
+            "epoch",
+        ):
+            _id(getattr(self, name), f"expected {name}")
+        if type(self.environment) is not str or self.environment not in {"offline_fixture", "paper", "live"}:
+            raise LifecycleError("invalid independently configured source environment")
+
+
+@dataclass(frozen=True, slots=True)
 class FencedParityAssessment:
     account_scope: str
     snapshot_id: str
@@ -220,18 +251,41 @@ def assess_fenced_report(
     fence: SourceFence,
     *,
     expected_anchors: tuple[CursorAnchor, ...],
+    expected_identity: ExpectedSourceIdentity,
 ) -> FencedParityAssessment:
     """Verify a claimed contiguous three-channel source fence and read-only parity.
 
     expected_anchors are previously persisted *source claims*, not trusted
     broker cursor facts. A clean result can never authorize account actions.
     """
-    if type(fence) is not SourceFence or type(expected_anchors) is not tuple:
-        raise LifecycleError("typed causal fence and immutable trusted-baseline references required")
+    if (
+        type(fence) is not SourceFence
+        or type(expected_anchors) is not tuple
+        or type(expected_identity) is not ExpectedSourceIdentity
+    ):
+        raise LifecycleError("typed causal fence, expected identity and immutable baseline required")
     if any(type(x) is not CursorAnchor for x in expected_anchors):
         raise LifecycleError("invalid expected source cursor type")
     base: ParityAssessment = compare_reported_snapshot(session, snapshot)
     errors = set(base.findings)
+    if (
+        expected_identity.account_scope != session.account_scope
+        or expected_identity.instrument_id != session.instrument_id
+        or expected_identity.action_version != session.action_version
+    ):
+        errors.add("PINNED_IDENTITY_LOCAL_SCOPE_MISMATCH")
+    if (
+        fence.account_scope != expected_identity.account_scope
+        or fence.source_id != expected_identity.source_id
+        or fence.venue != expected_identity.venue
+        or fence.environment != expected_identity.environment
+        or fence.instrument_id != expected_identity.instrument_id
+        or fence.action_version != expected_identity.action_version
+        or fence.epoch != expected_identity.epoch
+    ):
+        errors.add("FENCE_PINNED_SOURCE_IDENTITY_MISMATCH")
+    if snapshot.source_id != expected_identity.source_id:
+        errors.add("SNAPSHOT_PINNED_SOURCE_IDENTITY_MISMATCH")
     if fence.account_scope != session.account_scope or fence.account_scope != snapshot.account_scope:
         errors.add("FENCE_ACCOUNT_SCOPE_MISMATCH")
     if fence.instrument_id != session.instrument_id or fence.instrument_id != snapshot.instrument_id:
@@ -256,6 +310,7 @@ def assess_fenced_report(
 
     cursors = {a.channel: a for a in fence.anchors}
     last_available = {channel: 0 for channel in _CHANNELS}
+    last_delivery_available = 0
     events_seen: set[tuple[SourceChannel, str]] = set()
     for frame in fence.frames:
         prior = cursors[frame.channel]
@@ -267,6 +322,8 @@ def assess_fenced_report(
             errors.add("SOURCE_FRAME_DIGEST_MISMATCH")
         if frame.available_ns < last_available[frame.channel]:
             errors.add("SOURCE_AVAILABILITY_REGRESSION")
+        if frame.available_ns < last_delivery_available:
+            errors.add("SOURCE_MERGED_DELIVERY_TIME_REGRESSION")
         if frame.exchange_ns > fence.asof_ns or frame.available_ns > fence.available_ns:
             errors.add("SOURCE_EVENT_AFTER_SNAPSHOT_BOUNDARY")
         key = (frame.channel, frame.event_id)
@@ -275,6 +332,7 @@ def assess_fenced_report(
         events_seen.add(key)
         cursors[frame.channel] = CursorAnchor(frame.channel, frame.sequence, frame.digest)
         last_available[frame.channel] = frame.available_ns
+        last_delivery_available = frame.available_ns
     for final in fence.ends:
         if cursors[final.channel] != final:
             errors.add("FENCE_END_CURSOR_MISMATCH")
