@@ -366,14 +366,14 @@ class OfflineOrderSession:
             raise LifecycleError("order session is quarantined after invalid journal replay")
         full = {"order_id": order_id, **data}
         signature = {"kind": kind, "timestamp_ns": timestamp_ns, "data": full}
-        if event_id in self.seen_events:
-            if self.seen_events[event_id] != signature:
-                raise LifecycleError("conflicting event replay under an existing ID")
-            return self.orders[order_id]
         tail = self.journal.read_all()[-1]
         if tail["digest"] != self._head_digest:
             self._faulted = True
             raise LifecycleError("journal changed outside the active order session; reconcile before retry")
+        if event_id in self.seen_events:
+            if self.seen_events[event_id] != signature:
+                raise LifecycleError("conflicting event replay under an existing ID")
+            return self.orders[order_id]
         if timestamp_ns < tail["timestamp_ns"]:
             raise LifecycleError("new journal observation regresses behind prior source availability")
         self._verify_event_record(kind, event_id, timestamp_ns, full)
