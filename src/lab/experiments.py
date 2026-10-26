@@ -187,8 +187,7 @@ def reserve_trial(
     from lab.provenance import simulation_digest
 
     fingerprint = (
-        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:"
-        f"{simulation_digest()}:{data_digest}"
+        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:{simulation_digest()}:{data_digest}"
     )
     append_json(
         _trials_path(cfg),
@@ -222,8 +221,7 @@ def register_trial(
     from lab.provenance import simulation_digest
 
     fingerprint = (
-        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:"
-        f"{simulation_digest()}:{data_digest}"
+        f"{spec_fingerprint(spec)}:{config_fingerprint(cfg, bound_risk=bound_risk)}:{simulation_digest()}:{data_digest}"
     )
     # The return stream itself, so correlated trials can be counted as fewer independent ones (F-R02).
     path = _trial_returns_path(cfg, fingerprint)
@@ -374,9 +372,7 @@ def _compare(
         for spec in cand_specs:
             reserve_trial(cfg, key, spec, dataset_digest, bound_risk=bound_risk)
     results = [
-        run_spec(
-            control_cfg, BASELINE, tickers, frames, period, "buy_and_hold (control)", speed, bound_risk=bound_risk
-        )
+        run_spec(control_cfg, BASELINE, tickers, frames, period, "buy_and_hold (control)", speed, bound_risk=bound_risk)
     ]
     results += [run_spec(cfg, s, tickers, frames, period, speed=speed, bound_risk=bound_risk) for s in cand_specs]
 
