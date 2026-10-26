@@ -1374,9 +1374,14 @@ class ExecutionAgent(Strategy):
                 for event in order.events():
                     if type(event).__name__ == "OrderFilled":
                         booked = self._apply_fill(event, recovered=True)
-                        if not booked and str(event.trade_id) not in self.applied:
-                            # Inconclusive recovery: preserve the write-ahead
-                            # intent rather than laundering it into terminal.
+                        if not booked and (
+                            str(event.trade_id) not in self.applied
+                            or self.applied[str(event.trade_id)][1] != coid
+                        ):
+                            # A repeated trade ID belonging to ANOTHER order
+                            # is not proof that this order settled.
+                            self.pending[coid]["invalid_fill"] = True
+                            self._save()
                             return
             self.terminal[coid] = self.pending.pop(coid)
             self._save()
