@@ -142,14 +142,10 @@ def test_verifiable_builtin_approval_invalidates_data_and_parameter_changes(goog
 def test_unofficial_or_survivor_only_data_never_qualifies(goog_lab, monkeypatch):
     verified_environment(goog_lab, monkeypatch)
     spec = SignalSpec("sma_trend")
-    monkeypatch.setattr(
-        qualification.data, "quality", lambda *_: {**GOOD_SOURCE, "sources": ["yahoo_finance"]}
-    )
+    monkeypatch.setattr(qualification.data, "quality", lambda *_: {**GOOD_SOURCE, "sources": ["yahoo_finance"]})
     with pytest.raises(ApprovalError, match="unofficial"):
         qualification.evaluate_builtin(goog_lab, spec, ["GOOG"])
-    monkeypatch.setattr(
-        qualification.data, "quality", lambda *_: {**GOOD_SOURCE, "point_in_time_universe": False}
-    )
+    monkeypatch.setattr(qualification.data, "quality", lambda *_: {**GOOD_SOURCE, "point_in_time_universe": False})
     with pytest.raises(ApprovalError, match="point-in-time"):
         qualification.evaluate_builtin(goog_lab, spec, ["GOOG"])
 
