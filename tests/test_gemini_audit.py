@@ -277,6 +277,8 @@ def test_a_delisting_is_settled_at_its_recorded_value(goog_lab, tmp_path):
     assert len(sells) == 1 and sells[0].price == pytest.approx(dying["close"].iloc[-1] * 0.5, abs=0.005)  # a cent tick
     held = sum(x.qty if x.side == "BUY" else -x.qty for x in r.fills if x.ticker == "D")
     assert held == 0 and r.metrics["delistings_settled"]["D"]["source"] == "test vendor"
+    assert r.metrics["execution_qualified"] is False
+    assert r.metrics["delisting_execution_model"] == "synthetic_settlement_bars_not_executable"
 
 
 def test_delisting_records_need_a_vendor_and_a_value(goog_lab, tmp_path):
