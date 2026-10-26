@@ -17,14 +17,20 @@ and a loopback-only, read-only browser view:
 ```sh
 PYTHONPATH=src python -m lab.mobile doctor
 PYTHONPATH=src python -m lab.mobile check
-PYTHONPATH=src python -m lab.mobile serve --port 8787
+PYTHONPATH=src python -m lab.mobile demo
+PYTHONPATH=src python -m lab.mobile serve --port 8787 --demo
+
+# The existing offline Decimal engine also works on native Termux
+PYTHONPATH=src python -m lab.markets demo --side buy
 ```
 
 Open `http://127.0.0.1:8787/` on the same phone. No heavy package installation
-is needed; no broker credentials, trading decisions, simulated profits or
-orders are exposed. This mobile diagnostic mode **does not run the full
-NautilusTrader trading engine**, because native Android is not a qualified
-glibc/Manylinux runtime. An optional experimental Linux ARM64 PRoot route
+is needed; no broker credentials or external orders are exposed. The optional
+`--demo` panel shows clearly labeled synthetic fills and PnL from the exact
+same `OfflineSimulator` used by desktop's reference CLI — **not** verified
+market data or profitable-strategy evidence. This mobile mode **does not run the
+full NautilusTrader trading engine**, because native Android is not a
+qualified glibc/Manylinux runtime. An optional experimental Linux ARM64 PRoot route
 is documented but remains unvalidated and is never broker-authorized. See
 [Termux portable operation](docs/termux-mobile.md) for limitations,
 snapshot privacy and operator acceptance.
