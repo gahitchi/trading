@@ -158,9 +158,11 @@ def test_failed_projection_after_commit_does_not_reuse_stale_generation(tmp_path
     path = tmp_path / "ledger.json"
     store = ExecutionStore(path)
     store.save({"cash": 1000})
-    with patch("lab.execution_store.atomic_json", side_effect=OSError("simulated power loss")):
-        with pytest.raises(OSError, match="power loss"):
-            store.save({"cash": 900})
+    with (
+        patch("lab.execution_store.atomic_json", side_effect=OSError("simulated power loss")),
+        pytest.raises(OSError, match="power loss"),
+    ):
+        store.save({"cash": 900})
     assert read_json(path)["cash"] == 1000
     store.save({"cash": 850})
     assert ExecutionStore(path).load()["cash"] == 850
