@@ -298,8 +298,17 @@ def effective_trials(cfg: LabConfig) -> float | None:
 
 
 def compare(
-    cfg, specs, tickers, period, frames=None, *, register=True, holdout_ok=False,
-    speed="daily", holdout_reason="", bound_risk=False
+    cfg,
+    specs,
+    tickers,
+    period,
+    frames=None,
+    *,
+    register=True,
+    holdout_ok=False,
+    speed="daily",
+    holdout_reason="",
+    bound_risk=False,
 ):
     from lab.config import validate_effective
 
@@ -309,8 +318,15 @@ def compare(
     if holdout_ok:
         with holdout_attempt(cfg, specs, period, speed, holdout_reason):
             return _compare(
-                cfg, specs, tickers, period, frames,
-                register=register, holdout_ok=True, speed=speed, bound_risk=bound_risk
+                cfg,
+                specs,
+                tickers,
+                period,
+                frames,
+                register=register,
+                holdout_ok=True,
+                speed=speed,
+                bound_risk=bound_risk,
             )
     # Guard and record exposure before loading/evaluating strategies. Failed runs
     # are exposure too; this record cannot be removed by a retry or new label.
@@ -357,9 +373,11 @@ def _compare(
         dataset_digest = frame_digest(frames)
         for spec in cand_specs:
             reserve_trial(cfg, key, spec, dataset_digest, bound_risk=bound_risk)
-    results = [run_spec(
-        control_cfg, BASELINE, tickers, frames, period, "buy_and_hold (control)", speed, bound_risk=bound_risk
-    )]
+    results = [
+        run_spec(
+            control_cfg, BASELINE, tickers, frames, period, "buy_and_hold (control)", speed, bound_risk=bound_risk
+        )
+    ]
     results += [run_spec(cfg, s, tickers, frames, period, speed=speed, bound_risk=bound_risk) for s in cand_specs]
 
     if any(r.metrics.get("insolvent") for r in results):
