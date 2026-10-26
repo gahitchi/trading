@@ -214,14 +214,13 @@ def assess_trial_claims(
         kind for kind in expected.required()
         if kind not in by_kind or by_kind[kind].status is ProbeStatus.MISSING
     }
-    key = lambda x: x.value
     return TrialEvidenceAssessment(
         venue=expected.venue,
         instrument_id=expected.instrument_id,
-        missing=tuple(sorted(missing, key=key)),
-        conflicting=tuple(sorted(conflict, key=key)),
-        stale=tuple(sorted(stale, key=key)),
-        future_dated=tuple(sorted(future, key=key)),
-        duplicate=tuple(sorted(duplicate, key=key)),
-        cross_scope=tuple(sorted(cross_scope, key=key)),
+        missing=tuple(sorted(missing, key=lambda item: item.value)),
+        conflicting=tuple(sorted(conflict, key=lambda item: item.value)),
+        stale=tuple(sorted(stale, key=lambda item: item.value)),
+        future_dated=tuple(sorted(future, key=lambda item: item.value)),
+        duplicate=tuple(sorted(duplicate, key=lambda item: item.value)),
+        cross_scope=tuple(sorted(cross_scope, key=lambda item: item.value)),
     )
