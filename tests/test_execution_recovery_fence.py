@@ -77,8 +77,7 @@ def test_legacy_json_import_without_sqlite_snapshot_still_recovers(tmp_path):
         '{"cash":1,"cash":1000,"version":3,"authoritative_store":"ledger.sqlite3"}',
         '{"cash":NaN,"version":3,"authoritative_store":"ledger.sqlite3"}',
         '{"cash":1e10000,"version":3,"authoritative_store":"ledger.sqlite3"}',
-        '{"cash":1,"version":3,"authoritative_store":"ledger.sqlite3",'
-        '"positions":{"A":4,"A":0}}',
+        '{"cash":1,"version":3,"authoritative_store":"ledger.sqlite3","positions":{"A":4,"A":0}}',
     ],
 )
 def test_sqlite_financial_snapshot_rejects_duplicate_or_nonfinite_fields(tmp_path, raw):
