@@ -499,6 +499,24 @@ def cmd_research_list(cfg, a):
         print(f"{h.id:<42} {h.status or '?':<19}{extra}  {prop.get('title', '')[:60]}")
 
 
+def cmd_research_trials(cfg, a):
+    """Read-only inventory of attempted trials and whether their evidence is usable."""
+    report = experiments.trial_registry_status(cfg)
+    if a.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print(
+            f"research trials: {report['candidates']} candidate(s), {report['verified']} verified, "
+            f"{report['blocked']} blocked ({report['events']} append-only events)"
+        )
+        for issue in report["issues"]:
+            print(f"  {issue['fingerprint'][:16]} {issue['label']}: {issue['reason']}")
+        if report["blocked"]:
+            print("Re-run the exact attempted candidate with the same source, data and configuration. "
+                  "Never delete a failed trial to improve statistical significance.")
+    return 0 if report["qualification_allowed"] else 1
+
+
 def cmd_research_show(cfg, a):
     from lab.research.orchestrator import Hypothesis
 
@@ -1075,6 +1093,9 @@ def build_parser() -> argparse.ArgumentParser:
     rr.add_argument("--model")
     rr.set_defaults(fn=cmd_research_run)
     r.add_parser("list", help="all hypotheses and their status").set_defaults(fn=cmd_research_list)
+    trial = r.add_parser("trials", help="inspect durable candidate attempts and blocked evidence (read-only)")
+    trial.add_argument("--json", action="store_true")
+    trial.set_defaults(fn=cmd_research_trials)
     rt = r.add_parser("retry", help="re-implement a hypothesis that never reached validation")
     rt.add_argument("id")
     rt.add_argument("--provider", choices=["claude_code", "ollama"])
