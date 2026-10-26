@@ -571,8 +571,9 @@ def sanitize(src: Path, dst: Path, key_path: Path) -> dict:
             "with HMAC-SHA256 under a private key kept outside Git (same key for every phase, so joins hold); "
             "fields named like password/token/secret/api key/hmac/chat id/user id replaced by [REDACTED]; "
             "authority.key never copied; SQLite databases are represented by their deterministic JSON export; "
-            "non-JSON files (raw databases included) listed with their hash but not copied. Free text (operator "
-            "reasons, broker messages) is only checked for account-number patterns: it is NOT verified clean"
+            "non-JSON files (raw databases included) listed with their hash but not copied. Structured IDs "
+            "are first discovered across the bundle so references in free-text broker/risk messages are also "
+            "pseudonymized; unrecognized free-text identifiers may remain, so manual review is required"
         ),
         "key_fingerprint": hashlib.sha256(key).hexdigest()[:16],
         # ChatGPT, C004-F2: a person reads every sanitized file before publication and records it here; an empty
