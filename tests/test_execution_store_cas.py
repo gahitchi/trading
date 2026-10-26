@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from threading import Barrier
 from unittest.mock import patch
 
@@ -152,6 +153,46 @@ def test_v1_database_upgrades_without_losing_state_or_history(tmp_path):
         assert db.execute("PRAGMA user_version").fetchone()[0] == 2
         assert db.execute("SELECT generation FROM snapshot WHERE id=1").fetchone()[0] == 1
     assert ExecutionStore(path).maps["applied"]["OLD"] == [2, "O-OLD"]
+
+
+
+def test_interrupted_schema_upgrade_rolls_back_ddl_and_version(tmp_path):
+    path = tmp_path / "ledger.json"
+    database = path.with_suffix(".sqlite3")
+    with sqlite3.connect(database) as db:
+        db.execute("CREATE TABLE snapshot (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)")
+        db.execute(
+            "CREATE TABLE history (bucket TEXT NOT NULL, id TEXT NOT NULL, "
+            "value TEXT NOT NULL, coid TEXT, PRIMARY KEY(bucket,id)) WITHOUT ROWID"
+        )
+        db.execute("CREATE INDEX history_order ON history(bucket,coid)")
+        db.execute("PRAGMA user_version=1")
+
+    original_connect = ExecutionStore.connect
+
+    @contextmanager
+    def interrupting_connect(self):
+        with original_connect(self) as db:
+
+            class InterruptedConnection:
+                def execute(self, sql, *args):
+                    if sql == "PRAGMA user_version=2":
+                        raise OSError("simulated migration interruption")
+                    return db.execute(sql, *args)
+
+            yield InterruptedConnection()
+
+    with (
+        patch.object(ExecutionStore, "connect", interrupting_connect),
+        pytest.raises(OSError, match="migration interruption"),
+    ):
+        ExecutionStore(path)
+    with sqlite3.connect(database) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert "generation" not in {column[1] for column in db.execute("PRAGMA table_info(snapshot)")}
+    assert ExecutionStore(path)._expected_generation == 0
+    with sqlite3.connect(database) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
 
 
 def test_failed_projection_after_commit_does_not_reuse_stale_generation(tmp_path):
