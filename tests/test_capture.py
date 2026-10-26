@@ -130,8 +130,10 @@ def test_sanitizer_pseudonymizes_trade_ids_mentioned_in_other_files_free_text(tm
     )
     (src / "02-orders.json").write_text(
         json.dumps(
-            {"broker": {"trade_id": "T2", "client_order_id": "X-123"},
-             "pending": {"X-123": {"ticker": "A", "side": "BUY", "qty": 2}}}
+            {
+                "broker": {"trade_id": "T2", "client_order_id": "X-123"},
+                "pending": {"X-123": {"ticker": "A", "side": "BUY", "qty": 2}},
+            }
         )
     )
     manifest = capture.sanitize(src, dst, tmp_path / "private" / "key")
@@ -147,12 +149,8 @@ def test_sanitizer_pseudonymizes_trade_ids_mentioned_in_other_files_free_text(tm
 def test_sanitizer_handles_overlapping_execution_ids_in_text_and_jsonl(tmp_path):
     src, dst = tmp_path / "raw", tmp_path / "clean"
     src.mkdir()
-    (src / "risk.jsonl").write_text(
-        json.dumps({"detail": "Broker reports T23 and T2; ambiguous short IDs"}) + "\n"
-    )
-    (src / "trades.json").write_text(
-        json.dumps({"rows": [{"trade_id": "T23"}, {"trade_id": "T2"}]})
-    )
+    (src / "risk.jsonl").write_text(json.dumps({"detail": "Broker reports T23 and T2; ambiguous short IDs"}) + "\n")
+    (src / "trades.json").write_text(json.dumps({"rows": [{"trade_id": "T23"}, {"trade_id": "T2"}]}))
     capture.sanitize(src, dst, tmp_path / "private" / "key")
     note = (dst / "risk.jsonl").read_text()
     rows = json.loads((dst / "trades.json").read_text())["rows"]
