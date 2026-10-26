@@ -164,10 +164,9 @@ class OfflineOrderSession:
         self.action_version = _id(action_version, "instrument version")
         self.starting_position = _quantity(starting_position, "opening position")
         self.quantity_step = _quantity(quantity_step, "quantity step", positive=True)
-        if self.quantity_step != Decimal(1).scaleb(self.quantity_step.as_tuple().exponent):
-            raise LifecycleError("lot step must be a decimal power of ten for this reference implementation")
         self.orders: dict[str, OrderState] = {}
         self.seen_events: dict[str, dict] = {}
+        self._faulted = False
         journal.verify()
         header = {
             "schema": 1,
@@ -240,6 +239,8 @@ class OfflineOrderSession:
         original = self.orders[oid]
         state = original
         if kind == "submitted":
+            if self.frozen:
+                raise LifecycleError("unreconciled source state freezes new submission attempts")
             if state.prepared or state.terminal:
                 raise LifecycleError("duplicate/terminal submission attempt")
             state = replace(state, prepared=True)
@@ -340,6 +341,8 @@ class OfflineOrderSession:
         _id(order_id, "client order ID")
         _id(event_id, "event identity")
         _ns(timestamp_ns, "observed")
+        if self._faulted:
+            raise LifecycleError("order session is quarantined after invalid journal replay")
         full = {"order_id": order_id, **data}
         signature = {"kind": kind, "timestamp_ns": timestamp_ns, "data": full}
         if event_id in self.seen_events:
@@ -422,6 +425,8 @@ class OfflineOrderSession:
         )
 
     def recover(self) -> None:
+        """Invalid replay quarantines this instance pending a freshly verified session."""
+        self._faulted = True
         self.journal.verify()
         events = self.journal.read_all()
         self.orders = {}
@@ -448,9 +453,11 @@ class OfflineOrderSession:
             self.seen_events[entry["event_id"]] = {
                 "kind": entry["kind"], "timestamp_ns": entry["timestamp_ns"], "data": data
             }
+        self._faulted = False
 
     def assert_recovered(self) -> None:
         remembered = self.state_digest()
         self.recover()
         if self.state_digest() != remembered:
+            self._faulted = True
             raise LifecycleError("in-memory order state differs from durable events")

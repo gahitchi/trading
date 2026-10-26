@@ -13,7 +13,7 @@ from pathlib import Path
 
 from lab.kernel.order_lifecycle import BrokerEvidence, LifecycleError, OfflineOrderSession
 from lab.markets.domain import OrderIntent, Side
-from lab.markets.journal import EventJournal, JournalError
+from lab.markets.journal import EventJournal
 
 ROOT = Path(__file__).resolve().parents[1]
 DIGEST = hashlib.sha256(b"synthetic broker evidence bytes").hexdigest()
@@ -123,6 +123,20 @@ class IndependentLifecycleTests(unittest.TestCase):
         finally:
             journal.close()
 
+    def test_cancel_confirmation_does_not_release_inventory_or_allow_new_intent(self):
+        journal, session = self.open()
+        try:
+            session.plan(intent(), action_version="v1")
+            session.prepare_dispatch("FIRST", timestamp_ns=2)
+            session.request_cancel("FIRST", timestamp_ns=3)
+            session.observe("FIRST", "cancel_confirmed", evidence("cancelled", at=4))
+            self.assertTrue(session.frozen)
+            self.assertEqual(session.reserved_reduction, Decimal("6"))
+            with self.assertRaisesRegex(LifecycleError, "freezes"):
+                session.plan(intent("NEW", quantity=Decimal("1"), at=5), action_version="v1")
+        finally:
+            journal.close()
+
     def test_broker_cancel_confirmation_does_not_prevent_late_fill(self):
         journal, session = self.open()
         try:
@@ -220,6 +234,28 @@ class IndependentLifecycleTests(unittest.TestCase):
         finally:
             journal.close()
 
+    def test_arbitrary_decimal_lot_steps_are_supported(self):
+        journal, session = self.open(step=Decimal("0.25"))
+        try:
+            accepted = session.plan(intent(quantity=Decimal("0.75")), action_version="v1")
+            self.assertEqual(accepted.reserved, Decimal("0.75"))
+            with self.assertRaisesRegex(LifecycleError, "lot step"):
+                session.plan(intent("BAD", quantity=Decimal("0.70"), at=2), action_version="v1")
+        finally:
+            journal.close()
+
+    def test_prepare_fails_when_any_source_is_unreconciled(self):
+        journal, session = self.open()
+        try:
+            session.plan(intent("FIRST", quantity=Decimal("5")), action_version="v1")
+            session.plan(intent("SECOND", quantity=Decimal("5"), at=2), action_version="v1")
+            session.prepare_dispatch("FIRST", timestamp_ns=3)
+            session.observe("FIRST", "unknown", evidence("timeout", at=4))
+            with self.assertRaisesRegex(LifecycleError, "freezes"):
+                session.prepare_dispatch("SECOND", timestamp_ns=5)
+        finally:
+            journal.close()
+
     def test_exact_restart_recovers_all_executions_and_rejects_new_opening_position(self):
         journal, session = self.open()
         session.plan(intent(), action_version="v1")
@@ -264,6 +300,28 @@ class IndependentLifecycleTests(unittest.TestCase):
         journal.verify()
         with self.assertRaisesRegex(LifecycleError, "state replay diverged"):
             session.recover()
+        journal.close()
+
+    def test_corrupted_replay_quarantines_the_same_instance(self):
+        journal, session = self.open()
+        journal.append(
+            "plan:FORGED", "intent", 1,
+            {
+                "event": {
+                    "order_id": "FORGED",
+                    "intent": {
+                        "client_order_id": "FORGED", "instrument_id": "SIM:TEST-SHARE",
+                        "side": "sell", "quantity": "1", "created_ns": 1, "reduce_only": True,
+                    },
+                    "action_version": "v1",
+                },
+                "state_sha256": "0" * 64,
+            },
+        )
+        with self.assertRaisesRegex(LifecycleError, "diverged"):
+            session.recover()
+        with self.assertRaisesRegex(LifecycleError, "quarantined"):
+            session.plan(intent("NEW", at=2), action_version="v1")
         journal.close()
 
     def test_cannot_mix_corporate_journal_with_order_journal(self):
