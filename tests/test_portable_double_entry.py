@@ -16,13 +16,19 @@ from pathlib import Path
 from lab.kernel.double_entry import (
     Account,
     AccountingInvariantError,
-    AccountingState,
     Posting,
     PostingBatch,
     transition,
     verify_record,
 )
-from lab.markets.corporate_actions import CashReceipt, CashTermination, CorporateBook, ReconciledBook, receive, recognize
+from lab.markets.corporate_actions import (
+    CashReceipt,
+    CashTermination,
+    CorporateBook,
+    ReconciledBook,
+    receive,
+    recognize,
+)
 from lab.markets.corporate_journal import CorporateSession, _financial
 from lab.markets.journal import EventJournal
 
