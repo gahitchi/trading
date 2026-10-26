@@ -583,7 +583,10 @@ def cmd_research_qualify_builtin(cfg, a):
         if not evaluation["qualified"]:
             print("NO autonomous authorization. Results remain diagnostic.")
             return 1
-        if not a.yes and input("Review this policy and evidence. Approve autonomous PAPER only? [y/N] ").strip().lower() != "y":
+        if (
+            not a.yes
+            and input("Review this policy and evidence. Approve autonomous PAPER only? [y/N] ").strip().lower() != "y"
+        ):
             print("No approval created.")
             return 1
         path = approve_builtin(cfg, spec, tickers, evaluation)
