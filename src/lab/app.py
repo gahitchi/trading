@@ -230,6 +230,7 @@ class Controller:
             if kill and kill.get("mode") == "flatten":
                 raise ValueError("An exit is in progress. Reconcile positions before clearing it with lab resume.")
             if self.settings["mode"] == "autonomous":
+                from lab.research.approval import ApprovalError
                 from lab.research.builtin_qualification import verify_builtin
                 from lab.signals.registry import resolve
 
@@ -240,7 +241,7 @@ class Controller:
                 params = {"short": 1} if name == "sma_trend" and self.cfg.risk.max_short_gross > 0 else {}
                 try:
                     verify_builtin(self.cfg, resolve(name, self.cfg.research_dir, params), self.settings["tickers"])
-                except (OSError, ValueError) as exc:
+                except (ApprovalError, OSError, ValueError) as exc:
                     raise ValueError(
                         "autonomous paper requires qualified strategy evidence; use supervised or "
                         "lab research qualify-builtin"
