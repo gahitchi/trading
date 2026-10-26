@@ -262,7 +262,7 @@ def save_delistings(cfg: LabConfig, path: str | Path) -> pd.DataFrame:
     (1 + delist_return)) is recovery *metadata*, not a tradable quote. For distress with no
     value, an ASSUMED -30% research scenario (Shumway, 1997) is recorded and warned
     about; no simulated market settlement is authorized. Other delisting types need a value."""
-    df = pd.read_csv(path, dtype=str).rename(columns=str.lower).fillna("")
+    df = pd.read_csv(path, dtype=str, keep_default_na=False).rename(columns=str.lower).fillna("")
     missing = set(DELISTING_COLUMNS) - set(df.columns)
     if missing:
         raise DataError(f"{path}: missing columns {sorted(missing)}")
@@ -304,7 +304,7 @@ def delistings(cfg: LabConfig) -> dict[str, dict] | None:
     if not p.exists():
         return None
     try:
-        df = pd.read_csv(p, dtype=str).fillna("")
+        df = pd.read_csv(p, dtype=str, keep_default_na=False).fillna("")
     except (OSError, ValueError) as exc:
         raise DataError(f"{p}: invalid delisting evidence") from exc
     missing = set(DELISTING_COLUMNS) - set(df.columns)
