@@ -135,18 +135,20 @@ def evaluate_builtin(cfg, spec: SignalSpec, tickers: list[str]) -> dict:
     identity = _identity(cfg, spec, tickers, frames)
     _quality_gate(identity["quality"])
     bounds = {"bound_risk": True}
-    train, _ = experiments.compare(
-        research_cfg, [spec], tickers, research_cfg.period("train"), frames, **bounds
-    )
+    train, _ = experiments.compare(research_cfg, [spec], tickers, research_cfg.period("train"), frames, **bounds)
     candidate = _summary(train.rows[1])
     null_result = experiments.null_test(
-        research_cfg, spec, tickers, research_cfg.period("train"), cfg.research.null_samples,
-        frames, observed_edge=candidate["sharpe_edge"], **bounds
+        research_cfg,
+        spec,
+        tickers,
+        research_cfg.period("train"),
+        cfg.research.null_samples,
+        frames,
+        observed_edge=candidate["sharpe_edge"],
+        **bounds,
     )
     null = {"p_value": _number(null_result.get("p_value"))}
-    train_pass = _passes_train(candidate, null, cfg) and not any(
-        row.get("delistings_settled") for row in train.rows
-    )
+    train_pass = _passes_train(candidate, null, cfg) and not any(row.get("delistings_settled") for row in train.rows)
     # Do not expose the test period to a candidate that did not pass training.
     if not train_pass:
         return {
@@ -210,10 +212,17 @@ def verify_builtin(cfg, spec: SignalSpec, tickers: list[str]) -> str:
     if not _passes_train(train["candidate"], train["null"], cfg):
         raise ApprovalError("built-in training metrics no longer satisfy configured research thresholds")
     candidate = test["candidate"]
-    if candidate.get("sharpe_edge") is None or candidate["sharpe_edge"] <= 0 or candidate.get("signal_errors") != 0 or candidate.get("fills", 0) <= 0:
+    if (
+        candidate.get("sharpe_edge") is None
+        or candidate["sharpe_edge"] <= 0
+        or candidate.get("signal_errors") != 0
+        or candidate.get("fills", 0) <= 0
+    ):
         raise ApprovalError("built-in out-of-sample evidence is not qualified")
     if identity.get("schema") != SCHEMA or identity.get("spec") != {
-        "name": spec.name, "params": spec.params, "source_sha256": artifact_digest(spec)
+        "name": spec.name,
+        "params": spec.params,
+        "source_sha256": artifact_digest(spec),
     }:
         raise ApprovalError("built-in strategy source/parameter digest changed")
     if identity["tickers"] != sorted(tickers) or identity.get("deployment") != _bound_context(cfg, tickers):
