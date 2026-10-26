@@ -54,6 +54,22 @@ def _identity(cfg, spec: SignalSpec, tickers: list[str], frames: dict) -> dict:
         "deployment": _bound_context(cfg, tickers),
         "data_sha256": frame_digest(frames),
         "quality": data.quality(cfg, tickers),
+        "research_fingerprint": experiments.config_fingerprint(
+            replace(cfg, capital=cfg.paper.capital), len(tickers), bound_risk=True
+        ),
+        "periods": {
+            part: {
+                "start": str(cfg.period(part).start),
+                "end": str(cfg.period(part).end),
+            }
+            for part in ("train", "test")
+        },
+        "thresholds": {
+            "min_sharpe_edge": cfg.research.min_sharpe_edge,
+            "max_p_value": cfg.research.max_p_value,
+            "min_dsr": cfg.research.min_dsr,
+            "null_samples": cfg.research.null_samples,
+        },
     }
 
 
@@ -165,6 +181,13 @@ def verify_builtin(cfg, spec: SignalSpec, tickers: list[str]) -> str:
     ):
         raise ApprovalError("built-in strategy lacks passing reviewed train/test evidence")
     identity = record["identity"]
+    train = record["train"]
+    test = record["test"]
+    if not _passes_train(train["candidate"], train["null"], cfg):
+        raise ApprovalError("built-in training metrics no longer satisfy configured research thresholds")
+    candidate = test["candidate"]
+    if candidate.get("sharpe_edge", 0) <= 0 or candidate.get("signal_errors") != 0 or candidate.get("fills", 0) <= 0:
+        raise ApprovalError("built-in out-of-sample evidence is not qualified")
     if identity.get("schema") != SCHEMA or identity.get("spec") != {
         "name": spec.name, "params": spec.params, "source_sha256": artifact_digest(spec)
     }:
@@ -172,8 +195,9 @@ def verify_builtin(cfg, spec: SignalSpec, tickers: list[str]) -> str:
     if identity["tickers"] != sorted(tickers) or identity.get("deployment") != _bound_context(cfg, tickers):
         raise ApprovalError("built-in approval no longer matches the deployment context")
     current = data.load_many(cfg, tickers)
-    if identity["data_sha256"] != frame_digest(current) or identity["quality"] != data.quality(cfg, tickers):
-        raise ApprovalError("research data or provenance changed; re-validate built-in policy")
+    actual = _identity(cfg, spec, tickers, current)
+    if identity != actual:
+        raise ApprovalError("research data, evaluation periods, gates or provenance changed; re-validate builtin")
     _quality_gate(identity["quality"])
     # Return an immutable identity digest, not a claim of absolute predictive certainty.
     return hashlib.sha256(path.read_bytes()).hexdigest()
