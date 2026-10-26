@@ -12,14 +12,18 @@ from lab.agents.execution import _liquidity_cap, _opening
     [
         None,
         [],
-        [(1, 2000.0)],
-        [(i, 2000.0) for i in range(4)],
         [(i, 2000.0) for i in range(4)] + [(5, 0.0)],
         [(i, 2000.0) for i in range(4)] + [(5, float("nan"))],
     ],
 )
-def test_configured_capacity_fails_closed_without_five_valid_volumes(observations):
+def test_configured_capacity_fails_closed_without_qualified_volume(observations):
     assert _liquidity_cap(observations, 0.05) == 0
+
+
+def test_sparse_valid_volume_is_always_bounded_by_lowest_observed_bar():
+    assert _liquidity_cap([(1, 2000.0)], 0.05) == 100
+    assert _liquidity_cap([(1, 10000.0), (2, 2000.0)], 0.05) == 100
+    assert _liquidity_cap([(i, 2000.0) for i in range(4)], 0.05) == 100
 
 
 def test_cap_requires_explicit_disabled_setting():
