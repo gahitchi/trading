@@ -1375,8 +1375,7 @@ class ExecutionAgent(Strategy):
                     if type(event).__name__ == "OrderFilled":
                         booked = self._apply_fill(event, recovered=True)
                         if not booked and (
-                            str(event.trade_id) not in self.applied
-                            or self.applied[str(event.trade_id)][1] != coid
+                            str(event.trade_id) not in self.applied or self.applied[str(event.trade_id)][1] != coid
                         ):
                             # A repeated trade ID belonging to ANOTHER order
                             # is not proof that this order settled.
