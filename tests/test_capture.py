@@ -133,7 +133,11 @@ def test_sanitize_rewrites_known_trade_and_order_ids_in_unstructured_fields(tmp_
     key = tmp_path / "secret.key"
     capture.sanitize(raw, clean, key)
     note = (clean / "notes.json").read_text()
-    assert "T2" not in note and "ORDER-9" not in note
-    assert "T20" in note  # no unrelated identifier-prefix substitution
+    decoded = json.loads(note)
+    assert "T2" not in decoded["broker_message"]
+    assert "ORDER-9" not in decoded["broker_message"]
+    assert "T2" not in decoded["free_form"]
+    assert "ORDER-9" not in decoded["free_form"]
+    assert "T20" in decoded["free_form"]  # do not replace unrelated IDs that only share a prefix
     assert capture._pseudo(key.read_bytes(), "TRADE", "T2") in note
     assert capture._pseudo(key.read_bytes(), "CLIENT", "ORDER-9") in note
