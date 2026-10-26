@@ -82,9 +82,7 @@ def test_cached_invalid_terminal_fill_keeps_unsettled_intent(tmp_path):
 def test_invalid_fill_latch_survives_sqlite_restart(tmp_path):
     agent = active(tmp_path, closed=True)
     store = ExecutionStore(tmp_path / "ledger.json")
-    agent._save = lambda: store.save(
-        {"cash": agent.cash, "positions": agent.held, "pending": agent.pending}
-    )
+    agent._save = lambda: store.save({"cash": agent.cash, "positions": agent.held, "pending": agent.pending})
     bad = _fill("T1", 10)
     bad.last_px = float("nan")
     ExecutionAgent.on_order_filled(agent, bad)
@@ -124,9 +122,7 @@ def test_terminal_callback_rechecks_trade_id_conflict(tmp_path):
 @pytest.mark.parametrize("name,value", [("invalid_fill", 1), ("overfilled", "true")])
 def test_persisted_anomaly_flags_require_strict_booleans(name, value):
     with pytest.raises(ValueError, match=name):
-        validate_ledger(
-            {"cash": 100, "pending": {"X": {"ticker": "A", "side": "BUY", "qty": 10, name: value}}}
-        )
+        validate_ledger({"cash": 100, "pending": {"X": {"ticker": "A", "side": "BUY", "qty": 10, name: value}}})
 
 
 def test_valid_terminal_partial_fill_is_still_recovered_and_archived(tmp_path):
