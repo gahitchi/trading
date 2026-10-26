@@ -147,6 +147,47 @@ class PortableCorporateJournalTests(unittest.TestCase):
         ):
             CorporateSession(journal, initial(signed_basis=Decimal("500.00")))
 
+    def test_v1_corporate_journal_is_not_silently_upgraded_to_double_entry_v2(self):
+        older = initial()
+        with EventJournal(self.path) as journal:
+            journal.append(
+                "session:corporate-cash:v1",
+                "session",
+                0,
+                {"schema": 1, "book": older.record()},
+            )
+            journal.verify()
+        with (
+            EventJournal(self.path) as journal,
+            self.assertRaisesRegex(CorporateActionError, "identity/account assumptions"),
+        ):
+            CorporateSession(journal, older)
+
+    def test_hash_valid_but_forged_zero_sum_postings_fail_economic_replay(self):
+        before = initial()
+        after = recognize(before, action(), readiness(), observed_ns=20)
+        payload = transition(_financial(before), _financial(after), kind="corporate_action").record()
+        # Preserve a zero-sum posting while lying about both basis and income.
+        payload["entries"][0]["debit"] = "-399.00"
+        payload["entries"][-1]["debit"] = "-101.00"
+        self.assertEqual(sum(Decimal(p["debit"]) for p in payload["entries"]), 0)
+        with EventJournal(self.path) as journal:
+            CorporateSession(journal, before)
+            journal.append(
+                "corp-action:" + hashlib.sha256(b"corp_001").hexdigest(),
+                "corporate_action",
+                20,
+                {
+                    "action": action().record(),
+                    "reconciliation": readiness().record(),
+                    "book_digest": _digest(after.record()),
+                    "postings": payload,
+                },
+            )
+            journal.verify()  # Valid hash chain does not establish correct accounting.
+            with self.assertRaisesRegex(CorporateActionError, "double-entry postings do not match"):
+                CorporateSession(journal, before)
+
     def test_unknown_fill_after_settlement_is_not_dressed_as_corporate_cash(self):
         start = initial()
         with EventJournal(self.path) as journal:
