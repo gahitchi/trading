@@ -5,16 +5,22 @@ from __future__ import annotations
 import unittest
 from dataclasses import replace
 
-from lab.markets.domain import AssetClass, ContractKind
-
-from lab.markets.broker_trial import ProbeEvidence, ProbeKind, ProbeStatus, TrialScope, assess_trial_claims
+from lab.broker_trial import (
+    ProbeEvidence,
+    ProbeKind,
+    ProbeStatus,
+    TrialAsset,
+    TrialContract,
+    TrialScope,
+    assess_trial_claims,
+)
 
 HASH = "a" * 64
 NOW = 100_000
 AGE = 1_000
 
 
-def scoped(asset: AssetClass = AssetClass.EQUITY, kind: ContractKind = ContractKind.SHARE) -> TrialScope:
+def scoped(asset: TrialAsset = TrialAsset.EQUITY, kind: TrialContract = TrialContract.SHARE) -> TrialScope:
     return TrialScope(
         venue="TEST_VENUE",
         account_scope="PAPER_ALIAS_ONLY",
@@ -86,9 +92,9 @@ class BrokerTrialTests(unittest.TestCase):
 
     def test_equity_forex_crypto_derivatives_require_different_proof(self):
         stock = scoped()
-        fx = scoped(AssetClass.FOREX, ContractKind.FOREX_CASH)
-        spot = scoped(AssetClass.CRYPTO, ContractKind.SPOT)
-        deriv = scoped(AssetClass.CRYPTO, ContractKind.LINEAR_DERIVATIVE)
+        fx = scoped(TrialAsset.FOREX, TrialContract.FOREX_CASH)
+        spot = scoped(TrialAsset.CRYPTO, TrialContract.SPOT)
+        deriv = scoped(TrialAsset.CRYPTO, TrialContract.LINEAR_DERIVATIVE)
         self.assertIn(ProbeKind.EQUITY_CORPORATE_ACTIONS, stock.required())
         self.assertNotIn(ProbeKind.FX_ROLLOVER, stock.required())
         self.assertIn(ProbeKind.FX_ROLLOVER, fx.required())
@@ -106,7 +112,7 @@ class BrokerTrialTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "only paper"):
             replace(scoped(), environment="offline_fixture")
         with self.assertRaisesRegex(ValueError, "contract kind mismatch"):
-            replace(scoped(), contract_kind=ContractKind.SPOT)
+            replace(scoped(), contract_kind=TrialContract.SPOT)
         with self.assertRaises(ValueError):
             replace(scoped(), account_scope="PAPER ALIAS")
 
