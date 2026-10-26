@@ -136,7 +136,10 @@ def evaluate_builtin(cfg, spec: SignalSpec, tickers: list[str]) -> dict:
     if spec.path is not None:
         raise ApprovalError("qualify-builtin expects a built-in SignalSpec")
     research_cfg = replace(cfg, capital=cfg.paper.capital)
-    frames = data.load_many(research_cfg, tickers)
+    try:
+        frames = data.load_many(research_cfg, tickers)
+    except data.DataError as exc:
+        raise ApprovalError("unable to load qualified market data for built-in research") from exc
     identity = _identity(cfg, spec, tickers, frames)
     _quality_gate(identity["quality"])
     bounds = {"bound_risk": True}
@@ -185,7 +188,10 @@ def approve_builtin(cfg, spec: SignalSpec, tickers: list[str], evaluation: dict)
         raise ApprovalError("built-in strategy did not pass research qualification")
     if evaluation["test"]["survived"] is not True:
         raise ApprovalError("built-in strategy did not survive out-of-sample testing")
-    frames = data.load_many(cfg, tickers)
+    try:
+        frames = data.load_many(cfg, tickers)
+    except data.DataError as exc:
+        raise ApprovalError("qualified market data disappeared before operator approval") from exc
     if evaluation.get("identity") != _identity(cfg, spec, tickers, frames):
         raise ApprovalError("data, implementation or configured deployment changed since evaluation")
     path = evidence_path(cfg, spec, tickers)
@@ -232,7 +238,10 @@ def verify_builtin(cfg, spec: SignalSpec, tickers: list[str]) -> str:
         raise ApprovalError("built-in strategy source/parameter digest changed")
     if identity["tickers"] != sorted(tickers) or identity.get("deployment") != _bound_context(cfg, tickers):
         raise ApprovalError("built-in approval no longer matches the deployment context")
-    current = data.load_many(cfg, tickers)
+    try:
+        current = data.load_many(cfg, tickers)
+    except data.DataError as exc:
+        raise ApprovalError("qualified market data disappeared since approval") from exc
     actual = _identity(cfg, spec, tickers, current)
     if identity != actual:
         raise ApprovalError("research data, evaluation periods, gates or provenance changed; re-validate builtin")
