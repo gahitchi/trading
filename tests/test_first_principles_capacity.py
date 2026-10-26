@@ -39,6 +39,7 @@ def test_existing_position_reduction_is_not_subject_to_opening_volume_cap():
     assert _opening(10, 15) == 5
 
 
+@pytest.mark.harness
 def test_harness_paper_node_receives_identical_capacity_configuration(goog_lab, goog, tmp_path, monkeypatch):
     """Spy on the actual IBKR-paper node constructor used by the broker harness."""
     from lab import paper
