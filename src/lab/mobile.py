@@ -78,6 +78,7 @@ def _sqlite_snapshot(file: Path) -> dict:
         row = conn.execute("SELECT value FROM snapshot WHERE id=1").fetchone()
         if row is None:
             raise MobileDiagnosticError("authoritative execution snapshot is missing")
+
         def unique(pairs):
             out = {}
             for k, v in pairs:
@@ -85,8 +86,10 @@ def _sqlite_snapshot(file: Path) -> dict:
                     raise MobileDiagnosticError("duplicate execution snapshot JSON key")
                 out[k] = v
             return out
+
         def no_nonfinite(value):
             raise MobileDiagnosticError(f"nonfinite execution JSON number: {value}")
+
         state = json.loads(row[0], object_pairs_hook=unique, parse_constant=no_nonfinite)
         if not isinstance(state, dict) or state.get("authoritative_store") != file.name:
             raise MobileDiagnosticError("execution snapshot is not bound to this database name")
@@ -153,10 +156,7 @@ def _page(snapshot: dict | None) -> bytes:
                 ("Snapshot SHA-256", snapshot["artifact_sha256"]),
             ]
         )
-    lines = "".join(
-        f"<dt>{html.escape(label)}</dt><dd>{html.escape(value)}</dd>"
-        for label, value in items
-    )
+    lines = "".join(f"<dt>{html.escape(label)}</dt><dd>{html.escape(value)}</dd>" for label, value in items)
     return (
         "<!doctype html><html lang='en'><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
