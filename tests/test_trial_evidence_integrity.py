@@ -93,7 +93,9 @@ def test_rewriting_valid_npz_cannot_rebind_past_statistical_evidence(tmp_path, g
     revised = active * 2
     # An attacker replacing both the old NPZ and a future replay's observed
     # returns must not erase the old committed digest from selection history.
-    np.savez_compressed(path, ts=pd.DatetimeIndex(active.index).as_unit("ns").asi8, r=revised.to_numpy(dtype=np.float32))
+    np.savez_compressed(
+        path, ts=pd.DatetimeIndex(active.index).as_unit("ns").asi8, r=revised.to_numpy(dtype=np.float32)
+    )
     with pytest.raises(ValueError, match="previously completed trial bytes changed"):
         experiments.register_trial(cfg, "train", spec, "rebound", revised)
     with pytest.raises(ValueError, match="quarantined"):
