@@ -56,6 +56,40 @@ only a capture digest, snapshot token, event counts and explicit
 `UNQUALIFIED_PRIVATE_CAPTURE`/`UNVERIFIED` statuses, never raw account or
 trade IDs. Exit code 0 means that *this private file set could be parsed*; it
 does **not** approve a strategy or attest that IBKR emitted complete data.
+
+For the candidate B01 read-only checklist, append `--b01-report`. It inspects
+the bounded, exact-Decimal broker-account balance rows, local read-only
+observation interval and capture freshness after independently re-hashing the
+files. The structured output is always `"qualification": "BLOCKED"` with
+the outstanding broker-identity, history, cash/fees, clock and data-permission
+requirements listed, even when the observed account number matches the paper
+configuration. The capture clock now begins when the DataActor requests the
+broker observations, not when the final dump starts. It does not prove the
+broker's as-of time or completeness.
+
+**Operator B01 collection, Arch/Linux:** Stop the Trading Lab paper engine (or
+do not start it); keep IB Gateway in PAPER mode and authenticated. Use a
+private directory outside the repository, and do not run a smoke order:
+
+```sh
+# From the candidate repo checkout, with the appropriate local lab.toml:
+uv run python tools/capture_ib_session.py --config lab.toml \\
+  snapshot B01-readonly --out "$HOME/trading-evidence" \\
+  --tickers SPY --wait 45 --days 14
+
+# Replace SNAPSHOT_DIRECTORY with the printed private path from the preceding command:
+PYTHONPATH=src python -m lab.kernel.paper_capture_bridge \\
+  --config lab.toml --capture SNAPSHOT_DIRECTORY \\
+  --ticker SPY --action-version v1 --b01-report
+```
+
+`SPY` is just an example: select a symbol already present in
+`[universe]`. If IB Gateway is unavailable, the capture should fail rather
+than fabricate evidence. Only report the **non-sensitive** checklist JSON and
+errors after checking they contain no credentials or account numbers; never
+paste the underlying `broker_*.json` files. Keep the original hashes and
+captured data local for supervised acceptance. The next phase still needs
+direct authenticated broker-session evidence and complete historical cursors.
 Account scope, instrument version and paper port must match the local config.
 The raw capture and its private provenance must never be published.
 

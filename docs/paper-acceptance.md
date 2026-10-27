@@ -32,6 +32,18 @@ within the configured limits and paper buying power. These tests do not certify 
 | ID | Trigger and required observations | Pass condition |
 |---|---|---|
 | B01 | `paper --check-only`, then read-only connect; configured and observed account identity, port, mode, currency and initial cash/positions | Exact paper-account match; supported USD configuration; no orders from preflight; nonmatching/live identity refuses before submission. Negative account tests use the harness, never a real live account. |
+
+B01 has a non-executable **collection-only** stage: the read-only DataActor
+`tools/capture_ib_session.py snapshot` (never `--smoke --test-order`) records
+account/position/order cache observations while the paper node is stopped,
+then `python -m lab.kernel.paper_capture_bridge ... --b01-report` compares the
+local reported account and gateway port against the operator's config and
+checks the exact balance strings and capture interval. Its only possible
+qualification result is `BLOCKED` until an independently authenticated,
+complete broker source and reviewer attestations exist. Do not interpret a
+zero exit status from the evidence parser as passing B01. Original evidence
+is kept private, with no passwords, account IDs or raw order/trade identifiers
+in collaboration discussions.
 | B02 | `paper --smoke --test-order`; complete test/cleanup order statuses, fills and initial/final positions | Every smoke intent has terminal evidence, position delta is exactly zero, no unexplained cash delta after fees; crash/timeout cannot report success. Normal node refuses unresolved smoke state. |
 | B03 | Daily decision, next opening auction, each partial fill, commissions and final account values | Each broker trade ID is applied exactly once; sum(signed fills) equals ledger position change to 1e-9 shares; cash delta equals signed proceeds minus actual fees to USD 0.01 after separately classified cash movements. No unexplained residual accepted as rounding. |
 | B04 | Interrupt after intent persistence/before acknowledgement; restart, then duplicate execution reports | Same order ID remains attributable; no replacement while status is unknown; replay changes cash/positions zero times for already applied IDs and exactly once for each new fill. Terminal status alone cannot discard cached executions. |
