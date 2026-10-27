@@ -21,8 +21,19 @@ def d(value):
     return Decimal(value)
 
 
-def cash(event_id="deposit", source_ref="ledger:deposit", time=1, kind="CAPITAL_IN", amount="1000"):
-    return CashFact(event_id, source_ref, time, kind, d(amount))
+def cash(
+    event_id="deposit",
+    source_ref="ledger:deposit",
+    time=1,
+    kind="CAPITAL_IN",
+    amount="1000",
+    *,
+    source_kind="BROKER_CASH_ACTIVITY",
+    settlement_status="SETTLED",
+    source_sha256="a" * 64,
+):
+    # A well-formed synthetic source fingerprint is not independent authenticity.
+    return CashFact(event_id, source_ref, time, kind, d(amount), source_kind, settlement_status, source_sha256)
 
 
 def fill(event_id="fill1", source_ref="trade:fill1", time=2, side="BUY", qty="2", px="100", fee="0.25"):
@@ -185,3 +196,48 @@ def test_snapshot_event_ids_are_not_sufficient_when_evidence_hash_disagrees():
     assert book.reconcile(snapshot).matches
     with pytest.raises(EngineFactError, match="fingerprint"):
         book.reconcile(replace(snapshot, applied_evidence_head="f" * 64))
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        cash(settlement_status="ESTIMATED"),
+        cash(settlement_status="PENDING"),
+        cash(settlement_status="VERIFIED"),
+        cash(settlement_status=True),
+        cash(source_kind="UNCLASSIFIED"),
+        cash(kind="FINANCING", source_kind="BANK_TRANSFER"),
+        cash(kind="BORROW_FEE", source_kind="BANK_TRANSFER"),
+        cash(kind="DIVIDEND", source_kind="BANK_TRANSFER"),
+        cash(source_sha256=""),
+        cash(source_sha256="A" * 64),
+        cash(source_sha256="a" * 63),
+        cash(source_sha256=None),
+    ],
+)
+def test_unsettled_or_unclassified_cash_cannot_enter_engine_book(bad):
+    original = EngineEconomicBook("SIM-001")
+    with pytest.raises(EngineFactError):
+        original.append(bad)
+    assert not original.events
+    assert not original.ledger.journal
+
+
+def test_settled_dividend_and_financing_are_non_trade_cash_events():
+    book = EngineEconomicBook("SIM-001").append(cash())
+    book = book.append(cash("div", "statement:div", 2, "DIVIDEND", "3.50"))
+    book = book.append(cash("carry", "statement:carry", 3, "FINANCING", "0.25"))
+    book = book.append(cash("borrow", "statement:borrow", 4, "BORROW_FEE", "0.50"))
+    book.audit()
+    assert book.ledger.balance("cash:USD") == d("1002.75")
+    assert all(entry.kind != "FILL" for entry in book.ledger.journal)
+
+
+def test_settlement_source_hash_is_bound_to_engine_evidence_identity():
+    book = EngineEconomicBook("SIM-001").append(cash())
+    forged = replace(book, events=(replace(book.events[0], source_sha256="b" * 64),))
+    with pytest.raises(EngineFactError, match="custody chain"):
+        forged.audit()
+    assert book.evidence_head != EngineEconomicBook("SIM-001").append(
+        replace(cash(), source_sha256="b" * 64)
+    ).evidence_head
