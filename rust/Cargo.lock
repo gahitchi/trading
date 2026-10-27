@@ -32,6 +32,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "trading-paper-gateway"
+version = "0.1.0"
+dependencies = [
+ "trading-core-types",
+ "trading-risk-gate",
+ "trading-strategy-engine",
+ "trading-wallet-manager",
+]
+
+[[package]]
 name = "trading-risk-gate"
 version = "0.1.0"
 dependencies = [

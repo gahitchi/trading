@@ -1,29 +1,33 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use trading_core_types::{
-    FixedPrice, FixedQty, FixedUsd, OrderIntent, OrderSide, TimeInForce, VenueId, SCALE,
+    FixedPrice, FixedQty, FixedUsd, OrderIntent, OrderSide, SCALE, TimeInForce, VenueId,
 };
 use trading_paper_gateway::{
-    Journal, JournalError, OfflinePaperSession, PaperError, PaperQuote,
-    PaperStatus, RecordKind, run_demo,
+    Journal, JournalError, OfflinePaperSession, PaperError, PaperQuote, PaperStatus, RecordKind,
+    run_demo,
 };
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Self {
         let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        Self(std::env::temp_dir().join(
-            format!("rust-part6-paper-{}-{id}", std::process::id())
-        ))
+        Self(std::env::temp_dir().join(format!("rust-part6-paper-{}-{id}", std::process::id())))
     }
-    fn path(&self) -> &Path { &self.0 }
+    fn path(&self) -> &Path {
+        &self.0
+    }
 }
 impl Drop for Scratch {
-    fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 fn quote() -> PaperQuote {
     PaperQuote {
-        seq: 1, exchange_ns: 995_000_000, recv_ns: 1_000_000_000,
+        seq: 1,
+        exchange_ns: 995_000_000,
+        recv_ns: 1_000_000_000,
         best_bid: FixedPrice(100 * SCALE),
         best_ask: FixedPrice(100 * SCALE + SCALE / 10),
         bid_quantity: FixedQty(60_000_000),
@@ -32,11 +36,21 @@ fn quote() -> PaperQuote {
 }
 fn entry(id: u64) -> OrderIntent {
     OrderIntent::new(
-        id, 1_000_000_000, FixedPrice(100 * SCALE),
-        FixedQty(SCALE), Some(FixedPrice(101 * SCALE)),
-        FixedUsd(5 * SCALE), 0, 5, VenueId::Equities, 0,
-        OrderSide::Sell, TimeInForce::Ioc, false,
-    ).unwrap()
+        id,
+        1_000_000_000,
+        FixedPrice(100 * SCALE),
+        FixedQty(SCALE),
+        Some(FixedPrice(101 * SCALE)),
+        FixedUsd(5 * SCALE),
+        0,
+        5,
+        VenueId::Equities,
+        0,
+        OrderSide::Sell,
+        TimeInForce::Ioc,
+        false,
+    )
+    .unwrap()
 }
 fn session(path: &Path) -> OfflinePaperSession {
     let mut p = OfflinePaperSession::create(path).unwrap();
@@ -114,7 +128,10 @@ fn entry_is_denied_before_operator_arm() {
     let mut p = OfflinePaperSession::create(tmp.path()).unwrap();
     p.initialize_synthetic_stream(quote()).unwrap();
     assert_eq!(p.status(), PaperStatus::Disarmed);
-    assert!(matches!(p.reserve_short(&entry(1)), Err(PaperError::NotArmed)));
+    assert!(matches!(
+        p.reserve_short(&entry(1)),
+        Err(PaperError::NotArmed)
+    ));
 }
 #[test]
 fn paper_source_disallows_reversed_time_or_crossed_quote() {
@@ -156,7 +173,10 @@ fn fill_cannot_exceed_event_liquidity_or_pending_order() {
     let tmp = Scratch::new();
     let mut p = session(tmp.path());
     p.reserve_short(&entry(1)).unwrap();
-    assert!(matches!(p.simulate_fill(1, FixedQty(SCALE)), Err(PaperError::NoFill)));
+    assert!(matches!(
+        p.simulate_fill(1, FixedQty(SCALE)),
+        Err(PaperError::NoFill)
+    ));
     assert!(p.simulate_fill(1, FixedQty(70_000_000)).is_err());
     assert_eq!(p.summary().confirmed_short_qty_raw, 0);
     assert_eq!(p.summary().pending_quantity_raw(), SCALE);
@@ -181,10 +201,21 @@ fn simulator_halt_blocks_new_entries_but_allows_covers() {
     assert_eq!(p.status(), PaperStatus::EntryHalted);
     assert!(p.reserve_short(&entry(2)).is_err());
     let cover = OrderIntent::new(
-        2, 1_000_000_000, FixedPrice(101 * SCALE),
-        FixedQty(60_000_000), None, FixedUsd::ZERO, 0, 5,
-        VenueId::Equities, 0, OrderSide::Buy, TimeInForce::Ioc, true,
-    ).unwrap();
+        2,
+        1_000_000_000,
+        FixedPrice(101 * SCALE),
+        FixedQty(60_000_000),
+        None,
+        FixedUsd::ZERO,
+        0,
+        5,
+        VenueId::Equities,
+        0,
+        OrderSide::Buy,
+        TimeInForce::Ioc,
+        true,
+    )
+    .unwrap();
     assert_eq!(p.reserve_cover(&cover).unwrap().0, 60_000_000);
 }
 #[test]
@@ -205,17 +236,33 @@ fn reducing_short_changes_wallet_only_after_durable_cover_fill() {
     p.confirm_paper_cancel(1).unwrap();
     let initial = p.wallet().total_equity;
     let cover = OrderIntent::new(
-        2, 1_000_000_000, FixedPrice(101 * SCALE),
-        FixedQty(60_000_000), None, FixedUsd::ZERO, 0, 5,
-        VenueId::Equities, 0, OrderSide::Buy, TimeInForce::Ioc, true,
-    ).unwrap();
+        2,
+        1_000_000_000,
+        FixedPrice(101 * SCALE),
+        FixedQty(60_000_000),
+        None,
+        FixedUsd::ZERO,
+        0,
+        5,
+        VenueId::Equities,
+        0,
+        OrderSide::Buy,
+        TimeInForce::Ioc,
+        true,
+    )
+    .unwrap();
     p.reserve_cover(&cover).unwrap();
     assert_eq!(p.wallet().total_equity, initial);
     p.simulate_fill(2, FixedQty(40_000_000)).unwrap();
     assert_eq!(p.summary().confirmed_short_qty_raw, 20_000_000);
     assert!(p.wallet().total_equity.0 < initial.0);
-    assert_eq!(Journal::inspect(tmp.path()).unwrap().summary().confirmed_short_qty_raw,
-        20_000_000);
+    assert_eq!(
+        Journal::inspect(tmp.path())
+            .unwrap()
+            .summary()
+            .confirmed_short_qty_raw,
+        20_000_000
+    );
 }
 #[test]
 fn cannot_seal_session_with_unresolved_inventory_or_order() {
