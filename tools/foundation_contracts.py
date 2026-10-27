@@ -52,8 +52,11 @@ def validate(root: Path, path: Path | None = None) -> dict:
             raise ContractError("unnamed foundation gate")
         if not isinstance(gate.get("exit_evidence"), str) or not gate["exit_evidence"].strip():
             raise ContractError("gate exit evidence undefined")
-        files = [gate.get("primary_owner"), *(gate.get("implementation_refs") or [])]
-        if len(files) != len(set(files)) or any(type(f) is not str for f in files):
+        references = gate.get("implementation_refs")
+        if type(references) is not list or not references:
+            raise ContractError("gate must name its existing implementation and evidence boundaries")
+        files = [gate.get("primary_owner"), *references]
+        if any(type(f) is not str for f in files) or len(files) != len(set(files)):
             raise ContractError("missing or duplicated code ownership reference")
         for ref in files:
             rel = PurePosixPath(ref)
