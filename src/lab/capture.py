@@ -209,8 +209,10 @@ def _make_actor(cfg: LabConfig, iids: dict, out_dir: Path, wait_s: float, histor
             super().__init__(CaptureConfig())
             self.bars: list[dict] = []
             self.done = False
+            self.started_ns: int | None = None
 
         def on_start(self):
+            self.started_ns = time.time_ns()
             start = datetime.now(UTC) - timedelta(days=history_days)
             for iid in iids.values():
                 for spec in specs:
@@ -232,7 +234,11 @@ def _make_actor(cfg: LabConfig, iids: dict, out_dir: Path, wait_s: float, histor
             if self.done:
                 return
             self.done = True
-            capture_started_ns = time.time_ns()
+            # Capture interval starts when the actor requests the broker observations,
+            # not when the timer begins writing the final cache snapshot.
+            capture_started_ns = self.started_ns
+            if capture_started_ns is None:
+                raise RuntimeError("capture actor never entered the read-only observation session")
             from nautilus_trader.model import Venue
 
             from lab.paper import IB
