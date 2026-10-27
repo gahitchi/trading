@@ -452,8 +452,7 @@ fn replayed_order_id_is_not_authorized_twice() {
 #[test]
 fn invalid_operator_and_symbol_are_denied_without_token_spend() {
     let mut g = ready_gate();
-    let mut op = OperatorSnapshot::default();
-    op.strategy_enable_mask = 0;
+    let op = OperatorSnapshot { strategy_enable_mask: 0, ..OperatorSnapshot::default() };
     let a = AtomicOperatorState::new(op).unwrap();
     assert_eq!(
         g.validate_entry(
@@ -485,8 +484,7 @@ fn token_bucket_rejects_clock_regression() {
 }
 #[test]
 fn risk_policy_rejects_unbounded_limits() {
-    let mut p = RiskPolicy::default();
-    p.burst_capacity = 0;
+    let mut p = RiskPolicy { burst_capacity: 0, ..RiskPolicy::default() };
     assert!(RiskGate::new(p).is_err());
     p.burst_capacity = 10;
     p.max_quote_age_ns = 999_999_999;
