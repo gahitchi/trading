@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import fields
 from decimal import Decimal
 from pathlib import Path
@@ -106,7 +107,7 @@ class EconomicEventStore:
         self.path = Path(path)
         self.account_id = _identity(account_id, "durable economic account")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "CREATE TABLE IF NOT EXISTS identity ("
@@ -168,7 +169,7 @@ class EconomicEventStore:
         return book
 
     def load(self) -> EngineEconomicBook:
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             db.execute("BEGIN")
             result = self._read_locked(db)
             db.execute("COMMIT")
@@ -198,7 +199,7 @@ class EconomicEventStore:
             raise EconomicStoreError("noncash source bytes have no qualified custody policy")
         if expected_head is not None and (type(expected_head) is not str or len(expected_head) != 64):
             raise EconomicStoreError("invalid expected custody fingerprint")
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             book = self._read_locked(db)
             existing = db.execute(
