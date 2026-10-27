@@ -20,6 +20,7 @@ from typing import Any
 
 from lab.economic_ledger import EconomicLedgerError, exact
 from lab.engine_events import (
+    SHA256,
     BrokerFillFact,
     CashFact,
     CashInLieuFact,
@@ -28,7 +29,6 @@ from lab.engine_events import (
     EngineFactError,
     FillFact,
     SplitFact,
-    SHA256,
     _identity,
 )
 
