@@ -36,6 +36,17 @@ def test_snapshot_records_the_broker_view_without_placing_orders(goog_lab, goog,
         "broker_capture_meta.json",
         "NOTE.json",
     } <= files
+    # Native Money is serialized as exact numeric strings (no embedded currency
+    # suffix), because the standalone B01 parser accepts Decimal directly.
+    from decimal import Decimal
+
+    reported = json.loads((d / "broker_account.json").read_text())
+    assert reported["balances"]
+    for amount in reported["balances"]:
+        for name in ("total", "free", "locked"):
+            assert type(amount[name]) is str
+            assert Decimal(amount[name]).is_finite()
+
     orders = json.loads((d / "broker_orders.json").read_text())
     assert orders and any(e["type"] == "OrderFilled" and e.get("trade_id") for o in orders for e in o["events"])
     bars = json.loads((d / "broker_bars.json").read_text())
@@ -163,6 +174,14 @@ def test_invalid_paper_account_creates_no_partial_capture(goog_lab, tmp_path):
     [
         (lambda d: d["broker_account.json"].update(account_id=None), "account observation"),
         (lambda d: d["broker_account.json"].update(balances=[]), "balances not observed"),
+        (
+            lambda d: d["broker_account.json"]["balances"][0].update(total="100.00 USD"),
+            "invalid exact broker currency balance",
+        ),
+        (
+            lambda d: d["broker_account.json"]["balances"][0].update(total="NaN"),
+            "nonfinite broker currency balance",
+        ),
         (lambda d: d["identity.json"].update(paper_port=4001), "gateway port"),
         (lambda d: d["broker_positions.json"].pop("GOOG"), "positions not observed"),
         (lambda d: d["broker_positions.json"]["GOOG"].update(net_exact=None), "positions not observed"),

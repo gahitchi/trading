@@ -141,6 +141,11 @@ will be a separately supervised phase after protocol review.
 
 ## Completed capture status versus broker qualification
 
+Nautilus's monetary values are exported via `Money.as_decimal()` into
+exact **numeric** strings. Currency identifiers occupy their own field.
+This avoids accidentally serializing display strings containing currency
+suffixes, which the offline Decimal inspector rejects.
+
 The private `CAPTURE_STATUS.json` marker is written last and may be
 `COMPLETE_UNVERIFIED` only after all required export files have been created
 and the source-cache observation passes fail-closed **local** checks:

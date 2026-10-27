@@ -191,6 +191,18 @@ def _verify_capture_files(folder: Path, *, expected_account: str, expected_port:
     balances = account.get("balances")
     if not isinstance(balances, list) or not balances:
         raise RuntimeError("capture incomplete: broker balances not observed")
+    for balance in balances:
+        if not isinstance(balance, dict) or not isinstance(balance.get("currency"), str):
+            raise RuntimeError("capture incomplete: malformed broker currency balance")
+        for field in ("total", "free", "locked"):
+            value = balance.get(field)
+            if type(value) is not str or len(value) > 100:
+                raise RuntimeError("capture incomplete: missing exact broker currency balance")
+            try:
+                if not Decimal(value).is_finite():
+                    raise RuntimeError("capture incomplete: nonfinite broker currency balance")
+            except ArithmeticError as exc:
+                raise RuntimeError("capture incomplete: invalid exact broker currency balance") from exc
     if not isinstance(positions, dict) or not tickers or not all(
         isinstance(positions.get(t), dict)
         and isinstance(positions[t].get("positions"), list)
@@ -326,9 +338,11 @@ def _make_actor(cfg: LabConfig, iids: dict, out_dir: Path, wait_s: float, histor
                     balances.append(
                         {
                             "currency": str(b.currency),
-                            "total": str(b.total),
-                            "free": str(b.free),
-                            "locked": str(b.locked),
+                            # Nautilus Money.__str__ may include the currency suffix.
+                            # B01 requires exact numeric strings with currency in its own field.
+                            "total": str(b.total.as_decimal()),
+                            "free": str(b.free.as_decimal()),
+                            "locked": str(b.locked.as_decimal()),
                         }
                     )
             positions = {}
