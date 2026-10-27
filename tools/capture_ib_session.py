@@ -19,7 +19,8 @@ from pathlib import Path
 
 def main(argv=None) -> int:
     from lab.capture import GRADING_NOTE, bundle, sanitize, snapshot
-    from lab.config import load_config
+    from lab.config import ConfigError, load_config
+    from lab.safety import SafetyError
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default="lab.toml")
@@ -49,8 +50,19 @@ def main(argv=None) -> int:
             d = snapshot(cfg, tickers, a.out, a.phase, wait_s=a.wait, history_days=a.days)
         else:
             d = bundle(cfg, a.out, a.phase)
+    except SafetyError:
+        # SafetyError may contain account identifiers: never echo it to terminals/logs.
+        print(
+            "capture refused: missing or invalid PAPER account ID/port; "
+            "set [paper] account_id in lab.toml or LAB_PAPER_ACCOUNT (DU/DUR account number)",
+            file=sys.stderr,
+        )
+        return 2
+    except ConfigError:
+        print("capture refused: invalid local configuration; review lab.toml", file=sys.stderr)
+        return 2
     except (ValueError, OSError) as e:
-        print(f"capture refused: {e}", file=sys.stderr)
+        print(f"capture refused: {type(e).__name__}: check local inputs and broker connectivity", file=sys.stderr)
         return 2
     print(f"written: {d}; {GRADING_NOTE}")
     return 0

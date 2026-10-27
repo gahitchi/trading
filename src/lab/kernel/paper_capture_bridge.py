@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -346,7 +347,11 @@ def main(argv: list[str] | None = None) -> int:
         ticker = args.ticker.upper()
         if ticker not in universe:
             raise LifecycleError("ticker is not present in the configured universe")
-        account, port = paper["account_id"], paper["port"]
+        # Match lab.config._load_config() exactly: operator overrides take precedence
+        # over lab.toml in both the read-only capture and its offline inspection.
+        # Neither an IBKR username nor an account ID is a credential for this CLI.
+        account = os.environ.get("LAB_PAPER_ACCOUNT", paper["account_id"])
+        port = int(os.environ.get("LAB_IB_PORT", paper["port"]))
         if type(account) is not str or type(port) is not int or type(universe[ticker]) is not str:
             raise LifecycleError("invalid operator paper-account or instrument configuration")
         observed = load_paper_capture(
