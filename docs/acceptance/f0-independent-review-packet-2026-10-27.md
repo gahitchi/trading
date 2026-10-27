@@ -41,6 +41,16 @@ For the chosen SHA, use its GitHub CI run to verify the following:
    `data/SPY.parquet`. The digest-only receipt stays local; do not
    upload real account/configuration or raw data to CI.
 
+   This particular F0 receipt requires an **isolated SPY-only/ARCX daily**
+   `lab.toml`, not the product's normal multi-ticker configuration.
+   A non-`DU` account identifier, known IBKR live default port (4001/7496),
+   or explicit non-paper mode is refused. Create and review a distinct
+   committed F0-specific configuration candidate rather than altering
+   the operator's production settings or treating a dirty checkout as valid.
+   Other endpoints, environment overrides, and actual broker account mode
+   cannot be authenticated from configuration alone; broker evidence remains
+   out of scope until F6.
+
 For the candidate, capture CI run IDs, artifact names and SHA-256 digests in an
 external immutable review record; **do not manually edit generated receipts**.
 

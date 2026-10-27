@@ -66,6 +66,12 @@ def test_capture_local_inputs_only_records_redacted_hashes(local_checkout):
         ("lab.toml", '[universe]\nSPY = "XNYS"\n[trading]\nspeed = "daily"\n'),
         ("lab.toml", '[universe]\nSPY = "ARCX"\n[trading]\nspeed = "15m"\n'),
         ("lab.toml", 'universe = "ARCX"\n[trading]\nspeed = "daily"\n'),
+        ("lab.toml", '[universe]\nSPY = "ARCX"\nQQQ = "XNAS"\n[trading]\nspeed = "daily"\n'),
+        ("lab.toml", '[universe]\nSPY = "ARCX"\n[trading]\nspeed = "daily"\n[paper]\naccount_id = "U123"\n'),
+        ("lab.toml", '[universe]\nSPY = "ARCX"\n[trading]\nspeed = "daily"\n[paper]\nport = 4001\n'),
+        ("lab.toml", '[universe]\nSPY = "ARCX"\n[trading]\nspeed = "daily"\n[paper]\nport = 7496\n'),
+        ("lab.toml", '[universe]\nSPY = "ARCX"\n[trading]\nspeed = "daily"\n[paper]\nmode = "live"\n'),
+        ("lab.toml", '[universe]\nSPY = "ARCX"\n[trading]\nspeed = "daily"\n[paper]\nport = "4002"\n'),
         ("data/manifest.json", '{"QQQ": {"source": "synthetic"}}'),
         ("data/manifest.json", '{"SPY": null}'),
         ("data/SPY.parquet", "bad parquet"),
@@ -112,3 +118,13 @@ def test_receipt_cannot_self_approve_market_feed(local_checkout):
     receipt.write_text(json.dumps(data))
     with pytest.raises(source.FoundationError, match="differs"):
         inputs.verify(root, receipt)
+
+
+def test_paper_account_reference_config_is_redacted(local_checkout):
+    root, receipt = local_checkout
+    (root / "lab.toml").write_text(
+        '[universe]\nSPY = "ARCX"\n[trading]\nspeed = "daily"\n[paper]\naccount_id = "DUTEST123"\nport = 4002\n'
+    )
+    inputs.capture(root, receipt)
+    assert "DUTEST123" not in receipt.read_text()
+    assert inputs.verify(root, receipt)["qualification"] == "BLOCKED"
