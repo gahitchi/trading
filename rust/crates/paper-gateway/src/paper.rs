@@ -8,11 +8,10 @@ use trading_core_types::{
 use trading_risk_gate::{
     AccountEvidence, GateDecision, MarketEvidence, RiskContext, RiskGate, RiskPolicy, RiskReason,
 };
-use trading_wallet_manager::{Strategy, WalletSnapshot};
 use trading_strategy_engine::{
-    EntryEngine, EntrySnapshot, OrderEvent, OrderEventKind, OrderStatus,
-    OrderTracker,
+    EntryEngine, EntrySnapshot, OrderEvent, OrderEventKind, OrderStatus, OrderTracker,
 };
+use trading_wallet_manager::{Strategy, WalletSnapshot};
 
 #[derive(Debug)]
 pub enum PaperError {
@@ -85,33 +84,56 @@ struct PaperOrderShadow {
 }
 impl PaperOrderShadow {
     fn acknowledged(order_id: u64, amount: FixedQty) -> Result<Self, PaperError> {
-        let mut tracker = OrderTracker::new(order_id, amount)
-            .map_err(|_| PaperError::InvalidFlow)?;
+        let mut tracker =
+            OrderTracker::new(order_id, amount).map_err(|_| PaperError::InvalidFlow)?;
         tracker.sent().map_err(|_| PaperError::InvalidFlow)?;
-        tracker.apply(OrderEvent {
-            client_id: order_id, sequence: 1, event: OrderEventKind::Ack,
-        }).map_err(|_| PaperError::InvalidFlow)?;
-        Ok(Self { tracker, source_seq: 1 })
+        tracker
+            .apply(OrderEvent {
+                client_id: order_id,
+                sequence: 1,
+                event: OrderEventKind::Ack,
+            })
+            .map_err(|_| PaperError::InvalidFlow)?;
+        Ok(Self {
+            tracker,
+            source_seq: 1,
+        })
     }
     fn fill(&mut self, id: u64, added: FixedQty) -> Result<(), PaperError> {
-        let cumulative = self.tracker.cumulative_filled().0
-            .checked_add(added.0).ok_or(PaperError::Arithmetic)?;
-        self.source_seq = self.source_seq.checked_add(1)
+        let cumulative = self
+            .tracker
+            .cumulative_filled()
+            .0
+            .checked_add(added.0)
             .ok_or(PaperError::Arithmetic)?;
-        self.tracker.apply(OrderEvent {
-            client_id: id, sequence: self.source_seq,
-            event: OrderEventKind::CumulativeFill(FixedQty(cumulative)),
-        }).map_err(|_| PaperError::InvalidFlow)?;
+        self.source_seq = self
+            .source_seq
+            .checked_add(1)
+            .ok_or(PaperError::Arithmetic)?;
+        self.tracker
+            .apply(OrderEvent {
+                client_id: id,
+                sequence: self.source_seq,
+                event: OrderEventKind::CumulativeFill(FixedQty(cumulative)),
+            })
+            .map_err(|_| PaperError::InvalidFlow)?;
         Ok(())
     }
     fn canceled(&mut self, id: u64) -> Result<(), PaperError> {
-        self.tracker.cancel_requested().map_err(|_| PaperError::InvalidFlow)?;
-        self.source_seq = self.source_seq.checked_add(1)
+        self.tracker
+            .cancel_requested()
+            .map_err(|_| PaperError::InvalidFlow)?;
+        self.source_seq = self
+            .source_seq
+            .checked_add(1)
             .ok_or(PaperError::Arithmetic)?;
-        self.tracker.apply(OrderEvent {
-            client_id: id, sequence: self.source_seq,
-            event: OrderEventKind::CancelConfirmed,
-        }).map_err(|_| PaperError::InvalidFlow)?;
+        self.tracker
+            .apply(OrderEvent {
+                client_id: id,
+                sequence: self.source_seq,
+                event: OrderEventKind::CancelConfirmed,
+            })
+            .map_err(|_| PaperError::InvalidFlow)?;
         Ok(())
     }
 }
@@ -281,8 +303,7 @@ impl OfflinePaperSession {
             GateDecision::Rejected(reason) => return Err(PaperError::Risk(reason)),
             _ => return Err(PaperError::UnexpectedDecision),
         };
-        let shadow = PaperOrderShadow::acknowledged(
-            intent.client_order_id, amount)?;
+        let shadow = PaperOrderShadow::acknowledged(intent.client_order_id, amount)?;
         self.journal.append(
             RecordKind::EntryReserve,
             intent.client_order_id,
@@ -316,8 +337,7 @@ impl OfflinePaperSession {
             GateDecision::Rejected(reason) => return Err(PaperError::Risk(reason)),
             _ => return Err(PaperError::UnexpectedDecision),
         };
-        let shadow = PaperOrderShadow::acknowledged(
-            intent.client_order_id, amount)?;
+        let shadow = PaperOrderShadow::acknowledged(intent.client_order_id, amount)?;
         self.journal.append(
             RecordKind::CoverReserve,
             intent.client_order_id,
@@ -429,21 +449,29 @@ pub fn run_demo(path: &Path) -> Result<DemoReport, PaperError> {
     p.arm()?;
     // Part 4 must first emit an entry *candidate* from the synthetic
     // microstructure snapshot; Part 5 will independently vet its order.
-    let candidate = EntryEngine::new().evaluate(
-        now, p.operator.load().map_err(|_| PaperError::InvalidFlow)?,
-        EntrySnapshot {
-            observed_ns: now, feed_live_and_synchronized: true,
-            symbol_id: 0,
-            microprice: FixedPrice(100 * SCALE + SCALE / 20),
-            ofi_z: -3.5, bid_imbalance: -0.75, bid_vacuum: 0.25,
-            signed_sell_toxicity: 0.55, isr_down: 3.0,
-            hawkes_activity_proxy: 0.6, last_long_liquidation_ns: None,
-            leader_isr_down: 1.0, leader_return_50ms_bps: 0.0,
-            laggard_residual_bps: 0.0,
-        },
-    ).map_err(|_| PaperError::InvalidFlow)?;
-    if !candidate.is_some_and(|c| c.strategy == Strategy::A
-        && c.short_only && c.symbol_id == 0) {
+    let candidate = EntryEngine::new()
+        .evaluate(
+            now,
+            p.operator.load().map_err(|_| PaperError::InvalidFlow)?,
+            EntrySnapshot {
+                observed_ns: now,
+                feed_live_and_synchronized: true,
+                symbol_id: 0,
+                microprice: FixedPrice(100 * SCALE + SCALE / 20),
+                ofi_z: -3.5,
+                bid_imbalance: -0.75,
+                bid_vacuum: 0.25,
+                signed_sell_toxicity: 0.55,
+                isr_down: 3.0,
+                hawkes_activity_proxy: 0.6,
+                last_long_liquidation_ns: None,
+                leader_isr_down: 1.0,
+                leader_return_50ms_bps: 0.0,
+                laggard_residual_bps: 0.0,
+            },
+        )
+        .map_err(|_| PaperError::InvalidFlow)?;
+    if !candidate.is_some_and(|c| c.strategy == Strategy::A && c.short_only && c.symbol_id == 0) {
         return Err(PaperError::InvalidFlow);
     }
     let entry = OrderIntent::new(

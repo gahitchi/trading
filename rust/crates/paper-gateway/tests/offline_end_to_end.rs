@@ -3,11 +3,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use trading_core_types::{
     FixedPrice, FixedQty, FixedUsd, OrderIntent, OrderSide, SCALE, TimeInForce, VenueId,
 };
-use trading_strategy_engine::OrderStatus;
 use trading_paper_gateway::{
     Journal, JournalError, OfflinePaperSession, PaperError, PaperQuote, PaperStatus, RecordKind,
     run_demo,
 };
+use trading_strategy_engine::OrderStatus;
 static NEXT: AtomicU64 = AtomicU64::new(0);
 struct Scratch(PathBuf);
 impl Scratch {
