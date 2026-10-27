@@ -104,6 +104,60 @@ jobs:
       - uses: actions/checkout@v4
       - name: build the runtime image
         run: docker build -t trading-lab:ci .
+      - name: F0 record image layers and installed OS/Python packages, without broker access
+        run: |
+          mkdir -p "$RUNNER_TEMP/f0-container"
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          image = "trading-lab:ci"
+          def inspect(field):
+              return subprocess.check_output(
+                  ["docker", "image", "inspect", "--format", field, image], text=True
+              ).strip()
+          record = {
+              "id": inspect("{{.Id}}"),
+              "os": inspect("{{.Os}}"),
+              "architecture": inspect("{{.Architecture}}"),
+              "user": inspect("{{.Config.User}}"),
+              "rootfs_layers": json.loads(inspect("{{json .RootFS.Layers}}")),
+          }
+          file = pathlib.Path(os.environ["RUNNER_TEMP"]) / "f0-container" / "image.json"
+          file.write_text(json.dumps(record, sort_keys=True) + "\n")
+          PY
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --entrypoint python trading-lab:ci -c '
+          import hashlib, importlib.metadata, json, pathlib, subprocess
+          saved = pathlib.Path("/usr/local/share/trading-lab-os-packages.txt").read_bytes()
+          actual = subprocess.check_output(["dpkg-query", "-W"])
+          if saved != actual:
+              raise SystemExit("F0 OS package snapshot does not match container runtime")
+          dist = sorted(
+              (d.metadata["Name"].lower(), d.version)
+              for d in importlib.metadata.distributions() if d.metadata.get("Name")
+          )
+          encoded = json.dumps(dist, separators=(",", ":"), sort_keys=True).encode()
+          print(json.dumps({
+              "os_inventory_sha256": hashlib.sha256(actual).hexdigest(),
+              "installed_python_sha256": hashlib.sha256(encoded).hexdigest(),
+              "installed_python_count": len(dist),
+              "nautilus_version": importlib.metadata.version("nautilus_trader"),
+              "lab_version": importlib.metadata.version("trading-lab"),
+          }, sort_keys=True))
+          ' > "$RUNNER_TEMP/f0-container/installed.json"
+          python3 -m tools.foundation_image \
+            --image "$RUNNER_TEMP/f0-container/image.json" \
+            --installed "$RUNNER_TEMP/f0-container/installed.json" \
+            capture --out "$RUNNER_TEMP/f0-container/receipt.json"
+          python3 -m tools.foundation_image \
+            --image "$RUNNER_TEMP/f0-container/image.json" \
+            --installed "$RUNNER_TEMP/f0-container/installed.json" \
+            verify --input "$RUNNER_TEMP/f0-container/receipt.json"
+      - name: retain unsigned F0 container-build observation
+        uses: actions/upload-artifact@v4
+        with:
+          name: f0-container-image
+          path: ${{ runner.temp }}/f0-container/
+          retention-days: 30
       - name: smoke-test the image (no broker needed)
         run: |
           docker run --rm trading-lab:ci --help
