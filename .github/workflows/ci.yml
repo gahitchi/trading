@@ -100,10 +100,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/f0-wheel-repeat"
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
           uv build --wheel --no-build-isolation --out-dir "$RUNNER_TEMP/f0-wheel-repeat"
-          python3 tools/foundation_wheel.py --first dist/*.whl \
+          python3 -m tools.foundation_wheel --first dist/*.whl \
             --second "$RUNNER_TEMP/f0-wheel-repeat"/*.whl capture \
             --out "$RUNNER_TEMP/f0-candidate/wheel-repeat.json"
-          python3 tools/foundation_wheel.py --first dist/*.whl \
+          python3 -m tools.foundation_wheel --first dist/*.whl \
             --second "$RUNNER_TEMP/f0-wheel-repeat"/*.whl verify \
             --input "$RUNNER_TEMP/f0-candidate/wheel-repeat.json"
       - name: retain F0 unsigned source and wheel identity evidence
