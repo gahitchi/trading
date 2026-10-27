@@ -158,6 +158,76 @@ def test_invalid_paper_account_creates_no_partial_capture(goog_lab, tmp_path):
     assert not output.exists()
 
 
+@pytest.mark.parametrize(
+    ("mutate", "error"),
+    [
+        (lambda d: d["broker_account.json"].update(account_id=None), "account observation"),
+        (lambda d: d["broker_account.json"].update(balances=[]), "balances not observed"),
+        (lambda d: d["identity.json"].update(paper_port=4001), "gateway port"),
+        (lambda d: d["broker_positions.json"].pop("GOOG"), "positions not observed"),
+        (lambda d: d["broker_positions.json"]["GOOG"].update(net_exact=None), "positions not observed"),
+        (lambda d: d["broker_orders.json"].append("not a structured order"), "order"),
+        (lambda d: d["broker_capture_meta.json"].update(capture_completed_ns=1), "timestamps"),
+        (lambda d: d["broker_capture_meta.json"].update(coverage_verified=True), "coverage assertion"),
+    ],
+)
+def test_b01_evidence_coherence_gate_rejects_missing_observations(tmp_path, mutate, error):
+    """No native runtime, broker, trading authority or network required."""
+    folder = tmp_path / "read-only-capture"
+    folder.mkdir()
+    docs = {
+        "identity.json": {"paper_port": 4002},
+        "broker_account.json": {
+            "account_id": "IB-DUR123456",
+            "balances": [{"currency": "USD", "total": "100", "free": "100", "locked": "0"}],
+        },
+        "broker_positions.json": {"GOOG": {"net_exact": "0", "positions": []}},
+        "broker_orders.json": [],
+        "broker_bars.json": [],
+        "broker_capture_meta.json": {
+            "capture_started_ns": 2,
+            "capture_completed_ns": 3,
+            "stream": "NAUTILUS_IBKR_READ_ONLY",
+            "coverage_verified": False,
+            "broker_authentication_verified": False,
+            "causal_boundary_verified": False,
+        },
+    }
+    mutate(docs)
+    for name, document in docs.items():
+        (folder / name).write_text(json.dumps(document))
+    with pytest.raises(RuntimeError, match=error):
+        capture._verify_capture_files(
+            folder, expected_account="DUR123456", expected_port=4002, tickers=["GOOG"]
+        )
+
+
+def test_b01_evidence_coherence_gate_accepts_structural_empty_order_cache(tmp_path):
+    folder = tmp_path / "read-only-capture"
+    folder.mkdir()
+    docs = {
+        "identity.json": {"paper_port": 4002},
+        "broker_account.json": {
+            "account_id": "IB-DUR123456",
+            "balances": [{"currency": "USD", "total": "100", "free": "100", "locked": "0"}],
+        },
+        "broker_positions.json": {"GOOG": {"net_exact": "0", "positions": []}},
+        "broker_orders.json": [],
+        "broker_bars.json": [],
+        "broker_capture_meta.json": {
+            "capture_started_ns": 2,
+            "capture_completed_ns": 3,
+            "stream": "NAUTILUS_IBKR_READ_ONLY",
+            "coverage_verified": False,
+            "broker_authentication_verified": False,
+            "causal_boundary_verified": False,
+        },
+    }
+    for name, document in docs.items():
+        (folder / name).write_text(json.dumps(document))
+    capture._verify_capture_files(folder, expected_account="DUR123456", expected_port=4002, tickers=["GOOG"])
+
+
 def test_raw_captures_never_go_inside_the_repository(goog_lab):
     with pytest.raises(ValueError, match="inside the repository"):
         capture.check_outside_repo(goog_lab, goog_lab.root / "evidence")
