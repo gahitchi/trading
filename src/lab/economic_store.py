@@ -18,6 +18,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from lab.economic_ledger import EconomicLedgerError, exact
 from lab.engine_events import (
     CashFact,
     EconomicFact,
@@ -49,6 +50,10 @@ def _encode(fact: EconomicFact) -> bytes:
         if name in DECIMAL_FIELDS:
             if type(value) is not Decimal:
                 raise EconomicStoreError("only exact Decimal economic payloads may be persisted")
+            try:
+                value = exact(value)
+            except EconomicLedgerError as exc:
+                raise EconomicStoreError("economic payload exceeds bounded precision or scale") from exc
             record[name] = format(value, "f")
         else:
             record[name] = value
