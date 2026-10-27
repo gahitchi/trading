@@ -82,6 +82,19 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
           subject-path: ${{ runner.temp }}/f0-independent/ubuntu-24.04/*.whl
+      - name: Verify signed wheel provenance against exact source and workflow
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh attestation verify \
+            "$RUNNER_TEMP"/f0-independent/ubuntu-24.04/*.whl \
+            --repo "$GITHUB_REPOSITORY" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/f0-two-runner-wheel.yml" \
+            --deny-self-hosted-runners
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: f0-two-runner-verification
