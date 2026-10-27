@@ -103,11 +103,12 @@ def test_independent_projection_parity_differences_cannot_round_with_ambient_con
 
     book = EngineEconomicBook("SIM-001").append(fill("buy", 1, "BUY", "2", "100", "0"))
     actual = project_account(book)
+    independently_computed_cash = actual.cash + D("0.000000000000001")
 
     def slight_deviation(_book):
         return ProjectedAccount(
             actual.account_id,
-            actual.cash + D("0.000000000000001"),
+            independently_computed_cash,
             (("SPY", D("2.000000000000001")),),
             actual.source_event_ids,
             actual.evidence_head,
