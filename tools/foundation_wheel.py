@@ -13,6 +13,7 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import stat
 import sys
 import tomllib
@@ -32,7 +33,7 @@ def _digest(raw: bytes) -> str:
 
 
 def _tracked_sources(root: Path) -> dict[str, bytes]:
-    proc = __import__("subprocess").run(
+    proc = subprocess.run(
         ["git", "ls-files", "-z", "--", "src/lab"],
         cwd=root,
         capture_output=True,
@@ -68,6 +69,7 @@ def _wheel(path: Path, sources: dict[str, bytes], project: dict) -> dict:
                 raise foundation.FoundationError("wheel member inventory is empty or too large")
             names = set()
             actual = {}
+            expanded_bytes = 0
             for item in entries:
                 name = item.filename
                 pure = PurePosixPath(name)
@@ -81,15 +83,17 @@ def _wheel(path: Path, sources: dict[str, bytes], project: dict) -> dict:
                     or stat.S_IFMT(item.external_attr >> 16) == stat.S_IFLNK
                 ):
                     raise foundation.FoundationError("wheel has an unsafe or duplicate member")
+                if item.file_size > MAX_WHEEL_BYTES:
+                    raise foundation.FoundationError("wheel member exceeds permitted expanded size")
+                expanded_bytes += item.file_size
+                if expanded_bytes > MAX_WHEEL_BYTES * 2:
+                    raise foundation.FoundationError("wheel expansion exceeds bounded evidence budget")
                 names.add(name)
                 if not item.is_dir():
                     actual[name] = archive.read(item)
             packaged = {name: data for name, data in actual.items() if name.startswith("lab/")}
             if packaged != sources:
                 raise foundation.FoundationError("wheel package bytes differ from committed sources")
-            extras = [name for name in actual if not name.startswith("lab/") and ".dist-info/" not in name]
-            if extras:
-                raise foundation.FoundationError("wheel contains an unexpected executable or data payload")
             metadata_files = [name for name in actual if name.endswith(".dist-info/METADATA")]
             if len(metadata_files) != 1:
                 raise foundation.FoundationError("wheel must have exactly one distribution metadata file")
@@ -97,6 +101,8 @@ def _wheel(path: Path, sources: dict[str, bytes], project: dict) -> dict:
             expected_name = project["name"].replace("-", "_") + "-" + project["version"] + ".dist-info/"
             if prefix.lower() != expected_name.lower():
                 raise foundation.FoundationError("wheel distribution identity mismatch")
+            if any(not (name.startswith("lab/") or name.startswith(prefix)) for name in actual):
+                raise foundation.FoundationError("wheel contains an unexpected executable or data payload")
             metadata = BytesParser().parsebytes(actual[prefix + "METADATA"], headersonly=True)
             if metadata.get("Name", "").lower().replace("_", "-") != project["name"].lower():
                 raise foundation.FoundationError("wheel package name differs from pyproject")
@@ -104,6 +110,9 @@ def _wheel(path: Path, sources: dict[str, bytes], project: dict) -> dict:
                 raise foundation.FoundationError("wheel version differs from pyproject")
             if prefix + "WHEEL" not in actual or prefix + "RECORD" not in actual:
                 raise foundation.FoundationError("wheel metadata or RECORD is absent")
+            wheel_headers = BytesParser().parsebytes(actual[prefix + "WHEEL"], headersonly=True)
+            if wheel_headers.get("Wheel-Version") != "1.0" or not wheel_headers.get("Tag"):
+                raise foundation.FoundationError("wheel header is missing an expected format or tag")
             rows = list(csv.reader(io.StringIO(actual[prefix + "RECORD"].decode("utf-8"))))
             recorded = set()
             for row in rows:
