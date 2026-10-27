@@ -80,6 +80,10 @@ def test_capture_local_inputs_only_records_redacted_hashes(local_checkout):
 def test_refuse_invalid_scope_or_missing_reference_bytes(local_checkout, path, rewrite):
     root, _ = local_checkout
     (root / path).write_text(rewrite)
+    if path == "lab.toml":
+        # Commit the bad configuration: a dirty-tree refusal is not scope validation.
+        git(root, "add", path)
+        git(root, "-c", "user.name=F0", "-c", "user.email=f0@example.invalid", "commit", "-qm", "bad-scope")
     with pytest.raises(source.FoundationError):
         inputs.observation(root)
 
@@ -125,6 +129,8 @@ def test_paper_account_reference_config_is_redacted(local_checkout):
     (root / "lab.toml").write_text(
         '[universe]\nSPY = "ARCX"\n[trading]\nspeed = "daily"\n[paper]\naccount_id = "DUTEST123"\nport = 4002\n'
     )
+    git(root, "add", "lab.toml")
+    git(root, "-c", "user.name=F0", "-c", "user.email=f0@example.invalid", "commit", "-qm", "paper-config")
     inputs.capture(root, receipt)
     assert "DUTEST123" not in receipt.read_text()
     assert inputs.verify(root, receipt)["qualification"] == "BLOCKED"
