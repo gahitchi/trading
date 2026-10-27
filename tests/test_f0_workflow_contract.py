@@ -9,8 +9,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SETUP_UV = re.compile(
-    r'(?m)^\s*- uses: astral-sh/setup-uv@[0-9a-f]{40}\s*$\n'
-    r'\s+with:\s*\n'
+    r"(?m)^\s*- uses: astral-sh/setup-uv@[0-9a-f]{40}\s*$\n"
+    r"\s+with:\s*\n"
     r'\s+version: "[0-9]+\.[0-9]+\.[0-9]+"\s*$'
 )
 
