@@ -27,9 +27,7 @@ def cash(kind, amount, time):
 
 
 def fill(id_, time, side, quantity, price, commission="0.25"):
-    return FillFact(
-        id_, f"trade:{id_}", time, "SPY", side, D(quantity), D(price), D(commission)
-    )
+    return FillFact(id_, f"trade:{id_}", time, "SPY", side, D(quantity), D(price), D(commission))
 
 
 def test_independent_projection_handles_partial_close_splits_and_real_cash_settlements():
@@ -74,9 +72,7 @@ def test_empty_account_and_all_flat_positions_can_be_replayed():
 
 
 def test_independently_projected_fractional_amounts_are_never_rounded():
-    book = EngineEconomicBook("SIM-001").append(
-        fill("buy", 1, "BUY", "0.125", "1.0001", "0.00001")
-    )
+    book = EngineEconomicBook("SIM-001").append(fill("buy", 1, "BUY", "0.125", "1.0001", "0.00001"))
     assert project_account(book).cash == D("-0.1250225")
     assert compare_projection(book).matches
 
@@ -93,9 +89,7 @@ def test_projection_refuses_mutated_source_or_ledger():
 def test_projected_cash_precision_does_not_depend_on_ambient_decimal_context():
     from decimal import localcontext
 
-    book = EngineEconomicBook("SIM-001").append(
-        cash("CAPITAL_IN", "1234567890123456789.12345", 1)
-    )
+    book = EngineEconomicBook("SIM-001").append(cash("CAPITAL_IN", "1234567890123456789.12345", 1))
     with localcontext() as context:
         context.prec = 6
         # Independently derived exact-value construction is context agnostic.
