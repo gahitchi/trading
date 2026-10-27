@@ -73,6 +73,8 @@ def _wheel(path: Path, sources: dict[str, bytes], project: dict) -> dict:
             for item in entries:
                 name = item.filename
                 pure = PurePosixPath(name)
+                file_type = stat.S_IFMT(item.external_attr >> 16)
+                expected_file_types = (0, stat.S_IFDIR) if item.is_dir() else (0, stat.S_IFREG)
                 if (
                     not name
                     or name.startswith("/")
@@ -80,7 +82,7 @@ def _wheel(path: Path, sources: dict[str, bytes], project: dict) -> dict:
                     or "\x00" in name
                     or ".." in pure.parts
                     or name in names
-                    or stat.S_IFMT(item.external_attr >> 16) == stat.S_IFLNK
+                    or file_type not in expected_file_types
                 ):
                     raise foundation.FoundationError("wheel has an unsafe or duplicate member")
                 if item.file_size > MAX_WHEEL_BYTES:

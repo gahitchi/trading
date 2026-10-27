@@ -213,3 +213,19 @@ def test_refuse_duplicate_wheel_members(pair):
             z.writestr("lab/__init__.py", b"print('ok')\n")
     with pytest.raises(source.FoundationError, match="unsafe or duplicate"):
         wheel.observation(root, first, second)
+
+
+def test_reject_device_member_even_with_valid_record_digest(pair):
+    root, first, second, _ = pair
+    # RECORD authenticates bytes, not ZIP external attributes. A device mode
+    # must be rejected before installer-specific extraction semantics apply.
+    with zipfile.ZipFile(second) as archive:
+        entries = [(info, archive.read(info.filename)) for info in archive.infolist()]
+    with zipfile.ZipFile(second, "w", compression=zipfile.ZIP_STORED) as archive:
+        for info, data in entries:
+            if info.filename == "lab/__init__.py":
+                info.create_system = 3
+                info.external_attr = (stat.S_IFCHR | 0o600) << 16
+            archive.writestr(info, data)
+    with pytest.raises(source.FoundationError, match="unsafe or duplicate"):
+        wheel.observation(root, first, second)
