@@ -31,25 +31,36 @@ fn narrow(value: i128) -> Result<i64, NumericError> {
 /// significant fractional digits. Additional zeroes are accepted.
 fn parse_scaled(input: &str) -> Result<i64, NumericError> {
     let bytes = input.as_bytes();
-    if bytes.is_empty() { return Err(NumericError::InvalidDecimal); }
+    if bytes.is_empty() {
+        return Err(NumericError::InvalidDecimal);
+    }
     let (negative, digits) = match bytes[0] {
         b'-' => (true, &bytes[1..]),
         b'+' => (false, &bytes[1..]),
         _ => (false, bytes),
     };
-    if digits.is_empty() { return Err(NumericError::InvalidDecimal); }
+    if digits.is_empty() {
+        return Err(NumericError::InvalidDecimal);
+    }
     let mut integral: i128 = 0;
     let mut fractional: i128 = 0;
     let mut fraction_count: u32 = 0;
     let mut dot_seen = false;
     let mut saw_digit = false;
     for &byte in digits {
-        if byte == b'.' && !dot_seen { dot_seen = true; continue; }
-        if !byte.is_ascii_digit() { return Err(NumericError::InvalidDecimal); }
+        if byte == b'.' && !dot_seen {
+            dot_seen = true;
+            continue;
+        }
+        if !byte.is_ascii_digit() {
+            return Err(NumericError::InvalidDecimal);
+        }
         saw_digit = true;
         let d = i128::from(byte - b'0');
         if !dot_seen {
-            integral = integral.checked_mul(10).and_then(|x| x.checked_add(d))
+            integral = integral
+                .checked_mul(10)
+                .and_then(|x| x.checked_add(d))
                 .ok_or(NumericError::Overflow)?;
         } else if fraction_count < 8 {
             fractional = fractional * 10 + d;
@@ -58,9 +69,14 @@ fn parse_scaled(input: &str) -> Result<i64, NumericError> {
             return Err(NumericError::TooPrecise);
         }
     }
-    if !saw_digit { return Err(NumericError::InvalidDecimal); }
-    for _ in fraction_count..8 { fractional *= 10; }
-    let magnitude = integral.checked_mul(i128::from(SCALE))
+    if !saw_digit {
+        return Err(NumericError::InvalidDecimal);
+    }
+    for _ in fraction_count..8 {
+        fractional *= 10;
+    }
+    let magnitude = integral
+        .checked_mul(i128::from(SCALE))
         .and_then(|x| x.checked_add(fractional))
         .ok_or(NumericError::Overflow)?;
     narrow(if negative { -magnitude } else { magnitude })
@@ -73,28 +89,45 @@ macro_rules! fixed_type {
         pub struct $name(pub i64);
         impl $name {
             pub const ZERO: Self = Self(0);
-            pub const fn from_raw(raw: i64) -> Self { Self(raw) }
-            pub const fn raw(self) -> i64 { self.0 }
+            pub const fn from_raw(raw: i64) -> Self {
+                Self(raw)
+            }
+            pub const fn raw(self) -> i64 {
+                self.0
+            }
             pub fn from_integer(whole: i64) -> Result<Self, NumericError> {
-                whole.checked_mul(SCALE).map(Self).ok_or(NumericError::Overflow)
+                whole
+                    .checked_mul(SCALE)
+                    .map(Self)
+                    .ok_or(NumericError::Overflow)
             }
             pub fn checked_add(self, rhs: Self) -> Result<Self, NumericError> {
-                self.0.checked_add(rhs.0).map(Self).ok_or(NumericError::Overflow)
+                self.0
+                    .checked_add(rhs.0)
+                    .map(Self)
+                    .ok_or(NumericError::Overflow)
             }
             pub fn checked_sub(self, rhs: Self) -> Result<Self, NumericError> {
-                self.0.checked_sub(rhs.0).map(Self).ok_or(NumericError::Overflow)
+                self.0
+                    .checked_sub(rhs.0)
+                    .map(Self)
+                    .ok_or(NumericError::Overflow)
             }
             pub fn checked_mul(self, rhs: Self) -> Result<Self, NumericError> {
                 narrow(i128::from(self.0) * i128::from(rhs.0) / i128::from(SCALE)).map(Self)
             }
             pub fn checked_div(self, rhs: Self) -> Result<Self, NumericError> {
-                if rhs.0 == 0 { return Err(NumericError::DivisionByZero); }
+                if rhs.0 == 0 {
+                    return Err(NumericError::DivisionByZero);
+                }
                 narrow(i128::from(self.0) * i128::from(SCALE) / i128::from(rhs.0)).map(Self)
             }
         }
         impl FromStr for $name {
             type Err = NumericError;
-            fn from_str(s: &str) -> Result<Self, Self::Err> { parse_scaled(s).map(Self) }
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                parse_scaled(s).map(Self)
+            }
         }
     };
 }
@@ -135,7 +168,12 @@ impl TryFrom<u8> for VenueId {
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MarketEventType { DepthUpdate = 0, AggTrade = 1, ForceOrderLiq = 2, MarkPriceFunding = 3 }
+pub enum MarketEventType {
+    DepthUpdate = 0,
+    AggTrade = 1,
+    ForceOrderLiq = 2,
+    MarkPriceFunding = 3,
+}
 
 pub const FLAG_BID_OR_BUYER_MAKER: u8 = 1;
 pub const FLAG_END_OF_BATCH: u8 = 2;
@@ -162,26 +200,57 @@ pub struct MarketEvent {
 }
 impl MarketEvent {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(exchange_ts_ns: u64, recv_ts_ns: u64, price: FixedPrice,
-               qty: FixedQty, first_id: u64, final_id: u64, symbol_id: u16,
-               venue: VenueId, event_type: MarketEventType, flags: u8) -> Self {
-        Self { exchange_ts_ns, recv_ts_ns, price: price.0, qty: qty.0,
-            seq_id_first: first_id, seq_id_final: final_id, symbol_id,
-            venue_id: venue as u8, event_type: event_type as u8, flags,
-            _padding: [0; 11] }
+    pub fn new(
+        exchange_ts_ns: u64,
+        recv_ts_ns: u64,
+        price: FixedPrice,
+        qty: FixedQty,
+        first_id: u64,
+        final_id: u64,
+        symbol_id: u16,
+        venue: VenueId,
+        event_type: MarketEventType,
+        flags: u8,
+    ) -> Self {
+        Self {
+            exchange_ts_ns,
+            recv_ts_ns,
+            price: price.0,
+            qty: qty.0,
+            seq_id_first: first_id,
+            seq_id_final: final_id,
+            symbol_id,
+            venue_id: venue as u8,
+            event_type: event_type as u8,
+            flags,
+            _padding: [0; 11],
+        }
     }
 }
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OrderSide { Buy = 0, Sell = 1 }
+pub enum OrderSide {
+    Buy = 0,
+    Sell = 1,
+}
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TimeInForce { Gtc = 0, Ioc = 1, Fok = 2, PostOnly = 3 }
+pub enum TimeInForce {
+    Gtc = 0,
+    Ioc = 1,
+    Fok = 2,
+    PostOnly = 3,
+}
 pub const ORDER_FLAG_REDUCE_ONLY: u8 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IntentError { ZeroOrderId, InvalidPrice, InvalidQuantity, ZeroSymbolBudget }
+pub enum IntentError {
+    ZeroOrderId,
+    InvalidPrice,
+    InvalidQuantity,
+    ZeroSymbolBudget,
+}
 
 /// The side, TIF and flags must be checked at the routing trust boundary.
 /// Explicit padding prevents accidental 128-byte alignment expansion.
@@ -205,24 +274,53 @@ pub struct OrderIntent {
 }
 impl OrderIntent {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(client_order_id: u64, created_at_ns: u64, limit_price: FixedPrice,
-        quantity: FixedQty, stop_price: Option<FixedPrice>, risk_budget: FixedUsd,
-        symbol_id: u16, max_slippage_bps: u16, venue: VenueId, strategy_id: u8,
-        side: OrderSide, tif: TimeInForce, reduce_only: bool) -> Result<Self, IntentError>
-    {
-        if client_order_id == 0 { return Err(IntentError::ZeroOrderId); }
+    pub fn new(
+        client_order_id: u64,
+        created_at_ns: u64,
+        limit_price: FixedPrice,
+        quantity: FixedQty,
+        stop_price: Option<FixedPrice>,
+        risk_budget: FixedUsd,
+        symbol_id: u16,
+        max_slippage_bps: u16,
+        venue: VenueId,
+        strategy_id: u8,
+        side: OrderSide,
+        tif: TimeInForce,
+        reduce_only: bool,
+    ) -> Result<Self, IntentError> {
+        if client_order_id == 0 {
+            return Err(IntentError::ZeroOrderId);
+        }
         if limit_price.0 <= 0 || stop_price.is_some_and(|p| p.0 <= 0) {
             return Err(IntentError::InvalidPrice);
         }
-        if quantity.0 <= 0 { return Err(IntentError::InvalidQuantity); }
-        if risk_budget.0 < 0 { return Err(IntentError::ZeroSymbolBudget); }
-        Ok(Self { client_order_id, created_at_ns, limit_price: limit_price.0,
-            quantity: quantity.0, stop_price: stop_price.map_or(0, |p| p.0),
-            risk_budget_usd: risk_budget.0, symbol_id, max_slippage_bps,
-            venue_id: venue as u8, strategy_id, side: side as u8,
+        if quantity.0 <= 0 {
+            return Err(IntentError::InvalidQuantity);
+        }
+        if risk_budget.0 < 0 {
+            return Err(IntentError::ZeroSymbolBudget);
+        }
+        Ok(Self {
+            client_order_id,
+            created_at_ns,
+            limit_price: limit_price.0,
+            quantity: quantity.0,
+            stop_price: stop_price.map_or(0, |p| p.0),
+            risk_budget_usd: risk_budget.0,
+            symbol_id,
+            max_slippage_bps,
+            venue_id: venue as u8,
+            strategy_id,
+            side: side as u8,
             time_in_force: tif as u8,
-            flags: if reduce_only { ORDER_FLAG_REDUCE_ONLY } else { 0 },
-            _padding: [0; 7] })
+            flags: if reduce_only {
+                ORDER_FLAG_REDUCE_ONLY
+            } else {
+                0
+            },
+            _padding: [0; 7],
+        })
     }
     pub const fn is_reduce_only(&self) -> bool {
         self.flags & ORDER_FLAG_REDUCE_ONLY != 0
@@ -236,22 +334,36 @@ const _: [(); 64] = [(); core::mem::align_of::<OrderIntent>()];
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TradingMode { HaltAll = 0, ShortOnly = 1, ShortBiased = 2,
-    BiDirectional = 3, LongOnly = 4, ManualArmedTrap = 5 }
+pub enum TradingMode {
+    HaltAll = 0,
+    ShortOnly = 1,
+    ShortBiased = 2,
+    BiDirectional = 3,
+    LongOnly = 4,
+    ManualArmedTrap = 5,
+}
 impl TryFrom<u8> for TradingMode {
     type Error = OperatorError;
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(Self::HaltAll), 1 => Ok(Self::ShortOnly),
-            2 => Ok(Self::ShortBiased), 3 => Ok(Self::BiDirectional),
-            4 => Ok(Self::LongOnly), 5 => Ok(Self::ManualArmedTrap),
+            0 => Ok(Self::HaltAll),
+            1 => Ok(Self::ShortOnly),
+            2 => Ok(Self::ShortBiased),
+            3 => Ok(Self::BiDirectional),
+            4 => Ok(Self::LongOnly),
+            5 => Ok(Self::ManualArmedTrap),
             _ => Err(OperatorError::InvalidState),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OperatorError { InvalidState, InvalidField, Full, Disconnected }
+pub enum OperatorError {
+    InvalidState,
+    InvalidField,
+    Full,
+    Disconnected,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OperatorSnapshot {
@@ -269,19 +381,28 @@ pub struct OperatorSnapshot {
 }
 impl Default for OperatorSnapshot {
     fn default() -> Self {
-        Self { mode: TradingMode::ShortOnly, strategy_enable_mask: 0b1111,
-            max_leverage_tenths: 30, aggressiveness_pct: 100,
-            profit_lock_pct: 35, active_symbol_mask: 0x01ff,
-            heartbeat_rolling_sec: 0 }
+        Self {
+            mode: TradingMode::ShortOnly,
+            strategy_enable_mask: 0b1111,
+            max_leverage_tenths: 30,
+            aggressiveness_pct: 100,
+            profit_lock_pct: 35,
+            active_symbol_mask: 0x01ff,
+            heartbeat_rolling_sec: 0,
+        }
     }
 }
 impl OperatorSnapshot {
     pub fn validate(self) -> Result<(), OperatorError> {
-        if self.strategy_enable_mask > 0x0f || !(1..=100).contains(&self.max_leverage_tenths)
+        if self.strategy_enable_mask > 0x0f
+            || !(1..=100).contains(&self.max_leverage_tenths)
             || !(50..=200).contains(&self.aggressiveness_pct)
-            || self.profit_lock_pct > 100 || self.active_symbol_mask > 0x1ff
+            || self.profit_lock_pct > 100
+            || self.active_symbol_mask > 0x1ff
             || self.heartbeat_rolling_sec > 0x00ff_ffff
-        { return Err(OperatorError::InvalidField); }
+        {
+            return Err(OperatorError::InvalidField);
+        }
         Ok(())
     }
     pub fn pack(self) -> Result<u64, OperatorError> {
@@ -326,48 +447,93 @@ impl AtomicOperatorState {
         Ok(())
     }
     /// CAS preserves unrelated operator updates instead of overwriting them.
-    pub fn update(&self, transform: impl Fn(OperatorSnapshot) -> Result<OperatorSnapshot, OperatorError>)
-        -> Result<OperatorSnapshot, OperatorError>
-    {
+    pub fn update(
+        &self,
+        transform: impl Fn(OperatorSnapshot) -> Result<OperatorSnapshot, OperatorError>,
+    ) -> Result<OperatorSnapshot, OperatorError> {
         let mut previous = self.0.load(Ordering::Acquire);
         loop {
             let next = transform(OperatorSnapshot::unpack(previous)?)?;
             let packed = next.pack()?;
-            match self.0.compare_exchange_weak(previous, packed, Ordering::AcqRel, Ordering::Acquire) {
+            match self.0.compare_exchange_weak(
+                previous,
+                packed,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
                 Ok(_) => return Ok(next),
                 Err(observed) => previous = observed,
             }
         }
     }
     pub fn halt(&self) -> Result<(), OperatorError> {
-        self.update(|mut state| { state.mode = TradingMode::HaltAll; Ok(state) })?;
+        self.update(|mut state| {
+            state.mode = TradingMode::HaltAll;
+            Ok(state)
+        })?;
         Ok(())
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorCommand {
-    FireManualShortSweep { symbol_id: u16, risk_fraction_bps: u16, max_slippage_bps: u16 },
-    FireManualLongSweep { symbol_id: u16, risk_fraction_bps: u16, max_slippage_bps: u16 },
-    ArmBreakdownTrap { symbol_id: u16, trigger_price: i64, is_short: bool, risk_fraction_bps: u16 },
-    CashOutPositionPct { symbol_id: u16, pct_bps: u16 },
-    SweepActiveProfitToVault { pct_bps: u16 },
+    FireManualShortSweep {
+        symbol_id: u16,
+        risk_fraction_bps: u16,
+        max_slippage_bps: u16,
+    },
+    FireManualLongSweep {
+        symbol_id: u16,
+        risk_fraction_bps: u16,
+        max_slippage_bps: u16,
+    },
+    ArmBreakdownTrap {
+        symbol_id: u16,
+        trigger_price: i64,
+        is_short: bool,
+        risk_fraction_bps: u16,
+    },
+    CashOutPositionPct {
+        symbol_id: u16,
+        pct_bps: u16,
+    },
+    SweepActiveProfitToVault {
+        pct_bps: u16,
+    },
     PanicFlattenAll,
 }
 impl OperatorCommand {
     pub fn validate(self) -> Result<(), OperatorError> {
         match self {
-            Self::FireManualShortSweep { risk_fraction_bps, max_slippage_bps, .. }
-            | Self::FireManualLongSweep { risk_fraction_bps, max_slippage_bps, .. } => {
+            Self::FireManualShortSweep {
+                risk_fraction_bps,
+                max_slippage_bps,
+                ..
+            }
+            | Self::FireManualLongSweep {
+                risk_fraction_bps,
+                max_slippage_bps,
+                ..
+            } => {
                 if risk_fraction_bps == 0 || risk_fraction_bps > 10_000 || max_slippage_bps > 10_000
-                    { return Err(OperatorError::InvalidField); }
+                {
+                    return Err(OperatorError::InvalidField);
+                }
             }
-            Self::ArmBreakdownTrap { trigger_price, risk_fraction_bps, .. } => {
-                if trigger_price <= 0 || risk_fraction_bps == 0 || risk_fraction_bps > 10_000
-                    { return Err(OperatorError::InvalidField); }
+            Self::ArmBreakdownTrap {
+                trigger_price,
+                risk_fraction_bps,
+                ..
+            } => {
+                if trigger_price <= 0 || risk_fraction_bps == 0 || risk_fraction_bps > 10_000 {
+                    return Err(OperatorError::InvalidField);
+                }
             }
-            Self::CashOutPositionPct { pct_bps, .. } | Self::SweepActiveProfitToVault { pct_bps } => {
-                if pct_bps == 0 || pct_bps > 10_000 { return Err(OperatorError::InvalidField); }
+            Self::CashOutPositionPct { pct_bps, .. }
+            | Self::SweepActiveProfitToVault { pct_bps } => {
+                if pct_bps == 0 || pct_bps > 10_000 {
+                    return Err(OperatorError::InvalidField);
+                }
             }
             Self::PanicFlattenAll => (),
         }
@@ -380,10 +546,12 @@ impl OperatorCommand {
 /// the endpoint API does not expose cloning either handle.
 pub struct OperatorCommandTx(Sender<OperatorCommand>);
 pub struct OperatorCommandRx(Receiver<OperatorCommand>);
-pub fn operator_command_channel(capacity: usize)
-    -> Result<(OperatorCommandTx, OperatorCommandRx), OperatorError>
-{
-    if capacity == 0 { return Err(OperatorError::InvalidField); }
+pub fn operator_command_channel(
+    capacity: usize,
+) -> Result<(OperatorCommandTx, OperatorCommandRx), OperatorError> {
+    if capacity == 0 {
+        return Err(OperatorError::InvalidField);
+    }
     let (tx, rx) = crossbeam_channel::bounded(capacity);
     Ok((OperatorCommandTx(tx), OperatorCommandRx(rx)))
 }
@@ -407,12 +575,20 @@ impl OperatorCommandRx {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ComplianceReason { WrongVenue, NoLocate, InvalidReference, Blackout, UnsupportedOrder }
+pub enum ComplianceReason {
+    WrongVenue,
+    NoLocate,
+    InvalidReference,
+    Blackout,
+    UnsupportedOrder,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComplianceDecision {
     Allow,
     /// Caller MUST re-run execution/tick/marketability validation after repricing.
-    Reprice { minimum_limit_price: i64 },
+    Reprice {
+        minimum_limit_price: i64,
+    },
     Block(ComplianceReason),
 }
 
@@ -433,12 +609,18 @@ pub trait VenueComplianceTrait: Send + Sync {
 pub struct EquitiesCompliance;
 impl VenueComplianceTrait for EquitiesCompliance {
     fn evaluate(&self, order: &OrderIntent, ctx: &ComplianceContext) -> ComplianceDecision {
-        if order.venue_id != VenueId::Equities as u8 { return ComplianceDecision::Block(ComplianceReason::WrongVenue); }
-        if ctx.trading_blackout { return ComplianceDecision::Block(ComplianceReason::Blackout); }
+        if order.venue_id != VenueId::Equities as u8 {
+            return ComplianceDecision::Block(ComplianceReason::WrongVenue);
+        }
+        if ctx.trading_blackout {
+            return ComplianceDecision::Block(ComplianceReason::Blackout);
+        }
         if order.side != OrderSide::Sell as u8 || order.is_reduce_only() {
             return ComplianceDecision::Allow;
         }
-        if !ctx.located_for_open_short { return ComplianceDecision::Block(ComplianceReason::NoLocate); }
+        if !ctx.located_for_open_short {
+            return ComplianceDecision::Block(ComplianceReason::NoLocate);
+        }
         if ctx.short_sale_restriction_active {
             if ctx.national_best_bid <= 0 || ctx.tick_size <= 0 {
                 return ComplianceDecision::Block(ComplianceReason::InvalidReference);
@@ -447,10 +629,14 @@ impl VenueComplianceTrait for EquitiesCompliance {
                 return ComplianceDecision::Block(ComplianceReason::InvalidReference);
             };
             if order.limit_price < min_price {
-                if order.time_in_force == TimeInForce::Ioc as u8 || order.time_in_force == TimeInForce::Fok as u8 {
+                if order.time_in_force == TimeInForce::Ioc as u8
+                    || order.time_in_force == TimeInForce::Fok as u8
+                {
                     return ComplianceDecision::Block(ComplianceReason::UnsupportedOrder);
                 }
-                return ComplianceDecision::Reprice { minimum_limit_price: min_price };
+                return ComplianceDecision::Reprice {
+                    minimum_limit_price: min_price,
+                };
             }
         }
         ComplianceDecision::Allow
@@ -463,8 +649,11 @@ impl VenueComplianceTrait for ForexCommoditiesCompliance {
         if order.venue_id != VenueId::Forex as u8 && order.venue_id != VenueId::Commodities as u8 {
             return ComplianceDecision::Block(ComplianceReason::WrongVenue);
         }
-        if ctx.trading_blackout { ComplianceDecision::Block(ComplianceReason::Blackout) }
-        else { ComplianceDecision::Allow }
+        if ctx.trading_blackout {
+            ComplianceDecision::Block(ComplianceReason::Blackout)
+        } else {
+            ComplianceDecision::Allow
+        }
     }
 }
 
@@ -475,15 +664,27 @@ mod tests {
 
     #[test]
     fn cache_lines_are_exactly_sixty_four_bytes() {
-        assert_eq!((size_of::<MarketEvent>(), align_of::<MarketEvent>()), (64, 64));
-        assert_eq!((size_of::<OrderIntent>(), align_of::<OrderIntent>()), (64, 64));
+        assert_eq!(
+            (size_of::<MarketEvent>(), align_of::<MarketEvent>()),
+            (64, 64)
+        );
+        assert_eq!(
+            (size_of::<OrderIntent>(), align_of::<OrderIntent>()),
+            (64, 64)
+        );
     }
     #[test]
     fn decimal_parsing_is_exact_and_rejects_precision_loss() {
         assert_eq!("-1.23".parse::<FixedUsd>().unwrap().raw(), -123_000_000);
         assert_eq!("0.0000000100".parse::<FixedPrice>().unwrap().raw(), 1);
-        assert_eq!("0.000000001".parse::<FixedPrice>(), Err(NumericError::TooPrecise));
-        assert_eq!("1e2".parse::<FixedPrice>(), Err(NumericError::InvalidDecimal));
+        assert_eq!(
+            "0.000000001".parse::<FixedPrice>(),
+            Err(NumericError::TooPrecise)
+        );
+        assert_eq!(
+            "1e2".parse::<FixedPrice>(),
+            Err(NumericError::InvalidDecimal)
+        );
         assert_eq!("".parse::<FixedQty>(), Err(NumericError::InvalidDecimal));
     }
     #[test]
@@ -492,10 +693,18 @@ mod tests {
         let b: FixedUsd = "2".parse().unwrap();
         assert_eq!(a.checked_mul(b).unwrap(), "20.5".parse().unwrap());
         assert_eq!(a.checked_div(b).unwrap(), "5.125".parse().unwrap());
-        assert_eq!(a.checked_div(FixedUsd::ZERO), Err(NumericError::DivisionByZero));
-        assert_eq!(FixedUsd(i64::MAX).checked_add(FixedUsd(1)), Err(NumericError::Overflow));
-        assert_eq!(checked_notional("100".parse().unwrap(), "0.2".parse().unwrap()).unwrap(),
-            "20".parse().unwrap());
+        assert_eq!(
+            a.checked_div(FixedUsd::ZERO),
+            Err(NumericError::DivisionByZero)
+        );
+        assert_eq!(
+            FixedUsd(i64::MAX).checked_add(FixedUsd(1)),
+            Err(NumericError::Overflow)
+        );
+        assert_eq!(
+            checked_notional("100".parse().unwrap(), "0.2".parse().unwrap()).unwrap(),
+            "20".parse().unwrap()
+        );
     }
     #[test]
     fn packed_operator_register_round_trip_and_rejects_invalid_fields() {
@@ -504,9 +713,16 @@ mod tests {
         let mut bad = state;
         bad.active_symbol_mask = 0x200;
         assert_eq!(bad.pack(), Err(OperatorError::InvalidField));
-        assert_eq!(OperatorSnapshot::unpack(7), Err(OperatorError::InvalidState));
+        assert_eq!(
+            OperatorSnapshot::unpack(7),
+            Err(OperatorError::InvalidState)
+        );
         let reg = AtomicOperatorState::new(state).unwrap();
-        reg.update(|mut snapshot| { snapshot.profit_lock_pct = 70; Ok(snapshot) }).unwrap();
+        reg.update(|mut snapshot| {
+            snapshot.profit_lock_pct = 70;
+            Ok(snapshot)
+        })
+        .unwrap();
         reg.halt().unwrap();
         assert_eq!(reg.load().unwrap().mode, TradingMode::HaltAll);
         assert_eq!(reg.load().unwrap().profit_lock_pct, 70);
@@ -515,28 +731,61 @@ mod tests {
     fn operator_channel_is_bounded_and_commands_validated() {
         let (tx, rx) = operator_command_channel(1).unwrap();
         assert_eq!(rx.try_recv(), Ok(None));
-        assert_eq!(tx.try_send(OperatorCommand::CashOutPositionPct { symbol_id: 0, pct_bps: 0 }),
-            Err(OperatorError::InvalidField));
+        assert_eq!(
+            tx.try_send(OperatorCommand::CashOutPositionPct {
+                symbol_id: 0,
+                pct_bps: 0
+            }),
+            Err(OperatorError::InvalidField)
+        );
         tx.try_send(OperatorCommand::PanicFlattenAll).unwrap();
-        assert_eq!(tx.try_send(OperatorCommand::PanicFlattenAll), Err(OperatorError::Full));
+        assert_eq!(
+            tx.try_send(OperatorCommand::PanicFlattenAll),
+            Err(OperatorError::Full)
+        );
         assert_eq!(rx.try_recv(), Ok(Some(OperatorCommand::PanicFlattenAll)));
     }
     fn short_equity_order(tif: TimeInForce) -> OrderIntent {
-        OrderIntent::new(1, 42, "100".parse().unwrap(), "1".parse().unwrap(), None,
-            FixedUsd::ZERO, 4, 5, VenueId::Equities, 0,
-            OrderSide::Sell, tif, false).unwrap()
+        OrderIntent::new(
+            1,
+            42,
+            "100".parse().unwrap(),
+            "1".parse().unwrap(),
+            None,
+            FixedUsd::ZERO,
+            4,
+            5,
+            VenueId::Equities,
+            0,
+            OrderSide::Sell,
+            tif,
+            false,
+        )
+        .unwrap()
     }
     #[test]
     fn equities_rule_201_and_locate_fail_closed() {
-        let mut ctx = ComplianceContext { national_best_bid: 100 * SCALE,
-            tick_size: SCALE / 100, short_sale_restriction_active: true,
-            located_for_open_short: false, trading_blackout: false };
-        assert_eq!(EquitiesCompliance.evaluate(&short_equity_order(TimeInForce::Gtc), &ctx),
-            ComplianceDecision::Block(ComplianceReason::NoLocate));
+        let mut ctx = ComplianceContext {
+            national_best_bid: 100 * SCALE,
+            tick_size: SCALE / 100,
+            short_sale_restriction_active: true,
+            located_for_open_short: false,
+            trading_blackout: false,
+        };
+        assert_eq!(
+            EquitiesCompliance.evaluate(&short_equity_order(TimeInForce::Gtc), &ctx),
+            ComplianceDecision::Block(ComplianceReason::NoLocate)
+        );
         ctx.located_for_open_short = true;
-        assert_eq!(EquitiesCompliance.evaluate(&short_equity_order(TimeInForce::Gtc), &ctx),
-            ComplianceDecision::Reprice { minimum_limit_price: 100 * SCALE + SCALE / 100 });
-        assert_eq!(EquitiesCompliance.evaluate(&short_equity_order(TimeInForce::Ioc), &ctx),
-            ComplianceDecision::Block(ComplianceReason::UnsupportedOrder));
+        assert_eq!(
+            EquitiesCompliance.evaluate(&short_equity_order(TimeInForce::Gtc), &ctx),
+            ComplianceDecision::Reprice {
+                minimum_limit_price: 100 * SCALE + SCALE / 100
+            }
+        );
+        assert_eq!(
+            EquitiesCompliance.evaluate(&short_equity_order(TimeInForce::Ioc), &ctx),
+            ComplianceDecision::Block(ComplianceReason::UnsupportedOrder)
+        );
     }
 }
