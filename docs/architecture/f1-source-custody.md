@@ -50,6 +50,48 @@ All implementation here is offline research-only, with no order authority.
   controlling the entire database can replace the entire history and
   unkeyed hash root. An independently anchored digest/signature is required.
 
+## Additional F1.2/F1.4 implementation on source-binding candidate
+
+The `chatgpt/f1-source-binding-20261027` branch adds the following strictly
+separated and explicitly unqualified capabilities:
+
+- **Source-content binding:** cash and fractional cash-in-lieu statement bytes
+  are parsed again on every durable replay. An input fact with a valid
+  SHA-256 digest but falsified amount, event time or classification is refused.
+  A digest proves only byte equality, not issuer authenticity.
+- **Broker-claimed fill receipts:** `fill_input.py` parses complete exact-USD
+  original execution records with account, fill ID, source namespace,
+  order ID, last quantity, last price, commission and executed status. Each
+  execution, including partial executions of the same broker order, is an
+  independent `BrokerFillFact` with an original-byte SHA-256, distinct from
+  simulator `FillFact`. Original receipt bytes and accounting state commit
+  atomically to the SQLite journal, and both are replay-validated. This does
+  *not* authenticate the broker or prove an order was authorized.
+- **Independent account statements:** `account_observation.py` parses
+  a separate claimed-complete USD holdings/cash record; rejects foreign,
+  stale, partial, nonfinite, float and duplicate-position records. It compares
+  exact reported cash and net instruments against both our double-entry
+  ledger and rational account projector; disagreement is reported, not
+  automatically credited or written off. An input file can still be fake.
+- **Read-only diagnostics:** `EconomicEventStore(..., readonly=True)` refuses
+  append and cannot create a missing database. The standalone
+  `python -m lab.f1_verify` emits machine-readable exact differences with
+  codes 0 (arithmetic match), 2 (mismatch), or 3 (invalid/missing evidence).
+  Its output always states broker authentication and execution/release
+  authorization are false.
+
+The MVP retains these strict core contracts, but may start with one liquid
+USD cash-account instrument, one rule-based strategy and one offline broker-
+neutral matching/simulation route. AI research, multi-agent automation and
+complex portfolio methods are explicitly **not** required for this first
+usable product. This reduces scope, not acceptance standards.
+
+**F1 sign-off is still blocked** by genuine broker-origin verification,
+separately reconciled order-state custody, full account completeness and
+finality, corporate-action corrections, durable checkpoint/performance
+qualification, explicit rounding-policy evidence, external source controls
+and independent review. The isolated F1 tests do not authorize paper orders.
+
 ## Mandatory work before F1 sign-off
 
 1. **F1.2:** separately acquired engine/account and externally captured
