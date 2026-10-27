@@ -72,6 +72,27 @@ def test_snapshot_records_the_broker_view_without_placing_orders(goog_lab, goog,
     assert pseudo in (next(again.rglob("broker_account.json"))).read_text()
 
 
+def test_read_only_capture_preflight_redacts_broker_account_error(monkeypatch, capsys, tmp_path):
+    from types import SimpleNamespace
+
+    from lab import config
+    from lab.safety import SafetyError
+    from tools import capture_ib_session
+
+    monkeypatch.setattr(config, "load_config", lambda _path: SimpleNamespace(universe={"GOOG": "XNAS"}))
+
+    def refuse(*_args, **_kwargs):
+        raise SafetyError("account IB-DUR987654 is not an IB paper account")
+
+    monkeypatch.setattr(capture, "snapshot", refuse)
+    status = capture_ib_session.main(["snapshot", "B01-test", "--out", str(tmp_path), "--tickers", "GOOG"])
+    response = capsys.readouterr()
+    assert status == 2
+    assert "capture refused: missing or invalid PAPER account" in response.err
+    assert "IB-DUR987654" not in response.err
+    assert not response.out
+
+
 def test_raw_captures_never_go_inside_the_repository(goog_lab):
     with pytest.raises(ValueError, match="inside the repository"):
         capture.check_outside_repo(goog_lab, goog_lab.root / "evidence")

@@ -51,6 +51,14 @@ PYTHONPATH=src python -m lab.kernel.paper_capture_bridge \\
   --ticker GOOG --action-version v1
 ```
 
+Paper settings follow the exact same operator environment precedence as
+the capture command: `LAB_PAPER_ACCOUNT` overrides `[paper] account_id` in
+`lab.toml`, and `LAB_IB_PORT` overrides the configured paper API port.
+An IBKR *username* is not the `DU...` or `DUR...` paper-account ID.
+For a temporary terminal-only acceptance session, prefer the environment
+override rather than committing an account identifier into the repository.
+A missing or invalid paper setting is reported without echoing account IDs.
+
 This command makes no network connection and writes nothing. The output contains
 only a capture digest, snapshot token, event counts and explicit
 `UNQUALIFIED_PRIVATE_CAPTURE`/`UNVERIFIED` statuses, never raw account or

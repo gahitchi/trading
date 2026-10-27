@@ -270,6 +270,59 @@ class PaperCaptureTests(unittest.TestCase):
         self.assertEqual(wrong_account.returncode, 2)
         self.assertNotIn(ACCOUNT, wrong_account.stdout + wrong_account.stderr)
 
+    def test_inspector_uses_same_environment_paper_overrides_as_capture(self):
+        config = self.path / "lab.toml"
+        config.write_text('[paper]\\naccount_id = ""\\nport = 7497\\n[universe]\\nGOOG = "XNAS"\\n')
+
+        def inspect(overrides: dict[str, str]) -> subprocess.CompletedProcess[str]:
+            env = {
+                **{key: value for key, value in os.environ.items() if key not in ("LAB_PAPER_ACCOUNT", "LAB_IB_PORT")},
+                **overrides,
+                "PYTHONPATH": str(ROOT / "src"),
+            }
+            return subprocess.run(
+                [
+                    sys.executable,
+                    "-S",
+                    "-m",
+                    "lab.kernel.paper_capture_bridge",
+                    "--config",
+                    str(config),
+                    "--capture",
+                    str(self.path),
+                    "--ticker",
+                    "GOOG",
+                    "--action-version",
+                    "v1",
+                    "--b01-report",
+                ],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
+
+        good = inspect({"LAB_PAPER_ACCOUNT": "DUR123456", "LAB_IB_PORT": "4002"})
+        self.assertEqual(good.returncode, 0, good.stderr)
+        report = json.loads(good.stdout)
+        self.assertEqual(report["qualification"], "BLOCKED")
+        self.assertFalse(report["broker_authorization"])
+        self.assertNotIn(ACCOUNT, good.stdout + good.stderr)
+
+        missing = inspect({"LAB_IB_PORT": "4002"})
+        self.assertEqual(missing.returncode, 2)
+        self.assertNotIn(ACCOUNT, missing.stdout + missing.stderr)
+
+        wrong_port = inspect({"LAB_PAPER_ACCOUNT": "DUR123456"})
+        self.assertEqual(wrong_port.returncode, 2)
+        self.assertNotIn(ACCOUNT, wrong_port.stdout + wrong_port.stderr)
+
+        live_port = inspect({"LAB_PAPER_ACCOUNT": "DUR123456", "LAB_IB_PORT": "4001"})
+        self.assertEqual(live_port.returncode, 2)
+        self.assertNotIn(ACCOUNT, live_port.stdout + live_port.stderr)
+
     def test_explicit_pinned_gateway_port_must_match_capture(self):
         with self.assertRaisesRegex(LifecycleError, "gateway port"):
             load_paper_capture(
