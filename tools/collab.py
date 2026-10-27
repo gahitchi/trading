@@ -74,7 +74,7 @@ def _historical_message_title(text: str, path: str, meta: dict) -> str | None:
     if entry is None:
         return None
     raw = text.encode("utf-8")
-    blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\\x00" + raw).hexdigest()
+    blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + bytes([0]) + raw).hexdigest()
     expected_blob, original_at, title = entry
     if blob != expected_blob or meta.get("at") != original_at or "title" in meta:
         raise CollabError(f"{path}: registered historical metadata digest or fields changed")
