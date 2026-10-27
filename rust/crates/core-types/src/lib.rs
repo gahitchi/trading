@@ -134,7 +134,7 @@ macro_rules! fixed_type {
 fixed_type!(FixedPrice);
 fixed_type!(FixedQty);
 fixed_type!(FixedUsd);
-/// Scaled basis points per one US dollar of displayed notional; not money.
+// Scaled basis points per one US dollar of displayed notional; not money.
 fixed_type!(FixedBpsPerUsd);
 
 /// Price times base quantity, in quote-currency units. Currency conversion
