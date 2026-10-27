@@ -1,0 +1,80 @@
+name: f0-two-runner-wheel
+
+on:
+  push:
+    branches:
+      - main
+      - "chatgpt/f0-*"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  independent-wheel:
+    # Different ephemeral OS runners; this is NOT independent-provider trust.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - name: Resolve exact frozen build dependencies
+        run: uv sync --frozen --group build
+      - name: Build wheel separately from the identical source revision
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
+          mkdir -p "$RUNNER_TEMP/f0-wheel"
+          uv build --wheel --no-build-isolation --out-dir "$RUNNER_TEMP/f0-wheel"
+          sha256sum "$RUNNER_TEMP"/f0-wheel/*.whl > "$RUNNER_TEMP/f0-wheel/sha256.txt"
+          git rev-parse HEAD > "$RUNNER_TEMP/f0-wheel/source-commit.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f0-wheel-${{ matrix.os }}
+          path: ${{ runner.temp }}/f0-wheel/
+          retention-days: 30
+          if-no-files-found: error
+
+  cross-runner-verification:
+    needs: independent-wheel
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download separate build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: f0-wheel-ubuntu-22.04
+          path: ${{ runner.temp }}/f0-independent/ubuntu-22.04/
+      - uses: actions/download-artifact@v4
+        with:
+          name: f0-wheel-ubuntu-24.04
+          path: ${{ runner.temp }}/f0-independent/ubuntu-24.04/
+      - name: Verify exact source SHA and cross-runner wheel byte identity
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          for host in ubuntu-22.04 ubuntu-24.04; do
+            test "$(cat "$RUNNER_TEMP/f0-independent/$host/source-commit.txt")" = "$GITHUB_SHA"
+            ( cd "$RUNNER_TEMP/f0-independent/$host" && sha256sum -c sha256.txt )
+          done
+          mkdir -p "$RUNNER_TEMP/f0-independent/verified"
+          python3 -m tools.foundation_wheel \
+            --first "$RUNNER_TEMP/f0-independent/ubuntu-22.04/trading_lab-0.2.0-py3-none-any.whl" \
+            --second "$RUNNER_TEMP/f0-independent/ubuntu-24.04/trading_lab-0.2.0-py3-none-any.whl" \
+            capture --out "$RUNNER_TEMP/f0-independent/verified/cross-runner.json"
+          python3 -m tools.foundation_wheel \
+            --first "$RUNNER_TEMP/f0-independent/ubuntu-22.04/trading_lab-0.2.0-py3-none-any.whl" \
+            --second "$RUNNER_TEMP/f0-independent/ubuntu-24.04/trading_lab-0.2.0-py3-none-any.whl" \
+            verify --input "$RUNNER_TEMP/f0-independent/verified/cross-runner.json"
+          # Still unsigned and unable to certify the release.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: f0-two-runner-verification
+          path: ${{ runner.temp }}/f0-independent/verified/
+          retention-days: 30
+          if-no-files-found: error
