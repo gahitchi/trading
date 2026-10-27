@@ -170,7 +170,8 @@ def test_decimal_context_does_not_change_external_cash_delta():
 
     account = book()
     statement = parse_external_account_statement(
-        statement_bytes(cash="799.750000000000001"), source_namespace="broker",
+        statement_bytes(cash="799.750000000000001"),
+        source_namespace="broker",
         expected_account_id="SIM-001",
     )
     with localcontext() as ctx:
