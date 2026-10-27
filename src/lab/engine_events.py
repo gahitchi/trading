@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -22,6 +23,14 @@ from lab.economic_ledger import (
 )
 
 CASH_KINDS = frozenset({"CAPITAL_IN", "CAPITAL_OUT", "DIVIDEND", "FINANCING", "BORROW_FEE"})
+CASH_SOURCE_KINDS = {
+    "CAPITAL_IN": frozenset({"BANK_TRANSFER", "BROKER_CASH_ACTIVITY"}),
+    "CAPITAL_OUT": frozenset({"BANK_TRANSFER", "BROKER_CASH_ACTIVITY"}),
+    "DIVIDEND": frozenset({"BROKER_CASH_ACTIVITY"}),
+    "FINANCING": frozenset({"BROKER_CASH_ACTIVITY"}),
+    "BORROW_FEE": frozenset({"BROKER_CASH_ACTIVITY"}),
+}
+SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class EngineFactError(ValueError):
@@ -47,6 +56,9 @@ class CashFact:
     timestamp_ns: int
     kind: str
     amount: Decimal
+    source_kind: str
+    settlement_status: str
+    source_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,7 +143,13 @@ def _evidence_digest(previous: str, account_id: str, fact: EconomicFact) -> str:
             "commission": format(fact.commission, "f"),
         }
     elif type(fact) is CashFact:
-        payload = {"kind": fact.kind, "amount": format(fact.amount, "f")}
+        payload = {
+            "kind": fact.kind,
+            "amount": format(fact.amount, "f"),
+            "source_kind": fact.source_kind,
+            "settlement_status": fact.settlement_status,
+            "source_sha256": fact.source_sha256,
+        }
     elif type(fact) is SplitFact:
         payload = {
             "kind": "SPLIT",
@@ -164,6 +182,12 @@ def _event_ledger(ledger: EconomicLedger, fact: EconomicFact) -> EconomicLedger:
         if type(fact) is CashFact:
             if fact.kind not in CASH_KINDS:
                 raise EngineFactError("unsupported or unclassified cash movement")
+            if type(fact.settlement_status) is not str or fact.settlement_status != "SETTLED":
+                raise EngineFactError("estimated, pending or unverified cash cannot be booked as settled")
+            if type(fact.source_kind) is not str or fact.source_kind not in CASH_SOURCE_KINDS[fact.kind]:
+                raise EngineFactError("cash classification and source type do not agree")
+            if type(fact.source_sha256) is not str or not SHA256.fullmatch(fact.source_sha256):
+                raise EngineFactError("cash evidence lacks a canonical source digest")
             return ledger.post_cash(fact.event_id, fact.kind, _number(fact.amount, "cash amount", positive=True))
         if type(fact) is SplitFact:
             if type(fact.symbol) is not str or not SYMBOL.fullmatch(fact.symbol):
