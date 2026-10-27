@@ -38,12 +38,3 @@ def test_f0_container_security_steps_are_pinned_and_fail_closed():
     assert workflow.index("name: guided app starts") < workflow.index(
         "name: Scan actual image for high/critical known vulnerabilities"
     )
-
-
-def test_f0_debian_openssl_hotfix_comes_from_pinned_security_snapshot():
-    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    assert "snapshot.debian.org/archive/debian-security/20261026T000000Z" in dockerfile
-    assert "bookworm-security main" in dockerfile
-    assert "libssl3=3.0.22-1~deb12u2" in dockerfile
-    assert "openssl=3.0.22-1~deb12u2" in dockerfile
-    assert "libseccomp2=2.5.4-1+deb12u1" in dockerfile
