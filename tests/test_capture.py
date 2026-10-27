@@ -216,9 +216,7 @@ def test_b01_evidence_coherence_gate_rejects_missing_observations(tmp_path, muta
     for name, document in docs.items():
         (folder / name).write_text(json.dumps(document))
     with pytest.raises(RuntimeError, match=error):
-        capture._verify_capture_files(
-            folder, expected_account="DUR123456", expected_port=4002, tickers=["GOOG"]
-        )
+        capture._verify_capture_files(folder, expected_account="DUR123456", expected_port=4002, tickers=["GOOG"])
 
 
 def test_b01_evidence_coherence_gate_accepts_structural_empty_order_cache(tmp_path):

@@ -203,11 +203,15 @@ def _verify_capture_files(folder: Path, *, expected_account: str, expected_port:
                     raise RuntimeError("capture incomplete: nonfinite broker currency balance")
             except ArithmeticError as exc:
                 raise RuntimeError("capture incomplete: invalid exact broker currency balance") from exc
-    if not isinstance(positions, dict) or not tickers or not all(
-        isinstance(positions.get(t), dict)
-        and isinstance(positions[t].get("positions"), list)
-        and isinstance(positions[t].get("net_exact"), str)
-        for t in tickers
+    if (
+        not isinstance(positions, dict)
+        or not tickers
+        or not all(
+            isinstance(positions.get(t), dict)
+            and isinstance(positions[t].get("positions"), list)
+            and isinstance(positions[t].get("net_exact"), str)
+            for t in tickers
+        )
     ):
         raise RuntimeError("capture incomplete: broker positions not observed for requested instruments")
     if not isinstance(orders, list) or any(not isinstance(order, dict) for order in orders):
@@ -425,9 +429,7 @@ def snapshot(
                 node.dispose()
         finally:
             lock.close()
-        _verify_capture_files(
-            d, expected_account=cfg.paper.account_id, expected_port=cfg.paper.port, tickers=tickers
-        )
+        _verify_capture_files(d, expected_account=cfg.paper.account_id, expected_port=cfg.paper.port, tickers=tickers)
     except BaseException:
         # Preserve private incident evidence but never mistake this folder for a completed B01 capture.
         _set_capture_status(d, "INCOMPLETE")
@@ -465,9 +467,7 @@ async def snapshot_async(cfg, tickers, out, phase, *, wait_s=3.0, history_days=1
                 node.dispose()
         finally:
             lock.close()
-        _verify_capture_files(
-            d, expected_account=cfg.paper.account_id, expected_port=cfg.paper.port, tickers=tickers
-        )
+        _verify_capture_files(d, expected_account=cfg.paper.account_id, expected_port=cfg.paper.port, tickers=tickers)
     except BaseException:
         _set_capture_status(d, "INCOMPLETE")
         raise
