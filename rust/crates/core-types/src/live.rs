@@ -67,10 +67,11 @@ impl InstrumentSpec {
         let step = i128::from(self.tick_size);
         let base = i128::from(self.min_price);
         let offset = i128::from(raw.0) - base;
-        let adjusted = base + match direction {
-            TickRounding::Down => offset / step * step,
-            TickRounding::Up => (offset + step - 1) / step * step,
-        };
+        let adjusted = base
+            + match direction {
+                TickRounding::Down => offset / step * step,
+                TickRounding::Up => (offset + step - 1) / step * step,
+            };
         let result = i64::try_from(adjusted).map_err(|_| InstrumentError::ArithmeticOverflow)?;
         self.check_price(FixedPrice(result))?;
         Ok(FixedPrice(result))
@@ -88,7 +89,11 @@ impl InstrumentSpec {
         } else {
             self.step_size
         };
-        let min = if market { self.market_min_qty } else { self.min_qty };
+        let min = if market {
+            self.market_min_qty
+        } else {
+            self.min_qty
+        };
         if raw.0 < min {
             return Err(InstrumentError::UnderMinimum);
         }
@@ -257,11 +262,13 @@ mod tests {
             ..s()
         };
         assert_eq!(
-            p.round_price(FixedPrice(7_500_000), TickRounding::Down).unwrap(),
+            p.round_price(FixedPrice(7_500_000), TickRounding::Down)
+                .unwrap(),
             FixedPrice(6_500_000)
         );
         assert_eq!(
-            p.round_price(FixedPrice(7_500_000), TickRounding::Up).unwrap(),
+            p.round_price(FixedPrice(7_500_000), TickRounding::Up)
+                .unwrap(),
             FixedPrice(9_000_000)
         );
         assert!(p.check_price(FixedPrice(7_500_000)).is_err());
