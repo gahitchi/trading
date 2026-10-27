@@ -119,6 +119,27 @@ def test_reject_incorrect_source_or_wheel_record(pair, bad_kwargs, error):
         wheel.observation(root, first, second)
 
 
+def test_reject_second_distribution_payload_even_when_recorded(pair):
+    root, first, second, _ = pair
+    _wheel_file(second, extra="other_package-1.0.dist-info/added.py")
+    with pytest.raises(source.FoundationError, match="unexpected executable"):
+        wheel.observation(root, first, second)
+
+
+def test_reject_wheel_without_declared_compatibility_tag(pair):
+    root, first, second, _ = pair
+    with zipfile.ZipFile(second, "r") as z:
+        copied = {name: z.read(name) for name in z.namelist()}
+    copied["trading_lab-0.2.0.dist-info/WHEEL"] = b"Wheel-Version: 1.0\\n"
+    record_body = {k: v for k, v in copied.items() if not k.endswith("/RECORD")}
+    copied["trading_lab-0.2.0.dist-info/RECORD"] = _encode_record(record_body)
+    with zipfile.ZipFile(second, "w", compression=zipfile.ZIP_STORED) as z:
+        for name, data in copied.items():
+            z.writestr(name, data)
+    with pytest.raises(source.FoundationError, match="header"):
+        wheel.observation(root, first, second)
+
+
 def test_reject_second_build_with_different_archive_bytes(pair):
     root, first, second, _ = pair
     _wheel_file(second)
