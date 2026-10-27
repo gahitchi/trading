@@ -178,7 +178,7 @@ This mapping says **where to resolve** a finding, not that all 19 remain unfixed
 ## Current checkpoint and evidence
 
 - Main reference at roadmap creation: `cb0ee1d67f64cdb1e684e60eaba0718ad16a6723`; mainline CI had a green result, but this is not broker certification.
-- Latest B01 integrity candidate when this document was drafted: `chatgpt/b01-observation-integrity-20261027` at `888171271366fc01473585d2cc22e88ddb8b514c`. Hosted CI for this exact revision was **in progress**; prior B01 connection-failure branch at `6f34e00994c0f0f869669807f03561e528b320b9` had green CI.
+- Latest B01 integrity candidate when this document was drafted: `chatgpt/b01-observation-integrity-20261027` at `888171271366fc01473585d2cc22e88ddb8b514c`. Hosted CI for this exact revision **passed** in GitHub Actions run `40501459139`; prior B01 connection-failure branch at `6f34e00994c0f0f869669807f03561e528b320b9` also had green CI. Neither run constitutes authenticated broker qualification.
 - Prior actual PAPER preflight reached the local Gateway but experienced IBKR data and security-definition farm outages followed by a connection timeout. That does **not** produce a qualified B01 snapshot. Root cause remains open and requires supervised operator context.
 - The seven release gates remain **blocked** in `docs/release-criteria.json`. Do not change them to green based on this roadmap or feature tests.
 - No passwords, actual account identifiers, exchange API keys, secret paths, account balances or raw private evidence belong in the roadmap.
