@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "stage": "F0_ARCHITECTURE_MAP_UNQUALIFIED",
+  "rule": "Qualification is sequential; concurrent coding does not imply qualification.",
+  "runtime_policy": "PAPER_ONLY",
+  "release_authorization": false,
+  "qualification": "BLOCKED",
+  "gates": [
+    {
+      "id": "F0",
+      "name": "Reproducible candidate",
+      "depends_on": [],
+      "primary_owner": "tools/foundation_manifest.py",
+      "implementation_refs": [
+        "docs/architecture/f0-reference-scope.json",
+        "tools/foundation_image.py"
+      ],
+      "exit_evidence": "Pinned source, dependency, OS and build identities from exact candidate; independent review still pending",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "F1",
+      "name": "Economic conservation",
+      "depends_on": [
+        "F0"
+      ],
+      "primary_owner": "src/lab/economic_ledger.py",
+      "implementation_refs": [
+        "src/lab/engine_events.py",
+        "src/lab/execution_store.py",
+        "src/lab/agents/execution.py"
+      ],
+      "exit_evidence": "Trading Lab-owned typed economic events, exact-Decimal cash/position conservation, classified native-to-our-model broker facts, durable restart and independent reconciliation; NautilusTrader only an optional comparative oracle",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "F2",
+      "name": "Point-in-time inputs",
+      "depends_on": [
+        "F1"
+      ],
+      "primary_owner": "src/lab/data.py",
+      "implementation_refs": [
+        "src/lab/universe.py",
+        "src/lab/exchange.py"
+      ],
+      "exit_evidence": "As-of source identity, availability timestamps, revisions, membership and corporate-action custody",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "F3",
+      "name": "Typed decision and risk",
+      "depends_on": [
+        "F2"
+      ],
+      "primary_owner": "src/lab/agents/risk.py",
+      "implementation_refs": [
+        "src/lab/reservations.py",
+        "src/lab/authority.py"
+      ],
+      "exit_evidence": "Typed execution decision; held plus uncertain pending exposure, strict reduce-only and hard kill invariants",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "F4",
+      "name": "Durable order lifecycle",
+      "depends_on": [
+        "F3"
+      ],
+      "primary_owner": "src/lab/execution_store.py",
+      "implementation_refs": [
+        "src/lab/agents/execution.py",
+        "src/lab/execution_state.py"
+      ],
+      "exit_evidence": "Broker-order acknowledgement != fill; idempotent replay, late cancel/fill races and crash-durable recovery",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "F5",
+      "name": "Scientific qualification",
+      "depends_on": [
+        "F4"
+      ],
+      "primary_owner": "src/lab/experiments.py",
+      "implementation_refs": [
+        "src/lab/stats.py",
+        "src/lab/research/approval.py"
+      ],
+      "exit_evidence": "Prospective holdout, selection-aware statistics, causal data/economics and qualified policy fallback",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "F6",
+      "name": "Authenticated paper broker",
+      "depends_on": [
+        "F5"
+      ],
+      "primary_owner": "src/lab/paper.py",
+      "implementation_refs": [
+        "src/lab/capture.py",
+        "docs/paper-acceptance.md"
+      ],
+      "exit_evidence": "Authenticated complete broker observations; real PAPER B01-B10 and independent financial reconciliation",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "F7",
+      "name": "Operator deployment",
+      "depends_on": [
+        "F6"
+      ],
+      "primary_owner": "src/lab/app.py",
+      "implementation_refs": [
+        "src/lab/runtime_ops.py",
+        "docs/runtime-storage.md"
+      ],
+      "exit_evidence": "Minimal operator status and halt visibility before broker trials; production hardening, safe upgrade and soak at phase exit",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "F8",
+      "name": "Independent release criteria",
+      "depends_on": [
+        "F7"
+      ],
+      "primary_owner": "tools/release_check.py",
+      "implementation_refs": [
+        "docs/release-criteria.json",
+        "tests/test_release_evidence.py"
+      ],
+      "exit_evidence": "Seven independent release gates on same reviewed candidate, all required statuses and hashes",
+      "status": "BLOCKED"
+    }
+  ],
+  "prohibitions": [
+    "live-money order routing",
+    "automatic promotion from test to broker",
+    "broker authority based on an F0 manifest",
+    "F5 statistical approval before F1-F4 qualification",
+    "expansion inheriting prior independent release approval"
+  ]
+}
