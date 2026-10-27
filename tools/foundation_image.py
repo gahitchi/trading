@@ -16,8 +16,8 @@ from pathlib import Path
 
 from tools import foundation_manifest as source
 
-HEX256 = re.compile(r"sha256:[a-f0-9]{64}\\Z")
-HASH = re.compile(r"[a-f0-9]{64}\\Z")
+HEX256 = re.compile(r"sha256:[a-f0-9]{64}\Z")
+HASH = re.compile(r"[a-f0-9]{64}\Z")
 KIND = "F0_CONTAINER_BUILD_OBSERVATION_UNATTESTED"
 
 
@@ -65,7 +65,10 @@ def _observed(path: Path) -> dict:
         "lab_version",
     }:
         raise source.FoundationError("F0 installed dependency observation shape mismatch")
-    if any(type(item[k]) is not str or not HASH.fullmatch(item[k]) for k in ("os_inventory_sha256", "installed_python_sha256")):
+    if any(
+        type(item[k]) is not str or not HASH.fullmatch(item[k])
+        for k in ("os_inventory_sha256", "installed_python_sha256")
+    ):
         raise source.FoundationError("F0 installed dependency digests invalid")
     if (
         type(item["installed_python_count"]) is not int
