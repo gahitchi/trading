@@ -178,7 +178,12 @@ def test_full_replay_detects_forged_fill_economics_with_consistent_hash():
     # Rewrite all postings into a different, still balanced trade with the
     # same details, and recompute the unkeyed SHA to mimic local file tampering.
     altered = replace(
-        entry, postings=(Posting("cash:USD", D("-90")), Posting("inventory:USD:SPY", D("90")), Posting("income:realized", D("0"))),
+        entry,
+        postings=(
+            Posting("cash:USD", D("-90")),
+            Posting("inventory:USD:SPY", D("90")),
+            Posting("income:realized", D("0")),
+        ),
     )
     altered = replace(altered, sha256=_digest("0" * 64, altered))
     with pytest.raises(EconomicLedgerError):
