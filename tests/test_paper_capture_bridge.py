@@ -13,7 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from lab.kernel.order_lifecycle import BrokerEvidence, LifecycleError, OfflineOrderSession
-from lab.kernel.paper_capture_bridge import load_paper_capture
+from lab.kernel.paper_capture_bridge import b01_review, load_paper_capture
 from lab.markets.domain import OrderIntent, Side
 from lab.markets.journal import EventJournal
 from lab.safety import SafetyError
@@ -280,6 +280,91 @@ class PaperCaptureTests(unittest.TestCase):
                 instrument_id=INSTRUMENT,
                 action_version="v1",
             )
+
+    def test_b01_matching_cache_still_cannot_authorize_broker(self):
+        self.change(
+            "broker_account.json",
+            lambda row: row.update(
+                balances=[{"currency": "USD", "total": "1000.01", "free": "900.01", "locked": "100"}]
+            ),
+        )
+        observation = load(self.path)
+        review = b01_review(self.path, observation, now_ns=11, max_age_seconds=900)
+        self.assertEqual(review["qualification"], "BLOCKED")
+        self.assertEqual(review["stage"], "B01_READ_ONLY_EVIDENCE_REVIEW")
+        self.assertEqual(review["observed_currency_count"], 1)
+        self.assertEqual(review["observed_order_count"], 1)
+        self.assertEqual(review["observed_execution_count"], 1)
+        self.assertFalse(review["source_authenticated"])
+        self.assertFalse(review["broker_authorization"])
+        self.assertFalse(review["release_reservations"])
+        self.assertIn("BROKER_SESSION_IDENTITY_UNVERIFIED", review["unresolved_evidence"])
+        self.assertIn("CASH_AND_FEE_LEDGER_PARITY_UNVERIFIED", review["unresolved_evidence"])
+        self.assertNotIn("USD_CURRENCY_BALANCE_NOT_OBSERVED", review["unresolved_evidence"])
+        self.assertNotIn(ACCOUNT, json.dumps(review))
+
+    def test_b01_rejects_mutated_evidence_and_nonnumeric_balances(self):
+        observation = load(self.path)
+        self.change("broker_account.json", lambda row: row.update(balances=[{"currency": "EUR"}]))
+        with self.assertRaisesRegex(LifecycleError, "changed between"):
+            b01_review(self.path, observation, now_ns=11)
+        with self.assertRaisesRegex(LifecycleError, "decimal string"):
+            b01_review(self.path, load(self.path), now_ns=11)
+        fixture(self.path)
+        self.change(
+            "broker_account.json",
+            lambda row: row.update(
+                balances=[
+                    {"currency": "USD", "total": "10", "free": "10", "locked": "0"},
+                    {"currency": "USD", "total": "10", "free": "10", "locked": "0"},
+                ]
+            ),
+        )
+        with self.assertRaisesRegex(LifecycleError, "duplicate broker currency"):
+            b01_review(self.path, load(self.path), now_ns=11)
+
+    def test_b01_stale_and_future_captures_stay_blocked(self):
+        observation = load(self.path)
+        stale = b01_review(self.path, observation, now_ns=901_000_000_011, max_age_seconds=900)
+        self.assertEqual(stale["qualification"], "BLOCKED")
+        self.assertIn("CAPTURE_OLDER_THAN_OPERATOR_FRESHNESS_LIMIT", stale["unresolved_evidence"])
+        future = b01_review(self.path, observation, now_ns=9, max_age_seconds=900)
+        self.assertIn("CAPTURE_TIMESTAMP_IN_FUTURE", future["unresolved_evidence"])
+        with self.assertRaisesRegex(LifecycleError, "freshness"):
+            b01_review(self.path, observation, now_ns=11, max_age_seconds=0)
+
+    def test_b01_cli_emits_only_blocked_nonidentifying_evidence(self):
+        config = self.path / "lab.toml"
+        config.write_text('[paper]\\naccount_id = "DUR123456"\\nport = 4002\\n[universe]\\nGOOG = "XNAS"\\n')
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-S",
+                "-m",
+                "lab.kernel.paper_capture_bridge",
+                "--config",
+                str(config),
+                "--capture",
+                str(self.path),
+                "--ticker",
+                "GOOG",
+                "--action-version",
+                "v1",
+                "--b01-report",
+            ],
+            cwd=ROOT,
+            env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["qualification"], "BLOCKED")
+        self.assertFalse(report["broker_authorization"])
+        self.assertNotIn(ACCOUNT, result.stdout + result.stderr)
+        self.assertNotIn("1000.01", result.stdout)
 
     def test_strict_stdlib_import_no_broker_or_native_runtime(self):
         script = (
