@@ -16,7 +16,7 @@ pub use runtime::{LiveMarketDataEngine, build_stream_url, fetch_depth_snapshot};
 pub use wire::{LiveFrame, SnapshotRequest, StreamGroup, parse_combined, parse_depth_snapshot};
 
 use trading_core_types::NumericError;
-use trading_orderbook::{BookError,SyncError};
+use trading_orderbook::{BookError, SyncError};
 
 #[derive(Debug)]
 pub enum MarketDataError {
@@ -32,14 +32,18 @@ pub enum MarketDataError {
     ChannelClosed,
 }
 impl From<reqwest::Error> for MarketDataError {
-    fn from(value:reqwest::Error)->Self{Self::Http(value)}
+    fn from(value: reqwest::Error) -> Self {
+        Self::Http(value)
+    }
 }
 impl From<serde_json::Error> for MarketDataError {
-    fn from(value:serde_json::Error)->Self{Self::Json(value)}
+    fn from(value: serde_json::Error) -> Self {
+        Self::Json(value)
+    }
 }
 impl std::fmt::Display for MarketDataError {
-    fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result {
-        write!(f,"{self:?}")
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
     }
 }
 impl std::error::Error for MarketDataError {}
