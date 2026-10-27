@@ -9,6 +9,7 @@ on:
       - chatgpt/f1-evidence-custody-*
       - chatgpt/f1-durable-economic-*
       - chatgpt/f1-source-binding-*
+      - chatgpt/f1-order-reconciliation-*
   workflow_dispatch:
 
 permissions:
@@ -29,8 +30,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: uv sync --frozen --extra dev
       - name: pure own-engine accounting, event replay and parity
-        run: uv run --no-sync pytest -q tests/test_economic_ledger.py tests/test_engine_events.py tests/test_settlement_input.py tests/test_economic_store.py tests/test_account_projection.py tests/test_settlement_semantics.py tests/test_cash_in_lieu.py tests/test_source_binding.py tests/test_account_observation.py tests/test_f1_verify_cli.py tests/test_broker_fill_input.py
+        run: uv run --no-sync pytest -q tests/test_economic_ledger.py tests/test_engine_events.py tests/test_settlement_input.py tests/test_economic_store.py tests/test_account_projection.py tests/test_settlement_semantics.py tests/test_cash_in_lieu.py tests/test_source_binding.py tests/test_account_observation.py tests/test_f1_verify_cli.py tests/test_broker_fill_input.py tests/test_order_observation.py
       - name: pinned formatter and static checks
         run: |
-          uvx --from ruff==0.17.3 ruff check src/lab/economic_ledger.py src/lab/engine_events.py src/lab/settlement_input.py src/lab/economic_store.py src/lab/account_projection.py src/lab/account_observation.py src/lab/f1_verify.py src/lab/fill_input.py tests/test_economic_ledger.py tests/test_engine_events.py tests/test_settlement_input.py tests/test_economic_store.py tests/test_account_projection.py tests/test_settlement_semantics.py tests/test_cash_in_lieu.py tests/test_source_binding.py tests/test_account_observation.py tests/test_f1_verify_cli.py tests/test_broker_fill_input.py
-          uvx --from ruff==0.17.3 ruff format --check src/lab/economic_ledger.py src/lab/engine_events.py src/lab/settlement_input.py src/lab/economic_store.py src/lab/account_projection.py src/lab/account_observation.py src/lab/f1_verify.py src/lab/fill_input.py tests/test_economic_ledger.py tests/test_engine_events.py tests/test_settlement_input.py tests/test_economic_store.py tests/test_account_projection.py tests/test_settlement_semantics.py tests/test_cash_in_lieu.py tests/test_source_binding.py tests/test_account_observation.py tests/test_f1_verify_cli.py tests/test_broker_fill_input.py
+          uvx --from ruff==0.17.3 ruff check src/lab/economic_ledger.py src/lab/engine_events.py src/lab/settlement_input.py src/lab/economic_store.py src/lab/account_projection.py src/lab/account_observation.py src/lab/f1_verify.py src/lab/fill_input.py src/lab/order_observation.py tests/test_economic_ledger.py tests/test_engine_events.py tests/test_settlement_input.py tests/test_economic_store.py tests/test_account_projection.py tests/test_settlement_semantics.py tests/test_cash_in_lieu.py tests/test_source_binding.py tests/test_account_observation.py tests/test_f1_verify_cli.py tests/test_broker_fill_input.py tests/test_order_observation.py
+          uvx --from ruff==0.17.3 ruff format --check src/lab/economic_ledger.py src/lab/engine_events.py src/lab/settlement_input.py src/lab/economic_store.py src/lab/account_projection.py src/lab/account_observation.py src/lab/f1_verify.py src/lab/fill_input.py src/lab/order_observation.py tests/test_economic_ledger.py tests/test_engine_events.py tests/test_settlement_input.py tests/test_economic_store.py tests/test_account_projection.py tests/test_settlement_semantics.py tests/test_cash_in_lieu.py tests/test_source_binding.py tests/test_account_observation.py tests/test_f1_verify_cli.py tests/test_broker_fill_input.py tests/test_order_observation.py
