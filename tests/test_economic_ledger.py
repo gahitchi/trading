@@ -219,3 +219,12 @@ def test_ambient_decimal_context_cannot_round_fifo_short_lot_or_fractional_settl
         assert closed.position("SPY") == 0
         assert not closed.lots
         assert closed.balance("cash:USD") == D("-0.051851853185185196")
+
+
+def test_decimal_integer_digit_cap_is_exact_not_off_by_one():
+    # 10**25 has twenty-six integer digits even though its coefficient is "1".
+    with pytest.raises(EconomicLedgerError):
+        EconomicLedger().post_cash("too-large", "CAPITAL_IN", D("1E+25"))
+    s = EconomicLedger().post_cash("maximum", "CAPITAL_IN", D("1E+24"))
+    s.audit()
+    assert s.balance("cash:USD") == D("1E+24")
