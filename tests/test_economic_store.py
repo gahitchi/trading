@@ -96,7 +96,10 @@ def test_database_corruption_fails_closed_and_does_not_rewrite_evidence(tmp_path
     store = EconomicEventStore(path, "SIM-001")
     store.append_cash_record(record(), source_namespace="broker")
     with sqlite3.connect(path) as db:
-        db.execute(f"UPDATE economic_events SET {column}=? WHERE seq=1", (b"other" if column in {"source_bytes", "payload"} else "altered",))
+        db.execute(
+            f"UPDATE economic_events SET {column}=? WHERE seq=1",
+            (b"other" if column in {"source_bytes", "payload"} else "altered",),
+        )
     with pytest.raises((EconomicStoreError, EngineFactError)):
         store.load()
 
