@@ -1,0 +1,33 @@
+name: f1-independent-engine-events
+
+# Pure Trading Lab domain events. No NautilusTrader model imports, broker
+# credentials, order submission, deployment or relaxation of Docker CVE gates.
+on:
+  push:
+    branches:
+      - chatgpt/f1-independent-engine-events-*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  own-engine-economic-events:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: "0.13.6"
+          python-version: ${{ matrix.python }}
+      - run: uv sync --frozen --extra dev
+      - name: pure own-engine accounting, event replay and parity
+        run: uv run --no-sync pytest -q tests/test_economic_ledger.py tests/test_engine_events.py
+      - name: pinned formatter and static checks
+        run: |
+          uvx --from ruff==0.17.3 ruff check src/lab/economic_ledger.py src/lab/engine_events.py tests/test_economic_ledger.py tests/test_engine_events.py
+          uvx --from ruff==0.17.3 ruff format --check src/lab/economic_ledger.py src/lab/engine_events.py tests/test_economic_ledger.py tests/test_engine_events.py
