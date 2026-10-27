@@ -335,7 +335,7 @@ class PaperCaptureTests(unittest.TestCase):
 
     def test_b01_cli_emits_only_blocked_nonidentifying_evidence(self):
         config = self.path / "lab.toml"
-        config.write_text('[paper]\\naccount_id = "DUR123456"\\nport = 4002\\n[universe]\\nGOOG = "XNAS"\\n')
+        config.write_text('[paper]\naccount_id = "DUR123456"\nport = 4002\n[universe]\nGOOG = "XNAS"\n')
         result = subprocess.run(
             [
                 sys.executable,
