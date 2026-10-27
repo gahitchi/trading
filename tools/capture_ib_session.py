@@ -61,6 +61,19 @@ def main(argv=None) -> int:
     except ConfigError:
         print("capture refused: invalid local configuration; review lab.toml", file=sys.stderr)
         return 2
+    except RuntimeError as exc:
+        # Native LiveNode failures often mention account/order fields in their full
+        # exception text. Present only a classified, non-identifying failure.
+        if "data-connect timeout" in str(exc).lower():
+            print(
+                "capture blocked: broker data client did not become ready; "
+                "verify IB Gateway PAPER connection and market-data/security-definition farm status. "
+                "No B01 snapshot was completed.",
+                file=sys.stderr,
+            )
+        else:
+            print("capture blocked: broker startup or capture failed; no B01 evidence accepted", file=sys.stderr)
+        return 2
     except (ValueError, OSError) as e:
         print(f"capture refused: {type(e).__name__}: check local inputs and broker connectivity", file=sys.stderr)
         return 2

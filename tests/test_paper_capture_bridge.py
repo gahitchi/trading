@@ -30,6 +30,15 @@ def _write(folder: Path, name: str, data: object) -> None:
 
 def fixture(folder: Path) -> None:
     _write(folder, "identity.json", {"paper_port": 4002, "captured_at": "2026-01-01T00:00:00+00:00"})
+    _write(
+        folder,
+        "CAPTURE_STATUS.json",
+        {
+            "state": "COMPLETE_UNVERIFIED",
+            "broker_authenticated": False,
+            "history_coverage_verified": False,
+        },
+    )
     _write(folder, "broker_account.json", {"account_id": ACCOUNT, "balances": []})
     _write(
         folder,
@@ -209,6 +218,19 @@ class PaperCaptureTests(unittest.TestCase):
         fixture(self.path)
         self.change("broker_capture_meta.json", lambda doc: doc.update(capture_started_ns=11))
         with self.assertRaisesRegex(LifecycleError, "reversed"):
+            load(self.path)
+
+    def test_incomplete_or_missing_status_can_never_be_inspected(self):
+        self.change("CAPTURE_STATUS.json", lambda row: row.update(state="INCOMPLETE"))
+        with self.assertRaisesRegex(LifecycleError, "capture is incomplete"):
+            load(self.path)
+        fixture(self.path)
+        self.change("CAPTURE_STATUS.json", lambda row: row.update(broker_authenticated=True))
+        with self.assertRaisesRegex(LifecycleError, "status provenance"):
+            load(self.path)
+        fixture(self.path)
+        (self.path / "CAPTURE_STATUS.json").unlink()
+        with self.assertRaisesRegex(LifecycleError, "required regular file"):
             load(self.path)
 
     def test_provenance_binds_file_changes_and_rejects_symlinks(self):

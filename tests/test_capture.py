@@ -28,6 +28,7 @@ def test_snapshot_records_the_broker_view_without_placing_orders(goog_lab, goog,
     files = {p.name for p in d.iterdir()}
     assert {
         "identity.json",
+        "CAPTURE_STATUS.json",
         "broker_account.json",
         "broker_positions.json",
         "broker_orders.json",
@@ -47,6 +48,12 @@ def test_snapshot_records_the_broker_view_without_placing_orders(goog_lab, goog,
     assert capture_meta["coverage_verified"] is False
     assert capture_meta["broker_authentication_verified"] is False
     assert PAPER_ACCOUNT in (d / "broker_account.json").read_text()  # the raw original keeps the real ID
+    status = json.loads((d / "CAPTURE_STATUS.json").read_text())
+    assert status == {
+        "state": "COMPLETE_UNVERIFIED",
+        "broker_authenticated": False,
+        "history_coverage_verified": False,
+    }
     note = json.loads((d / "NOTE.json").read_text())["note"]
     assert "not a pass" in note
     ident = json.loads((d / "identity.json").read_text())
@@ -70,6 +77,50 @@ def test_snapshot_records_the_broker_view_without_placing_orders(goog_lab, goog,
     again = tmp_path_factory.mktemp("again")
     capture.sanitize(out / "B03-daily", again, key)
     assert pseudo in (next(again.rglob("broker_account.json"))).read_text()
+
+
+def test_broker_connect_timeout_quarantines_partial_snapshot_without_authority(
+    goog_lab, tmp_path, monkeypatch
+):
+    from lab import paper
+
+    def reject(*_args, **_kwargs):
+        raise RuntimeError("data-connect timeout")
+
+    monkeypatch.setattr(paper, "_base_node", reject)
+    location = tmp_path / "private-failed-b01"
+    with pytest.raises(RuntimeError, match="data-connect timeout"):
+        capture.snapshot(goog_lab, ["GOOG"], location, "B01-readonly")
+    captured = list((location / "B01-readonly").glob("snapshot-*"))
+    assert len(captured) == 1
+    folder = captured[0]
+    status = json.loads((folder / "CAPTURE_STATUS.json").read_text())
+    assert status["state"] == "INCOMPLETE"
+    assert status["broker_authenticated"] is False
+    assert status["history_coverage_verified"] is False
+    assert (folder / "identity.json").is_file()
+    assert not (folder / "NOTE.json").exists()
+    assert not (folder / "broker_account.json").exists()
+
+
+def test_capture_cli_handles_native_broker_startup_timeout_privately(monkeypatch, capsys, tmp_path):
+    from types import SimpleNamespace
+
+    from lab import config
+    from tools import capture_ib_session
+
+    monkeypatch.setattr(config, "load_config", lambda _path: SimpleNamespace(universe={"GOOG": "XNAS"}))
+
+    def reject(*_args, **_kwargs):
+        raise RuntimeError("data-connect timeout: account IB-DUR987654")
+
+    monkeypatch.setattr(capture, "snapshot", reject)
+    result = capture_ib_session.main(["snapshot", "B01-test", "--out", str(tmp_path), "--tickers", "GOOG"])
+    output = capsys.readouterr()
+    assert result == 2
+    assert "broker data client did not become ready" in output.err
+    assert "IB-DUR987654" not in output.out + output.err
+    assert not output.out
 
 
 def test_read_only_capture_preflight_redacts_broker_account_error(monkeypatch, capsys, tmp_path):
