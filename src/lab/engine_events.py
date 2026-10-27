@@ -78,7 +78,21 @@ class SplitFact:
     denominator: int
 
 
-EconomicFact = FillFact | CashFact | SplitFact
+@dataclass(frozen=True, slots=True)
+class CashInLieuFact:
+    event_id: str
+    source_ref: str
+    timestamp_ns: int
+    symbol: str
+    side: str
+    quantity: Decimal
+    cash: Decimal
+    source_kind: str
+    settlement_status: str
+    source_sha256: str
+
+
+EconomicFact = FillFact | CashFact | SplitFact | CashInLieuFact
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +170,17 @@ def _evidence_digest(previous: str, account_id: str, fact: EconomicFact) -> str:
             "settlement_status": fact.settlement_status,
             "source_sha256": fact.source_sha256,
         }
+    elif type(fact) is CashInLieuFact:
+        payload = {
+            "kind": "CASH_IN_LIEU",
+            "symbol": fact.symbol,
+            "side": fact.side,
+            "quantity": format(fact.quantity, "f"),
+            "cash": format(fact.cash, "f"),
+            "source_kind": fact.source_kind,
+            "settlement_status": fact.settlement_status,
+            "source_sha256": fact.source_sha256,
+        }
     elif type(fact) is SplitFact:
         payload = {
             "kind": "SPLIT",
@@ -195,6 +220,18 @@ def _event_ledger(ledger: EconomicLedger, fact: EconomicFact) -> EconomicLedger:
             if type(fact.source_sha256) is not str or not SHA256.fullmatch(fact.source_sha256):
                 raise EngineFactError("cash evidence lacks a canonical source digest")
             return ledger.post_cash(fact.event_id, fact.kind, _number(fact.amount, "cash amount", positive=True))
+        if type(fact) is CashInLieuFact:
+            if fact.source_kind != "BROKER_CASH_ACTIVITY" or fact.settlement_status != "SETTLED":
+                raise EngineFactError("cash-in-lieu requires classified settled broker cash activity")
+            if type(fact.source_sha256) is not str or not SHA256.fullmatch(fact.source_sha256):
+                raise EngineFactError("cash-in-lieu source digest missing")
+            return ledger.post_cash_in_lieu(
+                fact.event_id,
+                fact.symbol,
+                fact.side,
+                _number(fact.quantity, "fractional shares", positive=True),
+                _number(fact.cash, "cash-in-lieu amount", positive=True),
+            )
         if type(fact) is SplitFact:
             if type(fact.symbol) is not str or not SYMBOL.fullmatch(fact.symbol):
                 raise EngineFactError("invalid split instrument")
@@ -215,7 +252,7 @@ class EngineEconomicBook:
 
     def append(self, fact: EconomicFact) -> EngineEconomicBook:
         _identity(self.account_id, "account identity")
-        if type(fact) not in (FillFact, CashFact, SplitFact):
+        if type(fact) not in (FillFact, CashFact, SplitFact, CashInLieuFact):
             raise EngineFactError("unsupported economic event")
         _identity(fact.event_id, "event identity")
         _identity(fact.source_ref, "independent source reference")
