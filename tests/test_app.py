@@ -107,6 +107,16 @@ def test_gold_is_explicit_and_cannot_change_an_existing_runtime(controller):
         controller.configure({**controller.settings, "gold": True})
 
 
+def test_gold_is_presented_as_a_selectable_commodity_tile():
+    page = (app.UI / "index.html").read_text()
+    heading = page.index("Futures &amp; Commodities to trade")
+    tile = page.index('name="gold"', heading)
+
+    assert page.index('<div class="symbols">', heading) < tile
+    assert "<span>XAU</span>" in page[tile : tile + 160]
+    assert 'aria-label="Trade London Gold XAUUSD"' in page[tile : tile + 160]
+
+
 def test_confirmed_gold_migration_preserves_plan_and_uses_broker_checked_helper(controller, monkeypatch):
     atomic_json(controller.rt / "identity.json", {"account": controller.settings["account"]})
     calls = []
