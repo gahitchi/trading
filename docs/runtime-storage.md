@@ -65,3 +65,11 @@ the reviewed candidate. Research artifacts need revalidation against changed sou
 Legacy identities that did not bind execution settings require an independent migration
 plan. Non-flat migrations, account changes, strategy/configuration migrations and recovery
 from ambiguous broker state still require an independently reviewed migration plan.
+
+The local app has one narrower, explicit migration for adding `london-spot-atr-v1` to an
+existing runtime. It is limited to a flat local ledger with no pending intents and no hard
+halt. After operator confirmation, a read-only actor connects to the configured PAPER account
+and attests that the broker also reports no positions or open orders. The app then takes a
+private cold backup and writes an audited identity receipt; it does not reset the ledger,
+deduplication history, controls or authority key. The changed identity invalidates the old
+authority, and startup remains halted until both stock and Gold reconciliation complete.

@@ -156,7 +156,10 @@ function render(state) {
   }
   riskNote();
   const gold = state.gold_status;
-  $("gold-status").textContent = !state.settings.gold ? "London Gold is off."
+  const selectedGold = form.elements.gold.checked;
+  $("gold-status").textContent = selectedGold !== state.settings.gold
+    ? selectedGold ? "XAU selected. Save the plan to enable London Gold." : "XAU deselected. Save the plan to disable London Gold."
+    : !state.settings.gold ? "London Gold is off."
     : !gold ? "London Gold: waiting for broker data"
     : gold.state === "gold bracket submitted"
       ? `London Gold: ${shares.format(gold.qty)} oz order, limit ${usd.format(gold.entry_limit)}, stop ${usd.format(gold.stop)}, target ${usd.format(gold.target)}${gold.minimum_lot_override ? " (minimum lot exceeds 1% budget)" : ""}.`
@@ -198,12 +201,21 @@ async function action(fn) {
   try { render(await fn()); } catch (e) { notice(e.message); }
   finally { busy = false; try { render(await api("/api/status")); } catch (e) { notice(e.message); } }
 }
-form.addEventListener("submit", e => { e.preventDefault(); action(() => api("/api/setup", settings())); });
+async function saveSettings() {
+  const value = settings();
+  if (last.plan_locked && !last.settings.gold && value.gold) {
+    const confirmed = window.confirm("Trading Lab will pause new orders, spend about a minute verifying with IBKR that the PAPER account has no positions or open orders, make a private backup, then add London Gold. Continue?");
+    if (!confirmed) throw Error("London Gold migration cancelled.");
+    value.confirm_gold_migration = true;
+  }
+  return api("/api/setup", value);
+}
+form.addEventListener("submit", e => { e.preventDefault(); action(saveSettings); });
 form.addEventListener("change", e => { if (e.target.name === "profile") riskNote(); });
 $("start").onclick = () => action(async () => {
   if (!last.engine_alive) {
     if (!form.reportValidity()) throw Error("Complete the required setup fields.");
-    await api("/api/setup", settings());
+    await saveSettings();
   }
   return api("/api/start", {});
 });

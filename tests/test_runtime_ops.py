@@ -6,7 +6,7 @@ import pytest
 from lab.execution_store import ExecutionStore
 from lab.paper import acquire_runtime_lock, execution_identity, runtime_dir
 from lab.persistence import atomic_json, read_json
-from lab.runtime_ops import run, snapshot_locked
+from lab.runtime_ops import gold_upgrade_plan, run, snapshot_locked
 
 
 def test_backup_is_cold_private_and_refuses_live_writer(goog_lab, tmp_path):
@@ -108,3 +108,45 @@ def test_cold_backup_excludes_operator_control_writers(goog_lab, tmp_path, monke
     restored = Authority(tmp_path / "backup", authority.identity)
     assert restored.read() == authority.read()
     assert restored.requests() == authority.requests()
+
+
+def test_enable_gold_migrates_only_a_broker_attested_flat_runtime(goog_lab, tmp_path):
+    cfg = replace(goog_lab, results_dir=tmp_path / "results")
+    rt = runtime_dir(cfg)
+    identity = {
+        "account": "DU1234567",
+        "tickers": ["GOOG"],
+        "deployment": {"implementation_sha256": "old"},
+        "execution": execution_identity(cfg),
+    }
+    atomic_json(rt / "identity.json", identity)
+    ExecutionStore(rt / "ledger.json").save({"cash": 999, "positions": {}, "pending": {}})
+    atomic_json(rt / "HALT", {"kind": "review"})
+    assert any("hard halt" in blocker for blocker in gold_upgrade_plan(rt, cfg)["blockers"])
+    (rt / "HALT").unlink()
+    plan = gold_upgrade_plan(rt, cfg)
+    evidence = tmp_path / "gold-attestation.json"
+    atomic_json(
+        evidence,
+        {
+            "captured_at": datetime.now(UTC).isoformat(),
+            "runtime_identity": plan["old"],
+            "ledger": plan["ledger"],
+            "account": "DU1234567",
+            "open_orders": [],
+            "positions": {},
+        },
+    )
+
+    result = run(
+        cfg,
+        "enable-gold",
+        evidence=evidence,
+        reason="operator enabled gold after broker reconciliation",
+        destination=tmp_path / "gold-backup",
+    )
+
+    assert result["action"] == "enable-gold"
+    assert read_json(rt / "identity.json")["gold"] == "london-spot-atr-v1"
+    assert ExecutionStore(rt / "ledger.json").load()["cash"] == 999
+    assert (tmp_path / "gold-backup" / "backup-manifest.json").exists()
