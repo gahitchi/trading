@@ -104,3 +104,23 @@ remain absent. `main` remains Claude-owned and is unchanged by this branch.
 fixtures for the upcoming exact-Decimal accounting contract may be developed
 without enabling execution; they cannot be considered qualified or integrated
 without passing the reviewed F0 gates.
+
+## Bounded F0 offline-research CVE exception (owner direction, 2026-10-27)
+
+To allow **non-deployment F0 research verification** without concealing Debian
+risk, pushes to the exact ChatGPT F0 development branch may carry only the
+known **55 High package/CVE/version/fix-state matches** in
+`docs/security/f0-offline-cve-baseline.json` until **2026-11-26**.
+The pinned Grype scan still runs and its JSON/SBOM artifacts remain available.
+`tools/foundation_vulnerabilities.py` fails on any Critical, new High,
+changed/high-fixable package, invalid scan or expired exception.
+
+**This is neither an independent vulnerability-risk assessment nor F0
+qualification.** PRs, `main`, every other branch, broker-connected
+environments and any distribution/release retain the strict High/Critical
+security gate. The research exception grants **no broker, account, strategy,
+or release authorization**. The pilot must run offline without secrets,
+broker sessions, untrusted inputs, privileged containers or external
+service exposure. The independent reviewer may reject the exception.
+
+Arch operator input and independent F0.6 acceptance remain required.
