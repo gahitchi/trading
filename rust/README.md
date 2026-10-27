@@ -1,8 +1,8 @@
 # Rust Trading Engine — Parts 1–4 of 6
 
-**Status:** Parts 1 and 2 passed both Linux CI and independent Arch validation
-(41 tests total); Part 3 passed its first Linux CI run (61 tests total)
-but still requires independent Arch and Termux validation. This is a **research
+**Status:** Parts 1–3 passed Linux CI and independent Arch validation
+(61 total tests at Part 3); Part 4 passes Linux CI (91 total tests), with
+independent Arch and Termux validation still pending. This is a **research
 foundation**, not a live trading application. The Rust workspace lives under `rust/` alongside, but remains
 fully isolated from, the legacy Python trading-lab application. No exchange
 keys, external orders, accounts, or live venue connections are present.
