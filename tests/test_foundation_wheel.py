@@ -77,7 +77,7 @@ def pair(tmp_path):
         else:
             text = "synthetic pinned manifest\n"
         file.write_text(text)
-    (root / "src/lab").mkdir(parents=True)
+    (root / "src/lab").mkdir(parents=True, exist_ok=True)
     (root / "src/lab/__init__.py").write_bytes(b"print('ok')\n")
     (root / "src/lab/default.toml").write_bytes(b"[risk]\nprofile = 'balanced'\n")
     _commit(root)
