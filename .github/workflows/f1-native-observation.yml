@@ -1,0 +1,33 @@
+name: f1-native-observation-isolated
+
+# Offline F1.2 interface contract checks, NOT deployment approval.
+# Strict Docker security and full-branch release gates remain unchanged.
+on:
+  push:
+    branches:
+      - chatgpt/f1-native-observation-*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-observation-contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: "0.13.6"
+          python-version: ${{ matrix.python }}
+      - run: uv sync --frozen --extra dev
+      - name: exact ledger and native observation tests (no broker)
+        run: uv run --no-sync pytest -q tests/test_economic_ledger.py tests/test_economic_observation.py
+      - name: pinned static analysis
+        run: |
+          uvx --from ruff==0.17.3 ruff check src/lab/economic_ledger.py src/lab/economic_observation.py tests/test_economic_ledger.py tests/test_economic_observation.py
+          uvx --from ruff==0.17.3 ruff format --check src/lab/economic_ledger.py src/lab/economic_observation.py tests/test_economic_ledger.py tests/test_economic_observation.py
