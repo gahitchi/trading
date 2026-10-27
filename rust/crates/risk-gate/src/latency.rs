@@ -18,20 +18,35 @@ impl Default for LatencyCircuit {
     fn default() -> Self {
         // Cold start must never assume an unseen connection is healthy.
         Self {
-            state: LatencyState { blocked: true, recovery_streak: 0 },
+            state: LatencyState {
+                blocked: true,
+                recovery_streak: 0,
+            },
             last_receive_ns: None,
         }
     }
 }
 impl LatencyCircuit {
-    pub fn new() -> Self { Self::default() }
-    pub fn state(&self) -> LatencyState { self.state }
-    pub fn last_receive_ns(&self) -> Option<u64> { self.last_receive_ns }
-    pub fn trip(&mut self) {
-        self.state = LatencyState { blocked: true, recovery_streak: 0 };
+    pub fn new() -> Self {
+        Self::default()
     }
-    pub fn observe(&mut self, exchange_ts_ns: u64, recv_ts_ns: u64)
-        -> Result<LatencyState, RiskError> {
+    pub fn state(&self) -> LatencyState {
+        self.state
+    }
+    pub fn last_receive_ns(&self) -> Option<u64> {
+        self.last_receive_ns
+    }
+    pub fn trip(&mut self) {
+        self.state = LatencyState {
+            blocked: true,
+            recovery_streak: 0,
+        };
+    }
+    pub fn observe(
+        &mut self,
+        exchange_ts_ns: u64,
+        recv_ts_ns: u64,
+    ) -> Result<LatencyState, RiskError> {
         // The ingestion adapter must prove timestamps are normalized into
         // the same calibrated clock domain and are genuine venue events.
         if recv_ts_ns < exchange_ts_ns

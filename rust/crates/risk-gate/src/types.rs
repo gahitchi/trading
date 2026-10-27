@@ -9,21 +9,44 @@ pub enum RiskError {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RiskReason {
-    OperatorHalted, StrategyDisabled, SymbolDisabled, WrongMode,
-    UncertifiedSource, UnsynchronizedFeed, StaleQuote, StaleFundingBasis,
-    BadOrder, InvalidOrderType, ComplianceBlackout, ShortLocateMissing,
-    ShortSalePriceRestricted, FundingBasisSqueeze, LatencyCircuitOpen,
-    RateLimit, DrawdownFloor, AccountUnreconciled, MissingReservations,
-    ExceedsGrossLimit, InsufficientCollateral, NoConfirmedShort,
-    SqueezeFlattenRequired, InvalidPolicy, ReplayOrderId,
+    OperatorHalted,
+    StrategyDisabled,
+    SymbolDisabled,
+    WrongMode,
+    UncertifiedSource,
+    UnsynchronizedFeed,
+    StaleQuote,
+    StaleFundingBasis,
+    BadOrder,
+    InvalidOrderType,
+    ComplianceBlackout,
+    ShortLocateMissing,
+    ShortSalePriceRestricted,
+    FundingBasisSqueeze,
+    LatencyCircuitOpen,
+    RateLimit,
+    DrawdownFloor,
+    AccountUnreconciled,
+    MissingReservations,
+    ExceedsGrossLimit,
+    InsufficientCollateral,
+    NoConfirmedShort,
+    SqueezeFlattenRequired,
+    InvalidPolicy,
+    ReplayOrderId,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GateDecision {
     /// A preliminary *proposal* only: an independent atomic reservation and
     /// durable paper-execution gateway are required before it is executable.
-    ProposedEntry { approved_qty: FixedQty, approved_notional: FixedUsd },
+    ProposedEntry {
+        approved_qty: FixedQty,
+        approved_notional: FixedUsd,
+    },
     /// Buy-to-cover the reconciled short, strictly reduce-only.
-    ProposedCover { approved_qty: FixedQty },
+    ProposedCover {
+        approved_qty: FixedQty,
+    },
     Rejected(RiskReason),
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

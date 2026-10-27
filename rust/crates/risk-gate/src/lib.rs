@@ -12,6 +12,6 @@ pub use gate::RiskGate;
 pub use latency::{LatencyCircuit, LatencyState};
 pub use limiter::TokenBucket;
 pub use types::{
-    AccountEvidence, GateDecision, MarketEvidence, RiskContext, RiskDirective,
-    RiskError, RiskPolicy, RiskReason, SafetySnapshot,
+    AccountEvidence, GateDecision, MarketEvidence, RiskContext, RiskDirective, RiskError,
+    RiskPolicy, RiskReason, SafetySnapshot,
 };

@@ -9,13 +9,13 @@ pub struct TokenBucket {
     previous_ns: Option<u64>,
 }
 impl TokenBucket {
-    pub fn new(capacity: u32, refill_per_second: u32)
-        -> Result<Self, RiskError> {
+    pub fn new(capacity: u32, refill_per_second: u32) -> Result<Self, RiskError> {
         if capacity == 0 || refill_per_second == 0 {
             return Err(RiskError::InvalidConfiguration);
         }
         Ok(Self {
-            capacity, refill_rate: refill_per_second,
+            capacity,
+            refill_rate: refill_per_second,
             token_ns: u128::from(capacity) * NANOS_PER_SECOND,
             previous_ns: None,
         })
@@ -33,11 +33,15 @@ impl TokenBucket {
             let accrued = u128::from(now_ns - old)
                 .checked_mul(u128::from(self.refill_rate))
                 .ok_or(RiskError::NumericOverflow)?;
-            self.token_ns = self.token_ns.saturating_add(accrued)
+            self.token_ns = self
+                .token_ns
+                .saturating_add(accrued)
                 .min(u128::from(self.capacity) * NANOS_PER_SECOND);
         }
         self.previous_ns = Some(now_ns);
-        if self.token_ns < NANOS_PER_SECOND { return Ok(false); }
+        if self.token_ns < NANOS_PER_SECOND {
+            return Ok(false);
+        }
         self.token_ns -= NANOS_PER_SECOND;
         Ok(true)
     }
