@@ -36,6 +36,7 @@ Two layers of cooperating agents:
 
 ## Contents
 
+- [Foundation-first development roadmap (F0–F8)](docs/DEVELOPMENT_ROADMAP.md) — prerequisites, smaller milestones and acceptance gates
 - [What is verified, and where](#what-is-verified-and-where)
 - [Install](#install) · [Quick start](#quick-start) · [Commands](#commands)
 - [The scientific protocol](#the-scientific-protocol)
