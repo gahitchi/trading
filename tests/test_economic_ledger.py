@@ -159,3 +159,41 @@ def test_multi_symbol_book_inventory_and_cash_balance_independently():
     assert s.balance("income:realized") == D("-20")
     assert s.balance("cash:USD") == D("620")
     s.audit()
+
+
+def test_full_replay_detects_quantity_tamper_even_with_balanced_inventory_value():
+    s = EconomicLedger().post_fill("buy", "SPY", "BUY", "1", "100")
+    forged = replace(s, lots=(replace(s.lots[0], quantity=D("2")),))
+    # The original postings are still balanced and inventory cost is still 100.
+    # The final holding is nevertheless impossible from the transaction record.
+    with pytest.raises(EconomicLedgerError, match="quantities"):
+        forged.audit()
+
+
+def test_full_replay_detects_forged_fill_economics_with_consistent_hash():
+    from lab.economic_ledger import _digest
+
+    s = EconomicLedger().post_fill("buy", "SPY", "BUY", "1", "100")
+    entry = s.journal[0]
+    # Rewrite all postings into a different, still balanced trade with the
+    # same details, and recompute the unkeyed SHA to mimic local file tampering.
+    altered = replace(
+        entry, postings=(Posting("cash:USD", D("-90")), Posting("inventory:USD:SPY", D("90")), Posting("income:realized", D("0"))),
+    )
+    altered = replace(altered, sha256=_digest("0" * 64, altered))
+    with pytest.raises(EconomicLedgerError):
+        replace(s, journal=(altered,), lots=(replace(s.lots[0], basis=D("90")),)).audit()
+
+
+def test_multi_entry_replay_has_no_undocumented_synthetic_trade():
+    s = (
+        EconomicLedger()
+        .post_cash("deposit", "CAPITAL_IN", "1000")
+        .post_fill("buy", "SPY", "BUY", "2", "50")
+        .post_split("split", "SPY", 2, 1)
+        .post_cash("div", "DIVIDEND", "1.23")
+        .post_fill("sell", "SPY", "SELL", "3", "26")
+    )
+    s.audit()
+    assert s.position("SPY") == D("1")
+    assert len([e for e in s.journal if e.kind == "FILL"]) == 2

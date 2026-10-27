@@ -142,7 +142,7 @@ class EconomicLedger:
         prior = self.journal[-1].sha256 if self.journal else "0" * 64
         next_entry = replace(next_entry, sha256=_digest(prior, next_entry))
         candidate = EconomicLedger((*self.journal, next_entry), lots)
-        candidate.audit()
+        candidate._audit_postings()
         return candidate
 
     def post_cash(self, event_id: str, kind: str, amount: Decimal | str | int) -> EconomicLedger:
@@ -263,8 +263,8 @@ class EconomicLedger:
             tuple(lots),
         )
 
-    def audit(self) -> None:
-        """Independent replay of every entry, custody hash and inventory basis."""
+    def _audit_postings(self) -> None:
+        """Check each double-entry transaction, custody chain and ending inventory value."""
         seen: set[str] = set()
         prev = "0" * 64
         balances: dict[str, Decimal] = {}
@@ -301,3 +301,50 @@ class EconomicLedger:
                 raise EconomicLedgerError("inventory does not reconcile with FIFO cost basis")
         if _calc(lambda: sum(balances.values(), Decimal(0))) != 0:
             raise EconomicLedgerError("economic assets, capital, income and expense do not conserve")
+
+    def audit(self) -> None:
+        """Reconstruct all event economics independently from recorded business inputs.
+
+        Hashes and a balanced journal alone do not demonstrate correct
+        quantities, FIFO realization or entry semantics; reconstruct from
+        the recorded event payload and compare each generated posting.
+        """
+        self._audit_postings()
+        replay = EconomicLedger()
+        for event in self.journal:
+            details = dict(event.details)
+            if len(details) != len(event.details) or any(
+                type(pair) is not tuple or len(pair) != 2 or any(type(value) is not str for value in pair)
+                for pair in event.details
+            ):
+                raise EconomicLedgerError("invalid or duplicate economic event details")
+            try:
+                if event.kind == "FILL":
+                    if set(details) != {"symbol", "side", "quantity", "price", "commission"}:
+                        raise EconomicLedgerError("fill event payload is incomplete")
+                    replay = replay.post_fill(
+                        event.event_id,
+                        details["symbol"],
+                        details["side"],
+                        details["quantity"],
+                        details["price"],
+                        commission=details["commission"],
+                    )
+                elif event.kind == "SPLIT":
+                    if set(details) != {"symbol", "numerator", "denominator"}:
+                        raise EconomicLedgerError("split event payload is incomplete")
+                    replay = replay.post_split(
+                        event.event_id, details["symbol"], int(details["numerator"]), int(details["denominator"])
+                    )
+                elif event.kind in KINDS:
+                    if set(details) != {"amount"}:
+                        raise EconomicLedgerError("cash event payload is incomplete")
+                    replay = replay.post_cash(event.event_id, event.kind, details["amount"])
+                else:
+                    raise EconomicLedgerError("unknown economic event in journal")
+            except (KeyError, TypeError, ValueError) as exc:
+                raise EconomicLedgerError("economic history cannot be replayed") from exc
+            if replay.journal[-1] != event:
+                raise EconomicLedgerError("recorded economic postings differ from deterministic replay")
+        if replay.lots != self.lots:
+            raise EconomicLedgerError("open position quantities or FIFO lots diverge from event replay")

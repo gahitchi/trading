@@ -50,3 +50,15 @@ complete corporate-action support.
 The next implementation step is to specify a typed native-account
 observation and an independent reconciliation adapter, still offline
 and unqualified, *before* connecting any actual broker.
+
+## Deterministic replay audit (F1.0)
+
+An independent full-history `EconomicLedger.audit()` now reconstructs
+every journal entry from its business event payload, rejects altered
+postings even when its SHA-256 chain has been recomputed, and verifies
+**exact lot quantities as well as inventory cost basis**. The cheaper
+posting conservation check is used for each immutable append.
+This still does **not** authenticate the origin of the event, and the
+SHA-256 chain cannot prevent an attacker with full file-write control
+from replacing the entire history or its root. A separate durable
+signed/independently anchored event store remains unimplemented.
