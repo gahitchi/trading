@@ -216,7 +216,7 @@ fn quote() -> QuoteInputs {
 #[test]
 fn urgent_ioc_sell_limit_is_four_bps_below_bid() {
     let mut x = quote();
-    x.isr_down = 30.0;
+    x.isr_down = 200.0;
     let q = choose_short_quote(x).unwrap();
     assert_eq!(q.kind, QuoteKind::IocSweep);
     assert_eq!(q.time_in_force, TimeInForce::Ioc);
