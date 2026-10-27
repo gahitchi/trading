@@ -43,10 +43,13 @@ def _fraction_decimal(f: Fraction) -> Decimal:
     scale = max(twos, fives)
     if denominator != 1 or scale > MAX_EXACT_SCALE:
         raise EngineFactError("account projection requires explicit fractional rounding policy")
-    value = Decimal(f.numerator * 10**scale // f.denominator).scaleb(-scale)
-    if not value.is_finite() or len(value.as_tuple().digits) > 25:
+    unscaled, remainder = divmod(f.numerator * 10**scale, f.denominator)
+    if remainder:
+        raise EngineFactError("non-terminating fraction cannot be projected exactly")
+    if len(str(abs(unscaled))) > 25:
         raise EngineFactError("account projection exceeds bounded decimal precision")
-    return value
+    digits = tuple(int(char) for char in str(abs(unscaled)))
+    return Decimal((int(unscaled < 0), digits, -scale))
 
 
 @dataclass(frozen=True, slots=True)
