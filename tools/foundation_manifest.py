@@ -25,6 +25,7 @@ INPUTS = (
     "Dockerfile",
     "compose.app.yml",
     "docker-compose.yml",
+    "docs/architecture/f0-contract-map.json",
     "pyproject.toml",
     "requirements-build.lock",
     "requirements.lock",
