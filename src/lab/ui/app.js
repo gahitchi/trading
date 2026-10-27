@@ -156,7 +156,10 @@ function render(state) {
   }
   riskNote();
   const gold = state.gold_status;
-  $("gold-status").textContent = !state.settings.gold ? "London Gold is off."
+  const selectedGold = form.elements.gold.checked;
+  $("gold-status").textContent = selectedGold !== state.settings.gold
+    ? selectedGold ? "XAU selected. Save the plan to enable London Gold." : "XAU deselected. Save the plan to disable London Gold."
+    : !state.settings.gold ? "London Gold is off."
     : !gold ? "London Gold: waiting for broker data"
     : gold.state === "gold bracket submitted"
       ? `London Gold: ${shares.format(gold.qty)} oz order, limit ${usd.format(gold.entry_limit)}, stop ${usd.format(gold.stop)}, target ${usd.format(gold.target)}${gold.minimum_lot_override ? " (minimum lot exceeds 1% budget)" : ""}.`

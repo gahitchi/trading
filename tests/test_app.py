@@ -115,6 +115,8 @@ def test_gold_is_presented_as_a_selectable_commodity_tile():
     assert page.index('<div class="symbols">', heading) < tile
     assert "<span>XAU</span>" in page[tile : tile + 160]
     assert 'aria-label="Trade London Gold XAUUSD"' in page[tile : tile + 160]
+    script = (app.UI / "app.js").read_text()
+    assert "XAU selected. Save the plan to enable London Gold." in script
 
 
 def test_confirmed_gold_migration_preserves_plan_and_uses_broker_checked_helper(controller, monkeypatch):
