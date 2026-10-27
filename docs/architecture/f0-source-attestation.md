@@ -120,25 +120,71 @@ actual Arch/Windows-installed code and the wheel, or a supply-chain audit.
 The receipt always states `qualification=BLOCKED`. No trading authority can
 derive from these checks.
 
+## F0.2 cross-runner wheel comparison (GitHub-hosted Ubuntu 22.04 and 24.04)
+
+The `.github/workflows/f0-two-runner-wheel.yml` workflow rebuilds the
+wheel on **two separately provisioned GitHub-hosted runners**, using
+Python 3.13, frozen build dependencies and the exact Git commit time as
+`SOURCE_DATE_EPOCH`. Each runner uploads its wheel and a relocatable
+SHA-256 manifest. A separate verification job checks both source commit
+IDs, verifies each wheel against its original manifest, and reuses
+`tools/foundation_wheel.py` to prove byte-for-byte equality and committed
+source-to-package parity. The validator writes a third unsigned receipt.
+
+This is a repeatability check across two operating system images, **not**
+a comparison across independently controlled trust providers. GitHub,
+its ephemeral runners, uploaded artifacts and the trusted Actions
+supply chain are common dependencies. No signature, externally hosted
+artifact attestation, or complete installer reproducibility is claimed.
+
+## F0.4 private local runtime input custody (operator only)
+
+`tools/foundation_inputs.py` hashes the three specific local inputs
+necessary to reproduce the provisional SPY / ARCX daily research context:
+the root `lab.toml`, `data/manifest.json` and `data/SPY.parquet`.
+It requires a clean exact-source checkout, the configured SPY/ARCX
+daily reference, a manifest entry for SPY and Parquet magic/header
+markers. It records **only SHA-256 and byte lengths by neutral role**.
+It does not expose raw data, vendor metadata, broker account IDs,
+configuration values or credentials, and it is **never uploaded in CI**.
+
+On an operator machine with genuine local datasets present, run:
+
+```sh
+cd /path/to/clean/trading-checkout
+mkdir -p "$HOME/trading-evidence"
+python3 -m tools.foundation_inputs capture \
+  --out "$HOME/trading-evidence/f0-inputs-$(git rev-parse --short HEAD).json"
+python3 -m tools.foundation_inputs verify \
+  --input "$HOME/trading-evidence/f0-inputs-$(git rev-parse --short HEAD).json"
+```
+
+These commands are read-only on the source and input data, refuse
+replacing an existing receipt, and never submit orders. Keep the receipt
+private. Even a matching manifest and file hash **does not prove point-in-time
+source authenticity, complete OHLCV bars, valid corporate actions or market
+data entitlement**. Those require independent F2 and actual broker/source
+evidence. An absent market-data file fails rather than inventing fixtures.
+
 ## Explicit F0 gaps and next submilestones
 
 - **F0.1:** final owner/operator decision on the pilot symbol, instrument
   action version, source entitlement, data horizon and frozen strategy policy.
   Reference scope alone does not certify them.
-- **F0.2:** source-linked Docker image/installed OS/Python inventory and
-  source-to-wheel local repeatability are captured and checked in CI. Truly
-  independent two-builder reproducibility, signed image/wheel provenance,
-  runtime deployment attestations and Arch/Windows support remain open.
+- **F0.2:** source-linked Docker image/OS/Python inventory, local repeat
+  builds and two separate GitHub-hosted Ubuntu runner builds are checked
+  against the exact source. Independent-provider provenance, signed image
+  and wheel attestations, and Arch/Windows installer verification remain open.
 - **F0.3:** CI already runs dual Python, lint, packaging, Docker and serialized
   real-clock harness. We must still make all collaboration checks green on
   the *exact final candidate*. A separate older G040 message has malformed
   timestamp metadata on another branch; the original message is immutable
   under COLLABORATION.md. No validator relaxation, editing or deletion is
   authorized; this governance issue remains an explicit blocker.
-- **F0.4:** external data/config provenance with privacy-safe capture and
-  reviewable continuity; this scope receipt deliberately does **not** hash
-  or disclose `lab.toml`, raw exchange market data, secrets, broker account
-  IDs or authenticated order evidence.
+- **F0.4:** private local byte custody for `lab.toml`, the SPY source
+  manifest and Parquet data is implemented. The source receipt does not
+  disclose private values, and actual validated/authenticated market
+  source, permissions and broker evidence remain external blockers.
 - **F0.5–F0.6:** review architecture decisions and resolve all independent
   blocking findings; freeze a reviewed immutable, signed or otherwise
   externally attested *release* candidate and bind evidence to its exact SHA.
