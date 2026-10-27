@@ -123,16 +123,24 @@ def append_settled_cash_record(
 
 CASH_IN_LIEU_FIELDS = frozenset(
     {
-        "schema_version", "account_id", "event_id", "record_id",
-        "timestamp_ns", "kind", "source_kind", "settlement_status",
-        "currency", "symbol", "side", "quantity", "cash",
+        "schema_version",
+        "account_id",
+        "event_id",
+        "record_id",
+        "timestamp_ns",
+        "kind",
+        "source_kind",
+        "settlement_status",
+        "currency",
+        "symbol",
+        "side",
+        "quantity",
+        "cash",
     }
 )
 
 
-def parse_settled_cash_in_lieu_record(
-    raw: bytes, *, source_namespace: str, expected_account_id: str
-) -> CashInLieuFact:
+def parse_settled_cash_in_lieu_record(raw: bytes, *, source_namespace: str, expected_account_id: str) -> CashInLieuFact:
     """Parse a fractional nontrade cash adjustment with exact original bytes.
 
     This is evidence *custody*, not broker authentication; it cannot
