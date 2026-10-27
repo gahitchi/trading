@@ -85,6 +85,8 @@ jobs:
                   assert z.read(name), name
           PY
 
+      - name: enforce F0–F8 architecture and evidence dependencies
+        run: python3 tools/foundation_contracts.py check
       - name: F0 candidate source inventory (unqualified, read-only)
         run: |
           mkdir -p "$RUNNER_TEMP/f0-candidate"
