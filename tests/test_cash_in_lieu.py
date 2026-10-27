@@ -58,7 +58,7 @@ def test_fifo_cash_in_lieu_survives_restart_and_conserves_economics(
     assert ending.ledger.balance("cash:USD") == expected_cash
     assert ending.ledger.balance("income:realized") == expected_realized
     assert ending.ledger.journal[-1].kind == "CASH_IN_LIEU"
-    assert not ending.ledger.journal[-1].details[0][0] == "price"
+    assert ending.ledger.journal[-1].details[0][0] != "price"
     assert [e.kind for e in ending.ledger.journal].count("FILL") == 1
     assert compare_projection(ending).matches
     assert project_account(ending).quantity("SPY") == 0
