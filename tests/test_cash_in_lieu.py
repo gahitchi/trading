@@ -91,7 +91,8 @@ def test_invalid_cash_in_lieu_refuses_custody_and_preserves_account(tmp_path, qu
 
 
 def test_fractional_basis_with_nonterminating_remainder_fails_without_rounding():
-    ledger = EconomicLedger().post_fill("fill", "SPY", "BUY", "3", "0.01")
+    ledger = EconomicLedger().post_fill("fill", "SPY", "BUY", "2", "0.01")
+    ledger = ledger.post_split("split", "SPY", 3, 2)
     with pytest.raises(EconomicLedgerError, match="rounding policy"):
         ledger.post_cash_in_lieu("cash", "SPY", "LONG", "0.1", "0.01")
     assert ledger.position("SPY") == D("3")
