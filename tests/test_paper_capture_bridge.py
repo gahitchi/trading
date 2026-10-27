@@ -272,7 +272,7 @@ class PaperCaptureTests(unittest.TestCase):
 
     def test_inspector_uses_same_environment_paper_overrides_as_capture(self):
         config = self.path / "lab.toml"
-        config.write_text('[paper]\\naccount_id = ""\\nport = 7497\\n[universe]\\nGOOG = "XNAS"\\n')
+        config.write_text('[paper]\naccount_id = ""\nport = 7497\n[universe]\nGOOG = "XNAS"\n')
 
         def inspect(overrides: dict[str, str]) -> subprocess.CompletedProcess[str]:
             env = {
