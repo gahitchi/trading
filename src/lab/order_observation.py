@@ -143,7 +143,7 @@ def parse_external_order_statement(
         if item["status"] == "FILLED":
             consistent = executed == requested and remaining == 0
         elif item["status"] == "PARTIALLY_FILLED":
-            consistent = 0 < executed < requested and _calc(lambda: requested - executed) == remaining
+            consistent = 0 < executed < requested and _calc(lambda requested=requested, executed=executed: requested - executed) == remaining
         elif item["status"] == "ACCEPTED":
             consistent = executed == 0 and remaining == requested
         elif item["status"] == "REJECTED":
