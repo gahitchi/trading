@@ -170,3 +170,26 @@ def test_database_insert_failure_rolls_back_order_observation(tmp_path):
         store.capture_order_observation(order_document(), source_namespace="broker", expected_head=before.evidence_head)
     assert store.inspect_order_observations() == ()
     assert store.load() == before
+
+
+def test_idempotent_retry_cannot_launder_a_corrupt_stored_head(tmp_path):
+    store = journal(tmp_path)
+    raw = order_document()
+    correct_head = store.load().evidence_head
+    store.capture_order_observation(raw, source_namespace="broker", expected_head=correct_head)
+    with sqlite3.connect(store.path) as db:
+        db.execute("UPDATE external_order_observations SET evidence_head=? WHERE seq=1", ("e" * 64,))
+    with pytest.raises(EconomicStoreError, match="corrupted historical ledger head"):
+        store.capture_order_observation(raw, source_namespace="broker", expected_head="e" * 64)
+    assert store.load().evidence_head == correct_head
+
+
+def test_idempotent_retry_rejects_historically_rebound_event_count(tmp_path):
+    store = journal(tmp_path)
+    raw = order_document()
+    head = store.load().evidence_head
+    store.capture_order_observation(raw, source_namespace="broker", expected_head=head)
+    with sqlite3.connect(store.path) as db:
+        db.execute("UPDATE external_order_observations SET event_count=0 WHERE seq=1")
+    with pytest.raises(EconomicStoreError, match="corrupted historical ledger head"):
+        store.capture_order_observation(raw, source_namespace="broker", expected_head=head)

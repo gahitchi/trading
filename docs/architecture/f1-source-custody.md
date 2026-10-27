@@ -182,3 +182,8 @@ database replacement, or replace independently anchored evidence. A later
 migration must address encryption, lifecycle reconciliation, capture finality,
 schema/version compatibility and bounded replay performance. F1 remains
 BLOCKED and no broker mode is enabled.
+
+A same-identity retry additionally rebuilds the originally recorded economic
+prefix and verifies its saved head and complete individual execution receipt
+inventory. A privileged actor cannot turn a previously corrupt snapshot into
+an accepted retry by supplying a substituted local metadata head.

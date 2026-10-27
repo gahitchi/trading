@@ -408,14 +408,25 @@ class EconomicEventStore:
                 )
                 if existing != original:
                     raise EconomicStoreError("order observation identity reused with conflicting evidence")
+                historical_count = existing[2]
+                if type(historical_count) is not int or not 0 <= historical_count <= len(book.events):
+                    raise EconomicStoreError("archived order retry has an invalid historical event count")
+                historical = EngineEconomicBook(self.account_id)
+                for fact in book.events[:historical_count]:
+                    historical = historical.append(fact)
+                if historical.evidence_head != expected_head:
+                    raise EconomicStoreError("archived order retry has a corrupted historical ledger head")
+                historical_parity = reconcile_external_orders(historical, report)
+                if not historical_parity.matches or not historical_parity.receipt_scope_checked:
+                    raise EconomicStoreError("archived order retry disagrees with historical economic facts")
                 db.execute("COMMIT")
                 return StoredOrderObservation(
                     report.source_ref,
                     report.source_sha256,
                     report.as_of_ns,
                     expected_head,
-                    existing[2],
-                    checked,
+                    historical_count,
+                    historical_parity.broker_fills_checked,
                 )
             if expected_head != book.evidence_head:
                 raise EconomicStoreError("stale economic head for external order custody")
