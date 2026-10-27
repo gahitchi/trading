@@ -34,7 +34,7 @@ def observed(book, *, cash_value="799.75", positions=None, ids=None, as_of_ns=20
         positions = (EnginePosition("SPY", d("2")),)
     if ids is None:
         ids = tuple(event.event_id for event in book.events)
-    return EngineSnapshot(book.account_id, as_of_ns, ids, d(cash_value), positions, scope)
+    return EngineSnapshot(book.account_id, as_of_ns, ids, d(cash_value), positions, scope, book.evidence_head)
 
 
 def test_engine_event_book_is_owned_pure_decimal_immutable_and_replayable():
@@ -49,6 +49,7 @@ def test_engine_event_book_is_owned_pure_decimal_immutable_and_replayable():
     parity = bought.reconcile(observed(bought))
     assert parity.matches
     assert parity.position_deltas == (("SPY", d("0")),)
+    assert parity.evidence_head == bought.evidence_head
 
 
 def test_engine_events_preserve_fifo_and_corporate_action_without_fake_trades():
@@ -121,6 +122,7 @@ def test_independent_state_comparison_fails_closed_on_missing_coverage_or_events
         replace(reference, applied_event_ids=("deposit",)),
         replace(reference, applied_event_ids=("fill1", "deposit")),
         replace(reference, as_of_ns=1),
+        replace(reference, applied_evidence_head="0" * 64),
         replace(reference, account_id="FOREIGN"),
         replace(reference, cash=d("799.750000001")),
         replace(reference, positions=(EnginePosition("SPY", d("1")),)),
@@ -148,3 +150,38 @@ def test_tampered_ledger_refused_even_if_cash_and_positions_appear_correct():
     bad = replace(book, ledger=book.ledger.post_cash("forged", "CAPITAL_IN", "1"))
     with pytest.raises(EngineFactError, match="journal differs"):
         bad.audit()
+
+
+def test_evidence_hash_binds_provenance_time_account_and_raw_amounts():
+    book = EngineEconomicBook("SIM-001").append(cash()).append(fill())
+    book.audit()
+    assert len(book.evidence_head) == 64
+    assert book.evidence_head != "0" * 64
+    assert EngineEconomicBook("SIM-001").append(cash()).append(fill()).evidence_head == book.evidence_head
+    assert EngineEconomicBook("SIM-002").append(cash()).append(fill()).evidence_head != book.evidence_head
+    assert EngineEconomicBook("SIM-001").append(replace(cash(), source_ref="bank:another")).evidence_head != (
+        EngineEconomicBook("SIM-001").append(cash()).evidence_head
+    )
+
+
+@pytest.mark.parametrize(
+    "altered",
+    [
+        replace(cash(), source_ref="alternate:source"),
+        replace(cash(), timestamp_ns=2),
+        replace(cash(), amount=d("999")),
+    ],
+)
+def test_recomputed_business_journal_alone_cannot_hide_evidence_metadata_rewrite(altered):
+    original = EngineEconomicBook("SIM-001").append(cash())
+    modified = replace(original, events=(altered,))
+    with pytest.raises(EngineFactError):
+        modified.audit()
+
+
+def test_snapshot_event_ids_are_not_sufficient_when_evidence_hash_disagrees():
+    book = EngineEconomicBook("SIM-001").append(cash()).append(fill())
+    snapshot = observed(book)
+    assert book.reconcile(snapshot).matches
+    with pytest.raises(EngineFactError, match="fingerprint"):
+        book.reconcile(replace(snapshot, applied_evidence_head="f" * 64))
