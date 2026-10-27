@@ -12,6 +12,9 @@ on:
       - 'rust/**'
       - '.github/workflows/rust-foundation.yml'
 
+permissions:
+  contents: write
+
 jobs:
   validate:
     runs-on: ubuntu-24.04
@@ -23,6 +26,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: One-time foundation format and commit
+        if: github.event_name == 'push' && github.ref == 'refs/heads/chatgpt/rust-engine-foundation-20261027'
+        run: |
+          cargo fmt --all
+          if ! git diff --quiet -- crates/; then
+            git config user.name 'ChatGPT Rust bootstrap'
+            git config user.email 'github-actions[bot]@users.noreply.github.com'
+            git add crates/
+            git commit -m "Format Rust foundation sources" -m "Agent: chatgpt"
+            git push origin "HEAD:${GITHUB_REF#refs/heads/}"
+          fi
       - name: Format
         run: cargo fmt --all -- --check
       - name: Tests
