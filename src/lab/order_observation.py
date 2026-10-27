@@ -26,14 +26,24 @@ MAX_ORDER_REPORT_BYTES = 128 * 1024
 MAX_ORDER_COUNT = 2048
 FIELDS = frozenset(
     {
-        "schema_version", "account_id", "record_id", "as_of_ns",
-        "source_kind", "complete_order_scope", "orders",
+        "schema_version",
+        "account_id",
+        "record_id",
+        "as_of_ns",
+        "source_kind",
+        "complete_order_scope",
+        "orders",
     }
 )
 ORDER_FIELDS = frozenset(
     {
-        "broker_order_id", "symbol", "side", "status",
-        "requested_quantity", "executed_quantity", "remaining_quantity",
+        "broker_order_id",
+        "symbol",
+        "side",
+        "status",
+        "requested_quantity",
+        "executed_quantity",
+        "remaining_quantity",
     }
 )
 STATES = frozenset({"ACCEPTED", "PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECTED"})
@@ -143,7 +153,10 @@ def parse_external_order_statement(
         if item["status"] == "FILLED":
             consistent = executed == requested and remaining == 0
         elif item["status"] == "PARTIALLY_FILLED":
-            consistent = 0 < executed < requested and _calc(lambda requested=requested, executed=executed: requested - executed) == remaining
+            consistent = (
+                0 < executed < requested
+                and _calc(lambda requested=requested, executed=executed: requested - executed) == remaining
+            )
         elif item["status"] == "ACCEPTED":
             consistent = executed == 0 and remaining == requested
         elif item["status"] == "REJECTED":
@@ -165,9 +178,7 @@ def parse_external_order_statement(
     )
 
 
-def reconcile_external_orders(
-    book: EngineEconomicBook, report: ExternalOrderStatement
-) -> ExternalOrderParity:
+def reconcile_external_orders(book: EngineEconomicBook, report: ExternalOrderStatement) -> ExternalOrderParity:
     """Compare original broker-fill facts with independently supplied order scope.
 
     A reported execution omitted from our journal becomes a nonzero delta;
@@ -215,10 +226,7 @@ def reconcile_external_orders(
             order.broker_order_id,
             order.executed_quantity,
             custody.get(order.broker_order_id, Decimal(0)),
-            _calc(
-                lambda order=order: order.executed_quantity
-                - custody.get(order.broker_order_id, Decimal(0))
-            ),
+            _calc(lambda order=order: order.executed_quantity - custody.get(order.broker_order_id, Decimal(0))),
         )
         for order in report.orders
     )

@@ -20,18 +20,31 @@ def book(*, simulated=False):
     account = EngineEconomicBook("SIM-001")
     if simulated:
         return account.append(FillFact("sim", "sim:fill", 1, "SPY", "BUY", D("1"), D("100"), D("0")))
-    return (
-        account.append(
-            BrokerFillFact(
-                "receipt-1", "broker:r1", 1, "order-1", "SPY", "BUY",
-                D("0.25"), D("100"), D("0.01"), "a" * 64,
-            )
+    return account.append(
+        BrokerFillFact(
+            "receipt-1",
+            "broker:r1",
+            1,
+            "order-1",
+            "SPY",
+            "BUY",
+            D("0.25"),
+            D("100"),
+            D("0.01"),
+            "a" * 64,
         )
-        .append(
-            BrokerFillFact(
-                "receipt-2", "broker:r2", 2, "order-1", "SPY", "BUY",
-                D("0.75"), D("100.1"), D("0.02"), "b" * 64,
-            )
+    ).append(
+        BrokerFillFact(
+            "receipt-2",
+            "broker:r2",
+            2,
+            "order-1",
+            "SPY",
+            "BUY",
+            D("0.75"),
+            D("100.1"),
+            D("0.02"),
+            "b" * 64,
         )
     )
 
