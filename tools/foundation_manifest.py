@@ -84,6 +84,17 @@ def inventory(directory: Path) -> dict[str, object]:
     root = _root(directory)
     commit, tree = _candidate(root)
     digests = {path: _hash_input(root, path) for path in INPUTS}
+    for relative, digest in digests.items():
+        tracked = subprocess.run(
+            ["git", "show", f"{commit}:{relative}"],
+            cwd=root,
+            capture_output=True,
+            check=False,
+        )
+        if tracked.returncode != 0 or hashlib.sha256(tracked.stdout).hexdigest() != digest:
+            raise FoundationError("pinned file differs from exact candidate revision")
+    if _git(root, "status", "--porcelain", "--untracked-files=normal"):
+        raise FoundationError("candidate changed during evidence collection")
     try:
         scope = json.loads((root / SCOPE).read_bytes())
     except (ValueError, UnicodeError) as exc:
@@ -92,8 +103,9 @@ def inventory(directory: Path) -> dict[str, object]:
         type(scope) is not dict
         or scope.get("schema_version") != 1
         or scope.get("stage") != "F0_REFERENCE_SLICE_UNQUALIFIED"
-        or scope.get("operator", {}).get("authority") != "NONE_IN_F0"
-        or scope.get("operator", {}).get("account_mode") != "PAPER_ONLY"
+        or type(scope.get("operator")) is not dict
+        or scope["operator"].get("authority") != "NONE_IN_F0"
+        or scope["operator"].get("account_mode") != "PAPER_ONLY"
     ):
         raise FoundationError("F0 scope cannot assert execution authority or qualification")
     return {
