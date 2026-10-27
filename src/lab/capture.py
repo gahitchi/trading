@@ -30,6 +30,7 @@ import hashlib
 import hmac
 import json
 import os
+from decimal import Decimal
 import platform
 import re
 import shutil
@@ -231,6 +232,7 @@ def _make_actor(cfg: LabConfig, iids: dict, out_dir: Path, wait_s: float, histor
             if self.done:
                 return
             self.done = True
+            capture_started_ns = time.time_ns()
             from nautilus_trader.model import Venue
 
             from lab.paper import IB
@@ -254,6 +256,18 @@ def _make_actor(cfg: LabConfig, iids: dict, out_dir: Path, wait_s: float, histor
                     open_ = self.cache.positions_open(instrument_id=iid)
                     positions[t] = {
                         "net": sum(float(x.signed_qty) for x in open_),
+                        # Native Quantity serializes exactly; use the float signed_qty only for direction.
+                        # Independent reconciliation must never interpret the rounded net above as exact.
+                        "net_exact": str(
+                            sum(
+                                (
+                                    Decimal(str(x.quantity))
+                                    * (Decimal("-1") if x.signed_qty < 0 else Decimal("1"))
+                                    for x in open_
+                                ),
+                                Decimal("0"),
+                            )
+                        ),
                         "positions": [
                             {"side": str(x.side), "quantity": str(x.quantity), "avg_px_open": str(x.avg_px_open)}
                             for x in open_
@@ -266,6 +280,17 @@ def _make_actor(cfg: LabConfig, iids: dict, out_dir: Path, wait_s: float, histor
             _write(out_dir / "broker_positions.json", positions)
             _write(out_dir / "broker_orders.json", orders)
             _write(out_dir / "broker_bars.json", self.bars)
+            _write(
+                out_dir / "broker_capture_meta.json",
+                {
+                    "capture_started_ns": capture_started_ns,
+                    "capture_completed_ns": time.time_ns(),
+                    "stream": "NAUTILUS_IBKR_READ_ONLY",
+                    "coverage_verified": False,
+                    "broker_authentication_verified": False,
+                    "causal_boundary_verified": False,
+                },
+            )
             self.shutdown_system("capture snapshot written")
 
     return CaptureActor()
