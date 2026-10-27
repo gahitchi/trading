@@ -8,7 +8,7 @@ from decimal import Decimal
 import pytest
 
 from lab.economic_store import EconomicEventStore, EconomicStoreError
-from lab.engine_events import CashFact, EngineFactError, FillFact, SplitFact
+from lab.engine_events import EngineFactError, FillFact, SplitFact
 
 
 def D(value):
@@ -43,7 +43,7 @@ def test_durable_restart_recovers_exact_cash_positions_lots_and_two_hash_chains(
     store = EconomicEventStore(path, "SIM-001")
     source = record()
     first = store.append_cash_record(source, source_namespace="broker")
-    second = store.append(fill(), expected_head=first.evidence_head)
+    store.append(fill(), expected_head=first.evidence_head)
     third = store.append(SplitFact("split", "action:split", 3, "SPY", 2, 1))
     restored = EconomicEventStore(path, "SIM-001").load()
     assert third == restored
