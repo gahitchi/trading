@@ -159,3 +159,26 @@ Pending: independently verified account/order report extraction, immutable
 external source and completeness attestation, broker correction events,
 per-order finality/races, exact source custody and independent review. F1
 qualification remains BLOCKED.
+
+
+## F1.4 immutable local order-observation custody (Python candidate)
+
+`EconomicEventStore.capture_order_observation(...)` now accepts a
+**complete v2 claimed-external order report** with the caller's explicit
+expected economic-head fence. The original bounded UTF-8 JSON bytes, SHA-256,
+source record identity, timestamp, economic event count and evidence head
+commit in **one SQLite `BEGIN IMMEDIATE` transaction** to an append-only
+observation table, separate from all economic postings. Matching retries
+are idempotent; conflicting reuse, mismatched source facts, stale journal
+heads and over-capacity archives are refused. There is no order submission.
+
+`inspect_order_observations()` is read-only and replay-verifies each archived
+report against the exact economic event prefix it originally observed.
+Appending future unrelated events does not rewrite, invalidate or silently
+upgrade previously observed broker claims. Corrupt stored originals or head
+bindings cause an explicit refusal. This is local byte custody **only**:
+SQLite and unkeyed SHA-256 cannot prove broker origin, resist privileged
+database replacement, or replace independently anchored evidence. A later
+migration must address encryption, lifecycle reconciliation, capture finality,
+schema/version compatibility and bounded replay performance. F1 remains
+BLOCKED and no broker mode is enabled.

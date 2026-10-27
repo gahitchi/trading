@@ -13,7 +13,7 @@ import hashlib
 import json
 import sqlite3
 from contextlib import closing
-from dataclasses import fields
+from dataclasses import dataclass, fields
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -28,12 +28,14 @@ from lab.engine_events import (
     EngineFactError,
     FillFact,
     SplitFact,
+    SHA256,
     _identity,
 )
 
 SCHEMA = 1
 MAX_EVENT_BYTES = 16_384
 MAX_SOURCE_BYTES = 65_536
+MAX_ORDER_OBSERVATIONS = 1024
 DECIMAL_FIELDS = frozenset({"quantity", "price", "commission", "amount", "cash"})
 TYPES: dict[str, type] = {
     "FILL": FillFact,
@@ -46,6 +48,19 @@ TYPES: dict[str, type] = {
 
 class EconomicStoreError(EngineFactError):
     """Stored account state or durable transaction could not be verified."""
+
+
+@dataclass(frozen=True, slots=True)
+class StoredOrderObservation:
+    """Local custody receipt, not a broker-issued order status attestation."""
+
+    source_ref: str
+    source_sha256: str
+    as_of_ns: int
+    ledger_evidence_head: str
+    events_replayed: int
+    broker_fills_checked: int
+    broker_source_authenticated: bool = False
 
 
 def _encode(fact: EconomicFact) -> bytes:
@@ -192,6 +207,13 @@ class EconomicEventStore:
                 "source_ref TEXT NOT NULL UNIQUE, payload BLOB NOT NULL, "
                 "source_bytes BLOB, evidence_head TEXT NOT NULL, "
                 "ledger_head TEXT NOT NULL)"
+            )
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS external_order_observations ("
+                "seq INTEGER PRIMARY KEY, source_ref TEXT NOT NULL UNIQUE, "
+                "source_namespace TEXT NOT NULL, as_of_ns INTEGER NOT NULL, "
+                "event_count INTEGER NOT NULL, evidence_head TEXT NOT NULL, "
+                "source_sha256 TEXT NOT NULL, source_bytes BLOB NOT NULL)"
             )
             row = db.execute("SELECT schema_version, account_id FROM identity WHERE singleton=1").fetchone()
             if row is None:
@@ -345,3 +367,140 @@ class EconomicEventStore:
 
         fact = parse_broker_fill_record(raw, source_namespace=source_namespace, expected_account_id=self.account_id)
         return self.append(fact, source_bytes=raw, expected_head=expected_head)
+
+
+    def capture_order_observation(
+        self, raw: bytes, *, source_namespace: str, expected_head: str
+    ) -> StoredOrderObservation:
+        """Atomically archive complete external order bytes at an exact ledger head.
+
+        No economic event, position, balance, order or risk decision is changed.
+        Source content integrity is checked, NOT the issuer's authenticity.
+        """
+        from lab.order_observation import parse_external_order_statement, reconcile_external_orders
+
+        if self.readonly:
+            raise EconomicStoreError("read-only economic store cannot archive observations")
+        _identity(source_namespace, "order observation source namespace")
+        if type(expected_head) is not str or not SHA256.fullmatch(expected_head):
+            raise EconomicStoreError("an exact economic journal head is required")
+        report = parse_external_order_statement(
+            raw, source_namespace=source_namespace, expected_account_id=self.account_id
+        )
+        if report.schema_version != 2:
+            raise EconomicStoreError("durable order custody requires complete v2 receipt identities")
+        checked = sum(len(order.execution_receipts) for order in report.orders)
+        with closing(self._connect()) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            book = self._read_locked(db)
+            existing = db.execute(
+                "SELECT source_namespace,as_of_ns,event_count,evidence_head,source_sha256,source_bytes "
+                "FROM external_order_observations WHERE source_ref=?",
+                (report.source_ref,),
+            ).fetchone()
+            if existing is not None:
+                original = (
+                    source_namespace,
+                    report.as_of_ns,
+                    existing[2],
+                    expected_head,
+                    report.source_sha256,
+                    raw,
+                )
+                if existing != original:
+                    raise EconomicStoreError("order observation identity reused with conflicting evidence")
+                db.execute("COMMIT")
+                return StoredOrderObservation(
+                    report.source_ref, report.source_sha256, report.as_of_ns,
+                    expected_head, existing[2], checked,
+                )
+            if expected_head != book.evidence_head:
+                raise EconomicStoreError("stale economic head for external order custody")
+            parity = reconcile_external_orders(book, report)
+            if not parity.matches or not parity.receipt_scope_checked:
+                raise EconomicStoreError("external order observation cannot establish complete receipt parity")
+            count = db.execute("SELECT COUNT(*) FROM external_order_observations").fetchone()[0]
+            if count >= MAX_ORDER_OBSERVATIONS:
+                raise EconomicStoreError("bounded external order observation archive is full")
+            db.execute(
+                "INSERT INTO external_order_observations "
+                "(seq,source_ref,source_namespace,as_of_ns,event_count,evidence_head,source_sha256,source_bytes) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    count + 1,
+                    report.source_ref,
+                    source_namespace,
+                    report.as_of_ns,
+                    len(book.events),
+                    book.evidence_head,
+                    report.source_sha256,
+                    raw,
+                ),
+            )
+            db.execute("COMMIT")
+            return StoredOrderObservation(
+                report.source_ref, report.source_sha256, report.as_of_ns,
+                book.evidence_head, len(book.events), parity.broker_fills_checked,
+            )
+
+    def inspect_order_observations(self) -> tuple[StoredOrderObservation, ...]:
+        """Read-only, full-byte replay of externally CLAIMED historical reports.
+
+        Reconstruct only the original economic prefix for each report, never
+        the later book, so observations do not become invalid merely because
+        unrelated subsequent economic facts were appended.
+        """
+        from lab.order_observation import parse_external_order_statement, reconcile_external_orders
+
+        with closing(self._connect()) as db, db:
+            db.execute("BEGIN")
+            book = self._read_locked(db)
+            heads = ("0" * 64, *(
+                row[0] for row in db.execute(
+                    "SELECT evidence_head FROM economic_events ORDER BY seq"
+                )
+            ))
+            rows = db.execute(
+                "SELECT seq,source_ref,source_namespace,as_of_ns,event_count,evidence_head,"
+                "source_sha256,source_bytes FROM external_order_observations ORDER BY seq"
+            ).fetchall()
+            if len(rows) > MAX_ORDER_OBSERVATIONS:
+                raise EconomicStoreError("external order observation archive exceeds its bound")
+            results: list[StoredOrderObservation] = []
+            for index, row in enumerate(rows, 1):
+                seq, source_ref, namespace, as_of, n_events, head, digest, raw = row
+                if (
+                    type(seq) is not int
+                    or seq != index
+                    or type(n_events) is not int
+                    or not 0 <= n_events <= len(book.events)
+                    or type(head) is not str
+                    or head != heads[n_events]
+                    or type(raw) is not bytes
+                ):
+                    raise EconomicStoreError("order observation archive sequence or evidence head is corrupt")
+                report = parse_external_order_statement(
+                    raw, source_namespace=namespace, expected_account_id=self.account_id
+                )
+                if (
+                    report.schema_version != 2
+                    or report.source_ref != source_ref
+                    or report.as_of_ns != as_of
+                    or report.source_sha256 != digest
+                ):
+                    raise EconomicStoreError("archived order source bytes contradict stored identity or time")
+                prefix = EngineEconomicBook(self.account_id)
+                for fact in book.events[:n_events]:
+                    prefix = prefix.append(fact)
+                if prefix.evidence_head != head:
+                    raise EconomicStoreError("archived order observation does not match economic prefix")
+                parity = reconcile_external_orders(prefix, report)
+                if not parity.matches or not parity.receipt_scope_checked:
+                    raise EconomicStoreError("archived external orders disagree with their economic prefix")
+                results.append(
+                    StoredOrderObservation(
+                        source_ref, digest, as_of, head, n_events, parity.broker_fills_checked,
+                    )
+                )
+            db.execute("COMMIT")
+            return tuple(results)
