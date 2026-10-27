@@ -35,9 +35,7 @@ def fake_instrument(symbol="SPY", currency="USD"):
     return SimpleNamespace(id=iid, quote_currency=SimpleNamespace(code=currency))
 
 
-def fake_fill(
-    instrument, *, trade_id="trade1", side="BUY", quantity="1", price="100", commission="0.25"
-):
+def fake_fill(instrument, *, trade_id="trade1", side="BUY", quantity="1", price="100", commission="0.25"):
     return SimpleNamespace(
         trade_id=trade_id,
         instrument_id=instrument.id,
@@ -95,11 +93,11 @@ def test_native_cash_and_fill_observations_match_independent_business_events():
         ("899.74", "0.5", d("-0.01"), d("-0.5")),
     ],
 )
-def test_independent_observations_detect_cash_and_position_divergence(
-    cash, position, expected_cash, expected_position
-):
-    ledger = EconomicLedger().post_cash("fund", "CAPITAL_IN", "1000").post_fill(
-        "trade1", "SPY", "BUY", "1", "100", commission="0.25"
+def test_independent_observations_detect_cash_and_position_divergence(cash, position, expected_cash, expected_position):
+    ledger = (
+        EconomicLedger()
+        .post_cash("fund", "CAPITAL_IN", "1000")
+        .post_fill("trade1", "SPY", "BUY", "1", "100", commission="0.25")
     )
     portfolio = PortfolioReader({"SPY": d(position)})
     snapshot = observe_cash_account(fake_account(cash=cash), portfolio, {"SPY": fake_instrument().id}, as_of_ns=123)
@@ -127,9 +125,7 @@ def test_refuses_unscoped_native_position_reader_no_silent_fallback():
             return d("1")
 
     with pytest.raises(ObservationError, match="account-scoped"):
-        observe_cash_account(
-            fake_account(), WrongReader(), {"SPY": fake_instrument().id}, as_of_ns=123
-        )
+        observe_cash_account(fake_account(), WrongReader(), {"SPY": fake_instrument().id}, as_of_ns=123)
 
 
 def test_refuses_non_usd_fees_or_non_usd_instruments_and_missing_fee():
@@ -160,9 +156,7 @@ def test_refuses_float_conversion_even_when_float_numerically_equals_decimal():
 
 def test_fill_identity_or_economics_drift_is_blocking_not_a_tolerated_difference():
     ledger = EconomicLedger().post_fill("trade1", "SPY", "SELL", "1", "100")
-    snapshot = NativeCashObservation(
-        "SIM-001", 123, d("100"), (NativePositionObservation("SPY", d("-1")),)
-    )
+    snapshot = NativeCashObservation("SIM-001", 123, d("100"), (NativePositionObservation("SPY", d("-1")),))
     for fills in (
         (),
         (NativeFillObservation("other", "SPY", "SELL", d("1"), d("100"), d("0")),),
@@ -182,7 +176,9 @@ def test_missing_or_duplicate_native_positions_cannot_be_marked_as_parity():
         reconcile_native(
             ledger,
             NativeCashObservation(
-                "SIM-001", 123, d("-100"),
+                "SIM-001",
+                123,
+                d("-100"),
                 (NativePositionObservation("SPY", d("1")), NativePositionObservation("SPY", d("1"))),
             ),
             (fill,),
