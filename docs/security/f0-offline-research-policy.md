@@ -28,10 +28,19 @@ an automatic release waiver.
 deployed operations, research with untrusted code/inputs, live trading,
 release readiness, image-signing verification, or independent approval.
 
+The verifier also requires that the scanner's image ID, OS, architecture,
+and ordered layer digests match the built image identity captured and
+workflow-attested in `f0-container-image/image.json`. It checks that the
+Grype database is recent. The scanner output is independently signed
+with GitHub OIDC and verified against the exact source/workflow. This
+does not replace third-party security review or signed deployed OCI images.
+
 To validate an exact observed image scan:
 
 ```bash
-python3 -m tools.foundation_vulnerabilities --report /path/to/vulnerabilities.json
+python3 -m tools.foundation_vulnerabilities \
+  --report /path/to/vulnerabilities.json \
+  --image /path/to/image.json
 ```
 
 Exit zero means only that its identified High findings remain within

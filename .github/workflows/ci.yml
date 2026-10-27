@@ -264,6 +264,7 @@ jobs:
         run: |
           python3 -m tools.foundation_vulnerabilities \
             --report "$RUNNER_TEMP/f0-container/vulnerabilities.json" \
+            --image "$RUNNER_TEMP/f0-container/image.json" \
             > "$RUNNER_TEMP/f0-container/research-cve-result.json"
           cat "$RUNNER_TEMP/f0-container/research-cve-result.json"
       - name: Strict vulnerability gate for release, PRs, and other branches
@@ -277,6 +278,22 @@ jobs:
           fail-build: true
           severity-cutoff: high
           only-fixed: false
+      - name: Attest exact-source vulnerability scan evidence
+        if: github.event_name == 'push'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: ${{ runner.temp }}/f0-container/vulnerabilities.json
+      - name: Verify signed scan evidence is from this revision and workflow
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify "$RUNNER_TEMP/f0-container/vulnerabilities.json" \
+            --repo "$GITHUB_REPOSITORY" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+            --deny-self-hosted-runners
       - name: Retain dependency inventory and findings, including scanner failures
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -6,7 +6,7 @@ import argparse
 import hashlib
 import json
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 MAX_REPORT_BYTES = 50_000_000
@@ -31,7 +31,7 @@ def _read(path: Path, bound: int) -> dict:
     return doc
 
 
-def validate(report: Path, baseline: Path, *, today: date | None = None) -> dict:
+def validate(report: Path, baseline: Path, *, image: Path, today: date | None = None) -> dict:
     policy = _read(baseline, 65_536)
     if (
         policy.get("schema_version") != 1
@@ -80,6 +80,42 @@ def validate(report: Path, baseline: Path, *, today: date | None = None) -> dict
     ):
         raise VulnerabilityPolicyError("wrong scanner, database, image, or operating system")
 
+    # Bind scanner output to the *same built image* as the signed F0
+    # container identity receipt. A matching CVE list for another image
+    # must never stand in for the actual runtime scan.
+    observed_image = _read(image, 65_536)
+    target = source.get("target")
+    layers = observed_image.get("rootfs_layers")
+    if (
+        type(target) is not dict
+        or type(layers) is not list
+        or not 1 <= len(layers) <= 256
+        or any(type(value) is not str or not value.startswith("sha256:") for value in layers)
+        or observed_image.get("os") != "linux"
+        or observed_image.get("architecture") not in ("amd64", "arm64")
+        or observed_image.get("user") != "lab"
+        or type(observed_image.get("id")) is not str
+        or not observed_image["id"].startswith("sha256:")
+        or target.get("imageID") != observed_image["id"]
+        or target.get("userInput") != "trading-lab:ci"
+        or target.get("os") != observed_image["os"]
+        or target.get("architecture") != observed_image["architecture"]
+        or type(target.get("layers")) is not list
+        or [item.get("digest") for item in target["layers"] if type(item) is dict] != layers
+        or len(target["layers"]) != len(layers)
+    ):
+        raise VulnerabilityPolicyError("scanner target does not match signed image identity")
+    # Reject a stale or future-dated vulnerability database. A zero-findings
+    # report alone is not evidence of a current scan.
+    built = descriptor["db"]["status"].get("built")
+    try:
+        built_on = date.fromisoformat(built[:10]) if type(built) is str else None
+    except ValueError as exc:
+        raise VulnerabilityPolicyError("vulnerability database build date is invalid") from exc
+    checked_on = today or date.today()
+    if built_on is None or not checked_on - timedelta(days=14) <= built_on <= checked_on + timedelta(days=1):
+        raise VulnerabilityPolicyError("vulnerability database is stale or future-dated")
+
     counts: dict[str, int] = {}
     highs: set[tuple[str, str, str, str]] = set()
     for match in scan["matches"]:
@@ -91,7 +127,7 @@ def validate(report: Path, baseline: Path, *, today: date | None = None) -> dict
             raise VulnerabilityPolicyError("malformed security match")
         vuln, pkg = match["vulnerability"], match["artifact"]
         severity = vuln.get("severity")
-        if severity not in ("Negligible", "Low", "Medium", "High", "Critical", "Unknown"):
+        if severity not in ("Negligible", "Low", "Medium", "High", "Critical"):
             raise VulnerabilityPolicyError("unrecognized severity")
         counts[severity] = counts.get(severity, 0) + 1
         if severity == "Critical":
@@ -109,6 +145,8 @@ def validate(report: Path, baseline: Path, *, today: date | None = None) -> dict
     return {
         "scope": policy["scope"],
         "scanner_report_sha256": hashlib.sha256(report.read_bytes()).hexdigest(),
+        "observed_image_sha256": hashlib.sha256(image.read_bytes()).hexdigest(),
+        "observed_image_id": observed_image["id"],
         "carried_high_matches": len(highs),
         "critical_matches": 0,
         "unknown_high_matches": 0,
@@ -123,6 +161,7 @@ def validate(report: Path, baseline: Path, *, today: date | None = None) -> dict
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--image", type=Path, required=True)
     parser.add_argument(
         "--baseline",
         type=Path,
@@ -130,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        result = validate(args.report, args.baseline)
+        result = validate(args.report, args.baseline, image=args.image)
     except (OSError, VulnerabilityPolicyError) as exc:
         print(f"F0 security exception rejected: {type(exc).__name__}", file=sys.stderr)
         return 2

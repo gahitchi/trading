@@ -124,3 +124,16 @@ broker sessions, untrusted inputs, privileged containers or external
 service exposure. The independent reviewer may reject the exception.
 
 Arch operator input and independent F0.6 acceptance remain required.
+
+## F0 offline scanner/source binding (additional reviewer challenge)
+
+The strict research-only exception is restricted to the exact current
+`trading-lab:ci` Docker identity and non-root Linux architecture,
+**not merely matching previously seen CVE tuples**. Review
+`tools/foundation_vulnerabilities.py` for image ID, ordered layer
+identity and recent Grype database checks; challenge the verifier with a
+foreign image receipt, substituted image ID, changed layer, root user,
+unknown-severity vulnerability and stale database. Every case must
+fail. GitHub OIDC attestation additionally binds the Grype JSON digest
+to the same source/workflow; it does **not** prove scan accuracy or
+independent security approval.
