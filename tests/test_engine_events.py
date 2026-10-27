@@ -238,6 +238,7 @@ def test_settlement_source_hash_is_bound_to_engine_evidence_identity():
     forged = replace(book, events=(replace(book.events[0], source_sha256="b" * 64),))
     with pytest.raises(EngineFactError, match="custody chain"):
         forged.audit()
-    assert book.evidence_head != EngineEconomicBook("SIM-001").append(
-        replace(cash(), source_sha256="b" * 64)
-    ).evidence_head
+    assert (
+        book.evidence_head
+        != EngineEconomicBook("SIM-001").append(replace(cash(), source_sha256="b" * 64)).evidence_head
+    )
