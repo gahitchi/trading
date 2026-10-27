@@ -59,8 +59,10 @@ class ExternalAccountParity:
     @property
     def matches(self) -> bool:
         """Numerical consistency only; NOT authenticated broker settlement."""
-        return self.internal_projection_matches and self.cash_delta == 0 and all(
-            delta == 0 for _, delta in self.position_deltas
+        return (
+            self.internal_projection_matches
+            and self.cash_delta == 0
+            and all(delta == 0 for _, delta in self.position_deltas)
         )
 
 
@@ -122,9 +124,7 @@ def parse_external_account_statement(
     )
 
 
-def reconcile_external_account(
-    book: EngineEconomicBook, statement: ExternalAccountStatement
-) -> ExternalAccountParity:
+def reconcile_external_account(book: EngineEconomicBook, statement: ExternalAccountStatement) -> ExternalAccountParity:
     """Compare three independent arithmetic views without manufacturing events.
 
     The journal and rational projector use the same economic facts, whereas
