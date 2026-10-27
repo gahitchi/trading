@@ -31,7 +31,7 @@ jobs:
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
           mkdir -p "$RUNNER_TEMP/f0-wheel"
           uv build --wheel --no-build-isolation --out-dir "$RUNNER_TEMP/f0-wheel"
-          sha256sum "$RUNNER_TEMP"/f0-wheel/*.whl > "$RUNNER_TEMP/f0-wheel/sha256.txt"
+          ( cd "$RUNNER_TEMP/f0-wheel" && sha256sum ./*.whl > sha256.txt )
           git rev-parse HEAD > "$RUNNER_TEMP/f0-wheel/source-commit.txt"
       - uses: actions/upload-artifact@v4
         with:
@@ -64,12 +64,12 @@ jobs:
           done
           mkdir -p "$RUNNER_TEMP/f0-independent/verified"
           python3 -m tools.foundation_wheel \
-            --first "$RUNNER_TEMP/f0-independent/ubuntu-22.04/trading_lab-0.2.0-py3-none-any.whl" \
-            --second "$RUNNER_TEMP/f0-independent/ubuntu-24.04/trading_lab-0.2.0-py3-none-any.whl" \
+            --first "$RUNNER_TEMP"/f0-independent/ubuntu-22.04/*.whl \
+            --second "$RUNNER_TEMP"/f0-independent/ubuntu-24.04/*.whl \
             capture --out "$RUNNER_TEMP/f0-independent/verified/cross-runner.json"
           python3 -m tools.foundation_wheel \
-            --first "$RUNNER_TEMP/f0-independent/ubuntu-22.04/trading_lab-0.2.0-py3-none-any.whl" \
-            --second "$RUNNER_TEMP/f0-independent/ubuntu-24.04/trading_lab-0.2.0-py3-none-any.whl" \
+            --first "$RUNNER_TEMP"/f0-independent/ubuntu-22.04/*.whl \
+            --second "$RUNNER_TEMP"/f0-independent/ubuntu-24.04/*.whl \
             verify --input "$RUNNER_TEMP/f0-independent/verified/cross-runner.json"
           # Still unsigned and unable to certify the release.
       - uses: actions/upload-artifact@v4
