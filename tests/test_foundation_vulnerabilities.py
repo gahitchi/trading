@@ -17,7 +17,9 @@ def scenario(tmp_path):
     image = tmp_path / "image.json"
     sha = "sha256:" + "a" * 64
     layers = ["sha256:" + "b" * 64, "sha256:" + "c" * 64]
-    image.write_text(json.dumps({"id": sha, "os": "linux", "architecture": "amd64", "user": "lab", "rootfs_layers": layers}))
+    image.write_text(
+        json.dumps({"id": sha, "os": "linux", "architecture": "amd64", "user": "lab", "rootfs_layers": layers})
+    )
     accepted = ["CVE-2026-5435", "libc6", "2.41-12+deb13u4", "wont-fix"]
     policy = {
         "schema_version": 1,
@@ -28,7 +30,11 @@ def scenario(tmp_path):
         "accepted_high_matches": [accepted],
     }
     scan = {
-        "descriptor": {"name": "grype", "version": "0.121.0", "db": {"status": {"valid": True, "built": "2026-10-27T06:30:41Z"}}},
+        "descriptor": {
+            "name": "grype",
+            "version": "0.121.0",
+            "db": {"status": {"valid": True, "built": "2026-10-27T06:30:41Z"}},
+        },
         "distro": {"name": "debian", "version": "13.7"},
         "source": {
             "type": "image",
@@ -86,26 +92,25 @@ def test_new_or_dangerous_findings_refused(scenario, change):
         obj["distro"]["version"] = "12"
     report.write_text(json.dumps(obj))
     with pytest.raises(VulnerabilityPolicyError):
-        validate(report, baseline, today=date(2026, 10, 27))
+        validate(report, baseline, image=image, today=date(2026, 10, 27))
 
 
 def test_expiry_and_authorization_forgery_rejected(scenario):
     report, baseline, image, _, policy = scenario
     with pytest.raises(VulnerabilityPolicyError, match="expired"):
-        validate(report, baseline, today=date(2026, 11, 27))
+        validate(report, baseline, image=image, today=date(2026, 11, 27))
     policy["broker_authorization"] = True
     baseline.write_text(json.dumps(policy))
     with pytest.raises(VulnerabilityPolicyError, match="broadened"):
-        validate(report, baseline, today=date(2026, 10, 27))
+        validate(report, baseline, image=image, today=date(2026, 10, 27))
 
 
 def test_report_symlink_refused(scenario, tmp_path):
-    report, baseline, _, _ = scenario
+    report, baseline, image, _, _ = scenario
     alias = tmp_path / "symlink.json"
     alias.symlink_to(report)
     with pytest.raises(VulnerabilityPolicyError, match="symlinked"):
         validate(alias, baseline, image=image, today=date(2026, 10, 27))
-
 
 
 @pytest.mark.parametrize(
