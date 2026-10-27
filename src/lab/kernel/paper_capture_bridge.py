@@ -246,7 +246,6 @@ def load_paper_capture(
     return PaperCaptureObservation(snapshot=snapshot, manifest_sha256=manifest)
 
 
-
 def b01_review(
     folder: str | Path,
     observation: PaperCaptureObservation,
