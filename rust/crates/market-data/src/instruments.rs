@@ -1,7 +1,7 @@
 use crate::MarketDataError;
 use serde_json::Value;
 use std::{str::FromStr, sync::Arc, time::Duration};
-use trading_core_types::{FixedPrice, InstrumentSpec, NumericError, SCALE};
+use trading_core_types::{FixedPrice, InstrumentSpec, NumericError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinanceEnvironment {
@@ -194,8 +194,4 @@ pub(crate) fn parse_price(s: &str) -> Result<i64, MarketDataError> {
     FixedPrice::from_str(s)
         .map(|v| v.0)
         .map_err(|err: NumericError| MarketDataError::Numeric(err))
-}
-pub(crate) fn checked_notional(p: i64, q: i64) -> Result<i64, MarketDataError> {
-    i64::try_from(i128::from(p) * i128::from(q) / i128::from(SCALE))
-        .map_err(|_| MarketDataError::InvalidResponse("notional overflow"))
 }

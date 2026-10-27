@@ -7,7 +7,6 @@ use crate::{
 use futures_util::{SinkExt, StreamExt};
 use rtrb::PushError;
 use std::{
-    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{sync::mpsc, time::timeout};

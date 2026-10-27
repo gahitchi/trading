@@ -81,6 +81,7 @@ impl LiveBookConsumer {
                     }
                     slot.sync.start_snapshot_fetch();
                     slot.generation = *generation;
+                    slot.active_request = None;
                 }
                 Ok(None)
             }

@@ -179,9 +179,9 @@ fn snapshot_generation_prevents_stale_rest_revival() {
     let good = parse_depth_snapshot(raw, current).unwrap();
     assert_eq!(
         c.on_frame(&good).unwrap(),
-        Some(SyncOutcome::AwaitingBridge)
+        Some(SyncOutcome::Activated)
     );
-    assert!(!c.book(0).unwrap().is_tradable());
+    assert!(c.book(0).unwrap().is_tradable());
 }
 #[test]
 fn buffers_before_snapshot_and_proves_live_bridge() {
