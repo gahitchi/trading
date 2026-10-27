@@ -256,7 +256,6 @@ class EconomicEventStore:
         )
         return self.append(fact, source_bytes=raw, expected_head=expected_head)
 
-
     def append_cash_in_lieu_record(
         self, raw: bytes, *, source_namespace: str, expected_head: str | None = None
     ) -> EngineEconomicBook:
