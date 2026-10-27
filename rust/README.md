@@ -1,4 +1,4 @@
-# Rust Trading Engine — Parts 1–3 of 6
+# Rust Trading Engine — Parts 1–4 of 6
 
 **Status:** Parts 1 and 2 passed both Linux CI and independent Arch validation
 (41 tests total); Part 3 passed its first Linux CI run (61 tests total)
@@ -25,6 +25,10 @@ keys, external orders, accounts, or live venue connections are present.
 - `crates/wallet-manager`: three-bucket fixed-point wallet, session HWM/CPPI,
   per-strategy fixed-prior fractional Kelly, conviction weighting and bounded
   short-side sizing. See [Part 3 documentation](PART3.md).
+- `crates/strategy-engine`: Four entry-condition probes, bounded manual-armed
+  breakdown trap, IOC/post-only quoting heuristics, short-side four-phase
+  lifecycle with cumulative-fill accounting, and per-order shadow FSM.
+  See [Part 4 documentation](PART4.md).
 - Unit tests cover arithmetic, layout, bitfields, order book invariants,
   buffer overflow, crossings, sequence disconnections and signal contracts.
 
