@@ -27,8 +27,10 @@ cargo run --locked --release -p trading-paper-gateway --bin paper-lab -- inspect
 
 \`demo\` refuses an existing journal path. Each new run requires an explicit
 new file. The CLI creates the file, warms up a synthetic 50-packet stream,
-arms the local operator interlock, passes a short sell through the **Part 5
-RiskGate**, records a proposed order, applies only a **0.6-unit simulated
+arms the local operator interlock, passes a synthetic **Part 4 Strategy A entry candidate** through the
+**Part 5 RiskGate**, updates Part 4's per-order shadow FSM on local
+acknowledgments and fills, records the reserved order, applies only a
+**0.6-unit simulated
 fill** to a 1-unit short, journals the cancellation of the remainder, then
 places a **reduce-only simulated cover**, applies two cumulative fills of
 0.4 and 0.2 units, records net realized paper PnL, and seals the flat
@@ -39,6 +41,11 @@ pending orders, simulated realized PnL and the Part 3 wallet from durable
 events. It cannot resume a crashed order or submit one to a broker.
 An unfinished journal remains **inspect-only with unresolved orders**.
 A truncated, invalid or noncanonical journal is rejected.
+
+The in-process Part 4 `OrderTracker` checks paper ACK / partial-fill /
+cancel-confirmed transitions and cumulative fills. After a crash, only the
+durable journal can be reopened in **inspection mode**: no reconstructed
+tracker is permitted to resume sending anything.
 
 The journal uses a versioned text header, monotonic event sequence, simple
 FNV-1a chained checksums, strict event transition validation and bounded

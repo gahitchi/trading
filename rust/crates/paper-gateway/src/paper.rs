@@ -8,7 +8,11 @@ use trading_core_types::{
 use trading_risk_gate::{
     AccountEvidence, GateDecision, MarketEvidence, RiskContext, RiskGate, RiskPolicy, RiskReason,
 };
-use trading_wallet_manager::WalletSnapshot;
+use trading_wallet_manager::{Strategy, WalletSnapshot};
+use trading_strategy_engine::{
+    EntryEngine, EntrySnapshot, OrderEvent, OrderEventKind, OrderStatus,
+    OrderTracker,
+};
 
 #[derive(Debug)]
 pub enum PaperError {
@@ -74,12 +78,50 @@ pub struct DemoReport {
 /// Supervised offline execution flow. No public exchange connector and no
 /// broker credential capability. Internal risk proof flags mean **synthetic
 /// paper simulator only** and never assert a real account was reconciled.
+#[derive(Debug, Clone, Copy)]
+struct PaperOrderShadow {
+    tracker: OrderTracker,
+    source_seq: u64,
+}
+impl PaperOrderShadow {
+    fn acknowledged(order_id: u64, amount: FixedQty) -> Result<Self, PaperError> {
+        let mut tracker = OrderTracker::new(order_id, amount)
+            .map_err(|_| PaperError::InvalidFlow)?;
+        tracker.sent().map_err(|_| PaperError::InvalidFlow)?;
+        tracker.apply(OrderEvent {
+            client_id: order_id, sequence: 1, event: OrderEventKind::Ack,
+        }).map_err(|_| PaperError::InvalidFlow)?;
+        Ok(Self { tracker, source_seq: 1 })
+    }
+    fn fill(&mut self, id: u64, added: FixedQty) -> Result<(), PaperError> {
+        let cumulative = self.tracker.cumulative_filled().0
+            .checked_add(added.0).ok_or(PaperError::Arithmetic)?;
+        self.source_seq = self.source_seq.checked_add(1)
+            .ok_or(PaperError::Arithmetic)?;
+        self.tracker.apply(OrderEvent {
+            client_id: id, sequence: self.source_seq,
+            event: OrderEventKind::CumulativeFill(FixedQty(cumulative)),
+        }).map_err(|_| PaperError::InvalidFlow)?;
+        Ok(())
+    }
+    fn canceled(&mut self, id: u64) -> Result<(), PaperError> {
+        self.tracker.cancel_requested().map_err(|_| PaperError::InvalidFlow)?;
+        self.source_seq = self.source_seq.checked_add(1)
+            .ok_or(PaperError::Arithmetic)?;
+        self.tracker.apply(OrderEvent {
+            client_id: id, sequence: self.source_seq,
+            event: OrderEventKind::CancelConfirmed,
+        }).map_err(|_| PaperError::InvalidFlow)?;
+        Ok(())
+    }
+}
 pub struct OfflinePaperSession {
     journal: Journal,
     gate: RiskGate,
     operator: AtomicOperatorState,
     interlock: SafetyInterlock,
     quote: Option<PaperQuote>,
+    shadow: Option<PaperOrderShadow>,
 }
 impl OfflinePaperSession {
     pub fn create(path: &Path) -> Result<Self, PaperError> {
@@ -92,6 +134,7 @@ impl OfflinePaperSession {
                 .map_err(|_| PaperError::InvalidFlow)?,
             interlock: SafetyInterlock::new(),
             quote: None,
+            shadow: None,
         })
     }
     pub fn summary(&self) -> &ReplaySummary {
@@ -102,6 +145,10 @@ impl OfflinePaperSession {
     }
     pub fn wallet(&self) -> WalletSnapshot {
         self.journal.summary().wallet()
+    }
+    /// A local Part 4 shadow FSM; restarted journals never resume routing.
+    pub fn order_status(&self) -> Option<OrderStatus> {
+        self.shadow.map(|s| s.tracker.status())
     }
 
     fn context(&self, q: PaperQuote) -> RiskContext {
@@ -234,6 +281,8 @@ impl OfflinePaperSession {
             GateDecision::Rejected(reason) => return Err(PaperError::Risk(reason)),
             _ => return Err(PaperError::UnexpectedDecision),
         };
+        let shadow = PaperOrderShadow::acknowledged(
+            intent.client_order_id, amount)?;
         self.journal.append(
             RecordKind::EntryReserve,
             intent.client_order_id,
@@ -242,6 +291,7 @@ impl OfflinePaperSession {
             0,
             self.journal.summary().confirmed_short_qty_raw,
         )?;
+        self.shadow = Some(shadow);
         Ok(amount)
     }
     pub fn reserve_cover(&mut self, intent: &OrderIntent) -> Result<FixedQty, PaperError> {
@@ -266,6 +316,8 @@ impl OfflinePaperSession {
             GateDecision::Rejected(reason) => return Err(PaperError::Risk(reason)),
             _ => return Err(PaperError::UnexpectedDecision),
         };
+        let shadow = PaperOrderShadow::acknowledged(
+            intent.client_order_id, amount)?;
         self.journal.append(
             RecordKind::CoverReserve,
             intent.client_order_id,
@@ -274,6 +326,7 @@ impl OfflinePaperSession {
             0,
             self.journal.summary().confirmed_short_qty_raw,
         )?;
+        self.shadow = Some(shadow);
         Ok(amount)
     }
     /// Explicit single-event simulator capacity is NEVER presumed full.
@@ -307,8 +360,15 @@ impl OfflinePaperSession {
             s.confirmed_short_qty_raw.checked_add(quantity.0)
         }
         .ok_or(PaperError::Arithmetic)?;
+        let mut shadow = self.shadow.ok_or(PaperError::InvalidFlow)?;
+        shadow.fill(id, quantity)?;
         self.journal
             .append(kind, id, quantity.0, px, pnl, next_pos)?;
+        self.shadow = if self.journal.summary().unresolved_order().is_some() {
+            Some(shadow)
+        } else {
+            None
+        };
         Ok(())
     }
     /// An IOC remainder cancellation is an explicit simulator event.
@@ -318,6 +378,8 @@ impl OfflinePaperSession {
         if s.unresolved_order() != Some(id) {
             return Err(PaperError::InvalidFlow);
         }
+        let mut shadow = self.shadow.ok_or(PaperError::InvalidFlow)?;
+        shadow.canceled(id)?;
         self.journal.append(
             if s.pending_is_cover() {
                 RecordKind::CoverCancel
@@ -330,6 +392,7 @@ impl OfflinePaperSession {
             0,
             s.confirmed_short_qty_raw,
         )?;
+        self.shadow = None;
         Ok(())
     }
     /// Stop new entries. A paper account must still resolve pending orders
@@ -364,6 +427,25 @@ pub fn run_demo(path: &Path) -> Result<DemoReport, PaperError> {
     };
     p.initialize_synthetic_stream(entry_quote)?;
     p.arm()?;
+    // Part 4 must first emit an entry *candidate* from the synthetic
+    // microstructure snapshot; Part 5 will independently vet its order.
+    let candidate = EntryEngine::new().evaluate(
+        now, p.operator.load().map_err(|_| PaperError::InvalidFlow)?,
+        EntrySnapshot {
+            observed_ns: now, feed_live_and_synchronized: true,
+            symbol_id: 0,
+            microprice: FixedPrice(100 * SCALE + SCALE / 20),
+            ofi_z: -3.5, bid_imbalance: -0.75, bid_vacuum: 0.25,
+            signed_sell_toxicity: 0.55, isr_down: 3.0,
+            hawkes_activity_proxy: 0.6, last_long_liquidation_ns: None,
+            leader_isr_down: 1.0, leader_return_50ms_bps: 0.0,
+            laggard_residual_bps: 0.0,
+        },
+    ).map_err(|_| PaperError::InvalidFlow)?;
+    if !candidate.is_some_and(|c| c.strategy == Strategy::A
+        && c.short_only && c.symbol_id == 0) {
+        return Err(PaperError::InvalidFlow);
+    }
     let entry = OrderIntent::new(
         1,
         now,

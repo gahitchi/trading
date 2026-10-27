@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use trading_core_types::{
     FixedPrice, FixedQty, FixedUsd, OrderIntent, OrderSide, SCALE, TimeInForce, VenueId,
 };
+use trading_strategy_engine::OrderStatus;
 use trading_paper_gateway::{
     Journal, JournalError, OfflinePaperSession, PaperError, PaperQuote, PaperStatus, RecordKind,
     run_demo,
@@ -160,11 +161,14 @@ fn partial_entry_fill_reserves_remainder_until_explicit_cancel() {
     let tmp = Scratch::new();
     let mut p = session(tmp.path());
     p.reserve_short(&entry(1)).unwrap();
+    assert_eq!(p.order_status(), Some(OrderStatus::Acknowledged));
     p.simulate_fill(1, FixedQty(30_000_000)).unwrap();
+    assert_eq!(p.order_status(), Some(OrderStatus::Acknowledged));
     assert_eq!(p.summary().confirmed_short_qty_raw, 30_000_000);
     assert_eq!(p.summary().pending_quantity_raw(), 70_000_000);
     assert!(p.reserve_short(&entry(2)).is_err());
     p.confirm_paper_cancel(1).unwrap();
+    assert_eq!(p.order_status(), None);
     assert_eq!(p.summary().unresolved_order(), None);
     assert_eq!(p.summary().confirmed_short_qty_raw, 30_000_000);
 }
