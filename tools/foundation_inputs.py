@@ -89,20 +89,20 @@ def observation(directory: Path, *, config: Path | None = None) -> dict:
         observed[role] = {"sha256": digest, "bytes": count}
         if role == "configuration":
             try:
-                config = tomllib.loads(data.decode("utf-8"))
+                parsed_config = tomllib.loads(data.decode("utf-8"))
             except (ValueError, UnicodeError) as exc:
                 raise foundation.FoundationError("unreadable research configuration") from exc
-            paper = config.get("paper", {})
+            paper = parsed_config.get("paper", {})
             if not isinstance(paper, dict):
                 raise foundation.FoundationError("reference broker configuration is not a table")
             account = paper.get("account_id", "")
             port = paper.get("port")
             if (
-                not isinstance(config.get("universe"), dict)
-                or not isinstance(config.get("trading"), dict)
-                or set(config["universe"]) != {"SPY"}
-                or config["universe"]["SPY"] != "ARCX"
-                or config["trading"].get("speed") != "daily"
+                not isinstance(parsed_config.get("universe"), dict)
+                or not isinstance(parsed_config.get("trading"), dict)
+                or set(parsed_config["universe"]) != {"SPY"}
+                or parsed_config["universe"]["SPY"] != "ARCX"
+                or parsed_config["trading"].get("speed") != "daily"
                 or not isinstance(account, str)
                 or (account and not account.startswith("DU"))
                 or (port is not None and (type(port) is not int or not 1 <= port <= 65535 or port in (4001, 7496)))
