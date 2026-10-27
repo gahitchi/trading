@@ -14,6 +14,7 @@ from fractions import Fraction
 
 from lab.engine_events import (
     CashFact,
+    CashInLieuFact,
     EngineEconomicBook,
     EngineFactError,
     FillFact,
@@ -96,6 +97,13 @@ def project_account(book: EngineEconomicBook) -> ProjectedAccount:
             if sign is None:
                 raise EngineFactError("projection refuses unclassified cash")
             cash += sign * Fraction(fact.amount)
+        elif type(fact) is CashInLieuFact:
+            previous = positions.get(fact.symbol, Fraction(0))
+            expected_sign = 1 if fact.side == "LONG" else -1
+            if previous * expected_sign < Fraction(fact.quantity):
+                raise EngineFactError("cash-in-lieu exceeds long or short fractional position")
+            positions[fact.symbol] = previous - expected_sign * Fraction(fact.quantity)
+            cash += expected_sign * Fraction(fact.cash)
         elif type(fact) is SplitFact:
             if fact.symbol not in positions or positions[fact.symbol] == 0:
                 raise EngineFactError("projection split has no owned position")
