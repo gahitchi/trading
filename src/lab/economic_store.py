@@ -255,3 +255,17 @@ class EconomicEventStore:
             expected_account_id=self.account_id,
         )
         return self.append(fact, source_bytes=raw, expected_head=expected_head)
+
+
+    def append_cash_in_lieu_record(
+        self, raw: bytes, *, source_namespace: str, expected_head: str | None = None
+    ) -> EngineEconomicBook:
+        """Book fractional corporate-action cash through the same atomic custody."""
+        from lab.settlement_input import parse_settled_cash_in_lieu_record
+
+        fact = parse_settled_cash_in_lieu_record(
+            raw,
+            source_namespace=source_namespace,
+            expected_account_id=self.account_id,
+        )
+        return self.append(fact, source_bytes=raw, expected_head=expected_head)
