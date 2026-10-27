@@ -8,8 +8,11 @@ Never send its output to an order dispatcher or use it to release reservations.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import sys
+import tomllib
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -22,7 +25,7 @@ from lab.kernel.broker_reconciliation import (
     compare_reported_snapshot,
 )
 from lab.kernel.order_lifecycle import LifecycleError, OfflineOrderSession, _id, _ns, _quantity
-from lab.safety import check_paper_settings
+from lab.safety import SafetyError, check_paper_settings
 
 _REQUIRED = (
     "identity.json",
@@ -140,6 +143,7 @@ def load_paper_capture(
     ticker: str,
     instrument_id: str,
     action_version: str,
+    expected_port: int | None = None,
 ) -> PaperCaptureObservation:
     """Convert a private raw capture without assuming completeness or authentication.
 
@@ -164,6 +168,8 @@ def load_paper_capture(
     if account.get("account_id") != expected_account:
         raise LifecycleError("reported broker account differs from expected paper account")
     check_paper_settings(identity.get("paper_port"), expected_account.removeprefix("IB-"))
+    if expected_port is not None and (type(expected_port) is not int or expected_port != identity.get("paper_port")):
+        raise LifecycleError("capture paper gateway port differs from pinned configuration")
     if meta.get("stream") != "NAUTILUS_IBKR_READ_ONLY":
         raise LifecycleError("capture stream is not the recognized read-only adapter")
     if any(
@@ -236,3 +242,55 @@ def load_paper_capture(
         causal_boundary_complete=False,
     )
     return PaperCaptureObservation(snapshot=snapshot, manifest_sha256=manifest)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Private read-only inspection. Exit zero means parsed, never approved."""
+    parser = argparse.ArgumentParser(description="Inspect an unqualified private IBKR PAPER capture, read-only")
+    parser.add_argument("--config", required=True, help="operator's local lab.toml (never copied)")
+    parser.add_argument("--capture", required=True, help="private raw snapshot directory, outside Git")
+    parser.add_argument("--ticker", required=True, help="equity symbol from [universe]")
+    parser.add_argument("--action-version", required=True, help="pinned instrument action/split version")
+    args = parser.parse_args(argv)
+    try:
+        raw = tomllib.loads(Path(args.config).read_text())
+        paper, universe = raw["paper"], raw["universe"]
+        ticker = args.ticker.upper()
+        if ticker not in universe:
+            raise LifecycleError("ticker is not present in the configured universe")
+        account, port = paper["account_id"], paper["port"]
+        if type(account) is not str or type(port) is not int or type(universe[ticker]) is not str:
+            raise LifecycleError("invalid operator paper-account or instrument configuration")
+        observed = load_paper_capture(
+            args.capture,
+            expected_account="IB-" + account,
+            expected_port=port,
+            ticker=ticker,
+            instrument_id=f"{ticker}.{universe[ticker].upper()}",
+            action_version=args.action_version,
+        )
+    except (OSError, ValueError, KeyError, SafetyError) as exc:
+        # Do not print account identifiers, raw order IDs, broker payloads or original exception text.
+        print(f"Read-only capture inspection blocked: {type(exc).__name__}. Review the private input.", file=sys.stderr)
+        return 2
+    print(
+        json.dumps(
+            {
+                "mode": "UNQUALIFIED_PRIVATE_CAPTURE",
+                "capture_sha256": observed.manifest_sha256,
+                "snapshot_id": observed.snapshot.snapshot_id,
+                "order_count": len(observed.snapshot.orders),
+                "execution_count": len(observed.snapshot.executions),
+                "broker_authenticated": False,
+                "broker_authorization": False,
+                "release_reservations": False,
+                "history_coverage": "UNVERIFIED",
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
