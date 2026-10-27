@@ -54,14 +54,18 @@ def fixture(tmp_path):
     path = tmp_path / "economic.db"
     store = EconomicEventStore(path, "SIM-001")
     store.append_cash_record(cash_activity(), source_namespace="broker")
-    store.append(
-        FillFact("fill-1", "execution:fill-1", 20, "SPY", "BUY", D("2"), D("100"), D("0.25"))
-    )
+    store.append(FillFact("fill-1", "execution:fill-1", 20, "SPY", "BUY", D("2"), D("100"), D("0.25")))
     statement_path = tmp_path / "external-account.json"
     statement_path.write_bytes(report())
     args = [
-        "--journal", str(path), "--account", "SIM-001",
-        "--statement", str(statement_path), "--source", "broker",
+        "--journal",
+        str(path),
+        "--account",
+        "SIM-001",
+        "--statement",
+        str(statement_path),
+        "--source",
+        "broker",
     ]
     return path, statement_path, args
 
@@ -99,8 +103,14 @@ def test_missing_database_or_missing_statement_cannot_be_created_by_inspector(tm
     statement = tmp_path / "account.json"
     statement.write_bytes(report())
     args = [
-        "--journal", str(missing), "--account", "SIM-001",
-        "--statement", str(statement), "--source", "broker",
+        "--journal",
+        str(missing),
+        "--account",
+        "SIM-001",
+        "--statement",
+        str(statement),
+        "--source",
+        "broker",
     ]
     assert run(args) == 3
     assert not missing.exists()

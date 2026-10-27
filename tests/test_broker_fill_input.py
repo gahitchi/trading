@@ -19,10 +19,19 @@ def D(value):
 
 
 def receipt(
-    *, record_id="execution-1", event_id="exec-1", broker_order_id="order-123",
-    timestamp_ns=10, side="BUY", quantity="2", price="100",
-    commission="0.25", status="EXECUTED", source_kind="BROKER_EXECUTION_REPORT",
-    quote_currency="USD", commission_currency="USD",
+    *,
+    record_id="execution-1",
+    event_id="exec-1",
+    broker_order_id="order-123",
+    timestamp_ns=10,
+    side="BUY",
+    quantity="2",
+    price="100",
+    commission="0.25",
+    status="EXECUTED",
+    source_kind="BROKER_EXECUTION_REPORT",
+    quote_currency="USD",
+    commission_currency="USD",
 ):
     return json.dumps(
         {

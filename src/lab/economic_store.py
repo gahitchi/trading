@@ -333,7 +333,6 @@ class EconomicEventStore:
         )
         return self.append(fact, source_bytes=raw, expected_head=expected_head)
 
-
     def append_broker_fill_record(
         self, raw: bytes, *, source_namespace: str, expected_head: str | None = None
     ) -> EngineEconomicBook:
@@ -344,7 +343,5 @@ class EconomicEventStore:
         """
         from lab.fill_input import parse_broker_fill_record
 
-        fact = parse_broker_fill_record(
-            raw, source_namespace=source_namespace, expected_account_id=self.account_id
-        )
+        fact = parse_broker_fill_record(raw, source_namespace=source_namespace, expected_account_id=self.account_id)
         return self.append(fact, source_bytes=raw, expected_head=expected_head)

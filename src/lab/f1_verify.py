@@ -47,7 +47,14 @@ def run(argv: list[str] | None = None) -> int:
         store = EconomicEventStore(args.journal, args.account, readonly=True)
         book = store.load()
         parity = reconcile_external_account(book, statement)
-    except (OSError, ValueError, EconomicLedgerError, EconomicStoreError, EngineFactError, sqlite3.DatabaseError) as exc:
+    except (
+        OSError,
+        ValueError,
+        EconomicLedgerError,
+        EconomicStoreError,
+        EngineFactError,
+        sqlite3.DatabaseError,
+    ) as exc:
         print(f"F1 verification refused: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 3
 
@@ -61,8 +68,7 @@ def run(argv: list[str] | None = None) -> int:
         "events_replayed": len(book.events),
         "cash_delta_usd": _decimal_text(parity.cash_delta),
         "position_deltas": [
-            {"symbol": symbol, "quantity_delta": _decimal_text(delta)}
-            for symbol, delta in parity.position_deltas
+            {"symbol": symbol, "quantity_delta": _decimal_text(delta)} for symbol, delta in parity.position_deltas
         ],
         "independent_projection_matches": parity.internal_projection_matches,
         "broker_source_authenticated": False,

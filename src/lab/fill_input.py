@@ -46,9 +46,7 @@ def _decimal(text: object, description: str, *, positive: bool) -> Decimal:
         raise EngineFactError(f"invalid broker execution {description}") from exc
 
 
-def parse_broker_fill_record(
-    raw: bytes, *, source_namespace: str, expected_account_id: str
-) -> BrokerFillFact:
+def parse_broker_fill_record(raw: bytes, *, source_namespace: str, expected_account_id: str) -> BrokerFillFact:
     """Reject anything except a fully identified USD execution report."""
     _identity(source_namespace, "execution source namespace")
     _identity(expected_account_id, "expected broker account")
@@ -68,11 +66,7 @@ def parse_broker_fill_record(
         raise EngineFactError("unsupported execution report schema")
     if type(doc["account_id"]) is not str or doc["account_id"] != expected_account_id:
         raise EngineFactError("execution report is from another account")
-    if (
-        doc["kind"] != "BROKER_FILL"
-        or doc["status"] != "EXECUTED"
-        or doc["source_kind"] != "BROKER_EXECUTION_REPORT"
-    ):
+    if doc["kind"] != "BROKER_FILL" or doc["status"] != "EXECUTED" or doc["source_kind"] != "BROKER_EXECUTION_REPORT":
         raise EngineFactError("execution report is not a confirmed fill claim")
     if doc["quote_currency"] != "USD" or doc["commission_currency"] != "USD":
         raise EngineFactError("USD quote and USD commission must be explicit")
