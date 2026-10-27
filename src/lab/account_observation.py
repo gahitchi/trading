@@ -149,8 +149,16 @@ def reconcile_external_account(
     for symbol, quantity in statement.positions:
         if symbol in observed:
             raise EngineFactError("duplicate external instrument identity")
-        observed[symbol] = _decimal_string(format(quantity, "f"), "external position")
-    raw_cash = _decimal_string(format(statement.cash, "f"), "external cash")
+        try:
+            observed[symbol] = exact(quantity)
+        except EconomicLedgerError as exc:
+            raise EngineFactError("invalid external position precision or range") from exc
+    if type(statement.cash) is not Decimal:
+        raise EngineFactError("external statement cash is not exact Decimal")
+    try:
+        raw_cash = exact(statement.cash)
+    except EconomicLedgerError as exc:
+        raise EngineFactError("invalid external cash precision or range") from exc
     mathematical = compare_projection(book)
     independent = project_account(book)
     journal = book.ledger
