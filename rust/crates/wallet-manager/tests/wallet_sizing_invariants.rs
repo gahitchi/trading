@@ -267,7 +267,10 @@ fn positive_edge_without_observation_gate_cannot_open() {
 fn signal_sizing_respects_operator_mode_and_strategy_mask() {
     let w = WalletBuckets::new(usd("10000")).unwrap();
     let k = ready_kelly();
-    let mut operator = OperatorSnapshot { mode: TradingMode::HaltAll, ..OperatorSnapshot::default() };
+    let mut operator = OperatorSnapshot {
+        mode: TradingMode::HaltAll,
+        ..OperatorSnapshot::default()
+    };
     assert_eq!(
         compute_short_position_size(&w, &k, Strategy::A, operator, &book(), entry_inputs())
             .unwrap(),
