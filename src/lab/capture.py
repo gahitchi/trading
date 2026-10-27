@@ -155,9 +155,57 @@ def _set_capture_status(folder: Path, state: str) -> None:
     )
 
 
-def _verify_capture_files(folder: Path) -> None:
-    if any(not (folder / name).is_file() for name in _CAPTURE_REQUIRED):
+def _verify_capture_files(folder: Path, *, expected_account: str, tickers: list[str]) -> None:
+    """Check local cache coherence before committing status COMPLETE_UNVERIFIED.
+
+    This never authenticates the broker or asserts historical coverage.
+    """
+    if any((folder / name).is_symlink() or not (folder / name).is_file() for name in _CAPTURE_REQUIRED):
         raise RuntimeError("capture incomplete: required broker snapshot files missing")
+
+    def record(name: str) -> object:
+        path = folder / name
+        if path.stat().st_size > 8 * 1024 * 1024:
+            raise RuntimeError("capture incomplete: broker evidence exceeds B01 inspection limit")
+        try:
+            return json.loads(
+                path.read_text(),
+                parse_constant=lambda _: (_ for _ in ()).throw(ValueError("nonfinite JSON")),
+            )
+        except (UnicodeError, ValueError) as exc:
+            raise RuntimeError("capture incomplete: invalid broker evidence JSON") from exc
+
+    account = record("broker_account.json")
+    positions = record("broker_positions.json")
+    orders = record("broker_orders.json")
+    meta = record("broker_capture_meta.json")
+    identity_record = record("identity.json")
+    if not isinstance(account, dict) or account.get("account_id") != "IB-" + expected_account:
+        raise RuntimeError("capture incomplete: broker account observation missing or mismatched")
+    if not isinstance(identity_record, dict) or identity_record.get("paper_port") is None:
+        raise RuntimeError("capture incomplete: paper session identity missing")
+    balances = account.get("balances")
+    if not isinstance(balances, list) or not balances:
+        raise RuntimeError("capture incomplete: broker balances not observed")
+    if not isinstance(positions, dict) or not tickers or not all(
+        isinstance(positions.get(t), dict)
+        and isinstance(positions[t].get("positions"), list)
+        and isinstance(positions[t].get("net_exact"), str)
+        for t in tickers
+    ):
+        raise RuntimeError("capture incomplete: broker positions not observed for requested instruments")
+    if not isinstance(orders, list):
+        raise RuntimeError("capture incomplete: broker order cache missing")
+    if not isinstance(meta, dict) or meta.get("stream") != "NAUTILUS_IBKR_READ_ONLY":
+        raise RuntimeError("capture incomplete: broker observation metadata missing")
+    start, end = meta.get("capture_started_ns"), meta.get("capture_completed_ns")
+    if type(start) is not int or type(end) is not int or not 0 < start <= end:
+        raise RuntimeError("capture incomplete: broker observation timestamps missing")
+    if any(
+        meta.get(k) is not False
+        for k in ("coverage_verified", "broker_authentication_verified", "causal_boundary_verified")
+    ):
+        raise RuntimeError("capture incomplete: unsupported source coverage assertion")
 
 
 # ----------------------------------------------------------------------------- snapshot (read-only node)
@@ -359,7 +407,7 @@ def snapshot(
                 node.dispose()
         finally:
             lock.close()
-        _verify_capture_files(d)
+        _verify_capture_files(d, expected_account=cfg.paper.account_id, tickers=tickers)
     except BaseException:
         # Preserve private incident evidence but never mistake this folder for a completed B01 capture.
         _set_capture_status(d, "INCOMPLETE")
@@ -395,7 +443,7 @@ async def snapshot_async(cfg, tickers, out, phase, *, wait_s=3.0, history_days=1
                 node.dispose()
         finally:
             lock.close()
-        _verify_capture_files(d)
+        _verify_capture_files(d, expected_account=cfg.paper.account_id, tickers=tickers)
     except BaseException:
         _set_capture_status(d, "INCOMPLETE")
         raise
