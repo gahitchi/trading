@@ -19,6 +19,7 @@ from lab.economic_ledger import (
     SYMBOL,
     EconomicLedger,
     EconomicLedgerError,
+    _calc,
     exact,
 )
 
@@ -346,9 +347,15 @@ class EngineEconomicBook:
         symbols = {lot.symbol for lot in self.ledger.lots}
         if symbols - observed.keys():
             raise EngineFactError("engine snapshot omitted a journal position")
-        deltas = tuple((symbol, observed[symbol] - self.ledger.position(symbol)) for symbol in sorted(observed))
+        deltas = tuple(
+            (
+                symbol,
+                _calc(lambda symbol=symbol: observed[symbol] - self.ledger.position(symbol)),
+            )
+            for symbol in sorted(observed)
+        )
         return EngineParity(
-            _number(snapshot.cash, "engine cash") - self.ledger.balance("cash:USD"),
+            _calc(lambda: _number(snapshot.cash, "engine cash") - self.ledger.balance("cash:USD")),
             deltas,
             snapshot.applied_event_ids,
             self.evidence_head,
