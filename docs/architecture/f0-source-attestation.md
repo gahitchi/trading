@@ -61,15 +61,51 @@ immutable release artifact are established. Windows/Arch/Termux observations
 are different environments: verifying a receipt from another OS/kernel
 intentionally fails rather than silently claiming the same deployment.
 
+## F0.2: Docker image and installed-dependency observation
+
+**Development implementation:** `tools/foundation_image.py` and
+`tests/test_foundation_image.py`. This extends the exact-commit source receipt
+without granting it any trading or release authority.
+
+The hosted Docker CI job records a tightly filtered, source-commit-bound
+container observation:
+- Docker's local content-addressed **image ID**, platform, unprivileged `lab`
+  user and root filesystem layer digests. This is a **local image ID**, not
+  a registry-published or signed manifest digest.
+- A **byte equality check** that `dpkg-query -W` in the running, isolated
+  image matches the OS package list written during the pinned Docker build.
+- SHA-256 of that complete Debian package list, and SHA-256 of sorted installed
+  Python package name/version pairs, with explicit NautilusTrader and
+  Trading Lab package versions.
+- SHA-256 of the independently reconstructed F0 source-inventory record
+  linking those observations to an exact source commit, tree, lock graph
+  and builder environment.
+
+The observation is verified immediately and uploaded as a **separate unsigned
+CI artifact**; its creation and verification run without any IBKR session,
+credentials or external network inside the container. Forged identifiers,
+root-user containers, missing layers, changed dependencies, incompatible
+release versions, dirty checkouts, mutated receipts, and wrong release
+authorization all fail closed in synthetic fixture tests.
+
+**The snapshot does not prove reproducible binaries.** The image could have
+been built by a malicious or compromised CI runner, contain transitive
+software that is not covered by the lock, or vary between independent builds.
+A deterministic two-builder comparison, signed registry digest and
+provenance/SBOM verification, independently reviewed OS package and CVE
+assessment, and clean Arch/Windows installer observations remain open.
+Do not use this receipt as a deployment token, paper account authorization,
+market-data source proof, or R6/F8 release criterion.
+
 ## Explicit F0 gaps and next submilestones
 
 - **F0.1:** final owner/operator decision on the pilot symbol, instrument
   action version, source entitlement, data horizon and frozen strategy policy.
   Reference scope alone does not certify them.
-- **F0.2:** prove exact dependency graph and built image/host-OS package
-  provenance across every *supported* deployment target. This receipt hashes
-  the pinned definitions; it does not independently prove that a running
-  installation matches them.
+- **F0.2:** source-linked Docker build and installed OS/Python inventory are
+  now captured and checked in CI. Independent two-builder reproducibility,
+  signed image provenance, runtime deployment attestations and complete
+  Arch/Windows support remain open.
 - **F0.3:** CI already runs dual Python, lint, packaging, Docker and serialized
   real-clock harness. We must still make all collaboration checks green on
   the *exact final candidate*. A separate older G040 message has malformed
