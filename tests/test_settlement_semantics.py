@@ -7,8 +7,8 @@ import pytest
 
 from lab.account_projection import compare_projection, project_account
 from lab.economic_ledger import EconomicLedger
-from lab.engine_events import EngineEconomicBook, EngineFactError
 from lab.economic_store import EconomicEventStore
+from lab.engine_events import EngineFactError
 
 
 def D(v):
