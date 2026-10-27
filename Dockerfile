@@ -6,7 +6,9 @@
 # NautilusTrader ships wheels for linux x86_64 and aarch64 (glibc >= 2.34), so this
 # builds on a PC, an ARM VPS or a Raspberry Pi 5 (64-bit OS).
 
-FROM python:3.13-slim-bookworm@sha256:e32be0e55814a08977501ca863271d9bd02443710db8f2afaf8372e2c4508530
+# Digest of the official python:3.13.17-slim-trixie multi-architecture image index.
+# Independent CI scans the resulting runtime; this base change is not by itself a vulnerability waiver.
+FROM python:3.13.17-slim-trixie@sha256:19ed48e5e9c132082510ba9efb11bc2098d582f610374670fa30b6b17026617b
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -14,10 +16,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     TZ=America/New_York
 
-# Freeze Debian package resolution as well as the parent image and Python graph.
+# Freeze APT to Debian Trixie and its matching security snapshot. Both repositories
+# are timestamped; an exact dependency inventory is checked in the running image.
 RUN rm -f /etc/apt/sources.list.d/debian.sources \
-    && printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20261001T000000Z bookworm main' > /etc/apt/sources.list \
-    && apt-get update && apt-get install -y --no-install-recommends libseccomp2=2.5.4-1+deb12u1 \
+    && printf '%s\n' \
+      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20261026T000000Z trixie main' \
+      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20261026T000000Z trixie-security main' \
+      > /etc/apt/sources.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends libseccomp2 \
     && dpkg-query -W > /usr/local/share/trading-lab-os-packages.txt \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 --shell /usr/sbin/nologin lab
