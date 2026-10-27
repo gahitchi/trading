@@ -16,7 +16,7 @@ without developing and reviewing an entirely separate broker adapter.
 cd ~/trading-rust
 git pull --ff-only
 cd rust
-cargo run --locked --release -p trading-paper-gateway --bin paper-lab -- demo ./paper-session-$(date +%s%N).journal
+cargo run --locked --release -p trading-paper-gateway --bin paper-lab -- demo "$HOME/trading-paper-$(date +%s%N).journal"
 \`\`\`
 
 Use the actual journal name printed in your command when inspecting:
@@ -60,7 +60,7 @@ set -o pipefail
   cargo test --workspace --locked --all-targets &&
   cargo clippy --workspace --locked --all-targets -- -D warnings &&
   cargo build --workspace --locked --release &&
-  cargo run --workspace --locked --release -p trading-paper-gateway --bin paper-lab -- demo "./paper-combined-$(date +%s%N).journal"
+  cargo run --locked --release -p trading-paper-gateway --bin paper-lab -- demo "$HOME/trading-paper-combined-$(date +%s%N).journal"
 ) 2>&1 | tee ~/trading-rust-parts5-6-arch.log
 \`\`\`
 

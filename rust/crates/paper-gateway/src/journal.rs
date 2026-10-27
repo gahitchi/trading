@@ -134,8 +134,8 @@ impl ReplaySummary {
         // modelling simplification; no borrow interest / carry.
         let fees = (i128::from(self.average_entry_price_raw) + i128::from(execution_price))
             .checked_mul(q)
+            .and_then(|v| v.checked_mul(FEE_BPS_PER_SIDE))
             .ok_or(JournalError::Arithmetic)?
-            * FEE_BPS_PER_SIDE
             / (scale * 10_000);
         i64::try_from(gross - fees).map_err(|_| JournalError::Arithmetic)
     }
@@ -415,7 +415,7 @@ impl Journal {
             return Err(JournalError::Poisoned);
         }
         self.summary = staged;
-        self.hash = fnv(line[..line.rfind('|').expect("journal hash")].as_bytes());
+        self.hash = fnv(&line.as_bytes()[..line.rfind('|').expect("journal hash")]);
         // Hash chain uses the exact decimal-prefix bytes through prev_hash.
         Ok(r)
     }

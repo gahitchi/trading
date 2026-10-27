@@ -8,7 +8,7 @@ use trading_core_types::{
 use trading_risk_gate::{
     AccountEvidence, GateDecision, MarketEvidence, RiskContext, RiskGate, RiskPolicy, RiskReason,
 };
-use trading_wallet_manager::{WalletBuckets, WalletSnapshot};
+use trading_wallet_manager::WalletSnapshot;
 
 #[derive(Debug)]
 pub enum PaperError {
