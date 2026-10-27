@@ -26,6 +26,18 @@ For the chosen SHA, use its GitHub CI run to verify the following:
    `f0-candidate/wheel-repeat.json` artifacts. Verify any uploaded receipts
    are tied to the reviewed SHA. They are **unsigned runner observations**.
 
+6. `f0-two-runner-wheel`: separately provisioned **Ubuntu 22.04 and
+   Ubuntu 24.04** jobs rebuild the exact same candidate from frozen
+   dependencies and commit-time `SOURCE_DATE_EPOCH`. The verification job
+   downloads each build, validates original source SHA and artifact SHA-256,
+   and confirms identical wheels against the committed `src/lab` tree.
+   A green job does not prove independence from GitHub as a trust provider.
+7. **Operator-only F0.4**: when the Arch installation and actual SPY
+   dataset are available, generate `tools.foundation_inputs` receipt for
+   the local `lab.toml`, `data/manifest.json` and
+   `data/SPY.parquet`. The digest-only receipt stays local; do not
+   upload real account/configuration or raw data to CI.
+
 For the candidate, capture CI run IDs, artifact names and SHA-256 digests in an
 external immutable review record; **do not manually edit generated receipts**.
 
@@ -34,9 +46,9 @@ external immutable review record; **do not manually edit generated receipts**.
 | Step | Current engineering implementation | Required independent exit |
 | --- | --- | --- |
 | R0.1 | `docs/architecture/f0-reference-scope.json`: SPY/ARCX, USD, NYSE calendar, IBKR **PAPER**, no order authority | Owner approval of actual symbol, data entitlement, time horizon, venue action version and scoped strategy |
-| R0.2 | Pinned Docker source/image, dependency locks, OS/Python runtime inventory; repeat-built wheel/source parity | Independent builder, clean Arch and Windows deployment provenance, signed/attested build provenance |
+| R0.2 | Pinned Docker source/image and dependency locks, OS/Python runtime inventory; matching separate GitHub Ubuntu 22.04/24.04 wheel builds | Independent-provider trust, clean Arch and Windows deployment provenance, signed/attested build provenance |
 | R0.3 | Lint, Python 3.13/3.14, Docker, package, test harness and collaboration checks | Independent exact-SHA green CI and no pending blocking tests |
-| R0.4 | Exact clean Git commit/tree, pinned input digests, immutable source/image/wheel records | Actual data/config/account provenance with privacy-safe custody and independent verifier |
+| R0.4 | Exact commit/tree source/image/wheel receipts; a local-only SHA-256 custody tool for the SPY configuration, vendor manifest and raw Parquet | Real local-data capture, point-in-time authenticity, independent source permissions/custody review |
 | R0.5 | `docs/architecture/f0-contract-map.json` complete F0–F8 gate ownership and order validator | Design and failure-mode review; resolve any rejected ownership and duplicate authority |
 | R0.6 | Structured review packet and regression inventory prepared | **Independent reviewer/owner sign-off** on exact SHA; unresolved critical findings remain blocking |
 
@@ -60,9 +72,9 @@ external immutable review record; **do not manually edit generated receipts**.
 ## Scope, limits and disposition
 
 The F0 evidence is about **repeatability and integrity**, not the soundness of
-future financial/economic models. In particular, two local wheel builds on one
-GitHub runner do *not* demonstrate independent reproducibility, signed
-publication, a trusted build runner or a clean OS install. The exact
+future financial/economic models. The build comparison now executes on two GitHub-hosted OS runners,
+but it does *not* demonstrate independence from the GitHub build infrastructure,
+signed publication, a trusted build runner or a clean OS installation. The exact
 configuration, market data, broker evidence and release-candidate signatures
 remain absent. `main` remains Claude-owned and is unchanged by this branch.
 
