@@ -15,7 +15,20 @@ from decimal import Decimal, DecimalException, Inexact, Rounded, localcontext
 
 SYMBOL = re.compile(r"[A-Z0-9][A-Z0-9._-]{0,31}\Z")
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9:._/-]{0,127}\Z")
-KINDS = {"CAPITAL_IN", "CAPITAL_OUT", "DIVIDEND", "FINANCING", "BORROW_FEE"}
+# Each non-trade settled cash movement must name its economic counterpart.
+# Debits to cash are positive; income and capital carry opposite postings.
+CASH_POSTINGS = {
+    "CAPITAL_IN": ("equity:capital", 1),
+    "CAPITAL_OUT": ("equity:capital", -1),
+    "DIVIDEND": ("income:dividend", 1),
+    "INTEREST_CREDIT": ("income:interest", 1),
+    "BORROW_REBATE": ("income:borrow_rebate", 1),
+    "DIVIDEND_WITHHOLDING": ("expense:withholding", -1),
+    "SHORT_DISTRIBUTION": ("expense:short_distribution", -1),
+    "FINANCING": ("expense:financing", -1),
+    "BORROW_FEE": ("expense:borrow", -1),
+}
+KINDS = frozenset(CASH_POSTINGS)
 MAX_DIGITS = 25
 MAX_SCALE = 18
 
@@ -149,16 +162,7 @@ class EconomicLedger:
         if kind not in KINDS:
             raise EconomicLedgerError("unsupported non-trade settlement event")
         value = exact(amount, positive=True)
-        if kind == "CAPITAL_IN":
-            account, direction = "equity:capital", 1
-        elif kind == "CAPITAL_OUT":
-            account, direction = "equity:capital", -1
-        elif kind == "DIVIDEND":
-            account, direction = "income:dividend", 1
-        elif kind == "FINANCING":
-            account, direction = "expense:financing", -1
-        else:
-            account, direction = "expense:borrow", -1
+        account, direction = CASH_POSTINGS[kind]
         debit = _calc(lambda: value * direction)
         return self._post(
             event_id,
