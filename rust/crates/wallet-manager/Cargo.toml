@@ -1,0 +1,13 @@
+[package]
+name = "trading-wallet-manager"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+trading-core-types = { path = "../core-types" }
+trading-orderbook = { path = "../orderbook" }
+
+[lints]
+workspace = true

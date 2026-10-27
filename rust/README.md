@@ -1,8 +1,7 @@
-# Rust Trading Engine — Parts 1–2 of 6
+# Rust Trading Engine — Parts 1–3 of 6
 
-**Status:** Parts 1 and 2 compile on Linux CI; Part 1 additionally passed
-22 tests on the owner's Arch machine. Part 2 needs independent Arch and
-Termux validation. This is a **research foundation**, not a live trading
+**Status:** Parts 1 and 2 passed both Linux CI and independent Arch validation
+(41 tests total); Part 3 is under development and requires separate validation. This is a **research foundation**, not a live trading
 application. The Rust workspace lives under `rust/` alongside, but remains
 fully isolated from, the legacy Python trading-lab application. No exchange
 keys, external orders, accounts, or live venue connections are present.
@@ -22,6 +21,9 @@ keys, external orders, accounts, or live venue connections are present.
 - `crates/signals`: all six Part 2 microstructure research registers, with
   bounded state and deterministic unit tests. See [Part 2 implementation
   and mathematical limitations](PART2.md).
+- `crates/wallet-manager`: three-bucket fixed-point wallet, session HWM/CPPI,
+  per-strategy fixed-prior fractional Kelly, conviction weighting and bounded
+  short-side sizing. See [Part 3 documentation](PART3.md).
 - Unit tests cover arithmetic, layout, bitfields, order book invariants,
   buffer overflow, crossings, sequence disconnections and signal contracts.
 
