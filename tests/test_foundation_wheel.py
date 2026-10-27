@@ -7,6 +7,8 @@ import csv
 import hashlib
 import io
 import json
+import os
+import stat
 import subprocess
 import zipfile
 from pathlib import Path
@@ -153,6 +155,25 @@ def test_reject_single_artifact_masquerading_as_two_builds(pair):
     root, first, _, _ = pair
     with pytest.raises(source.FoundationError, match="two distinct"):
         wheel.observation(root, first, first)
+
+
+def test_reject_hardlink_disguised_as_second_artifact(pair, tmp_path):
+    root, first, _, _ = pair
+    fake_second = tmp_path / "alias-of-first.whl"
+    os.link(first, fake_second)
+    with pytest.raises(source.FoundationError, match="distinct artifact"):
+        wheel.observation(root, first, fake_second)
+
+
+def test_reject_archive_symlink_payload_even_if_recorded(pair):
+    root, first, second, _ = pair
+    with zipfile.ZipFile(second, "a") as archive:
+        info = zipfile.ZipInfo("foreign-symlink")
+        info.create_system = 3
+        info.external_attr = (stat.S_IFLNK | 0o777) << 16
+        archive.writestr(info, "lab/__init__.py")
+    with pytest.raises(source.FoundationError, match="unsafe or duplicate"):
+        wheel.observation(root, first, second)
 
 
 def test_refuse_dirty_or_changed_source_candidate(pair):
