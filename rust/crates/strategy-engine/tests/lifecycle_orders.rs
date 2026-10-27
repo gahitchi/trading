@@ -85,7 +85,7 @@ fn breakeven_stop_ratchets_only_down_for_short() {
     assert!(l.stop_price() <= prior);
 }
 #[test]
-fn 50_percent_partial_exit_requires_confirmed_cumulative_fills() {
+fn half_position_partial_exit_requires_confirmed_cumulative_fills() {
     let mut l = short();
     l.on_tick(tick(2_000_000_000, 99, 99)).unwrap();
     let mut t = tick(3_000_000_000, 97, 97);
