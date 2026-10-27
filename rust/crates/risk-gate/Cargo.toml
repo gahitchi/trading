@@ -1,0 +1,13 @@
+[package]
+name = "trading-risk-gate"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+trading-core-types = { path = "../core-types" }
+trading-wallet-manager = { path = "../wallet-manager" }
+
+[lints]
+workspace = true

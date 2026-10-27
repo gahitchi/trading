@@ -1,4 +1,4 @@
-# Rust Trading Engine — Parts 1–4 of 6
+# Rust Trading Engine — Parts 1–5 of 6
 
 **Status:** Parts 1–3 passed Linux CI and independent Arch validation
 (61 total tests at Part 3); Part 4 passes Linux CI (91 total tests), with
@@ -29,6 +29,10 @@ keys, external orders, accounts, or live venue connections are present.
   breakdown trap, IOC/post-only quoting heuristics, short-side four-phase
   lifecycle with cumulative-fill accounting, and per-order shadow FSM.
   See [Part 4 documentation](PART4.md).
+- `crates/risk-gate`: independent fixed-point pre-trade gate, network latency
+  trip/recovery circuit, CPPI/squeeze supervisory directives, funding/basis
+  breaker, quote/exposure/borrow checks, and token-bucket throttling.
+  See [Part 5 scope and safety limitations](PART5.md).
 - Unit tests cover arithmetic, layout, bitfields, order book invariants,
   buffer overflow, crossings, sequence disconnections and signal contracts.
 
