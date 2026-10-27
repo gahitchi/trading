@@ -3,7 +3,7 @@
 **Disposition:** proposed, awaiting independent review and `main` integration.
 **Scope:** repository governance only; no broker, trading or risk code modified.
 
-Four ChatGPT proposal messages were committed without the required front-matter
+Five ChatGPT proposal messages were committed without the required front-matter
 `title`; the first, G040, also contained a milliseconds timestamp incompatible
 with the whole-second filename. The collaboration CI checks all branches, so
 this defect blocks unrelated builds.
@@ -22,6 +22,7 @@ from the original message heading:
 | G041 / `20261027T124500Z-proposal.md` | `8e7436810da9dc2dc95c47cf4dab68a04865bcf3` | missing title |
 | G042 / `20261027T130419Z-proposal.md` | `a4d9fd804f37193f9572e9ccd6f5be4b37b67a15` | missing title |
 | G043 / `20261027T134152Z-proposal.md` | `419d683227b5ce451f9db31114c3978d4bd3ae78` | missing title |
+| G044 / `20261027T225111Z-proposal.md` | `a482a9e378c7c4761d2019e51155c8b3285744e9` | missing title |
 
 **This is a narrowly bounded compatibility amendment, not a general waiver.**
 Any mutation of those files invalidates the pinned Git blob and fails

@@ -9,6 +9,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 G043 = "collab/outbox/chatgpt/G043/20261027T134152Z-proposal.md"
+G044 = "collab/outbox/chatgpt/G044/20261027T225111Z-proposal.md"
 
 
 def load_tool():
@@ -24,7 +25,7 @@ def test_exact_historical_proposal_stays_unchanged_but_is_readable():
     record = tool.parse_message(data, G043)
     assert record["title"] == "F0.2 exact runtime build provenance: narrow candidate"
     assert record["at"] == "2026-10-27T13:41:52Z"
-    assert len(tool.LEGACY_METADATA_ERRATA) == 4
+    assert len(tool.LEGACY_METADATA_ERRATA) == 5
 
 
 @pytest.mark.parametrize("mutation", ["\n# extra text", "\nsecret", "\n---\n"])
@@ -59,3 +60,14 @@ def test_exception_requires_exact_path_as_well_as_blob():
     different = "collab/outbox/chatgpt/G043/20261027T134153Z-proposal.md"
     with pytest.raises(tool.CollabError, match="must match the file name"):
         tool.parse_message(data, different)
+
+
+def test_exact_original_g044_is_accepted_without_allowing_rewritten_messages():
+    tool = load_tool()
+    original = (ROOT / G044).read_text()
+    observed = tool.parse_message(original, G044)
+    assert observed["thread"] == "G044"
+    assert observed["title"] == "Roadmap integration proposal: F0-F8, independent engine and institutional MVP"
+    assert observed["at"] == "2026-10-27T22:51:11Z"
+    with pytest.raises(tool.CollabError, match="digest or fields changed"):
+        tool.parse_message(original + "\nchanged", G044)

@@ -65,6 +65,11 @@ LEGACY_METADATA_ERRATA = {
         "2026-10-27T13:41:52Z",
         "F0.2 exact runtime build provenance: narrow candidate",
     ),
+    "collab/outbox/chatgpt/G044/20261027T225111Z-proposal.md": (
+        "a482a9e378c7c4761d2019e51155c8b3285744e9",
+        "2026-10-27T22:51:11Z",
+        "Roadmap integration proposal: F0-F8, independent engine and institutional MVP",
+    ),
 }
 
 
