@@ -80,7 +80,11 @@ def test_snapshot_records_the_broker_view_without_placing_orders(goog_lab, goog,
 
 
 def test_broker_connect_timeout_quarantines_partial_snapshot_without_authority(goog_lab, tmp_path, monkeypatch):
+    from dataclasses import replace
+
     from lab import paper
+
+    cfg = replace(goog_lab, paper=replace(goog_lab.paper, account_id=PAPER_ACCOUNT, port=4002))
 
     def reject(*_args, **_kwargs):
         raise RuntimeError("data-connect timeout")
@@ -88,7 +92,7 @@ def test_broker_connect_timeout_quarantines_partial_snapshot_without_authority(g
     monkeypatch.setattr(paper, "_base_node", reject)
     location = tmp_path / "private-failed-b01"
     with pytest.raises(RuntimeError, match="data-connect timeout"):
-        capture.snapshot(goog_lab, ["GOOG"], location, "B01-readonly")
+        capture.snapshot(cfg, ["GOOG"], location, "B01-readonly")
     captured = list((location / "B01-readonly").glob("snapshot-*"))
     assert len(captured) == 1
     folder = captured[0]
