@@ -19,7 +19,7 @@ paper-account scope, ticker, instrument ID and instrument action version.
 It refuses unsupported paper ports or account mismatches, missing or
 symlinked evidence files, malformed JSON, stale/inconsistent local capture
 times, non-exact position components, missing broker IDs and partial
-order/fill histories. It binds five file hashes into a deterministic local
+order/fill histories. It binds six file hashes into a deterministic local
 SHA-256 manifest and projects orders and fills to
 `lab.kernel.broker_reconciliation.ReportedSnapshot`.
 
@@ -102,6 +102,30 @@ Account scope, instrument version and paper port must match the local config.
 The raw capture and its private provenance must never be published.
 
 ## Operator and privacy constraints
+
+## Failed Gateway connection: private incomplete evidence
+
+In the initial owner-operated PAPER acceptance run, the local Gateway API
+accepted a connection, but the IBKR market-data and security-definition farms
+remained disconnected (error codes 2103 and 2157). Nautilus aborted startup
+after its 30-second data-client connection limit. Message 2107, by contrast,
+merely describes an idle historical farm and is usually informational.
+
+The capture command's `--wait 45` is an observation duration **after the data
+client starts**; it does not override the broker connection timeout. Check
+the Gateway/TWS PAPER session and IBKR data-farm status, local connectivity,
+and instrument metadata before attempting another capture. Never bypass
+data-client startup or source qualification in order to produce a report.
+
+Every newly created private capture directory carries a
+`CAPTURE_STATUS.json` document with one of `IN_PROGRESS`, `INCOMPLETE` or
+`COMPLETE_UNVERIFIED`, and explicit false broker-authentication and
+history-completeness flags. A failed node start retains the private incident
+artifact marked `INCOMPLETE`, but cannot be loaded by the read-only bridge.
+A normally returning capture requires all broker data files and a
+`COMPLETE_UNVERIFIED` status, and remains entirely unqualified. The new
+strict bridge requires the explicit status file, so old five-file captures
+must be repeated to qualify for **inspection only**.
 
 Original captures contain actual account IDs, order IDs, quantities, balances,
 timestamps and other sensitive broker evidence. Keep them outside Git in a

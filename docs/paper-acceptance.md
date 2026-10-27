@@ -4,6 +4,22 @@ Status: **not run against IBKR; all release gates remain blocked.** This protoco
 collecting data. A green simulator run is not a broker acceptance result. Do not place orders from this
 protocol without the operator supervising the paper account. The software continues to refuse real accounts.
 
+## Local Gateway is not the broker-data source
+
+The first operator-operated PAPER B01 collection reached localhost:4002 but
+Nautilus failed during data-client readiness with a 30-second
+`data-connect timeout`, while IBKR reported `2103` (US market-data farm
+disconnected) and `2157` (security-definition farm disconnected).
+`2107`, the historical-data farm being idle until requested, is normally
+informational. No broker account reconciliation or completed capture
+occurred.
+
+A failed session must remain a private, explicitly `INCOMPLETE` artifact and
+never qualify for a read-only B01 report. The collection `--wait` option
+does not control the connection timeout. Verify the actual Gateway PAPER
+session, server farm status, local connectivity and contract definitions
+before retrying, without placing an order or loosening completeness gates.
+
 ## Evidence identity and handling
 
 Freeze the candidate Git SHA, dependency lock hashes, container digest, installed OS package manifest,
