@@ -85,6 +85,19 @@ jobs:
                   assert z.read(name), name
           PY
 
+      - name: F0 candidate source inventory (unqualified, read-only)
+        run: |
+          mkdir -p "$RUNNER_TEMP/f0-candidate"
+          python3 tools/foundation_manifest.py create --out "$RUNNER_TEMP/f0-candidate/source.json"
+          python3 tools/foundation_manifest.py verify --input "$RUNNER_TEMP/f0-candidate/source.json"
+          sha256sum dist/*.whl > "$RUNNER_TEMP/f0-candidate/wheel.sha256"
+      - name: retain F0 unsigned source and wheel identity evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: f0-inventory-py313
+          path: ${{ runner.temp }}/f0-candidate/
+          retention-days: 30
+
   docker:
     runs-on: ubuntu-latest
     steps:
