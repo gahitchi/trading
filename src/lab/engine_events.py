@@ -22,10 +22,19 @@ from lab.economic_ledger import (
     exact,
 )
 
-CASH_KINDS = frozenset({
-    "CAPITAL_IN", "CAPITAL_OUT", "DIVIDEND", "INTEREST_CREDIT", "BORROW_REBATE",
-    "DIVIDEND_WITHHOLDING", "SHORT_DISTRIBUTION", "FINANCING", "BORROW_FEE",
-})
+CASH_KINDS = frozenset(
+    {
+        "CAPITAL_IN",
+        "CAPITAL_OUT",
+        "DIVIDEND",
+        "INTEREST_CREDIT",
+        "BORROW_REBATE",
+        "DIVIDEND_WITHHOLDING",
+        "SHORT_DISTRIBUTION",
+        "FINANCING",
+        "BORROW_FEE",
+    }
+)
 CASH_SOURCE_KINDS = {
     "CAPITAL_IN": frozenset({"BANK_TRANSFER", "BROKER_CASH_ACTIVITY"}),
     "CAPITAL_OUT": frozenset({"BANK_TRANSFER", "BROKER_CASH_ACTIVITY"}),
