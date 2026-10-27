@@ -61,11 +61,15 @@ impl InstrumentSpec {
         if raw.0 <= 0 {
             return Err(InstrumentError::InvalidPrice);
         }
+        if raw.0 < self.min_price {
+            return Err(InstrumentError::UnderMinimum);
+        }
         let step = i128::from(self.tick_size);
-        let n = i128::from(raw.0);
-        let adjusted = match direction {
-            TickRounding::Down => n / step * step,
-            TickRounding::Up => (n + step - 1) / step * step,
+        let base = i128::from(self.min_price);
+        let offset = i128::from(raw.0) - base;
+        let adjusted = base + match direction {
+            TickRounding::Down => offset / step * step,
+            TickRounding::Up => (offset + step - 1) / step * step,
         };
         let result = i64::try_from(adjusted).map_err(|_| InstrumentError::ArithmeticOverflow)?;
         self.check_price(FixedPrice(result))?;
@@ -84,17 +88,21 @@ impl InstrumentSpec {
         } else {
             self.step_size
         };
-        let rounded = raw.0 / step * step;
+        let min = if market { self.market_min_qty } else { self.min_qty };
+        if raw.0 < min {
+            return Err(InstrumentError::UnderMinimum);
+        }
+        let rounded = min + (raw.0 - min) / step * step;
         self.check_qty(FixedQty(rounded), market)?;
         Ok(FixedQty(rounded))
     }
     pub fn check_price(self, p: FixedPrice) -> Result<(), InstrumentError> {
         self.validate()?;
-        if p.0 <= 0 || p.0 % self.tick_size != 0 {
-            return Err(InstrumentError::NotAligned);
-        }
-        if p.0 < self.min_price {
+        if p.0 <= 0 || p.0 < self.min_price {
             return Err(InstrumentError::UnderMinimum);
+        }
+        if (p.0 - self.min_price) % self.tick_size != 0 {
+            return Err(InstrumentError::NotAligned);
         }
         if self.max_price != 0 && p.0 > self.max_price {
             return Err(InstrumentError::OverMaximum);
@@ -112,11 +120,11 @@ impl InstrumentSpec {
         } else {
             (self.step_size, self.min_qty, self.max_qty)
         };
-        if q.0 <= 0 || q.0 % step != 0 {
-            return Err(InstrumentError::NotAligned);
-        }
-        if q.0 < min {
+        if q.0 <= 0 || q.0 < min {
             return Err(InstrumentError::UnderMinimum);
+        }
+        if (q.0 - min) % step != 0 {
+            return Err(InstrumentError::NotAligned);
         }
         if max != 0 && q.0 > max {
             return Err(InstrumentError::OverMaximum);
@@ -238,6 +246,30 @@ mod tests {
                 .unwrap(),
             FixedUsd(5_000_000_000)
         );
+    }
+    #[test]
+    fn filter_offset_is_not_assumed_zero() {
+        let p = InstrumentSpec {
+            min_price: 1_500_000,
+            tick_size: 2_500_000,
+            min_qty: 1_500_000,
+            step_size: 1_000_000,
+            ..s()
+        };
+        assert_eq!(
+            p.round_price(FixedPrice(7_500_000), TickRounding::Down).unwrap(),
+            FixedPrice(6_500_000)
+        );
+        assert_eq!(
+            p.round_price(FixedPrice(7_500_000), TickRounding::Up).unwrap(),
+            FixedPrice(9_000_000)
+        );
+        assert!(p.check_price(FixedPrice(7_500_000)).is_err());
+        assert_eq!(
+            p.round_qty_to_step(FixedQty(3_600_000)).unwrap(),
+            FixedQty(3_500_000)
+        );
+        assert!(p.check_qty(FixedQty(3_000_000), false).is_err());
     }
     #[test]
     fn event_has_one_cache_line_and_known_enum() {
