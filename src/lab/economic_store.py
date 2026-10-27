@@ -152,9 +152,17 @@ class EconomicEventStore:
     WAL commit does not constitute a broker settlement confirmation.
     """
 
-    def __init__(self, path: Path, account_id: str):
+    def __init__(self, path: Path, account_id: str, *, readonly: bool = False):
         self.path = Path(path)
         self.account_id = _identity(account_id, "durable economic account")
+        if type(readonly) is not bool:
+            raise EconomicStoreError("economic store access mode must be explicit bool")
+        self.readonly = readonly
+        if readonly:
+            if not self.path.is_file():
+                raise EconomicStoreError("read-only economic database does not exist")
+            self.load()
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
@@ -180,6 +188,11 @@ class EconomicEventStore:
                 raise EconomicStoreError("durable account or schema identity changed")
 
     def _connect(self) -> sqlite3.Connection:
+        if self.readonly:
+            db = sqlite3.connect(f"{self.path.absolute().as_uri()}?mode=ro", uri=True, timeout=15, isolation_level=None)
+            db.execute("PRAGMA trusted_schema=OFF")
+            db.execute("PRAGMA query_only=ON")
+            return db
         db = sqlite3.connect(self.path, timeout=15, isolation_level=None)
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA synchronous=FULL")
@@ -235,6 +248,8 @@ class EconomicEventStore:
         Idempotent same-event retry after an uncertain commit is supported.
         Expected head is an optimistic concurrency fence for *new* events.
         """
+        if self.readonly:
+            raise EconomicStoreError("read-only economic store cannot append financial events")
         payload = _encode(fact)
         if len(payload) > MAX_EVENT_BYTES:
             raise EconomicStoreError("oversized economic fact")
