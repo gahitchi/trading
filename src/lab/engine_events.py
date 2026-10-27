@@ -8,7 +8,7 @@ classify unexplained balance changes, or attest upstream data authenticity.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 from lab.economic_ledger import (
@@ -138,7 +138,7 @@ class EngineEconomicBook:
 
     account_id: str
     events: tuple[EconomicFact, ...] = ()
-    ledger: EconomicLedger = EconomicLedger()
+    ledger: EconomicLedger = field(default_factory=EconomicLedger)
 
     def append(self, fact: EconomicFact) -> EngineEconomicBook:
         _identity(self.account_id, "account identity")
