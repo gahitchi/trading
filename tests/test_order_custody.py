@@ -78,9 +78,7 @@ def test_order_source_bytes_commit_atomically_without_mutating_cash_or_positions
     store = journal(tmp_path)
     before = store.load()
     raw = order_document()
-    captured = store.capture_order_observation(
-        raw, source_namespace="broker", expected_head=before.evidence_head
-    )
+    captured = store.capture_order_observation(raw, source_namespace="broker", expected_head=before.evidence_head)
     assert captured.events_replayed == 1
     assert captured.broker_fills_checked == 1
     assert captured.source_sha256 == hashlib.sha256(raw).hexdigest()
@@ -97,18 +95,14 @@ def test_exact_retry_is_idempotent_and_conflicting_same_id_fails_closed(tmp_path
     first = store.capture_order_observation(raw, source_namespace="broker", expected_head=head)
     assert store.capture_order_observation(raw, source_namespace="broker", expected_head=head) == first
     with pytest.raises(EconomicStoreError, match="conflicting"):
-        store.capture_order_observation(
-            order_document(as_of_ns=31), source_namespace="broker", expected_head=head
-        )
+        store.capture_order_observation(order_document(as_of_ns=31), source_namespace="broker", expected_head=head)
     assert store.inspect_order_observations() == (first,)
 
 
 def test_stale_head_and_legacy_order_summaries_cannot_be_archived(tmp_path):
     store = journal(tmp_path)
     with pytest.raises(EconomicStoreError, match="stale"):
-        store.capture_order_observation(
-            order_document(), source_namespace="broker", expected_head="0" * 64
-        )
+        store.capture_order_observation(order_document(), source_namespace="broker", expected_head="0" * 64)
     with pytest.raises(EconomicStoreError, match="v2"):
         store.capture_order_observation(
             order_document(schema=1), source_namespace="broker", expected_head=store.load().evidence_head
@@ -173,8 +167,6 @@ def test_database_insert_failure_rolls_back_order_observation(tmp_path):
             "BEGIN SELECT RAISE(ABORT, 'simulated commit failure'); END"
         )
     with pytest.raises(sqlite3.DatabaseError, match="simulated commit failure"):
-        store.capture_order_observation(
-            order_document(), source_namespace="broker", expected_head=before.evidence_head
-        )
+        store.capture_order_observation(order_document(), source_namespace="broker", expected_head=before.evidence_head)
     assert store.inspect_order_observations() == ()
     assert store.load() == before

@@ -368,7 +368,6 @@ class EconomicEventStore:
         fact = parse_broker_fill_record(raw, source_namespace=source_namespace, expected_account_id=self.account_id)
         return self.append(fact, source_bytes=raw, expected_head=expected_head)
 
-
     def capture_order_observation(
         self, raw: bytes, *, source_namespace: str, expected_head: str
     ) -> StoredOrderObservation:
@@ -411,8 +410,12 @@ class EconomicEventStore:
                     raise EconomicStoreError("order observation identity reused with conflicting evidence")
                 db.execute("COMMIT")
                 return StoredOrderObservation(
-                    report.source_ref, report.source_sha256, report.as_of_ns,
-                    expected_head, existing[2], checked,
+                    report.source_ref,
+                    report.source_sha256,
+                    report.as_of_ns,
+                    expected_head,
+                    existing[2],
+                    checked,
                 )
             if expected_head != book.evidence_head:
                 raise EconomicStoreError("stale economic head for external order custody")
@@ -439,8 +442,12 @@ class EconomicEventStore:
             )
             db.execute("COMMIT")
             return StoredOrderObservation(
-                report.source_ref, report.source_sha256, report.as_of_ns,
-                book.evidence_head, len(book.events), parity.broker_fills_checked,
+                report.source_ref,
+                report.source_sha256,
+                report.as_of_ns,
+                book.evidence_head,
+                len(book.events),
+                parity.broker_fills_checked,
             )
 
     def inspect_order_observations(self) -> tuple[StoredOrderObservation, ...]:
@@ -455,11 +462,10 @@ class EconomicEventStore:
         with closing(self._connect()) as db, db:
             db.execute("BEGIN")
             book = self._read_locked(db)
-            heads = ("0" * 64, *(
-                row[0] for row in db.execute(
-                    "SELECT evidence_head FROM economic_events ORDER BY seq"
-                )
-            ))
+            heads = (
+                "0" * 64,
+                *(row[0] for row in db.execute("SELECT evidence_head FROM economic_events ORDER BY seq")),
+            )
             rows = db.execute(
                 "SELECT seq,source_ref,source_namespace,as_of_ns,event_count,evidence_head,"
                 "source_sha256,source_bytes FROM external_order_observations ORDER BY seq"
@@ -499,7 +505,12 @@ class EconomicEventStore:
                     raise EconomicStoreError("archived external orders disagree with their economic prefix")
                 results.append(
                     StoredOrderObservation(
-                        source_ref, digest, as_of, head, n_events, parity.broker_fills_checked,
+                        source_ref,
+                        digest,
+                        as_of,
+                        head,
+                        n_events,
+                        parity.broker_fills_checked,
                     )
                 )
             db.execute("COMMIT")
