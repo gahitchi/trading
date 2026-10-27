@@ -19,8 +19,8 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
         with:
           python-version: "3.13"
       - name: Resolve exact frozen build dependencies
@@ -33,7 +33,7 @@ jobs:
           uv build --wheel --no-build-isolation --out-dir "$RUNNER_TEMP/f0-wheel"
           ( cd "$RUNNER_TEMP/f0-wheel" && sha256sum ./*.whl > sha256.txt )
           git rev-parse HEAD > "$RUNNER_TEMP/f0-wheel/source-commit.txt"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: f0-wheel-${{ matrix.os }}
           path: ${{ runner.temp }}/f0-wheel/
@@ -49,13 +49,13 @@ jobs:
       attestations: write
       artifact-metadata: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Download separate build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: f0-wheel-ubuntu-22.04
           path: ${{ runner.temp }}/f0-independent/ubuntu-22.04/
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: f0-wheel-ubuntu-24.04
           path: ${{ runner.temp }}/f0-independent/ubuntu-24.04/
@@ -79,10 +79,10 @@ jobs:
           # Still unsigned and unable to certify the release.
       - name: Sign verified wheel provenance for public push candidates
         if: github.event_name == 'push'
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
           subject-path: ${{ runner.temp }}/f0-independent/ubuntu-24.04/*.whl
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: f0-two-runner-verification
           path: ${{ runner.temp }}/f0-independent/verified/
