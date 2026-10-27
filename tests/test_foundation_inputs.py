@@ -24,17 +24,19 @@ def local_checkout(tmp_path):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         if relative == source.SCOPE:
-            path.write_text(json.dumps({
-                "schema_version": 1,
-                "stage": "F0_REFERENCE_SLICE_UNQUALIFIED",
-                "operator": {"authority": "NONE_IN_F0", "account_mode": "PAPER_ONLY"},
-            }))
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "stage": "F0_REFERENCE_SLICE_UNQUALIFIED",
+                        "operator": {"authority": "NONE_IN_F0", "account_mode": "PAPER_ONLY"},
+                    }
+                )
+            )
         else:
             path.write_text("synthetic pinned bytes\n")
     (root / ".gitignore").write_text("data/\n")
-    (root / "lab.toml").write_text(
-        '[universe]\nSPY = "ARCX"\n\n[trading]\nspeed = "daily"\n'
-    )
+    (root / "lab.toml").write_text('[universe]\nSPY = "ARCX"\n\n[trading]\nspeed = "daily"\n')
     git(root, "add", ".")
     git(root, "-c", "user.name=F0", "-c", "user.email=f0@example.invalid", "commit", "-qm", "fixture")
     data = root / "data"
