@@ -110,15 +110,21 @@ class EconomicLedger:
     lots: tuple[Lot, ...] = ()
 
     def balance(self, account: str) -> Decimal:
-        return _calc(lambda: sum((p.amount for e in self.journal for p in e.postings if p.account == account), Decimal(0)))
+        return _calc(
+            lambda: sum((p.amount for e in self.journal for p in e.postings if p.account == account), Decimal(0))
+        )
 
     def position(self, symbol: str) -> Decimal:
         symbol = _name(symbol, SYMBOL, "symbol")
         return _calc(lambda: sum((lot.quantity for lot in self.lots if lot.symbol == symbol), Decimal(0)))
 
     def _post(
-        self, event_id: str, kind: str, postings: tuple[Posting, ...],
-        details: tuple[tuple[str, str], ...], lots: tuple[Lot, ...],
+        self,
+        event_id: str,
+        kind: str,
+        postings: tuple[Posting, ...],
+        details: tuple[tuple[str, str], ...],
+        lots: tuple[Lot, ...],
     ) -> EconomicLedger:
         _name(event_id, IDENTIFIER, "event identity")
         if any(event.event_id == event_id for event in self.journal):
@@ -155,13 +161,22 @@ class EconomicLedger:
             account, direction = "expense:borrow", -1
         debit = _calc(lambda: value * direction)
         return self._post(
-            event_id, kind, (Posting("cash:USD", debit), Posting(account, -debit)),
-            (("amount", _fmt(value)),), self.lots,
+            event_id,
+            kind,
+            (Posting("cash:USD", debit), Posting(account, -debit)),
+            (("amount", _fmt(value)),),
+            self.lots,
         )
 
     def post_fill(
-        self, event_id: str, symbol: str, side: str, quantity: Decimal | str | int,
-        price: Decimal | str | int, *, commission: Decimal | str | int = "0",
+        self,
+        event_id: str,
+        symbol: str,
+        side: str,
+        quantity: Decimal | str | int,
+        price: Decimal | str | int,
+        *,
+        commission: Decimal | str | int = "0",
     ) -> EconomicLedger:
         symbol = _name(symbol, SYMBOL, "symbol")
         if side not in ("BUY", "SELL"):
@@ -180,7 +195,9 @@ class EconomicLedger:
                 continue
             close = min(abs(lot.quantity), remaining)
             released = _calc(lambda lot=lot, close=close: lot.basis * close / abs(lot.quantity))
-            inventory_delta = _calc(lambda inventory_delta=inventory_delta, released=released: inventory_delta - released)
+            inventory_delta = _calc(
+                lambda inventory_delta=inventory_delta, released=released: inventory_delta - released
+            )
             updated_qty = _calc(lambda lot=lot, close=close: lot.quantity + (close if signed > 0 else -close))
             updated_basis = _calc(lambda lot=lot, released=released: lot.basis - released)
             if updated_qty:
@@ -203,9 +220,16 @@ class EconomicLedger:
         if fee:
             postings.append(Posting("expense:commission", fee))
         return self._post(
-            event_id, "FILL", tuple(postings),
-            (("symbol", symbol), ("side", side), ("quantity", _fmt(qty)),
-             ("price", _fmt(px)), ("commission", _fmt(fee))),
+            event_id,
+            "FILL",
+            tuple(postings),
+            (
+                ("symbol", symbol),
+                ("side", side),
+                ("quantity", _fmt(qty)),
+                ("price", _fmt(px)),
+                ("commission", _fmt(fee)),
+            ),
             tuple(lots),
         )
 
@@ -213,8 +237,10 @@ class EconomicLedger:
         """Non-trade share transform. Basis/cash stay unchanged; never invent a fill."""
         symbol = _name(symbol, SYMBOL, "symbol")
         if (
-            type(numerator) is not int or type(denominator) is not int
-            or not 1 <= numerator <= 1_000_000 or not 1 <= denominator <= 1_000_000
+            type(numerator) is not int
+            or type(denominator) is not int
+            or not 1 <= numerator <= 1_000_000
+            or not 1 <= denominator <= 1_000_000
         ):
             raise EconomicLedgerError("split ratio must be finite positive integers")
         if not any(lot.symbol == symbol for lot in self.lots):
@@ -229,8 +255,13 @@ class EconomicLedger:
                 lots.append(Lot(symbol, new_qty, lot.basis))
             else:
                 lots.append(lot)
-        return self._post(event_id, "SPLIT", (), (("symbol", symbol), ("numerator", str(numerator)),
-                                                  ("denominator", str(denominator))), tuple(lots))
+        return self._post(
+            event_id,
+            "SPLIT",
+            (),
+            (("symbol", symbol), ("numerator", str(numerator)), ("denominator", str(denominator))),
+            tuple(lots),
+        )
 
     def audit(self) -> None:
         """Independent replay of every entry, custody hash and inventory basis."""
@@ -263,7 +294,9 @@ class EconomicLedger:
             if lot.quantity == 0 or lot.basis == 0 or (lot.quantity > 0) != (lot.basis > 0):
                 raise EconomicLedgerError("invalid open lot sign or zero balance")
         for symbol in symbols:
-            expected = _calc(lambda symbol=symbol: sum((lot.basis for lot in self.lots if lot.symbol == symbol), Decimal(0)))
+            expected = _calc(
+                lambda symbol=symbol: sum((lot.basis for lot in self.lots if lot.symbol == symbol), Decimal(0))
+            )
             if balances.get(f"inventory:USD:{symbol}", Decimal(0)) != expected:
                 raise EconomicLedgerError("inventory does not reconcile with FIFO cost basis")
         if _calc(lambda: sum(balances.values(), Decimal(0))) != 0:
