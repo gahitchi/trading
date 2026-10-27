@@ -63,6 +63,7 @@ def test_capture_local_inputs_only_records_redacted_hashes(local_checkout):
     [
         ("lab.toml", '[universe]\nSPY = "XNYS"\n[trading]\nspeed = "daily"\n'),
         ("lab.toml", '[universe]\nSPY = "ARCX"\n[trading]\nspeed = "15m"\n'),
+        ("lab.toml", 'universe = "ARCX"\n[trading]\nspeed = "daily"\n'),
         ("data/manifest.json", '{"QQQ": {"source": "synthetic"}}'),
         ("data/manifest.json", '{"SPY": null}'),
         ("data/SPY.parquet", "bad parquet"),
