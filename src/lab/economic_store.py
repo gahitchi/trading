@@ -388,7 +388,6 @@ class EconomicEventStore:
         )
         if report.schema_version != 2:
             raise EconomicStoreError("durable order custody requires complete v2 receipt identities")
-        checked = sum(len(order.execution_receipts) for order in report.orders)
         with closing(self._connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             book = self._read_locked(db)
