@@ -36,5 +36,9 @@ def test_f0_container_security_steps_are_pinned_and_fail_closed():
     assert '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml"' in workflow
     assert "name: f0-container-security" in workflow
     assert workflow.index("name: guided app starts") < workflow.index(
-        "name: Scan actual image for high/critical known vulnerabilities"
+        "name: Scan isolated F0 offline research image (findings retained)"
     )
+    assert "name: Reject any Critical, new High, expired, or malformed F0 exception" in workflow
+    assert "name: Strict vulnerability gate for release, PRs, and other branches" in workflow
+    assert "github.ref == 'refs/heads/chatgpt/f0-independent-wheel-build-20261027'" in workflow
+    assert "github.ref != 'refs/heads/chatgpt/f0-independent-wheel-build-20261027'" in workflow
