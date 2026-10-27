@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from fractions import Fraction
 
+from lab.economic_ledger import _calc
 from lab.engine_events import (
     BrokerFillFact,
     CashFact,
@@ -125,9 +126,12 @@ def compare_projection(book: EngineEconomicBook) -> IndependentProjectionParity:
     own = project_account(book)
     journal = book.ledger
     symbols = {symbol for symbol, _ in own.positions} | {lot.symbol for lot in journal.lots}
-    deltas = tuple((symbol, own.quantity(symbol) - journal.position(symbol)) for symbol in sorted(symbols))
+    deltas = tuple(
+        (symbol, _calc(lambda symbol=symbol: own.quantity(symbol) - journal.position(symbol)))
+        for symbol in sorted(symbols)
+    )
     return IndependentProjectionParity(
-        own.cash - journal.balance("cash:USD"),
+        _calc(lambda: own.cash - journal.balance("cash:USD")),
         deltas,
         len(book.events),
     )
