@@ -160,7 +160,6 @@ def test_cli_never_requires_nautilus_native_objects(tmp_path, capsys):
     assert capsys.readouterr().out.startswith('{"account_id":')
 
 
-
 def broker_receipt():
     return json.dumps(
         {
