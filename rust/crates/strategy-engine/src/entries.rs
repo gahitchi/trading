@@ -41,10 +41,15 @@ impl EntrySnapshot {
             return Err(StrategyError::StaleOrFutureSignal);
         }
         let values = [
-            self.ofi_z, self.bid_imbalance, self.bid_vacuum,
-            self.signed_sell_toxicity, self.isr_down,
-            self.hawkes_activity_proxy, self.leader_isr_down,
-            self.leader_return_50ms_bps, self.laggard_residual_bps,
+            self.ofi_z,
+            self.bid_imbalance,
+            self.bid_vacuum,
+            self.signed_sell_toxicity,
+            self.isr_down,
+            self.hawkes_activity_proxy,
+            self.leader_isr_down,
+            self.leader_return_50ms_bps,
+            self.laggard_residual_bps,
         ];
         if !values.iter().all(|x| x.is_finite())
             || self.microprice.0 <= 0
@@ -88,18 +93,33 @@ pub struct EntryEngine {
     arm: Option<ManualTrap>,
 }
 impl EntryEngine {
-    pub fn new() -> Self { Self::default() }
-    pub fn disarm(&mut self) { self.arm = None; }
-    pub fn reset_on_feed_gap(&mut self) { self.arm = None; self.last_now_ns = None; }
-    pub fn armed(&self) -> Option<ManualTrap> { self.arm }
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn disarm(&mut self) {
+        self.arm = None;
+    }
+    pub fn reset_on_feed_gap(&mut self) {
+        self.arm = None;
+        self.last_now_ns = None;
+    }
+    pub fn armed(&self) -> Option<ManualTrap> {
+        self.arm
+    }
 
-    pub fn arm_trap(&mut self, token: ManualTrap, now_ns: u64,
-        operator: OperatorSnapshot) -> Result<(), StrategyError>
-    {
-        operator.validate().map_err(|_| StrategyError::InvalidOperator)?;
+    pub fn arm_trap(
+        &mut self,
+        token: ManualTrap,
+        now_ns: u64,
+        operator: OperatorSnapshot,
+    ) -> Result<(), StrategyError> {
+        operator
+            .validate()
+            .map_err(|_| StrategyError::InvalidOperator)?;
         if operator.mode != TradingMode::ManualArmedTrap
             || operator.strategy_enable_mask & 0b1000 == 0
-            || token.arm_id == 0 || token.symbol_id >= 9
+            || token.arm_id == 0
+            || token.symbol_id >= 9
             || token.threshold_price.0 <= 0
             || token.expires_at_ns <= now_ns
             || token.expires_at_ns - now_ns > 300_000_000_000
@@ -113,10 +133,15 @@ impl EntryEngine {
         Ok(())
     }
 
-    pub fn evaluate(&mut self, now_ns: u64, operator: OperatorSnapshot,
-        snapshot: EntrySnapshot) -> Result<Option<EntryCandidate>, StrategyError>
-    {
-        operator.validate().map_err(|_| StrategyError::InvalidOperator)?;
+    pub fn evaluate(
+        &mut self,
+        now_ns: u64,
+        operator: OperatorSnapshot,
+        snapshot: EntrySnapshot,
+    ) -> Result<Option<EntryCandidate>, StrategyError> {
+        operator
+            .validate()
+            .map_err(|_| StrategyError::InvalidOperator)?;
         if self.last_now_ns.is_some_and(|prev| now_ns < prev) {
             return Err(StrategyError::TimeReversal);
         }
@@ -151,14 +176,17 @@ impl EntryEngine {
                 self.arm = None; // one-shot, no repeated trigger after a tick
                 return Ok(Some(EntryCandidate {
                     strategy: Strategy::D,
-                    symbol_id: snapshot.symbol_id, decision_ts_ns: now_ns, short_only: true,
+                    symbol_id: snapshot.symbol_id,
+                    decision_ts_ns: now_ns,
+                    short_only: true,
                 }));
             }
             return Ok(None);
         }
-        if !matches!(operator.mode,
-            TradingMode::ShortOnly | TradingMode::ShortBiased | TradingMode::BiDirectional)
-        {
+        if !matches!(
+            operator.mode,
+            TradingMode::ShortOnly | TradingMode::ShortBiased | TradingMode::BiDirectional
+        ) {
             self.arm = None;
             return Ok(None);
         }
@@ -169,8 +197,9 @@ impl EntryEngine {
         let strategy = if m & 0b0010 != 0
             && snapshot.isr_down > 4.5 / eta
             && snapshot.hawkes_activity_proxy > 0.8
-            && snapshot.last_long_liquidation_ns.is_some_and(|ts|
-                now_ns - ts <= LIQ_LOOKBACK_NS)
+            && snapshot
+                .last_long_liquidation_ns
+                .is_some_and(|ts| now_ns - ts <= LIQ_LOOKBACK_NS)
             && snapshot.ofi_z < -2.0 / eta
         {
             Some(Strategy::B)
@@ -192,8 +221,10 @@ impl EntryEngine {
             None
         };
         Ok(strategy.map(|s| EntryCandidate {
-            strategy: s, symbol_id: snapshot.symbol_id,
-            decision_ts_ns: now_ns, short_only: true,
+            strategy: s,
+            symbol_id: snapshot.symbol_id,
+            decision_ts_ns: now_ns,
+            short_only: true,
         }))
     }
 }

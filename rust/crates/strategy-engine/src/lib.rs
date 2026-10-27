@@ -10,14 +10,10 @@ mod lifecycle;
 mod orders;
 mod tactics;
 
-pub use entries::{
-    EntryCandidate, EntryEngine, EntrySnapshot, ManualTrap, StrategyError,
-};
+pub use entries::{EntryCandidate, EntryEngine, EntrySnapshot, ManualTrap, StrategyError};
 pub use lifecycle::{
-    ExitProposal, ExitReason, ExitReportKind, LifecycleError, LifecyclePhase,
-    LifecycleSignals, ShortTradeLifecycle, TradeTick, continuation_proxy,
+    ExitProposal, ExitReason, ExitReportKind, LifecycleError, LifecyclePhase, LifecycleSignals,
+    ShortTradeLifecycle, TradeTick, continuation_proxy,
 };
 pub use orders::{OrderEvent, OrderEventKind, OrderStatus, OrderTracker, OrderTrackerError};
-pub use tactics::{
-    QuoteDecision, QuoteError, QuoteInputs, QuoteKind, choose_short_quote,
-};
+pub use tactics::{QuoteDecision, QuoteError, QuoteInputs, QuoteKind, choose_short_quote};

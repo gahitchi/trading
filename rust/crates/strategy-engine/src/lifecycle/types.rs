@@ -2,22 +2,41 @@ use trading_core_types::{FixedPrice, FixedQty};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LifecycleError {
-    InvalidInput, TimeReversal, InvalidTransition,
-    NonMonotonicReport, UnknownExit, NumericOverflow, PendingExitAtRisk,
+    InvalidInput,
+    TimeReversal,
+    InvalidTransition,
+    NonMonotonicReport,
+    UnknownExit,
+    NumericOverflow,
+    PendingExitAtRisk,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LifecyclePhase {
-    InitialRisk, Breakeven, PartialExitPending, Runner,
-    ExitPending, Closed, ReconciliationRequired,
+    InitialRisk,
+    Breakeven,
+    PartialExitPending,
+    Runner,
+    ExitPending,
+    Closed,
+    ReconciliationRequired,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitReason {
-    HardStop, Fakeout, PartialHarvest, RunnerStop,
-    Climax, ContinuationFailed, Stagnation,
+    HardStop,
+    Fakeout,
+    PartialHarvest,
+    RunnerStop,
+    Climax,
+    ContinuationFailed,
+    Stagnation,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitReportKind {
-    Working, Canceled, Rejected, Filled, Unknown,
+    Working,
+    Canceled,
+    Rejected,
+    Filled,
+    Unknown,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExitProposal {
@@ -51,26 +70,33 @@ pub struct TradeTick {
     pub signals: LifecycleSignals,
 }
 impl TradeTick {
-    pub(super) fn checked(self, symbol_id: u16, last_ns: u64)
-        -> Result<(), LifecycleError>
-    {
-        if self.timestamp_ns <= last_ns { return Err(LifecycleError::TimeReversal); }
-        if !self.synchronized || self.symbol_id != symbol_id
+    pub(super) fn checked(self, symbol_id: u16, last_ns: u64) -> Result<(), LifecycleError> {
+        if self.timestamp_ns <= last_ns {
+            return Err(LifecycleError::TimeReversal);
+        }
+        if !self.synchronized
+            || self.symbol_id != symbol_id
             || self.observed_ns > self.timestamp_ns
             || self.timestamp_ns - self.observed_ns > 50_000_000
-            || self.best_ask_to_cover.0 <= 0 || self.microprice.0 <= 0
+            || self.best_ask_to_cover.0 <= 0
+            || self.microprice.0 <= 0
         {
             return Err(LifecycleError::InvalidInput);
         }
         let sig = self.signals;
         let vals = [
-            self.spread_bps, self.sigma_10s_bps, sig.ofi_z,
-            sig.book_imbalance, sig.hawkes_acceleration,
-            sig.hawkes_activity_proxy, sig.bid_vacuum_ratio,
+            self.spread_bps,
+            self.sigma_10s_bps,
+            sig.ofi_z,
+            sig.book_imbalance,
+            sig.hawkes_acceleration,
+            sig.hawkes_activity_proxy,
+            sig.bid_vacuum_ratio,
             sig.absorption_ratio,
         ];
         if !vals.iter().all(|v| v.is_finite())
-            || self.spread_bps < 0.0 || self.sigma_10s_bps < 0.0
+            || self.spread_bps < 0.0
+            || self.sigma_10s_bps < 0.0
             || !(-1.0..=1.0).contains(&sig.book_imbalance)
             || sig.bid_vacuum_ratio < 0.0
             || !(0.0..=1.5).contains(&sig.hawkes_activity_proxy)

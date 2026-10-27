@@ -1,4 +1,4 @@
-use trading_core_types::{FixedPrice, TimeInForce, SCALE};
+use trading_core_types::{FixedPrice, SCALE, TimeInForce};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuoteError {
@@ -16,7 +16,10 @@ pub struct QuoteInputs {
     pub book_imbalance: f64,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QuoteKind { IocSweep, PassivePostOnly }
+pub enum QuoteKind {
+    IocSweep,
+    PassivePostOnly,
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct QuoteDecision {
     pub kind: QuoteKind,
@@ -34,13 +37,16 @@ pub struct QuoteDecision {
 /// This is NOT an optimized Avellaneda–Stoikov market making model or an
 /// Almgren–Chriss impact optimizer; it is a transparent threshold heuristic.
 pub fn choose_short_quote(q: QuoteInputs) -> Result<QuoteDecision, QuoteError> {
-    if q.best_bid.0 <= 0 || q.best_ask.0 <= q.best_bid.0
-        || q.microprice.0 < q.best_bid.0 || q.microprice.0 > q.best_ask.0
+    if q.best_bid.0 <= 0
+        || q.best_ask.0 <= q.best_bid.0
+        || q.microprice.0 < q.best_bid.0
+        || q.microprice.0 > q.best_ask.0
     {
         return Err(QuoteError::InvalidBook);
     }
     if !q.microprice_divergence_bps.is_finite()
-        || !q.isr_down.is_finite() || q.isr_down < 0.0
+        || !q.isr_down.is_finite()
+        || q.isr_down < 0.0
         || !q.book_imbalance.is_finite()
         || !(-1.0..=1.0).contains(&q.book_imbalance)
     {
@@ -48,13 +54,15 @@ pub fn choose_short_quote(q: QuoteInputs) -> Result<QuoteDecision, QuoteError> {
     }
     let mid = (q.best_bid.0 as f64 + q.best_ask.0 as f64) / 2.0;
     let spread_bps = (q.best_ask.0 - q.best_bid.0) as f64 / mid * 10_000.0;
-    let urgency_bps = q.microprice_divergence_bps.abs()
-        + 1.5 * (q.isr_down - 3.0).max(0.0);
+    let urgency_bps = q.microprice_divergence_bps.abs() + 1.5 * (q.isr_down - 3.0).max(0.0);
     let urgent = urgency_bps > 1.5 * spread_bps;
     let (kind, time_in_force, raw_price) = if urgent {
         // Floor to a raw fixed-price quantum; venue tick rounding still needed.
-        (QuoteKind::IocSweep, TimeInForce::Ioc,
-            i128::from(q.best_bid.0) * 9_996 / 10_000)
+        (
+            QuoteKind::IocSweep,
+            TimeInForce::Ioc,
+            i128::from(q.best_bid.0) * 9_996 / 10_000,
+        )
     } else {
         let spread = (q.best_ask.0 - q.best_bid.0) as f64;
         let micro = q.microprice.0 as f64;
@@ -67,13 +75,17 @@ pub fn choose_short_quote(q: QuoteInputs) -> Result<QuoteDecision, QuoteError> {
         let target = (res.ceil() as i128).max(i128::from(q.best_ask.0));
         (QuoteKind::PassivePostOnly, TimeInForce::PostOnly, target)
     };
-    if raw_price <= 0 || raw_price > i128::from(i64::MAX)
+    if raw_price <= 0
+        || raw_price > i128::from(i64::MAX)
         || raw_price < i128::from(SCALE) / 100_000_000
     {
         return Err(QuoteError::ArithmeticOverflow);
     }
     Ok(QuoteDecision {
-        kind, time_in_force, short_sell_limit: FixedPrice(raw_price as i64),
-        urgency_bps, spread_bps,
+        kind,
+        time_in_force,
+        short_sell_limit: FixedPrice(raw_price as i64),
+        urgency_bps,
+        spread_bps,
     })
 }

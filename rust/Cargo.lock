@@ -40,6 +40,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "trading-strategy-engine"
+version = "0.1.0"
+dependencies = [
+ "trading-core-types",
+ "trading-signals",
+ "trading-wallet-manager",
+]
+
+[[package]]
 name = "trading-wallet-manager"
 version = "0.1.0"
 dependencies = [
