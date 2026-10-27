@@ -21,6 +21,7 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
        'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20261026T000000Z bookworm-security main' \
        > /etc/apt/sources.list \
     && apt-get update \
+    && apt-cache policy libssl3 openssl \
     && apt-get install -y --no-install-recommends \
        libseccomp2=2.5.4-1+deb12u1 \
        libssl3=3.0.22-1~deb12u2 \
