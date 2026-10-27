@@ -13,8 +13,8 @@ import hashlib
 import io
 import json
 import os
-import subprocess
 import stat
+import subprocess
 import sys
 import tomllib
 import zipfile
