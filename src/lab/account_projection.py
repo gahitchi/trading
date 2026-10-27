@@ -13,6 +13,7 @@ from decimal import Decimal
 from fractions import Fraction
 
 from lab.engine_events import (
+    BrokerFillFact,
     CashFact,
     CashInLieuFact,
     EngineEconomicBook,
@@ -88,7 +89,7 @@ def project_account(book: EngineEconomicBook) -> ProjectedAccount:
     cash = Fraction(0)
     positions: dict[str, Fraction] = {}
     for fact in book.events:
-        if type(fact) is FillFact:
+        if type(fact) in (FillFact, BrokerFillFact):
             signed = Fraction(fact.quantity) if fact.side == "BUY" else -Fraction(fact.quantity)
             positions[fact.symbol] = positions.get(fact.symbol, Fraction(0)) + signed
             cash -= signed * Fraction(fact.price) + Fraction(fact.commission)
