@@ -120,7 +120,6 @@ def _number(value: object, description: str, *, positive: bool = False, nonnegat
         raise EngineFactError(f"invalid {description}") from exc
 
 
-
 def _evidence_digest(previous: str, account_id: str, fact: EconomicFact) -> str:
     """Bind event identity, provenance, time and raw economic inputs.
 
