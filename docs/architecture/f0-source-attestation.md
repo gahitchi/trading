@@ -1,0 +1,90 @@
+# F0 acceptance slice 01 — clean source and dependency inventory
+
+**Status:** development candidate, not qualified. Scope: F0.1–F0.4 only. No order dispatch, broker login, new strategies or release-gate changes.
+
+## Reference vertical slice
+
+The machine-readable scope is [f0-reference-scope.json](f0-reference-scope.json).
+For foundational reproducibility tests it designates one USD-listed equity/ETF
+(**SPY / ARCX**, NYSE calendar, daily-only), an **IBKR PAPER** context and
+**no execution authority**. This is a *provisional internal test reference*,
+not an assertion of IBKR market-data entitlement, actual account availability,
+qualified corporate actions or permission to place an order. Gold, forex,
+crypto, other brokers, unrestricted autonomy and real-money routing are
+excluded from this reference candidate; broader product development is not
+cancelled or treated as qualified by this choice.
+
+## Why this code exists
+
+The existing tools already provide simulation/runtime source digests
+(`src/lab/provenance.py`), locked Python graphs, pinned Docker parent,
+hosted CI and a strict **seven-gate release checker**
+(`tools/release_check.py`). None is a standalone **write-once, exact-source
+receipt** for the F0 scoped milestone. This new facility adds only that
+missing narrow function; it does not create a second release verifier.
+
+`tools/foundation_manifest.py` is standard-library-only and requires:
+
+1. The caller supplies the **Git checkout root**, without any uncommitted
+   tracked or untracked changes.
+2. Git HEAD commit and tree identities are available.
+3. All fixed source/lock/CI/OS-build-definition inputs are regular files,
+   not symlinks, and SHA-256 hashes of their working bytes match the exact
+   bytes at `HEAD`; a second cleanliness check catches changes during read.
+4. `f0-reference-scope.json` is present and explicitly **PAPER_ONLY** with
+   **NONE_IN_F0** authority, so the source inventory cannot be generated
+   for a mislabeled live or trading-enabled reference slice.
+5. Output is created **outside the Git checkout** with exclusive creation
+   (no silent overwrite). The verifier re-observes all inputs and rejects a
+   changed SHA, dependency lock, scope, OS/kernel/Python tuple or invented
+   release authorization. The receipt is **not a signature**.
+
+From a clean checkout, use a private folder outside the repository:
+
+```sh
+mkdir -p "$HOME/trading-evidence"
+python3 tools/foundation_manifest.py create \
+  --out "$HOME/trading-evidence/f0-candidate.json"
+python3 tools/foundation_manifest.py verify \
+  --input "$HOME/trading-evidence/f0-candidate.json"
+```
+
+Both successful commands deliberately report `qualification=BLOCKED`,
+`release_authorization=false`. Exit zero means **source/environment inventory
+integrity only**, never that any trading gate passed. A second `create` on
+the same path refuses; choose a different filename for a new commit.
+
+CI's `package` job creates and verifies a fresh inventory and uploads it
+along with the built wheel's SHA-256 for later review. These are *ephemeral
+unsigned hosted-run observations* until reviewer evidence and a genuinely
+immutable release artifact are established. Windows/Arch/Termux observations
+are different environments: verifying a receipt from another OS/kernel
+intentionally fails rather than silently claiming the same deployment.
+
+## Explicit F0 gaps and next submilestones
+
+- **F0.1:** final owner/operator decision on the pilot symbol, instrument
+  action version, source entitlement, data horizon and frozen strategy policy.
+  Reference scope alone does not certify them.
+- **F0.2:** prove exact dependency graph and built image/host-OS package
+  provenance across every *supported* deployment target. This receipt hashes
+  the pinned definitions; it does not independently prove that a running
+  installation matches them.
+- **F0.3:** CI already runs dual Python, lint, packaging, Docker and serialized
+  real-clock harness. We must still make all collaboration checks green on
+  the *exact final candidate*. A separate older G040 message has malformed
+  timestamp metadata on another branch; the original message is immutable
+  under COLLABORATION.md. No validator relaxation, editing or deletion is
+  authorized; this governance issue remains an explicit blocker.
+- **F0.4:** external data/config provenance with privacy-safe capture and
+  reviewable continuity; this scope receipt deliberately does **not** hash
+  or disclose `lab.toml`, raw exchange market data, secrets, broker account
+  IDs or authenticated order evidence.
+- **F0.5–F0.6:** review architecture decisions and resolve all independent
+  blocking findings; freeze a reviewed immutable, signed or otherwise
+  externally attested *release* candidate and bind evidence to its exact SHA.
+
+**Exit condition:** no F0 completion claim until exact code, build, OS,
+configuration/data identities and independent review are demonstrably tied
+to one candidate. F1 economic conservation and F2 data integrity come
+**after** this reviewed foundation; the tool here authorizes no execution.
