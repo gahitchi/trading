@@ -11,7 +11,7 @@ jobs:
   collab:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0  # all branches: messages are read from every agent's own branch
           # Pull-request workflows otherwise check out GitHub's temporary merge commit,
@@ -29,8 +29,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
       - run: uvx ruff check src tests tools
       - run: uvx ruff format --check src tests tools
 
@@ -41,10 +41,10 @@ jobs:
       matrix:
         python: ["3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0  # test_collab reads conversation openers from other branches
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --frozen --extra dev
@@ -62,8 +62,8 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
         with:
           python-version: "3.13"
       - run: uv sync --frozen --group build
@@ -107,7 +107,7 @@ jobs:
             --second "$RUNNER_TEMP/f0-wheel-repeat"/*.whl verify \
             --input "$RUNNER_TEMP/f0-candidate/wheel-repeat.json"
       - name: retain F0 unsigned source and wheel identity evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: f0-inventory-py313
           path: ${{ runner.temp }}/f0-candidate/
@@ -116,7 +116,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: build the runtime image
         run: docker build -t trading-lab:ci .
       - name: F0 record image layers and installed OS/Python packages, without broker access
@@ -168,7 +168,7 @@ jobs:
             --installed "$RUNNER_TEMP/f0-container/installed.json" \
             verify --input "$RUNNER_TEMP/f0-container/receipt.json"
       - name: retain unsigned F0 container-build observation
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: f0-container-image
           path: ${{ runner.temp }}/f0-container/
