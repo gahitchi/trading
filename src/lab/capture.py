@@ -198,8 +198,8 @@ def _verify_capture_files(folder: Path, *, expected_account: str, expected_port:
         for t in tickers
     ):
         raise RuntimeError("capture incomplete: broker positions not observed for requested instruments")
-    if not isinstance(orders, list):
-        raise RuntimeError("capture incomplete: broker order cache missing")
+    if not isinstance(orders, list) or any(not isinstance(order, dict) for order in orders):
+        raise RuntimeError("capture incomplete: broker order cache malformed or missing")
     if not isinstance(meta, dict) or meta.get("stream") != "NAUTILUS_IBKR_READ_ONLY":
         raise RuntimeError("capture incomplete: broker observation metadata missing")
     start, end = meta.get("capture_started_ns"), meta.get("capture_completed_ns")
