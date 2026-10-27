@@ -22,6 +22,7 @@ KIND = "F0_SOURCE_INVENTORY_UNATTESTED"
 SCOPE = "docs/architecture/f0-reference-scope.json"
 INPUTS = (
     ".github/workflows/ci.yml",
+    ".github/workflows/f0-two-runner-wheel.yml",
     "Dockerfile",
     "compose.app.yml",
     "docker-compose.yml",
