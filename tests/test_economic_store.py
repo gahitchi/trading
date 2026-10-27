@@ -144,3 +144,62 @@ def test_sqlite_pragmas_are_actual_durable_transaction_configuration(tmp_path):
         # Value is per-connection; _connect() must set FULL for writes.
     with store._connect() as db:
         assert db.execute("PRAGMA synchronous").fetchone()[0] == 2
+
+
+@pytest.mark.parametrize(
+    "price",
+    [
+        Decimal("1E+999999999"),
+        Decimal("NaN"),
+        Decimal("Infinity"),
+        Decimal("1E-50"),
+        Decimal("123456789012345678901234567890"),
+    ],
+)
+def test_store_refuses_unbounded_numeric_payload_before_serialization(tmp_path, price):
+    store = EconomicEventStore(tmp_path / "bounded.sqlite3", "SIM-001")
+    with pytest.raises(EconomicStoreError):
+        store.append(replace(fill(), price=price))
+    assert store.load().events == ()
+
+
+def test_rolled_back_writer_does_not_leave_half_persisted_economic_event(tmp_path):
+    store = EconomicEventStore(tmp_path / "rollback.sqlite3", "SIM-001")
+    initial = store.append_cash_record(record(), source_namespace="broker")
+    writer = sqlite3.connect(store.path)
+    try:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute(
+            "INSERT INTO economic_events(seq,event_id,source_ref,payload,evidence_head,ledger_head) "
+            "VALUES(?,?,?,?,?,?)",
+            (2, "orphan", "orphan:fill", b"{}", "f" * 64, "f" * 64),
+        )
+    finally:
+        # Simulate a process failure before COMMIT.
+        writer.close()
+    assert store.load() == initial
+    assert store.append(fill()).ledger.position("SPY") == D("2")
+
+
+def test_concurrent_writers_with_same_head_cannot_both_commit(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = EconomicEventStore(tmp_path / "concurrent.sqlite3", "SIM-001")
+    funded = store.append_cash_record(record(), source_namespace="broker")
+    original_head = funded.evidence_head
+    events = [
+        fill(event_id="t-a", source_ref="broker:trade:t-a", time=2),
+        fill(event_id="t-b", source_ref="broker:trade:t-b", time=2),
+    ]
+
+    def compete(event):
+        try:
+            store.append(event, expected_head=original_head)
+            return "committed"
+        except EconomicStoreError:
+            return "refused"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(compete, events))
+    assert sorted(results) == ["committed", "refused"]
+    assert len(store.load().events) == 2
