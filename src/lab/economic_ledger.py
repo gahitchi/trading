@@ -267,6 +267,67 @@ class EconomicLedger:
             tuple(lots),
         )
 
+    def post_cash_in_lieu(
+        self,
+        event_id: str,
+        symbol: str,
+        side: str,
+        quantity: Decimal | str | int,
+        cash: Decimal | str | int,
+    ) -> EconomicLedger:
+        """Settle fractional shares without inventing an exchange fill.
+
+        The cash is an externally claimed settled gross receipt (LONG) or
+        payment (SHORT). Withholding and fees require separate typed events.
+        Cost is released FIFO, with no implicit rounding of fraction or basis.
+        """
+        symbol = _name(symbol, SYMBOL, "symbol")
+        if side not in ("LONG", "SHORT"):
+            raise EconomicLedgerError("cash-in-lieu side must identify long or short position")
+        qty = exact(quantity, positive=True)
+        if qty >= 1:
+            raise EconomicLedgerError("cash-in-lieu is restricted to fractional shares")
+        paid = exact(cash, positive=True)
+        remaining = qty
+        lots: list[Lot] = []
+        released_total = Decimal(0)
+        for lot in self.lots:
+            correct_side = (lot.quantity > 0) if side == "LONG" else (lot.quantity < 0)
+            if lot.symbol != symbol or not correct_side or remaining == 0:
+                lots.append(lot)
+                continue
+            close = min(abs(lot.quantity), remaining)
+            released = _calc(lambda lot=lot, close=close: lot.basis * close / abs(lot.quantity))
+            released_total = _calc(lambda released_total=released_total, released=released: released_total + released)
+            remaining = _calc(lambda remaining=remaining, close=close: remaining - close)
+            next_qty = _calc(
+                lambda lot=lot, close=close: lot.quantity - close if side == "LONG" else lot.quantity + close
+            )
+            next_basis = _calc(lambda lot=lot, released=released: lot.basis - released)
+            if next_qty:
+                lots.append(Lot(symbol, next_qty, next_basis))
+        if remaining:
+            raise EconomicLedgerError("cash-in-lieu exceeds eligible fractional holdings")
+        cash_delta = paid if side == "LONG" else _calc(lambda: -paid)
+        inventory_delta = _calc(lambda: -released_total)
+        realized = _calc(lambda: -(cash_delta + inventory_delta))
+        return self._post(
+            event_id,
+            "CASH_IN_LIEU",
+            (
+                Posting("cash:USD", cash_delta),
+                Posting(f"inventory:USD:{symbol}", inventory_delta),
+                Posting("income:realized", realized),
+            ),
+            (
+                ("symbol", symbol),
+                ("side", side),
+                ("quantity", _fmt(qty)),
+                ("cash", _fmt(paid)),
+            ),
+            tuple(lots),
+        )
+
     def _audit_postings(self) -> None:
         """Check each double-entry transaction, custody chain and ending inventory value."""
         seen: set[str] = set()
@@ -339,6 +400,12 @@ class EconomicLedger:
                         raise EconomicLedgerError("split event payload is incomplete")
                     replay = replay.post_split(
                         event.event_id, details["symbol"], int(details["numerator"]), int(details["denominator"])
+                    )
+                elif event.kind == "CASH_IN_LIEU":
+                    if set(details) != {"symbol", "side", "quantity", "cash"}:
+                        raise EconomicLedgerError("cash-in-lieu payload is incomplete")
+                    replay = replay.post_cash_in_lieu(
+                        event.event_id, details["symbol"], details["side"], details["quantity"], details["cash"]
                     )
                 elif event.kind in KINDS:
                     if set(details) != {"amount"}:
