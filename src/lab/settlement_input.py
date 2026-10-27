@@ -11,7 +11,7 @@ import hashlib
 import json
 from decimal import Decimal, InvalidOperation
 
-from lab.engine_events import CashFact, EngineEconomicBook, EngineFactError, _identity
+from lab.engine_events import CashFact, CashInLieuFact, EngineEconomicBook, EngineFactError, _identity
 
 REQUIRED = frozenset(
     {
@@ -119,3 +119,69 @@ def append_settled_cash_record(
         raise EngineFactError("cash statement requires an engine-owned economic book")
     fact = parse_settled_cash_record(raw, source_namespace=source_namespace, expected_account_id=book.account_id)
     return book.append(fact)
+
+
+CASH_IN_LIEU_FIELDS = frozenset(
+    {
+        "schema_version", "account_id", "event_id", "record_id",
+        "timestamp_ns", "kind", "source_kind", "settlement_status",
+        "currency", "symbol", "side", "quantity", "cash",
+    }
+)
+
+
+def parse_settled_cash_in_lieu_record(
+    raw: bytes, *, source_namespace: str, expected_account_id: str
+) -> CashInLieuFact:
+    """Parse a fractional nontrade cash adjustment with exact original bytes.
+
+    This is evidence *custody*, not broker authentication; it cannot
+    establish the position entitlement without a source-of-truth audit.
+    """
+    _identity(source_namespace, "statement source namespace")
+    _identity(expected_account_id, "statement account")
+    if type(raw) is not bytes or not 0 < len(raw) <= MAX_RECORD_BYTES:
+        raise EngineFactError("cash-in-lieu source must be bounded original bytes")
+    try:
+        doc = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_nonfinite,
+        )
+    except (UnicodeError, ValueError, TypeError) as exc:
+        raise EngineFactError("invalid cash-in-lieu source document") from exc
+    if type(doc) is not dict or set(doc) != CASH_IN_LIEU_FIELDS:
+        raise EngineFactError("cash-in-lieu source keys incomplete or ambiguous")
+    if type(doc["schema_version"]) is not int or doc["schema_version"] != 1:
+        raise EngineFactError("unsupported cash-in-lieu schema")
+    if type(doc["account_id"]) is not str or doc["account_id"] != expected_account_id:
+        raise EngineFactError("foreign cash-in-lieu account")
+    if doc["kind"] != "CASH_IN_LIEU" or type(doc["kind"]) is not str:
+        raise EngineFactError("unsupported corporate-action settlement")
+    if type(doc["currency"]) is not str or doc["currency"] != "USD":
+        raise EngineFactError("cash-in-lieu is USD only")
+    if type(doc["timestamp_ns"]) is not int or doc["timestamp_ns"] <= 0:
+        raise EngineFactError("cash-in-lieu timestamp must be integer nanoseconds")
+    if type(doc["side"]) is not str or type(doc["symbol"]) is not str:
+        raise EngineFactError("cash-in-lieu instrument and side are required")
+    if type(doc["quantity"]) is not str or type(doc["cash"]) is not str:
+        raise EngineFactError("cash-in-lieu decimals must be exact source strings")
+    if type(doc["source_kind"]) is not str or type(doc["settlement_status"]) is not str:
+        raise EngineFactError("cash-in-lieu classification is invalid")
+    try:
+        qty = Decimal(doc["quantity"])
+        cash = Decimal(doc["cash"])
+    except InvalidOperation as exc:
+        raise EngineFactError("invalid cash-in-lieu decimal strings") from exc
+    return CashInLieuFact(
+        event_id=_identity(doc["event_id"], "corporate-action event identity"),
+        source_ref=f"{source_namespace}:{_identity(doc['record_id'], 'corporate-action record identity')}",
+        timestamp_ns=doc["timestamp_ns"],
+        symbol=doc["symbol"],
+        side=doc["side"],
+        quantity=qty,
+        cash=cash,
+        source_kind=doc["source_kind"],
+        settlement_status=doc["settlement_status"],
+        source_sha256=hashlib.sha256(raw).hexdigest(),
+    )
