@@ -1,0 +1,33 @@
+name: f1-economic-conservation-isolated
+
+# Development-only exact-Decimal contract checks: no Docker, broker or release
+# authority. The full CI Docker security gate remains intentionally unchanged.
+on:
+  push:
+    branches:
+      - chatgpt/f1-economic-conservation-*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pure-ledger:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: "0.13.6"
+          python-version: ${{ matrix.python }}
+      - run: uv sync --frozen --extra dev
+      - name: deterministic independent F1 economic invariants
+        run: uv run --no-sync pytest -q tests/test_economic_ledger.py
+      - name: static analysis and pinned formatting
+        run: |
+          uvx --from ruff==0.17.3 ruff check src/lab/economic_ledger.py tests/test_economic_ledger.py
+          uvx --from ruff==0.17.3 ruff format --check src/lab/economic_ledger.py tests/test_economic_ledger.py
