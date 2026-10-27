@@ -1,7 +1,7 @@
 # F0.6 review packet — reference PAPER foundation
 
 **Date:** 2026-10-27. **Owner:** ChatGPT development branch
-`chatgpt/f0-wheel-reproducibility-20261027`.
+`chatgpt/f0-independent-wheel-build-20261027`.
 **Disposition:** **CANDIDATE — independently unreviewed**.
 No external reviewer acceptance, broker qualification, live-money authority,
 strategy approval, release signing or F0 qualification is asserted.
@@ -31,7 +31,10 @@ For the chosen SHA, use its GitHub CI run to verify the following:
    dependencies and commit-time `SOURCE_DATE_EPOCH`. The verification job
    downloads each build, validates original source SHA and artifact SHA-256,
    and confirms identical wheels against the committed `src/lab` tree.
-   A green job does not prove independence from GitHub as a trust provider.
+   The verified wheel is then attested using GitHub OIDC/Sigstore and
+   checked against the exact repository, SHA, ref and signing workflow.
+   A green job does not prove independence from GitHub as a trust provider
+   or that the wheel is financially correct.
 7. **Operator-only F0.4**: when the Arch installation and actual SPY
    dataset are available, generate `tools.foundation_inputs` receipt for
    the local `lab.toml`, `data/manifest.json` and
@@ -46,7 +49,7 @@ external immutable review record; **do not manually edit generated receipts**.
 | Step | Current engineering implementation | Required independent exit |
 | --- | --- | --- |
 | R0.1 | `docs/architecture/f0-reference-scope.json`: SPY/ARCX, USD, NYSE calendar, IBKR **PAPER**, no order authority | Owner approval of actual symbol, data entitlement, time horizon, venue action version and scoped strategy |
-| R0.2 | Pinned Docker source/image and dependency locks, OS/Python runtime inventory; matching separate GitHub Ubuntu 22.04/24.04 wheel builds | Independent-provider trust, clean Arch and Windows deployment provenance, signed/attested build provenance |
+| R0.2 | Pinned Docker source/image and locks, OS/Python inventory, matching GitHub Ubuntu 22.04/24.04 wheels, signed and workflow-verified GitHub OIDC provenance | Independent provider and security review, clean Arch/Windows installation, verified signed image and deployment provenance |
 | R0.3 | Lint, Python 3.13/3.14, Docker, package, test harness and collaboration checks | Independent exact-SHA green CI and no pending blocking tests |
 | R0.4 | Exact commit/tree source/image/wheel receipts; a local-only SHA-256 custody tool for the SPY configuration, vendor manifest and raw Parquet | Real local-data capture, point-in-time authenticity, independent source permissions/custody review |
 | R0.5 | `docs/architecture/f0-contract-map.json` complete F0–F8 gate ownership and order validator | Design and failure-mode review; resolve any rejected ownership and duplicate authority |
@@ -72,9 +75,10 @@ external immutable review record; **do not manually edit generated receipts**.
 ## Scope, limits and disposition
 
 The F0 evidence is about **repeatability and integrity**, not the soundness of
-future financial/economic models. The build comparison now executes on two GitHub-hosted OS runners,
-but it does *not* demonstrate independence from the GitHub build infrastructure,
-signed publication, a trusted build runner or a clean OS installation. The exact
+future financial/economic models. The wheel build comparison now executes on two GitHub-hosted OS runners
+and has GitHub OIDC-backed, workflow-verified build provenance, but it does *not*
+demonstrate independence from GitHub, independent security/code review,
+a signed container image, or a clean supported-OS installation. The exact
 configuration, market data, broker evidence and release-candidate signatures
 remain absent. `main` remains Claude-owned and is unchanged by this branch.
 

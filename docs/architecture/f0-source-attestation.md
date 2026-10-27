@@ -133,9 +133,16 @@ source-to-package parity. The validator writes a third unsigned receipt.
 
 This is a repeatability check across two operating system images, **not**
 a comparison across independently controlled trust providers. GitHub,
-its ephemeral runners, uploaded artifacts and the trusted Actions
-supply chain are common dependencies. No signature, externally hosted
-artifact attestation, or complete installer reproducibility is claimed.
+its ephemeral runners, uploaded artifacts and Actions supply chain
+remain common dependencies.
+
+On public push candidates, the verified wheel is signed through
+`actions/attest` using GitHub OIDC/Sigstore artifact provenance,
+and the workflow calls `gh attestation verify` to require the exact
+repository, source revision, branch ref, signing workflow and hosted runner.
+The signature attests **wheel digest and GitHub workflow origin**, not
+whether the software, market data, financial models or deployment is safe.
+The signed wheel does not imply a signed Docker image or a reviewed release.
 
 ## F0.4 private local runtime input custody (operator only)
 

@@ -76,7 +76,7 @@ jobs:
             --first "$RUNNER_TEMP"/f0-independent/ubuntu-22.04/*.whl \
             --second "$RUNNER_TEMP"/f0-independent/ubuntu-24.04/*.whl \
             verify --input "$RUNNER_TEMP/f0-independent/verified/cross-runner.json"
-          # Still unsigned and unable to certify the release.
+          # Cross-runner equality receipt is unsigned; verified wheel is attested separately.
       - name: Sign verified wheel provenance for public push candidates
         if: github.event_name == 'push'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
