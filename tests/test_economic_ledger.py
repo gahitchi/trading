@@ -202,3 +202,22 @@ def test_multi_entry_replay_has_no_undocumented_synthetic_trade():
     s.audit()
     assert s.position("SPY") == D("1")
     assert len([e for e in s.journal if e.kind == "FILL"]) == 2
+
+
+def test_ambient_decimal_context_cannot_round_fifo_short_lot_or_fractional_settlement():
+    from decimal import localcontext
+
+    expected_qty = D("0.123456789012345678")
+    with localcontext() as ctx:
+        ctx.prec = 6
+        short = EconomicLedger().post_fill("short", "SPY", "SELL", expected_qty, D("1.2"))
+        assert short.position("SPY") == D("-0.123456789012345678")
+        assert short.lots[0].quantity == D("-0.123456789012345678")
+        short.audit()
+        closed = short.post_cash_in_lieu(
+            "cil", "SPY", "SHORT", expected_qty, D("0.2")
+        )
+        closed.audit()
+        assert closed.position("SPY") == 0
+        assert not closed.lots
+        assert closed.balance("cash:USD") == D("-0.0518518531851851864")
