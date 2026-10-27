@@ -176,13 +176,11 @@ def reconcile_native(
         row = expected[trade_id]
         if (
             (row.get("symbol"), row.get("side")) != (fill.symbol, fill.side)
-            or _decimal(fill.quantity, "native fill quantity") != _decimal(
-                Decimal(row["quantity"]), "ledger fill quantity"
-            )
+            or _decimal(fill.quantity, "native fill quantity")
+            != _decimal(Decimal(row["quantity"]), "ledger fill quantity")
             or _decimal(fill.price, "native fill price") != _decimal(Decimal(row["price"]), "ledger fill price")
-            or _decimal(fill.commission, "native commission") != _decimal(
-                Decimal(row["commission"]), "ledger commission"
-            )
+            or _decimal(fill.commission, "native commission")
+            != _decimal(Decimal(row["commission"]), "ledger commission")
         ):
             raise ObservationError("native fill does not match ledger business event")
     if type(snapshot.positions) is not tuple or any(
@@ -197,8 +195,6 @@ def reconcile_native(
     # remain valid observations, but hidden ledger instruments are refused.
     if expected_symbols - observed.keys():
         raise ObservationError("native observations omit an open ledger instrument")
-    deltas = tuple(
-        (symbol, observed[symbol] - ledger.position(symbol)) for symbol in sorted(observed)
-    )
+    deltas = tuple((symbol, observed[symbol] - ledger.position(symbol)) for symbol in sorted(observed))
     cash_delta = _decimal(snapshot.cash, "native USD cash") - ledger.balance("cash:USD")
     return NativeParity(cash_delta, deltas, tuple(sorted(native)))
