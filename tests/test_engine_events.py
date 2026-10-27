@@ -242,3 +242,20 @@ def test_settlement_source_hash_is_bound_to_engine_evidence_identity():
         book.evidence_head
         != EngineEconomicBook("SIM-001").append(replace(cash(), source_sha256="b" * 64)).evidence_head
     )
+
+
+def test_independent_snapshot_detects_subcent_cash_and_position_drift_under_low_decimal_precision():
+    from decimal import localcontext
+
+    book = EngineEconomicBook("SIM-001").append(cash()).append(fill())
+    snapshot = observed(
+        book,
+        cash_value="799.750000000000001",
+        positions=(EnginePosition("SPY", d("2.000000000000001")),),
+    )
+    with localcontext() as context:
+        context.prec = 5
+        parity = book.reconcile(snapshot)
+    assert parity.cash_delta == d("0.000000000000001")
+    assert parity.position_deltas == (("SPY", d("0.000000000000001")),)
+    assert not parity.matches
