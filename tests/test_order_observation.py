@@ -212,3 +212,80 @@ def test_empty_broker_order_book_matches_empty_engine_account():
     parity = reconcile_external_orders(EngineEconomicBook("SIM-001"), report)
     assert parity.matches
     assert parity.broker_fills_checked == 0
+
+
+
+def v2_report(*, receipts=None):
+    """Version 2 requires an explicit complete execution receipt inventory."""
+    payload = json.loads(report_bytes())
+    payload["schema_version"] = 2
+    payload["orders"][0]["execution_receipts"] = (
+        [
+            {"record_id": "r1", "quantity": "0.25", "source_sha256": "a" * 64},
+            {"record_id": "r2", "quantity": "0.75", "source_sha256": "b" * 64},
+        ]
+        if receipts is None
+        else receipts
+    )
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+
+
+def test_v2_binds_every_execution_receipt_id_quantity_and_original_digest():
+    result = reconcile_external_orders(book(), parse(v2_report()))
+    assert result.matches
+    assert result.receipt_scope_checked
+    assert result.receipt_identities_checked == 2
+
+
+def test_v1_legacy_summary_only_proves_aggregate_arithmetic():
+    result = reconcile_external_orders(book(), parse(report_bytes()))
+    assert result.matches
+    assert not result.receipt_scope_checked
+    assert result.receipt_identities_checked == 0
+
+
+@pytest.mark.parametrize(
+    "receipts",
+    [
+        [{"record_id": "replacement", "quantity": "1", "source_sha256": "a" * 64}],
+        [
+            {"record_id": "r1", "quantity": "0.35", "source_sha256": "a" * 64},
+            {"record_id": "r2", "quantity": "0.65", "source_sha256": "b" * 64},
+        ],
+        [
+            {"record_id": "r1", "quantity": "0.25", "source_sha256": "f" * 64},
+            {"record_id": "r2", "quantity": "0.75", "source_sha256": "b" * 64},
+        ],
+    ],
+)
+def test_v2_equal_aggregate_cannot_hide_wrong_receipt_identity_quantity_or_digest(receipts):
+    observed = parse(v2_report(receipts=receipts))
+    with pytest.raises(EngineFactError, match="receipt"):
+        reconcile_external_orders(book(), observed)
+
+
+def test_v2_missing_original_receipt_is_hard_incompleteness_error():
+    payload = json.loads(v2_report())
+    payload["orders"][0]["executed_quantity"] = "0.25"
+    payload["orders"][0]["execution_receipts"].pop()
+    observed = parse(json.dumps(payload).encode())
+    with pytest.raises(EngineFactError, match="missing"):
+        reconcile_external_orders(book(), observed)
+
+
+def test_v2_duplicate_cross_order_receipt_id_is_rejected():
+    payload = json.loads(v2_report())
+    other = order(order_id="order-2", executed="0.25")
+    other["execution_receipts"] = [
+        {"record_id": "r1", "quantity": "0.25", "source_sha256": "a" * 64}
+    ]
+    payload["orders"].append(other)
+    with pytest.raises(EngineFactError, match="duplicate execution receipt"):
+        parse(json.dumps(payload).encode())
+
+
+def test_v2_receipt_total_must_equal_reported_execution():
+    payload = json.loads(v2_report())
+    payload["orders"][0]["execution_receipts"][0]["quantity"] = "0.20"
+    with pytest.raises(EngineFactError, match="do not conserve"):
+        parse(json.dumps(payload).encode())

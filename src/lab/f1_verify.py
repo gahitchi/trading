@@ -64,6 +64,10 @@ def run(argv: list[str] | None = None) -> int:
             order_report = parse_external_order_statement(
                 order_raw, source_namespace=args.source, expected_account_id=args.account
             )
+            if order_report.as_of_ns != statement.as_of_ns:
+                raise EngineFactError("account and order observations are from different snapshot times")
+            if any(type(fact) is BrokerFillFact for fact in book.events) and order_report.schema_version != 2:
+                raise EngineFactError("broker-fill parity requires a v2 complete execution receipt inventory")
             order_parity = reconcile_external_orders(book, order_report)
         elif any(type(fact) is BrokerFillFact for fact in book.events):
             raise EngineFactError("broker fills require a separate complete order report")
@@ -95,6 +99,8 @@ def run(argv: list[str] | None = None) -> int:
         "order_parity_checked": order_parity is not None,
         "order_statement_sha256": order_parity.statement_sha256 if order_parity else None,
         "broker_fills_checked": order_parity.broker_fills_checked if order_parity else None,
+        "order_receipt_scope_checked": order_parity.receipt_scope_checked if order_parity else False,
+        "order_receipt_identities_checked": order_parity.receipt_identities_checked if order_parity else 0,
         "order_deltas": (
             [
                 {

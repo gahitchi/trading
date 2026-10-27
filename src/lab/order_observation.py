@@ -18,6 +18,7 @@ from lab.engine_events import (
     EngineEconomicBook,
     EngineFactError,
     FillFact,
+    SHA256,
     _identity,
 )
 from lab.settlement_input import _reject_nonfinite, _unique_object
@@ -47,6 +48,18 @@ ORDER_FIELDS = frozenset(
     }
 )
 STATES = frozenset({"ACCEPTED", "PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECTED"})
+ORDER_FIELDS_V2 = ORDER_FIELDS | {"execution_receipts"}
+RECEIPT_FIELDS = frozenset({"record_id", "quantity", "source_sha256"})
+MAX_ORDER_RECEIPTS = 8192
+
+
+@dataclass(frozen=True, slots=True)
+class ReportedExecution:
+    """An externally enumerated execution report, not a broker authentication."""
+
+    source_ref: str
+    quantity: Decimal
+    source_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +71,7 @@ class ReportedOrder:
     requested_quantity: Decimal
     executed_quantity: Decimal
     remaining_quantity: Decimal
+    execution_receipts: tuple[ReportedExecution, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +82,7 @@ class ExternalOrderStatement:
     orders: tuple[ReportedOrder, ...]
     complete_order_scope: bool
     source_sha256: str
+    schema_version: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +101,8 @@ class ExternalOrderParity:
     journal_evidence_head: str
     order_deltas: tuple[OrderQuantityDelta, ...]
     broker_fills_checked: int
+    receipt_scope_checked: bool = False
+    receipt_identities_checked: int = 0
 
     @property
     def matches(self) -> bool:
@@ -120,7 +137,7 @@ def parse_external_order_statement(
         raise EngineFactError("invalid order observation JSON") from exc
     if type(data) is not dict or set(data) != FIELDS:
         raise EngineFactError("incomplete or unexpected order observation fields")
-    if type(data["schema_version"]) is not int or data["schema_version"] != 1:
+    if type(data["schema_version"]) is not int or data["schema_version"] not in (1, 2):
         raise EngineFactError("unsupported order observation schema")
     if type(data["account_id"]) is not str or data["account_id"] != expected_account_id:
         raise EngineFactError("foreign order statement account")
@@ -133,9 +150,12 @@ def parse_external_order_statement(
     if type(data["orders"]) is not list or len(data["orders"]) > MAX_ORDER_COUNT:
         raise EngineFactError("order observation list is unbounded or invalid")
     ids: set[str] = set()
+    receipt_ids: set[str] = set()
+    receipt_count = 0
     orders: list[ReportedOrder] = []
+    expected_fields = ORDER_FIELDS_V2 if data["schema_version"] == 2 else ORDER_FIELDS
     for item in data["orders"]:
-        if type(item) is not dict or set(item) != ORDER_FIELDS:
+        if type(item) is not dict or set(item) != expected_fields:
             raise EngineFactError("incomplete or unexpected order fields")
         order_id = _identity(item["broker_order_id"], "observed order identity")
         symbol = item["symbol"]
@@ -166,8 +186,35 @@ def parse_external_order_statement(
             consistent = executed < requested and remaining == 0
         if not consistent:
             raise EngineFactError("reported order quantities contradict its state")
+        receipts: list[ReportedExecution] = []
+        if data["schema_version"] == 2:
+            supplied = item["execution_receipts"]
+            if type(supplied) is not list or len(supplied) > MAX_ORDER_RECEIPTS - receipt_count:
+                raise EngineFactError("execution receipt scope is invalid or exceeds the bounded limit")
+            for receipt in supplied:
+                if type(receipt) is not dict or set(receipt) != RECEIPT_FIELDS:
+                    raise EngineFactError("execution receipt has missing or unexpected fields")
+                receipt_id = _identity(receipt["record_id"], "execution receipt identity")
+                source_ref = f"{source_namespace}:{receipt_id}"
+                if source_ref in receipt_ids:
+                    raise EngineFactError("duplicate execution receipt identity in external order scope")
+                digest = receipt["source_sha256"]
+                if type(digest) is not str or not SHA256.fullmatch(digest):
+                    raise EngineFactError("invalid execution receipt digest")
+                receipts.append(
+                    ReportedExecution(source_ref, _quantity(receipt["quantity"], positive=True), digest)
+                )
+                receipt_ids.add(source_ref)
+                receipt_count += 1
+            receipt_total = _calc(lambda: sum((receipt.quantity for receipt in receipts), Decimal(0)))
+            if receipt_total != executed:
+                raise EngineFactError("execution receipt quantities do not conserve reported executed quantity")
         ids.add(order_id)
-        orders.append(ReportedOrder(order_id, symbol, item["side"], item["status"], requested, executed, remaining))
+        orders.append(
+            ReportedOrder(
+                order_id, symbol, item["side"], item["status"], requested, executed, remaining, tuple(receipts)
+            )
+        )
     return ExternalOrderStatement(
         account_id=expected_account_id,
         source_ref=f"{source_namespace}:{_identity(data['record_id'], 'order observation identity')}",
@@ -175,6 +222,7 @@ def parse_external_order_statement(
         orders=tuple(sorted(orders, key=lambda order: order.broker_order_id)),
         complete_order_scope=True,
         source_sha256=hashlib.sha256(raw).hexdigest(),
+        schema_version=data["schema_version"],
     )
 
 
@@ -194,6 +242,8 @@ def reconcile_external_orders(book: EngineEconomicBook, report: ExternalOrderSta
         raise EngineFactError("invalid order observation time")
     if book.events and report.as_of_ns < book.events[-1].timestamp_ns:
         raise EngineFactError("stale order observation")
+    if type(report.schema_version) is not int or report.schema_version not in (1, 2):
+        raise EngineFactError("unsupported order report version")
     if type(report.orders) is not tuple or any(type(order) is not ReportedOrder for order in report.orders):
         raise EngineFactError("untyped reported order items")
     known: dict[str, ReportedOrder] = {}
@@ -203,6 +253,21 @@ def reconcile_external_orders(book: EngineEconomicBook, report: ExternalOrderSta
         if type(order.status) is not str or order.status not in STATES:
             raise EngineFactError("unsupported order state in supplied summary")
         known[order.broker_order_id] = order
+
+    claimed_receipts: dict[str, tuple[str, ReportedExecution]] = {}
+    if report.schema_version == 2:
+        for order in report.orders:
+            if type(order.execution_receipts) is not tuple:
+                raise EngineFactError("untyped complete execution receipt scope")
+            for receipt in order.execution_receipts:
+                if type(receipt) is not ReportedExecution:
+                    raise EngineFactError("untyped execution receipt")
+                _identity(receipt.source_ref, "execution receipt reference")
+                if type(receipt.source_sha256) is not str or not SHA256.fullmatch(receipt.source_sha256):
+                    raise EngineFactError("invalid execution receipt digest")
+                if receipt.source_ref in claimed_receipts:
+                    raise EngineFactError("duplicate execution receipt in supplied scope")
+                claimed_receipts[receipt.source_ref] = (order.broker_order_id, receipt)
 
     custody: dict[str, Decimal] = {}
     broker_fills_checked = 0
@@ -217,10 +282,21 @@ def reconcile_external_orders(book: EngineEconomicBook, report: ExternalOrderSta
                 raise EngineFactError("broker execution instrument or side disagrees with external order")
             if fact.timestamp_ns > report.as_of_ns:
                 raise EngineFactError("future execution cannot match older account statement")
+            if report.schema_version == 2:
+                matching = claimed_receipts.pop(fact.source_ref, None)
+                if matching is None:
+                    raise EngineFactError("journal execution is missing from complete receipt identity scope")
+                reported_order_id, receipt = matching
+                if reported_order_id != fact.broker_order_id:
+                    raise EngineFactError("execution receipt belongs to the wrong broker order")
+                if receipt.quantity != fact.quantity or receipt.source_sha256 != fact.source_sha256:
+                    raise EngineFactError("execution receipt quantity or source digest disagrees with journal")
             broker_fills_checked += 1
             custody[fact.broker_order_id] = _calc(
                 lambda fact=fact: custody.get(fact.broker_order_id, Decimal(0)) + fact.quantity
             )
+    if report.schema_version == 2 and claimed_receipts:
+        raise EngineFactError("external receipt inventory includes executions missing from the journal")
     deltas = tuple(
         OrderQuantityDelta(
             order.broker_order_id,
@@ -237,4 +313,6 @@ def reconcile_external_orders(book: EngineEconomicBook, report: ExternalOrderSta
         journal_evidence_head=book.evidence_head,
         order_deltas=deltas,
         broker_fills_checked=broker_fills_checked,
+        receipt_scope_checked=report.schema_version == 2,
+        receipt_identities_checked=broker_fills_checked if report.schema_version == 2 else 0,
     )

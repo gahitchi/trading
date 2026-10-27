@@ -1,5 +1,6 @@
 """Standalone, no-network, no-write F1 accounting verifier acceptance tests."""
 
+import hashlib
 import json
 import sqlite3
 from decimal import Decimal
@@ -184,26 +185,33 @@ def broker_receipt():
     ).encode()
 
 
-def order_report(executed="2", status="FILLED", remaining="0"):
+def order_report(executed="2", status="FILLED", remaining="0", *, schema_version=2, as_of_ns=30):
+    entry = {
+        "broker_order_id": "order-001",
+        "symbol": "SPY",
+        "side": "BUY",
+        "status": status,
+        "requested_quantity": "2",
+        "executed_quantity": executed,
+        "remaining_quantity": remaining,
+    }
+    if schema_version == 2:
+        entry["execution_receipts"] = [
+            {
+                "record_id": "receipt-001",
+                "quantity": executed,
+                "source_sha256": hashlib.sha256(broker_receipt()).hexdigest(),
+            }
+        ]
     return json.dumps(
         {
-            "schema_version": 1,
+            "schema_version": schema_version,
             "account_id": "SIM-001",
             "record_id": "orders-001",
-            "as_of_ns": 30,
+            "as_of_ns": as_of_ns,
             "source_kind": "BROKER_ORDER_STATEMENT",
             "complete_order_scope": True,
-            "orders": [
-                {
-                    "broker_order_id": "order-001",
-                    "symbol": "SPY",
-                    "side": "BUY",
-                    "status": status,
-                    "requested_quantity": "2",
-                    "executed_quantity": executed,
-                    "remaining_quantity": remaining,
-                }
-            ],
+            "orders": [entry],
         },
         sort_keys=True,
     ).encode()
@@ -236,15 +244,15 @@ def test_broker_fill_journal_requires_independent_order_scope(tmp_path, capsys):
     output = json.loads(capsys.readouterr().out)
     assert output["order_parity_checked"] is True
     assert output["broker_fills_checked"] == 1
+    assert output["order_receipt_scope_checked"] is True
+    assert output["order_receipt_identities_checked"] == 1
     assert output["order_deltas"][0]["quantity_delta"] == "0"
     assert output["broker_source_authenticated"] is False
     assert output["execution_authorized"] is False
 
     orders.write_bytes(order_report(executed="1.5", status="PARTIALLY_FILLED", remaining="0.5"))
-    assert run([*args, "--orders", str(orders)]) == 2
-    output = json.loads(capsys.readouterr().out)
-    assert output["status"] == "MISMATCH"
-    assert output["order_deltas"][0]["quantity_delta"] == "-0.5"
+    assert run([*args, "--orders", str(orders)]) == 3
+    assert "receipt quantity" in capsys.readouterr().err
     assert store.load().ledger.position("SPY") == D("2")
 
 
@@ -271,3 +279,39 @@ def test_malformed_external_order_scope_never_authorizes_numerical_parity(tmp_pa
     ]
     assert run(args) == 3
     assert "refused" in capsys.readouterr().err
+
+
+
+def test_cli_refuses_legacy_quantity_only_order_report_for_real_broker_fills(tmp_path, capsys):
+    path = tmp_path / "broker-v1.db"
+    store = EconomicEventStore(path, "SIM-001")
+    store.append_cash_record(cash_activity(), source_namespace="broker")
+    store.append_broker_fill_record(broker_receipt(), source_namespace="broker")
+    account = tmp_path / "account.json"
+    account.write_bytes(report())
+    orders = tmp_path / "orders.json"
+    orders.write_bytes(order_report(schema_version=1))
+    args = [
+        "--journal", str(path), "--account", "SIM-001",
+        "--statement", str(account), "--orders", str(orders), "--source", "broker",
+    ]
+    assert run(args) == 3
+    assert "v2 complete execution receipt" in capsys.readouterr().err
+    assert store.load().ledger.position("SPY") == D("2")
+
+
+def test_cli_refuses_order_and_account_snapshots_from_distinct_times(tmp_path, capsys):
+    path = tmp_path / "broker-epochs.db"
+    store = EconomicEventStore(path, "SIM-001")
+    store.append_cash_record(cash_activity(), source_namespace="broker")
+    store.append_broker_fill_record(broker_receipt(), source_namespace="broker")
+    account = tmp_path / "account.json"
+    account.write_bytes(report(as_of_ns=30))
+    orders = tmp_path / "orders.json"
+    orders.write_bytes(order_report(as_of_ns=31))
+    args = [
+        "--journal", str(path), "--account", "SIM-001",
+        "--statement", str(account), "--orders", str(orders), "--source", "broker",
+    ]
+    assert run(args) == 3
+    assert "different snapshot times" in capsys.readouterr().err

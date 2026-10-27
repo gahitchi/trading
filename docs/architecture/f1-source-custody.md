@@ -133,3 +133,29 @@ This branch does not modify the legacy Nautilus-based execution agent,
 paper-only broker gate, kill switch, independent release gates or Docker
 security policy. It is a replacement-engine **foundation**, not a completed
 trading engine or production-ready financial ledger.
+
+
+## F1.5 receipt-complete order observation (Python candidate, 2026-10-28)
+
+The read-only order reporter now accepts two explicit schemas. Legacy v1
+checks **aggregate order quantities only**, and remains parseable for research
+comparison. New v2 requires a bounded, complete per-order
+`execution_receipts` inventory, each identifying the original fill
+`record_id`, exact `quantity` and SHA-256 of the original execution report.
+Each original `BrokerFillFact` must match a unique enumerated receipt,
+including its account-scoped source reference, broker order ID, quantity,
+and original evidence digest. An extra, missing or substituted receipt is a
+hard refusal even when executed quantity totals agree. The complete inventory
+is still an **unverified external claim**, not independently authenticated.
+
+The `lab.f1_verify` CLI now requires v2 identity-complete order evidence
+when a durable journal contains broker fills and requires the account and
+order observations to share the exact `as_of_ns` boundary. Legacy v1
+arithmetic remains available from the library with
+`receipt_scope_checked=False`, but cannot cause a broker-fill CLI success.
+No trading authorization, broker connection or fabricated order is added.
+
+Pending: independently verified account/order report extraction, immutable
+external source and completeness attestation, broker correction events,
+per-order finality/races, exact source custody and independent review. F1
+qualification remains BLOCKED.
