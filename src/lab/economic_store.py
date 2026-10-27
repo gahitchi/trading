@@ -21,6 +21,7 @@ from typing import Any
 from lab.economic_ledger import EconomicLedgerError, exact
 from lab.engine_events import (
     CashFact,
+    CashInLieuFact,
     EconomicFact,
     EngineEconomicBook,
     EngineFactError,
@@ -32,8 +33,8 @@ from lab.engine_events import (
 SCHEMA = 1
 MAX_EVENT_BYTES = 16_384
 MAX_SOURCE_BYTES = 65_536
-DECIMAL_FIELDS = frozenset({"quantity", "price", "commission", "amount"})
-TYPES: dict[str, type] = {"FILL": FillFact, "CASH": CashFact, "SPLIT": SplitFact}
+DECIMAL_FIELDS = frozenset({"quantity", "price", "commission", "amount", "cash"})
+TYPES: dict[str, type] = {"FILL": FillFact, "CASH": CashFact, "SPLIT": SplitFact, "CASH_IN_LIEU": CashInLieuFact}
 
 
 class EconomicStoreError(EngineFactError):
@@ -41,8 +42,16 @@ class EconomicStoreError(EngineFactError):
 
 
 def _encode(fact: EconomicFact) -> bytes:
-    kind = "FILL" if type(fact) is FillFact else "CASH" if type(fact) is CashFact else "SPLIT"
-    if type(fact) not in (FillFact, CashFact, SplitFact):
+    kind = (
+        "FILL"
+        if type(fact) is FillFact
+        else "CASH"
+        if type(fact) is CashFact
+        else "CASH_IN_LIEU"
+        if type(fact) is CashInLieuFact
+        else "SPLIT"
+    )
+    if type(fact) not in (FillFact, CashFact, SplitFact, CashInLieuFact):
         raise EconomicStoreError("unexpected economic fact type")
     record = {"schema": SCHEMA, "type": kind}
     for name in (item.name for item in fields(fact)):
@@ -158,7 +167,7 @@ class EconomicEventStore:
             fact = _decode(payload)
             if fact.event_id != event_id or fact.source_ref != source_ref:
                 raise EconomicStoreError("persisted economic/source identity differs")
-            if type(fact) is CashFact:
+            if type(fact) in (CashFact, CashInLieuFact):
                 if type(source_bytes) is not bytes or not 0 < len(source_bytes) <= MAX_SOURCE_BYTES:
                     raise EconomicStoreError("missing or invalid original settlement evidence")
                 if hashlib.sha256(source_bytes).hexdigest() != fact.source_sha256:
@@ -194,7 +203,7 @@ class EconomicEventStore:
         payload = _encode(fact)
         if len(payload) > MAX_EVENT_BYTES:
             raise EconomicStoreError("oversized economic fact")
-        if type(fact) is CashFact:
+        if type(fact) in (CashFact, CashInLieuFact):
             if type(source_bytes) is not bytes or not 0 < len(source_bytes) <= MAX_SOURCE_BYTES:
                 raise EconomicStoreError("cash event requires original source bytes")
             if hashlib.sha256(source_bytes).hexdigest() != fact.source_sha256:
