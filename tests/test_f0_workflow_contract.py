@@ -35,6 +35,9 @@ def test_f0_container_security_steps_are_pinned_and_fail_closed():
     assert "subject-path: ${{ runner.temp }}/f0-container/receipt.json" in workflow
     assert '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml"' in workflow
     assert "name: f0-container-security" in workflow
+    assert workflow.index("name: guided app starts") < workflow.index(
+        "name: Scan actual image for high/critical known vulnerabilities"
+    )
 
 
 def test_f0_debian_openssl_hotfix_comes_from_pinned_security_snapshot():
