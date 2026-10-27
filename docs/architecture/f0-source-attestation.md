@@ -97,15 +97,38 @@ assessment, and clean Arch/Windows installer observations remain open.
 Do not use this receipt as a deployment token, paper account authorization,
 market-data source proof, or R6/F8 release criterion.
 
+## F0.2: source-to-wheel parity and repeated local builds
+
+The `tools/foundation_wheel.py` verifier checks that the **complete tracked
+`src/lab` package tree** appears inside the wheel with byte-identical content
+(including source modules, UI assets, icons, fonts and defaults). It rejects
+unexpected executable/data payloads, duplicate or unsafe ZIP members,
+out-of-bounds expanded archive size, mismatched Python distribution identity,
+invalid `WHEEL` metadata, and any missing, malformed or hash-inconsistent
+`RECORD` rows.
+
+The package CI job builds the wheel once from the sdist and again directly
+from the source tree in **separate directories**, with
+`SOURCE_DATE_EPOCH` pinned to the exact candidate commit timestamp. It
+requires the two resulting wheel files to be **byte-for-byte identical** and
+stores an exclusive-write, SHA-256/source-commit-bound receipt. Rebuilding and
+verifying on a modified source tree invalidates that receipt.
+
+This tests *local repeatability on one GitHub runner*. It is **not independent
+builder reproduction**, signed package provenance, a comparison between the
+actual Arch/Windows-installed code and the wheel, or a supply-chain audit.
+The receipt always states `qualification=BLOCKED`. No trading authority can
+derive from these checks.
+
 ## Explicit F0 gaps and next submilestones
 
 - **F0.1:** final owner/operator decision on the pilot symbol, instrument
   action version, source entitlement, data horizon and frozen strategy policy.
   Reference scope alone does not certify them.
-- **F0.2:** source-linked Docker build and installed OS/Python inventory are
-  now captured and checked in CI. Independent two-builder reproducibility,
-  signed image provenance, runtime deployment attestations and complete
-  Arch/Windows support remain open.
+- **F0.2:** source-linked Docker image/installed OS/Python inventory and
+  source-to-wheel local repeatability are captured and checked in CI. Truly
+  independent two-builder reproducibility, signed image/wheel provenance,
+  runtime deployment attestations and Arch/Windows support remain open.
 - **F0.3:** CI already runs dual Python, lint, packaging, Docker and serialized
   real-clock harness. We must still make all collaboration checks green on
   the *exact final candidate*. A separate older G040 message has malformed
