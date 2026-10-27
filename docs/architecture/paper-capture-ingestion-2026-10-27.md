@@ -139,6 +139,25 @@ There is no operator requirement to run this feature yet. CI exercises
 synthetic, fabricated account and order IDs only. Real IBKR paper acceptance
 will be a separately supervised phase after protocol review.
 
+## Completed capture status versus broker qualification
+
+The private `CAPTURE_STATUS.json` marker is written last and may be
+`COMPLETE_UNVERIFIED` only after all required export files have been created
+and the source-cache observation passes fail-closed **local** checks:
+configured PAPER account identifier, pinned gateway port, nonempty reported
+account balances, an exact position record for every requested instrument,
+a structured (possibly empty) order cache, and a monotonic observation
+interval with explicitly unverified source flags. Missing or malformed
+observations result in `INCOMPLETE` or `IN_PROGRESS` and are not accepted
+by the inspection bridge. The order cache is allowed to be empty; that
+**does not** prove the broker has no historical orders or executions.
+
+These are local export hygiene checks, not authentication, custody proof,
+complete history, fee parity, or authority to execute. Only independently
+acquired and qualified broker evidence could address those separate release
+requirements. A complete cache can still be incomplete relative to the
+broker's historical books.
+
 ## Release-blocking next requirements
 
 1. Prove broker identity from the pinned paper session via authenticated
