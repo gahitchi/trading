@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
+import time
 import tomllib
 from dataclasses import dataclass
 from decimal import Decimal
@@ -244,6 +246,92 @@ def load_paper_capture(
     return PaperCaptureObservation(snapshot=snapshot, manifest_sha256=manifest)
 
 
+
+def b01_review(
+    folder: str | Path,
+    observation: PaperCaptureObservation,
+    *,
+    max_age_seconds: int = 900,
+    now_ns: int | None = None,
+) -> dict[str, object]:
+    """Local B01 evidence checklist. NEVER a broker-authentication assertion.
+
+    Unlike an ordinary preflight, this is deliberately BLOCKED even for a
+    perfect local account/position match: the Nautilus cache is not a signed
+    complete broker account history, has no attested session ID or clock fence,
+    and may omit old orders/fills. The returned JSON must not feed authority.
+    """
+    if type(observation) is not PaperCaptureObservation:
+        raise LifecycleError("typed read-only capture required")
+    if type(max_age_seconds) is not int or not 1 <= max_age_seconds <= 3600:
+        raise LifecycleError("invalid bounded capture freshness threshold")
+    if now_ns is None:
+        now_ns = time.time_ns()
+    _ns(now_ns, "inspection time")
+    documents, digest = _read_private_capture(Path(folder))
+    if digest != observation.manifest_sha256:
+        raise LifecycleError("private capture changed between conversion and inspection")
+    account = documents["broker_account.json"]
+    meta = documents["broker_capture_meta.json"]
+    if type(account) is not dict or type(meta) is not dict:
+        raise LifecycleError("invalid B01 capture account or metadata")
+    if account.get("account_id") != observation.snapshot.account_scope:
+        raise LifecycleError("account changed between conversion and inspection")
+    started = _positive_ns(meta.get("capture_started_ns"), "observation start")
+    finished = _positive_ns(meta.get("capture_completed_ns"), "observation end")
+    if finished != observation.snapshot.asof_ns or started > finished:
+        raise LifecycleError("capture observation interval changed")
+    balances = account.get("balances")
+    if type(balances) is not list or len(balances) > 64:
+        raise LifecycleError("capture balances are missing or unbounded")
+    currencies: set[str] = set()
+    for entry in balances:
+        if type(entry) is not dict:
+            raise LifecycleError("broker currency balance record is malformed")
+        currency = entry.get("currency")
+        if type(currency) is not str or re.fullmatch(r"[A-Z]{3,8}", currency) is None:
+            raise LifecycleError("invalid broker currency")
+        if currency in currencies:
+            raise LifecycleError("duplicate broker currency balance")
+        currencies.add(currency)
+        for field in ("total", "free", "locked"):
+            _decimal_string(entry.get(field), f"broker {field} balance")
+    warnings: set[str] = {
+        "ACCOUNT_IDENTITY_FROM_UNATTESTED_CACHE",
+        "BROKER_SESSION_IDENTITY_UNVERIFIED",
+        "COMPLETE_ORDER_AND_EXECUTION_HISTORY_UNVERIFIED",
+        "BROKER_SEQUENCE_AND_CLOCK_BOUNDARY_UNVERIFIED",
+        "CASH_AND_FEE_LEDGER_PARITY_UNVERIFIED",
+        "BROKER_DATA_PERMISSION_UNVERIFIED",
+    }
+    if not balances:
+        warnings.add("BROKER_BALANCES_NOT_OBSERVED")
+    if "USD" not in currencies:
+        warnings.add("USD_CURRENCY_BALANCE_NOT_OBSERVED")
+    if finished > now_ns:
+        warnings.add("CAPTURE_TIMESTAMP_IN_FUTURE")
+    elif now_ns - finished > max_age_seconds * 1_000_000_000:
+        warnings.add("CAPTURE_OLDER_THAN_OPERATOR_FRESHNESS_LIMIT")
+    if finished - started > max_age_seconds * 1_000_000_000:
+        warnings.add("OBSERVATION_WINDOW_EXCEEDS_FRESHNESS_LIMIT")
+
+    return {
+        "stage": "B01_READ_ONLY_EVIDENCE_REVIEW",
+        "qualification": "BLOCKED",
+        "capture_sha256": digest,
+        "snapshot_id": observation.snapshot.snapshot_id,
+        "paper_account_string_matches_local_config": True,
+        "local_evidence_recency_checked": True,
+        "observed_currency_count": len(currencies),
+        "observed_order_count": len(observation.snapshot.orders),
+        "observed_execution_count": len(observation.snapshot.executions),
+        "source_authenticated": False,
+        "broker_authorization": False,
+        "release_reservations": False,
+        "unresolved_evidence": sorted(warnings),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     """Private read-only inspection. Exit zero means parsed, never approved."""
     parser = argparse.ArgumentParser(description="Inspect an unqualified private IBKR PAPER capture, read-only")
@@ -251,6 +339,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--capture", required=True, help="private raw snapshot directory, outside Git")
     parser.add_argument("--ticker", required=True, help="equity symbol from [universe]")
     parser.add_argument("--action-version", required=True, help="pinned instrument action/split version")
+    parser.add_argument("--b01-report", action="store_true", help="report missing B01 qualification evidence")
     args = parser.parse_args(argv)
     try:
         raw = tomllib.loads(Path(args.config).read_text())
@@ -269,10 +358,14 @@ def main(argv: list[str] | None = None) -> int:
             instrument_id=f"{ticker}.{universe[ticker].upper()}",
             action_version=args.action_version,
         )
+        review = b01_review(args.capture, observed) if args.b01_report else None
     except (OSError, ValueError, KeyError, SafetyError) as exc:
         # Do not print account identifiers, raw order IDs, broker payloads or original exception text.
         print(f"Read-only capture inspection blocked: {type(exc).__name__}. Review the private input.", file=sys.stderr)
         return 2
+    if review is not None:
+        print(json.dumps(review, sort_keys=True))
+        return 0  # parsing succeeded, release qualification remains BLOCKED
     print(
         json.dumps(
             {
