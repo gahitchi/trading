@@ -1,10 +1,13 @@
-use crate::{decay, finite_positive, positive_price, SignalError};
+use crate::{SignalError, decay, finite_positive, positive_price};
 use trading_core_types::FixedPrice;
 
 const MAX_INTERVAL_NS: u64 = 50_000_000; // 50ms
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PairSymbol { Leader, Laggard }
+pub enum PairSymbol {
+    Leader,
+    Laggard,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LeadLagSnapshot {
@@ -35,7 +38,9 @@ impl StreamState {
             return Err(SignalError::NonMonotonicTime);
         }
         self.interval = self.last_ns.and_then(|old| {
-            if ts_ns - old > MAX_INTERVAL_NS { None } else {
+            if ts_ns - old > MAX_INTERVAL_NS {
+                None
+            } else {
                 Some(ReturnInterval {
                     start_ns: old,
                     end_ns: ts_ns,
@@ -71,11 +76,15 @@ pub struct KalmanLeadLagEngine {
     last_laggard_ns: Option<u64>,
 }
 impl KalmanLeadLagEngine {
-    pub fn new(initial_beta: f64, initial_variance: f64,
-        process_variance: f64, base_observation_variance: f64)
-        -> Result<Self, SignalError>
-    {
-        if !initial_beta.is_finite() { return Err(SignalError::InvalidConfiguration); }
+    pub fn new(
+        initial_beta: f64,
+        initial_variance: f64,
+        process_variance: f64,
+        base_observation_variance: f64,
+    ) -> Result<Self, SignalError> {
+        if !initial_beta.is_finite() {
+            return Err(SignalError::InvalidConfiguration);
+        }
         Ok(Self {
             leader: StreamState::default(),
             laggard: StreamState::default(),
@@ -89,10 +98,10 @@ impl KalmanLeadLagEngine {
             last_laggard_ns: None,
         })
     }
-    pub fn reset(&mut self, initial_beta: f64, initial_variance: f64)
-        -> Result<(), SignalError>
-    {
-        if !initial_beta.is_finite() { return Err(SignalError::InvalidConfiguration); }
+    pub fn reset(&mut self, initial_beta: f64, initial_variance: f64) -> Result<(), SignalError> {
+        if !initial_beta.is_finite() {
+            return Err(SignalError::InvalidConfiguration);
+        }
         self.beta = initial_beta;
         self.posterior_variance = finite_positive(initial_variance)?;
         self.leader = StreamState::default();
@@ -105,9 +114,12 @@ impl KalmanLeadLagEngine {
     }
     /// Input must be an event-time-ordered merge of both streams. A failed
     /// synchronization check produces None and must NOT yield a trading signal.
-    pub fn observe(&mut self, symbol: PairSymbol, ts_ns: u64, price: FixedPrice)
-        -> Result<Option<LeadLagSnapshot>, SignalError>
-    {
+    pub fn observe(
+        &mut self,
+        symbol: PairSymbol,
+        ts_ns: u64,
+        price: FixedPrice,
+    ) -> Result<Option<LeadLagSnapshot>, SignalError> {
         let price = positive_price(price)?;
         if self.last_global_ns.is_some_and(|old| ts_ns < old) {
             return Err(SignalError::NonMonotonicTime);
@@ -117,22 +129,32 @@ impl KalmanLeadLagEngine {
             PairSymbol::Laggard => self.laggard.update(ts_ns, price)?,
         };
         self.last_global_ns = Some(ts_ns);
-        if symbol == PairSymbol::Leader { return Ok(None); }
-        let dt = self.last_laggard_ns.map_or(0.0, |old|
-            (ts_ns - old) as f64 * 1e-9);
+        if symbol == PairSymbol::Leader {
+            return Ok(None);
+        }
+        let dt = self
+            .last_laggard_ns
+            .map_or(0.0, |old| (ts_ns - old) as f64 * 1e-9);
         self.last_laggard_ns = Some(ts_ns);
 
         let overlaps = match (self.leader.interval, self.laggard.interval) {
-            (Some(x), Some(y)) if x.start_ns < y.end_ns && y.start_ns < x.end_ns
-                && self.leader.sequence != self.matched_leader_sequence => Some((x, y)),
+            (Some(x), Some(y))
+                if x.start_ns < y.end_ns
+                    && y.start_ns < x.end_ns
+                    && self.leader.sequence != self.matched_leader_sequence =>
+            {
+                Some((x, y))
+            }
             _ => None,
         };
         let matched = overlaps.is_some();
         let alpha = decay(dt, 0.050);
-        self.synchronization_density =
-            (alpha * self.synchronization_density + (1.0 - alpha)
-                * if matched { 1.0 } else { 0.0 }).clamp(0.05, 1.0);
-        let Some((x, y)) = overlaps else { return Ok(None); };
+        self.synchronization_density = (alpha * self.synchronization_density
+            + (1.0 - alpha) * if matched { 1.0 } else { 0.0 })
+        .clamp(0.05, 1.0);
+        let Some((x, y)) = overlaps else {
+            return Ok(None);
+        };
         let r = self.base_observation_variance / self.synchronization_density;
         let predicted_variance = self.posterior_variance + self.process_variance;
         let innovation_var = x.log_return * x.log_return * predicted_variance + r;
@@ -144,11 +166,11 @@ impl KalmanLeadLagEngine {
         let next_beta = self.beta + gain * innovation;
         let residual = 1.0 - gain * x.log_return;
         // Joseph form retains non-negative variance in finite precision.
-        let next_variance =
-            residual * residual * predicted_variance + gain * gain * r;
+        let next_variance = residual * residual * predicted_variance + gain * gain * r;
         let lag_bps = (next_beta * x.log_return - y.log_return) * 10_000.0;
-        if !next_beta.is_finite() || !next_variance.is_finite() ||
-            !lag_bps.is_finite() { return Err(SignalError::NumericOverflow); }
+        if !next_beta.is_finite() || !next_variance.is_finite() || !lag_bps.is_finite() {
+            return Err(SignalError::NumericOverflow);
+        }
         self.beta = next_beta;
         self.posterior_variance = next_variance;
         self.matched_leader_sequence = self.leader.sequence;

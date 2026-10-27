@@ -32,7 +32,9 @@ pub struct VpinToxicityEngine {
 }
 impl VpinToxicityEngine {
     pub fn new(bucket_size: FixedUsd) -> Result<Self, SignalError> {
-        if bucket_size.0 <= 0 { return Err(SignalError::InvalidConfiguration); }
+        if bucket_size.0 <= 0 {
+            return Err(SignalError::InvalidConfiguration);
+        }
         Ok(Self {
             bucket_size_raw: i128::from(bucket_size.0),
             partial_signed: 0,
@@ -71,12 +73,18 @@ impl VpinToxicityEngine {
         self.rolling_absolute = signed_full.abs() * VPIN_BUCKETS as i128;
         self.next = (self.next + (number % VPIN_BUCKETS as i128) as usize) % VPIN_BUCKETS;
         self.filled = VPIN_BUCKETS;
-        self.total = self.total.saturating_add(u64::try_from(number).unwrap_or(u64::MAX));
+        self.total = self
+            .total
+            .saturating_add(u64::try_from(number).unwrap_or(u64::MAX));
     }
-    pub fn observe(&mut self, notional: FixedUsd, is_aggressive_sell: bool)
-        -> Result<Option<VpinSnapshot>, SignalError>
-    {
-        if notional.0 <= 0 { return Err(SignalError::InvalidQuantity); }
+    pub fn observe(
+        &mut self,
+        notional: FixedUsd,
+        is_aggressive_sell: bool,
+    ) -> Result<Option<VpinSnapshot>, SignalError> {
+        if notional.0 <= 0 {
+            return Err(SignalError::InvalidQuantity);
+        }
         let direction = if is_aggressive_sell { 1_i128 } else { -1_i128 };
         let size = self.bucket_size_raw;
         let remaining_first = size - self.partial_used;
@@ -106,7 +114,9 @@ impl VpinToxicityEngine {
         Ok(self.snapshot())
     }
     pub fn snapshot(&self) -> Option<VpinSnapshot> {
-        if self.filled < VPIN_BUCKETS { return None; }
+        if self.filled < VPIN_BUCKETS {
+            return None;
+        }
         let norm = VPIN_BUCKETS as f64 * self.bucket_size_raw as f64;
         Some(VpinSnapshot {
             toxicity: self.rolling_absolute as f64 / norm,
@@ -114,5 +124,7 @@ impl VpinToxicityEngine {
             completed_buckets: self.total,
         })
     }
-    pub fn completed_buckets(&self) -> u64 { self.total }
+    pub fn completed_buckets(&self) -> u64 {
+        self.total
+    }
 }

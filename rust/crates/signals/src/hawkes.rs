@@ -1,4 +1,4 @@
-use crate::{decay, elapsed_s, finite_positive, SignalError};
+use crate::{SignalError, decay, elapsed_s, finite_positive};
 use trading_core_types::{FixedUsd, SCALE};
 
 const BETA_FAST: f64 = 8.0;
@@ -27,7 +27,11 @@ pub struct HawkesSnapshot {
     pub mean_trade_notional_usd: f64,
 }
 #[derive(Default)]
-struct Cascades { fast: f64, liquidation: f64, slow: f64 }
+struct Cascades {
+    fast: f64,
+    liquidation: f64,
+    slow: f64,
+}
 impl Cascades {
     fn decay(&mut self, dt: f64) {
         self.fast *= decay(dt, 1.0 / BETA_FAST);
@@ -78,12 +82,21 @@ impl HawkesCascadeEngine {
         self.previous_ns = Some(ts_ns);
         Ok(self.snapshot())
     }
-    pub fn observe(&mut self, ts_ns: u64, event: HawkesEvent, notional: FixedUsd)
-        -> Result<HawkesSnapshot, SignalError>
-    {
-        if notional.0 <= 0 { return Err(SignalError::InvalidQuantity); }
+    pub fn observe(
+        &mut self,
+        ts_ns: u64,
+        event: HawkesEvent,
+        notional: FixedUsd,
+    ) -> Result<HawkesSnapshot, SignalError> {
+        if notional.0 <= 0 {
+            return Err(SignalError::InvalidQuantity);
+        }
         let now = notional.0 as f64 / SCALE as f64;
-        let previous_mean = if self.mean_notional == 0.0 { now } else { self.mean_notional };
+        let previous_mean = if self.mean_notional == 0.0 {
+            now
+        } else {
+            self.mean_notional
+        };
         let weight = (now / previous_mean).min(5.0);
         let dt = elapsed_s(self.previous_ns, ts_ns)?;
         let result = self.advance(ts_ns);
@@ -104,15 +117,14 @@ impl HawkesCascadeEngine {
         let isr_up = 1.0 + (self.up.fast + self.up.liquidation) / mu;
         let denominator = self.down.fast + self.down.liquidation + 1.0;
         let proxy = ((ALPHA_FAST / BETA_FAST) * self.down.fast / denominator
-            + ((ALPHA_LIQ + ALPHA_CROSS) / BETA_LIQ)
-            * self.down.liquidation / denominator).clamp(0.0, 1.5);
+            + ((ALPHA_LIQ + ALPHA_CROSS) / BETA_LIQ) * self.down.liquidation / denominator)
+            .clamp(0.0, 1.5);
         HawkesSnapshot {
             isr_down,
             isr_up,
             down_acceleration: isr_down - (1.0 + self.down.slow / mu),
             effective_branching_proxy: proxy,
-            fixed_kernel_spectral_radius: (ALPHA_FAST / BETA_FAST)
-                .max(ALPHA_LIQ / BETA_LIQ),
+            fixed_kernel_spectral_radius: (ALPHA_FAST / BETA_FAST).max(ALPHA_LIQ / BETA_LIQ),
             mean_trade_notional_usd: self.mean_notional,
         }
     }

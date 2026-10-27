@@ -38,7 +38,9 @@ pub enum SignalError {
     InvalidObservation,
 }
 impl From<NumericError> for SignalError {
-    fn from(_: NumericError) -> Self { Self::NumericOverflow }
+    fn from(_: NumericError) -> Self {
+        Self::NumericOverflow
+    }
 }
 impl From<BookError> for SignalError {
     fn from(e: BookError) -> Self {
@@ -56,11 +58,15 @@ pub(crate) fn elapsed_s(previous: Option<u64>, current: u64) -> Result<f64, Sign
     Ok(previous.map_or(0.0, |old| current.saturating_sub(old) as f64 * 1e-9))
 }
 pub(crate) fn qty_float(value: i64) -> Result<f64, SignalError> {
-    if value < 0 { return Err(SignalError::InvalidQuantity); }
+    if value < 0 {
+        return Err(SignalError::InvalidQuantity);
+    }
     Ok(value as f64 / SCALE as f64)
 }
 pub(crate) fn positive_price(price: FixedPrice) -> Result<f64, SignalError> {
-    if price.0 <= 0 { return Err(SignalError::InvalidPrice); }
+    if price.0 <= 0 {
+        return Err(SignalError::InvalidPrice);
+    }
     Ok(price.0 as f64 / SCALE as f64)
 }
 pub(crate) fn fixed_price(value: f64) -> Result<FixedPrice, SignalError> {
@@ -74,7 +80,11 @@ pub(crate) fn fixed_price(value: f64) -> Result<FixedPrice, SignalError> {
     Ok(FixedPrice(raw as i64))
 }
 pub(crate) fn finite_positive(v: f64) -> Result<f64, SignalError> {
-    if v.is_finite() && v > 0.0 { Ok(v) } else { Err(SignalError::InvalidConfiguration) }
+    if v.is_finite() && v > 0.0 {
+        Ok(v)
+    } else {
+        Err(SignalError::InvalidConfiguration)
+    }
 }
 pub(crate) fn decay(dt_s: f64, time_constant_s: f64) -> f64 {
     (-dt_s / time_constant_s).exp()

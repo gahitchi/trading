@@ -1,26 +1,36 @@
 use std::str::FromStr;
 use trading_core_types::{FixedPrice, FixedQty, FixedUsd, SCALE};
-use trading_orderbook::{FlatOrderBook, PriceLevel, Side, LevelDelta};
-use trading_signals::{
-    AbsorptionEngine, HawkesCascadeEngine, HawkesEvent, KalmanLeadLagEngine,
-    MicroPriceEngine, MlOfiEngine, SignalError, VpinToxicityEngine,
-};
+use trading_orderbook::{FlatOrderBook, LevelDelta, PriceLevel, Side};
 use trading_signals::PairSymbol;
+use trading_signals::{
+    AbsorptionEngine, HawkesCascadeEngine, HawkesEvent, KalmanLeadLagEngine, MicroPriceEngine,
+    MlOfiEngine, SignalError, VpinToxicityEngine,
+};
 
-fn p(s: &str) -> FixedPrice { FixedPrice::from_str(s).unwrap() }
-fn q(s: &str) -> FixedQty { FixedQty::from_str(s).unwrap() }
-fn usd(s: &str) -> FixedUsd { FixedUsd::from_str(s).unwrap() }
+fn p(s: &str) -> FixedPrice {
+    FixedPrice::from_str(s).unwrap()
+}
+fn q(s: &str) -> FixedQty {
+    FixedQty::from_str(s).unwrap()
+}
+fn usd(s: &str) -> FixedUsd {
+    FixedUsd::from_str(s).unwrap()
+}
 
 fn synthetic_book() -> FlatOrderBook {
     let mut b = FlatOrderBook::new(64).unwrap();
-    let bids: Vec<_> = (0..10).map(|i| PriceLevel {
-        price: FixedPrice((10_000 - i) * 1_000_000),
-        qty: q("2"),
-    }).collect();
-    let asks: Vec<_> = (0..10).map(|i| PriceLevel {
-        price: FixedPrice((10_100 + i) * 1_000_000),
-        qty: q("1"),
-    }).collect();
+    let bids: Vec<_> = (0..10)
+        .map(|i| PriceLevel {
+            price: FixedPrice((10_000 - i) * 1_000_000),
+            qty: q("2"),
+        })
+        .collect();
+    let asks: Vec<_> = (0..10)
+        .map(|i| PriceLevel {
+            price: FixedPrice((10_100 + i) * 1_000_000),
+            qty: q("1"),
+        })
+        .collect();
     b.load_snapshot(&bids, &asks).unwrap();
     b
 }
@@ -38,7 +48,8 @@ fn ofi_positive_for_bid_replenishment() {
     let mut b = synthetic_book();
     let mut e = MlOfiEngine::new();
     e.update(1, &b).unwrap();
-    b.apply_batch(&[LevelDelta::new(Side::Bid, p("100"), q("3")).unwrap()]).unwrap();
+    b.apply_batch(&[LevelDelta::new(Side::Bid, p("100"), q("3")).unwrap()])
+        .unwrap();
     let value = e.update(100_000_001, &b).unwrap().unwrap();
     assert!(value.ofi_base_units > 0.0);
     assert!(value.z_score.is_finite());
@@ -61,9 +72,15 @@ fn microprice_and_vacuum_are_bounded_and_quote_sensitive() {
     let first = m.update(1, &b).unwrap().unwrap();
     assert!((first.downward_vacuum_ratio - 1.0).abs() < 1e-12);
     assert!(first.microprice > first.mid);
-    let changed_bids: Vec<_> = b.bids().iter().copied().map(|mut x| {
-        x.qty = q("1"); x
-    }).collect();
+    let changed_bids: Vec<_> = b
+        .bids()
+        .iter()
+        .copied()
+        .map(|mut x| {
+            x.qty = q("1");
+            x
+        })
+        .collect();
     let asks = b.asks().to_vec();
     b.load_snapshot(&changed_bids, &asks).unwrap();
     let second = m.update(1_800_000_000_001, &b).unwrap().unwrap();
@@ -83,7 +100,9 @@ fn microprice_rejects_unprovable_truncated_depth() {
 #[test]
 fn vpin_requires_fifty_completed_buckets() {
     let mut v = VpinToxicityEngine::new(usd("10")).unwrap();
-    for _ in 0..49 { assert!(v.observe(usd("10"), true).unwrap().is_none()); }
+    for _ in 0..49 {
+        assert!(v.observe(usd("10"), true).unwrap().is_none());
+    }
     let s = v.observe(usd("10"), true).unwrap().unwrap();
     assert_eq!(s.completed_buckets, 50);
     assert!((s.toxicity - 1.0).abs() < 1e-12);
@@ -96,7 +115,9 @@ fn vpin_partial_splits_and_signed_direction() {
     v.observe(usd("3"), true).unwrap();
     v.observe(usd("7"), false).unwrap();
     assert_eq!(v.completed_buckets(), 1);
-    for _ in 0..49 { v.observe(usd("10"), false).unwrap(); }
+    for _ in 0..49 {
+        v.observe(usd("10"), false).unwrap();
+    }
     let s = v.snapshot().unwrap();
     assert!(s.toxicity < 1.0);
     assert!(s.signed_sell_toxicity < 0.0);
@@ -121,7 +142,9 @@ fn vpin_rejects_zero_or_negative_volume() {
 #[test]
 fn hawkes_separates_upward_downward_flows() {
     let mut h = HawkesCascadeEngine::new(1.0).unwrap();
-    let d = h.observe(1, HawkesEvent::AggressiveSell, usd("10")).unwrap();
+    let d = h
+        .observe(1, HawkesEvent::AggressiveSell, usd("10"))
+        .unwrap();
     assert!(d.isr_down > 1.0);
     assert_eq!(d.isr_up, 1.0);
     let u = h.observe(1, HawkesEvent::AggressiveBuy, usd("10")).unwrap();
@@ -133,7 +156,9 @@ fn hawkes_separates_upward_downward_flows() {
 #[test]
 fn hawkes_forced_liquidation_excites_fast_and_slow_channels() {
     let mut h = HawkesCascadeEngine::new(1.0).unwrap();
-    let x = h.observe(1, HawkesEvent::ForcedLongLiquidation, usd("10")).unwrap();
+    let x = h
+        .observe(1, HawkesEvent::ForcedLongLiquidation, usd("10"))
+        .unwrap();
     assert!(x.effective_branching_proxy > 0.0);
     assert!(x.isr_down > 7.0);
     let later = h.advance(10_000_000_001).unwrap();
@@ -176,10 +201,25 @@ fn absorption_rejects_bad_normalizer_without_state_update() {
 #[test]
 fn kalman_accepts_only_overlapping_real_observations() {
     let mut k = KalmanLeadLagEngine::new(1.0, 1.0, 1e-9, 1e-7).unwrap();
-    assert!(k.observe(PairSymbol::Leader, 1, p("100")).unwrap().is_none());
-    assert!(k.observe(PairSymbol::Laggard, 1_000_000, p("50")).unwrap().is_none());
-    assert!(k.observe(PairSymbol::Leader, 10_000_000, p("101")).unwrap().is_none());
-    let s = k.observe(PairSymbol::Laggard, 15_000_000, p("50.5")).unwrap().unwrap();
+    assert!(
+        k.observe(PairSymbol::Leader, 1, p("100"))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        k.observe(PairSymbol::Laggard, 1_000_000, p("50"))
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        k.observe(PairSymbol::Leader, 10_000_000, p("101"))
+            .unwrap()
+            .is_none()
+    );
+    let s = k
+        .observe(PairSymbol::Laggard, 15_000_000, p("50.5"))
+        .unwrap()
+        .unwrap();
     assert!(s.beta.is_finite());
     assert!(s.posterior_variance > 0.0);
     assert!(s.lag_signal_bps.is_finite());
@@ -191,19 +231,31 @@ fn kalman_rejects_reuse_of_one_leader_return() {
     k.observe(PairSymbol::Leader, 1, p("100")).unwrap();
     k.observe(PairSymbol::Laggard, 1_000_000, p("50")).unwrap();
     k.observe(PairSymbol::Leader, 10_000_000, p("101")).unwrap();
-    k.observe(PairSymbol::Laggard, 15_000_000, p("50.5")).unwrap();
-    assert!(k.observe(PairSymbol::Laggard, 20_000_000, p("50.6")).unwrap().is_none());
+    k.observe(PairSymbol::Laggard, 15_000_000, p("50.5"))
+        .unwrap();
+    assert!(
+        k.observe(PairSymbol::Laggard, 20_000_000, p("50.6"))
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
 fn kalman_rejects_event_time_reversal_and_long_intervals() {
     let mut k = KalmanLeadLagEngine::new(1.0, 1.0, 1e-9, 1e-7).unwrap();
     k.observe(PairSymbol::Leader, 1, p("100")).unwrap();
-    assert_eq!(k.observe(PairSymbol::Laggard, 0, p("50")),
-        Err(SignalError::NonMonotonicTime));
+    assert_eq!(
+        k.observe(PairSymbol::Laggard, 0, p("50")),
+        Err(SignalError::NonMonotonicTime)
+    );
     k.observe(PairSymbol::Laggard, 1_000, p("50")).unwrap();
-    k.observe(PairSymbol::Leader, 100_000_000, p("101")).unwrap();
-    assert!(k.observe(PairSymbol::Laggard, 101_000_000, p("50.5")).unwrap().is_none());
+    k.observe(PairSymbol::Leader, 100_000_000, p("101"))
+        .unwrap();
+    assert!(
+        k.observe(PairSymbol::Laggard, 101_000_000, p("50.5"))
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
