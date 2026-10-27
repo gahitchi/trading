@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import os
 import re
 import subprocess
@@ -40,6 +41,44 @@ KINDS = ("proposal", "review", "reply", "question", "agree", "object", "escalate
 OPENING_KINDS = ("proposal", "review", "question")
 FINDING_TAGS = ("blocking", "advisory", "question")
 OUTBOX = "collab/outbox"
+
+# Closed-set, immutable historical metadata errata: original messages are
+# unchanged. New messages still obey exactly the original validator.
+LEGACY_METADATA_ERRATA = {
+    "collab/outbox/chatgpt/G040/20261027T122006Z-proposal.md": (
+        "5ae7bf5a3efd627a27cc3943610d6df67cf4f9bf",
+        "2026-10-27T12:20:06.886Z",
+        "Proposal — versioned institutional development tree and acceptance roadmap",
+    ),
+    "collab/outbox/chatgpt/G041/20261027T124500Z-proposal.md": (
+        "8e7436810da9dc2dc95c47cf4dab68a04865bcf3",
+        "2026-10-27T12:45:00Z",
+        "F0–F8 foundation-first roadmap: corrected canonical execution order",
+    ),
+    "collab/outbox/chatgpt/G042/20261027T130419Z-proposal.md": (
+        "a4d9fd804f37193f9572e9ccd6f5be4b37b67a15",
+        "2026-10-27T13:04:19Z",
+        "F0.1–F0.4 foundation first: reference slice and exact-candidate inventory",
+    ),
+    "collab/outbox/chatgpt/G043/20261027T134152Z-proposal.md": (
+        "419d683227b5ce451f9db31114c3978d4bd3ae78",
+        "2026-10-27T13:41:52Z",
+        "F0.2 exact runtime build provenance: narrow candidate",
+    ),
+}
+
+
+def _historical_message_title(text: str, path: str, meta: dict) -> str | None:
+    """Byte-pinned erratum, never a wildcard exemption or message mutation."""
+    entry = LEGACY_METADATA_ERRATA.get(path)
+    if entry is None:
+        return None
+    raw = text.encode("utf-8")
+    blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\\x00" + raw).hexdigest()
+    expected_blob, original_at, title = entry
+    if blob != expected_blob or meta.get("at") != original_at or "title" in meta:
+        raise CollabError(f"{path}: registered historical metadata digest or fields changed")
+    return title
 
 NAME = re.compile(r"^(?P<stamp>\d{8}T\d{6}Z)(?:-(?P<seq>\d+))?-(?P<kind>[a-z]+)\.md$")
 THREAD_ID = re.compile(r"^[CGH]\d{3}$")
@@ -121,7 +160,8 @@ def parse_message(text: str, path: str) -> dict:
         if meta.get(key) != expected:
             raise CollabError(f"{path}: front matter {key}={meta.get(key)!r} must match the path ({expected!r})")
     stamp = datetime.strptime(m["stamp"], "%Y%m%dT%H%M%SZ").strftime("%Y-%m-%dT%H:%M:%SZ")
-    if meta.get("at") != stamp:
+    legacy_title = _historical_message_title(text, path, meta)
+    if legacy_title is None and meta.get("at") != stamp:
         raise CollabError(f"{path}: front matter at={meta.get('at')!r} must match the file name ({stamp})")
     if not body.strip():
         raise CollabError(f"{path}: empty message")
@@ -136,7 +176,7 @@ def parse_message(text: str, path: str) -> dict:
         "kind": m["kind"],
         "at": stamp,
         "seq": int(m["seq"] or 0),
-        "title": meta.get("title", ""),
+        "title": legacy_title if legacy_title is not None else meta.get("title", ""),
         "refs": meta.get("refs", ""),
         "body": body,
     }
