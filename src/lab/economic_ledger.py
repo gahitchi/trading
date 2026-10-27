@@ -135,7 +135,7 @@ class EconomicLedger:
         next_entry = JournalEntry(event_id, kind, postings, details, "")
         prior = self.journal[-1].sha256 if self.journal else "0" * 64
         next_entry = replace(next_entry, sha256=_digest(prior, next_entry))
-        candidate = EconomicLedger(self.journal + (next_entry,), lots)
+        candidate = EconomicLedger((*self.journal, next_entry), lots)
         candidate.audit()
         return candidate
 
@@ -179,13 +179,13 @@ class EconomicLedger:
                 lots.append(lot)
                 continue
             close = min(abs(lot.quantity), remaining)
-            released = _calc(lambda: lot.basis * close / abs(lot.quantity))
-            inventory_delta = _calc(lambda: inventory_delta - released)
-            updated_qty = _calc(lambda: lot.quantity + (close if signed > 0 else -close))
-            updated_basis = _calc(lambda: lot.basis - released)
+            released = _calc(lambda lot=lot, close=close: lot.basis * close / abs(lot.quantity))
+            inventory_delta = _calc(lambda inventory_delta=inventory_delta, released=released: inventory_delta - released)
+            updated_qty = _calc(lambda lot=lot, close=close: lot.quantity + (close if signed > 0 else -close))
+            updated_basis = _calc(lambda lot=lot, released=released: lot.basis - released)
             if updated_qty:
                 lots.append(Lot(lot.symbol, updated_qty, updated_basis))
-            remaining = _calc(lambda: remaining - close)
+            remaining = _calc(lambda remaining=remaining, close=close: remaining - close)
 
         if remaining:
             opened_qty = remaining if side == "BUY" else -remaining
@@ -222,7 +222,7 @@ class EconomicLedger:
         lots = []
         for lot in self.lots:
             if lot.symbol == symbol:
-                new_qty = _calc(lambda: (lot.quantity * Decimal(numerator)) / Decimal(denominator))
+                new_qty = _calc(lambda lot=lot: (lot.quantity * Decimal(numerator)) / Decimal(denominator))
                 new_qty = exact(new_qty, positive=False)
                 if new_qty == 0:
                     raise EconomicLedgerError("split removed a position")
@@ -248,11 +248,11 @@ class EconomicLedger:
                     raise EconomicLedgerError("split cannot contain monetary postings")
             elif not entry.postings:
                 raise EconomicLedgerError("empty monetary journal entry")
-            if _calc(lambda: sum((p.amount for p in entry.postings), Decimal(0))) != 0:
+            if _calc(lambda entry=entry: sum((p.amount for p in entry.postings), Decimal(0))) != 0:
                 raise EconomicLedgerError("unbalanced historical event")
             for posting in entry.postings:
                 balances[posting.account] = _calc(
-                    lambda: balances.get(posting.account, Decimal(0)) + posting.amount
+                    lambda posting=posting: balances.get(posting.account, Decimal(0)) + posting.amount
                 )
         symbols = {lot.symbol for lot in self.lots}
         symbols |= {account.split(":")[2] for account in balances if account.startswith("inventory:USD:")}
@@ -263,7 +263,7 @@ class EconomicLedger:
             if lot.quantity == 0 or lot.basis == 0 or (lot.quantity > 0) != (lot.basis > 0):
                 raise EconomicLedgerError("invalid open lot sign or zero balance")
         for symbol in symbols:
-            expected = _calc(lambda: sum((lot.basis for lot in self.lots if lot.symbol == symbol), Decimal(0)))
+            expected = _calc(lambda symbol=symbol: sum((lot.basis for lot in self.lots if lot.symbol == symbol), Decimal(0)))
             if balances.get(f"inventory:USD:{symbol}", Decimal(0)) != expected:
                 raise EconomicLedgerError("inventory does not reconcile with FIFO cost basis")
         if _calc(lambda: sum(balances.values(), Decimal(0))) != 0:

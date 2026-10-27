@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from lab.economic_ledger import EconomicLedger, EconomicLedgerError, JournalEntry, Posting
+from lab.economic_ledger import EconomicLedger, EconomicLedgerError, Posting
 
 
 def D(s):
@@ -18,9 +18,9 @@ def test_exact_funding_buy_sell_fees_and_fifo_realized_gain():
     s = s.post_fill("b2", "SPY", "BUY", "2", "120.00")
     s = s.post_fill("s1", "SPY", "SELL", "3", "130.00", commission="0.75")
     s.audit()
-    assert s.balance("cash:USD") == D("10169.00")
+    assert s.balance("cash:USD") == D("9949.00")
     assert s.balance("inventory:USD:SPY") == D("120")
-    assert s.balance("income:realized") == D("-170")
+    assert s.balance("income:realized") == D("-70")
     assert s.balance("expense:commission") == D("1")
     assert s.balance("equity:capital") == D("-10000")
     assert s.position("SPY") == D("1")
@@ -123,7 +123,7 @@ def test_deterministic_byte_identical_chain_and_float_refusal():
             .post_cash("capital", "CAPITAL_IN", "1000")
             .post_fill("b", "SPY", "BUY", "0.5", "111.125", commission="0.003")
             .post_split("s", "SPY", 2, 1)
-            .post_fill("c", "SPY", "SELL", "1", "113.125")
+            .post_fill("c", "SPY", "SELL", "1", "56.5625")
         )
 
     first, second = replay(), replay()
@@ -135,7 +135,7 @@ def test_deterministic_byte_identical_chain_and_float_refusal():
 
 
 def test_partial_cost_basis_cannot_silently_round_repeating_fraction():
-    s = EconomicLedger().post_fill("buy", "SPY", "BUY", "3", "1")
+    s = EconomicLedger().post_fill("buy", "SPY", "BUY", "2", "0.01").post_split("split", "SPY", 3, 2)
     with pytest.raises(EconomicLedgerError, match="rounding policy"):
         s.post_fill("sell", "SPY", "SELL", "1", "2")
     assert s.position("SPY") == D("3")
