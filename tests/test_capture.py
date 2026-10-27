@@ -79,9 +79,7 @@ def test_snapshot_records_the_broker_view_without_placing_orders(goog_lab, goog,
     assert pseudo in (next(again.rglob("broker_account.json"))).read_text()
 
 
-def test_broker_connect_timeout_quarantines_partial_snapshot_without_authority(
-    goog_lab, tmp_path, monkeypatch
-):
+def test_broker_connect_timeout_quarantines_partial_snapshot_without_authority(goog_lab, tmp_path, monkeypatch):
     from lab import paper
 
     def reject(*_args, **_kwargs):

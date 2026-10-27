@@ -137,7 +137,6 @@ def _write(path: Path, data) -> None:
     os.replace(tmp, path)
 
 
-
 _CAPTURE_REQUIRED = (
     "identity.json",
     "broker_account.json",
