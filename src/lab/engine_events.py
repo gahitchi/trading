@@ -66,6 +66,22 @@ class FillFact:
 
 
 @dataclass(frozen=True, slots=True)
+class BrokerFillFact:
+    """A claimed broker execution; original report bytes must be stored atomically."""
+
+    event_id: str
+    source_ref: str
+    timestamp_ns: int
+    broker_order_id: str
+    symbol: str
+    side: str
+    quantity: Decimal
+    price: Decimal
+    commission: Decimal
+    source_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
 class CashFact:
     event_id: str
     source_ref: str
@@ -101,7 +117,7 @@ class CashInLieuFact:
     source_sha256: str
 
 
-EconomicFact = FillFact | CashFact | SplitFact | CashInLieuFact
+EconomicFact = FillFact | BrokerFillFact | CashFact | SplitFact | CashInLieuFact
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +187,17 @@ def _evidence_digest(previous: str, account_id: str, fact: EconomicFact) -> str:
             "price": format(fact.price, "f"),
             "commission": format(fact.commission, "f"),
         }
+    elif type(fact) is BrokerFillFact:
+        payload = {
+            "kind": "BROKER_FILL",
+            "broker_order_id": fact.broker_order_id,
+            "symbol": fact.symbol,
+            "side": fact.side,
+            "quantity": format(fact.quantity, "f"),
+            "price": format(fact.price, "f"),
+            "commission": format(fact.commission, "f"),
+            "source_sha256": fact.source_sha256,
+        }
     elif type(fact) is CashFact:
         payload = {
             "kind": fact.kind,
@@ -206,11 +233,15 @@ def _evidence_digest(previous: str, account_id: str, fact: EconomicFact) -> str:
 
 def _event_ledger(ledger: EconomicLedger, fact: EconomicFact) -> EconomicLedger:
     try:
-        if type(fact) is FillFact:
+        if type(fact) in (FillFact, BrokerFillFact):
             if type(fact.symbol) is not str or not SYMBOL.fullmatch(fact.symbol):
                 raise EngineFactError("invalid fill symbol")
             if fact.side not in ("BUY", "SELL"):
                 raise EngineFactError("invalid fill direction")
+            if type(fact) is BrokerFillFact:
+                _identity(fact.broker_order_id, "broker order identity")
+                if type(fact.source_sha256) is not str or not SHA256.fullmatch(fact.source_sha256):
+                    raise EngineFactError("broker execution report digest is invalid")
             return ledger.post_fill(
                 fact.event_id,
                 fact.symbol,
@@ -261,7 +292,7 @@ class EngineEconomicBook:
 
     def append(self, fact: EconomicFact) -> EngineEconomicBook:
         _identity(self.account_id, "account identity")
-        if type(fact) not in (FillFact, CashFact, SplitFact, CashInLieuFact):
+        if type(fact) not in (FillFact, BrokerFillFact, CashFact, SplitFact, CashInLieuFact):
             raise EngineFactError("unsupported economic event")
         _identity(fact.event_id, "event identity")
         _identity(fact.source_ref, "independent source reference")
