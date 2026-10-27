@@ -315,7 +315,11 @@ def snapshot(
     """Connect read-only, record the broker's view, return the phase directory. `clients`: the harness's
     simulated broker in tests (paper.Clients); default Interactive Brokers."""
     from lab.paper import _base_node, acquire_runtime_lock
+    from lab.safety import check_paper_settings
 
+    # Fail before creating a misleading partial snapshot/identity directory.
+    # This is a read-only collection tool, but it must require a configured PAPER account.
+    check_paper_settings(cfg.paper.port, cfg.paper.account_id)
     out = check_outside_repo(cfg, out)
     d = phase_dir(out, phase) / f"snapshot-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
     d.mkdir(parents=True, mode=0o700)

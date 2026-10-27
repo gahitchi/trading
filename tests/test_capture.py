@@ -93,6 +93,18 @@ def test_read_only_capture_preflight_redacts_broker_account_error(monkeypatch, c
     assert not response.out
 
 
+def test_invalid_paper_account_creates_no_partial_capture(goog_lab, tmp_path):
+    from dataclasses import replace
+
+    from lab.safety import SafetyError
+
+    cfg = replace(goog_lab, paper=replace(goog_lab.paper, account_id=""))
+    output = tmp_path / "invalid-account-capture"
+    with pytest.raises(SafetyError):
+        capture.snapshot(cfg, ["GOOG"], output, "B01-readonly")
+    assert not output.exists()
+
+
 def test_raw_captures_never_go_inside_the_repository(goog_lab):
     with pytest.raises(ValueError, match="inside the repository"):
         capture.check_outside_repo(goog_lab, goog_lab.root / "evidence")
