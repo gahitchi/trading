@@ -11,7 +11,7 @@ pub type MarketFrameConsumer = Consumer<LiveFrame>;
 pub fn market_frame_ring(
     capacity: usize,
 ) -> Result<(MarketFrameProducer, MarketFrameConsumer), MarketDataError> {
-    if capacity < 2 || capacity > 131_072 {
+    if !(2..=131_072).contains(&capacity) {
         return Err(MarketDataError::InvalidConfiguration(
             "ring capacity outside bounds",
         ));
