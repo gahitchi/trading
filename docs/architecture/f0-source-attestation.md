@@ -166,14 +166,24 @@ markers. It records **only SHA-256 and byte lengths by neutral role**.
 It does not expose raw data, vendor metadata, broker account IDs,
 configuration values or credentials, and it is **never uploaded in CI**.
 
+The normal tracked `lab.toml` is intentionally a multi-instrument product
+configuration, not this isolated F0 reference. To verify the **same exact CI
+commit without editing any tracked source file**, save an explicit, private
+SPY-only TOML outside the repository (for example `$HOME/trading-evidence/f0-pilot.toml`).
+The verifier reads it read-only with `--config`, validates that it contains
+**only** SPY/ARCX, daily speed and a non-live paper context, and records
+only its byte hash and size. It never uploads the configuration or turns it
+into an order-routing authority. The default without `--config` still
+checks the root `lab.toml` and **will reject the normal multi-ticker config**.
+
 On an operator machine with genuine local datasets present, run:
 
 ```sh
 cd /path/to/clean/trading-checkout
 mkdir -p "$HOME/trading-evidence"
-python3 -m tools.foundation_inputs capture \
+python3 -m tools.foundation_inputs --config "$HOME/trading-evidence/f0-pilot.toml" capture \
   --out "$HOME/trading-evidence/f0-inputs-$(git rev-parse --short HEAD).json"
-python3 -m tools.foundation_inputs verify \
+python3 -m tools.foundation_inputs --config "$HOME/trading-evidence/f0-pilot.toml" verify \
   --input "$HOME/trading-evidence/f0-inputs-$(git rev-parse --short HEAD).json"
 ```
 

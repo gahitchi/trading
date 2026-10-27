@@ -49,11 +49,12 @@ For the chosen SHA, use its GitHub CI run to verify the following:
    upload real account/configuration or raw data to CI.
 
    This particular F0 receipt requires an **isolated SPY-only/ARCX daily**
-   `lab.toml`, not the product's normal multi-ticker configuration.
+   config, not the product's normal multi-ticker `lab.toml`. Supply a private
+   external TOML with `--config` to keep the exact checked-out commit
+   unchanged; its byte hash is verified and its content is never uploaded.
    A non-`DU` account identifier, known IBKR live default port (4001/7496),
-   or explicit non-paper mode is refused. Create and review a distinct
-   committed F0-specific configuration candidate rather than altering
-   the operator's production settings or treating a dirty checkout as valid.
+   or explicit non-paper mode is refused. Preserve the reviewed Git commit;
+   **do not** edit or commit the operator's production configuration for F0.
    Other endpoints, environment overrides, and actual broker account mode
    cannot be authenticated from configuration alone; broker evidence remains
    out of scope until F6.

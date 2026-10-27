@@ -29,9 +29,15 @@ MAX_CONFIG = 2 * 1024 * 1024
 MAX_DATA = 20 * 1024 * 1024 * 1024
 
 
-def _read_identity(root: Path, relative: str, max_bytes: int) -> tuple[str, int, bytes | None]:
+def _read_identity(
+    root: Path, relative: str | Path, max_bytes: int, *, local_config_override: bool = False
+) -> tuple[str, int, bytes | None]:
     target = root / relative
-    if target.is_symlink() or not target.is_file() or not target.resolve().is_relative_to(root):
+    if (
+        target.is_symlink()
+        or not target.is_file()
+        or (not local_config_override and not target.resolve().is_relative_to(root))
+    ):
         raise foundation.FoundationError("required local input file missing, unsafe or nonregular")
     # No symbolic links and no mutable writing: constrain the input to a
     # single opened descriptor, and detect changes in identity during hashing.
@@ -68,12 +74,18 @@ def _read_identity(root: Path, relative: str, max_bytes: int) -> tuple[str, int,
         os.close(fd)
 
 
-def observation(directory: Path) -> dict:
+def observation(directory: Path, *, config: Path | None = None) -> dict:
     root = directory.expanduser().resolve()
     inventory = foundation.inventory(root)
     observed = {}
     for role, relative in ROLES.items():
-        digest, count, data = _read_identity(root, relative, MAX_DATA if role == "reference_bars" else MAX_CONFIG)
+        chosen = config if role == "configuration" and config is not None else relative
+        digest, count, data = _read_identity(
+            root,
+            chosen,
+            MAX_DATA if role == "reference_bars" else MAX_CONFIG,
+            local_config_override=role == "configuration" and config is not None,
+        )
         observed[role] = {"sha256": digest, "bytes": count}
         if role == "configuration":
             try:
@@ -117,7 +129,13 @@ def observation(directory: Path) -> dict:
     if foundation.inventory(root) != inventory:
         raise foundation.FoundationError("source candidate changed during input observation")
     for role, relative in ROLES.items():
-        digest, count, _ = _read_identity(root, relative, MAX_DATA if role == "reference_bars" else MAX_CONFIG)
+        chosen = config if role == "configuration" and config is not None else relative
+        digest, count, _ = _read_identity(
+            root,
+            chosen,
+            MAX_DATA if role == "reference_bars" else MAX_CONFIG,
+            local_config_override=role == "configuration" and config is not None,
+        )
         if observed[role] != {"sha256": digest, "bytes": count}:
             raise foundation.FoundationError("local inputs changed during input observation")
     return {
@@ -138,8 +156,8 @@ def observation(directory: Path) -> dict:
     }
 
 
-def capture(root: Path, output: Path) -> Path:
-    result = observation(root)
+def capture(root: Path, output: Path, *, config: Path | None = None) -> Path:
+    result = observation(root, config=config)
     destination = output.expanduser().absolute()
     if destination.resolve().is_relative_to(root.resolve()):
         raise foundation.FoundationError("local evidence must be outside the source checkout")
@@ -151,7 +169,7 @@ def capture(root: Path, output: Path) -> Path:
     return destination
 
 
-def verify(root: Path, evidence: Path) -> dict:
+def verify(root: Path, evidence: Path, *, config: Path | None = None) -> dict:
     if evidence.is_symlink() or not evidence.is_file() or evidence.stat().st_size > 128_000:
         raise foundation.FoundationError("local input evidence is unavailable or nonregular")
     try:
@@ -160,7 +178,7 @@ def verify(root: Path, evidence: Path) -> dict:
         )
     except (ValueError, UnicodeError) as exc:
         raise foundation.FoundationError("unreadable local input evidence") from exc
-    current = observation(root)
+    current = observation(root, config=config)
     if saved != current:
         raise foundation.FoundationError("local input evidence differs from observed source and files")
     return {
@@ -174,16 +192,17 @@ def verify(root: Path, evidence: Path) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--config", type=Path, help="explicit private SPY-only pilot TOML (default: root lab.toml)")
     sub = parser.add_subparsers(dest="action", required=True)
     sub.add_parser("capture").add_argument("--out", type=Path, required=True)
     sub.add_parser("verify").add_argument("--input", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.action == "capture":
-            capture(args.root, args.out)
+            capture(args.root, args.out, config=args.config)
             payload = {"recorded": True, "qualification": "BLOCKED", "release_authorization": False}
         else:
-            payload = verify(args.root, args.input)
+            payload = verify(args.root, args.input, config=args.config)
         print(json.dumps(payload, sort_keys=True))
     except (OSError, ValueError, TypeError) as exc:
         print(f"F0 local input custody refused: {type(exc).__name__}", file=sys.stderr)

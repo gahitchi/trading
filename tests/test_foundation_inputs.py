@@ -134,3 +134,37 @@ def test_paper_account_reference_config_is_redacted(local_checkout):
     inputs.capture(root, receipt)
     assert "DUTEST123" not in receipt.read_text()
     assert inputs.verify(root, receipt)["qualification"] == "BLOCKED"
+
+
+def test_explicit_private_pilot_config_does_not_mutate_tracked_operator_config(local_checkout, tmp_path):
+    root, receipt = local_checkout
+    private = tmp_path / "f0-reference.toml"
+    private.write_text('[universe]\nSPY = "ARCX"\n[trading]\nspeed = "daily"\n[paper]\nport = 4002\n')
+    # The default repository configuration is intentionally broader. Only the
+    # explicitly supplied private scope file may be used for this observation.
+    (root / "lab.toml").write_text('[universe]\nSPY = "ARCX"\nQQQ = "XNAS"\n[trading]\nspeed = "daily"\n')
+    git(root, "add", "lab.toml")
+    git(root, "-c", "user.name=F0", "-c", "user.email=f0@example.invalid", "commit", "-qm", "normal-config")
+    with pytest.raises(source.FoundationError, match="isolated"):
+        inputs.observation(root)
+    inputs.capture(root, receipt, config=private)
+    record = json.loads(receipt.read_text())
+    assert str(private) not in receipt.read_text()
+    assert "SPY" not in receipt.read_text()
+    assert record["qualification"] == "BLOCKED"
+    assert inputs.verify(root, receipt, config=private)["byte_identity_matches"] is True
+    with pytest.raises(source.FoundationError, match="differs"):
+        inputs.verify(root, receipt)
+    private.write_text('[universe]\nSPY = "ARCX"\n[trading]\nspeed = "15m"\n')
+    with pytest.raises(source.FoundationError):
+        inputs.verify(root, receipt, config=private)
+
+
+def test_explicit_pilot_symlink_is_refused(local_checkout, tmp_path):
+    root, _ = local_checkout
+    original = tmp_path / "pilot.toml"
+    original.write_text('[universe]\nSPY = "ARCX"\n[trading]\nspeed = "daily"\n')
+    alias = tmp_path / "alias.toml"
+    alias.symlink_to(original)
+    with pytest.raises(source.FoundationError, match="unsafe"):
+        inputs.observation(root, config=alias)
