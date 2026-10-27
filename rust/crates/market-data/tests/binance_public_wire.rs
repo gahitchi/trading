@@ -177,10 +177,7 @@ fn snapshot_generation_prevents_stale_rest_revival() {
     assert_eq!(c.on_frame(&stale).unwrap(), None);
     assert!(!c.book(0).unwrap().is_tradable());
     let good = parse_depth_snapshot(raw, current).unwrap();
-    assert_eq!(
-        c.on_frame(&good).unwrap(),
-        Some(SyncOutcome::Activated)
-    );
+    assert_eq!(c.on_frame(&good).unwrap(), Some(SyncOutcome::Activated));
     assert!(c.book(0).unwrap().is_tradable());
 }
 #[test]

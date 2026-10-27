@@ -6,9 +6,7 @@ use crate::{
 };
 use futures_util::{SinkExt, StreamExt};
 use rtrb::PushError;
-use std::{
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::{sync::mpsc, time::timeout};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
