@@ -145,8 +145,8 @@ def _wheel(path: Path, sources: dict[str, bytes], project: dict) -> dict:
 def observation(root: Path, first: Path, second: Path) -> dict:
     root = root.expanduser().resolve()
     candidate = foundation.inventory(root)
-    if first.resolve() == second.resolve():
-        raise foundation.FoundationError("repeat-build comparison requires two distinct artifact paths")
+    if first.resolve() == second.resolve() or first.samefile(second):
+        raise foundation.FoundationError("repeat-build comparison requires two distinct artifact paths and inodes")
     sources = _tracked_sources(root)
     pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     project = pyproject.get("project")
