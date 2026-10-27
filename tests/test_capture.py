@@ -32,6 +32,7 @@ def test_snapshot_records_the_broker_view_without_placing_orders(goog_lab, goog,
         "broker_positions.json",
         "broker_orders.json",
         "broker_bars.json",
+        "broker_capture_meta.json",
         "NOTE.json",
     } <= files
     orders = json.loads((d / "broker_orders.json").read_text())
@@ -39,6 +40,12 @@ def test_snapshot_records_the_broker_view_without_placing_orders(goog_lab, goog,
     bars = json.loads((d / "broker_bars.json").read_text())
     assert bars and {"ts_event_utc", "ts_init_utc", "received_utc", "lab_normalized_ts_event_utc"} <= set(bars[0])
     assert json.loads((d / "broker_positions.json").read_text())["GOOG"]["net"] > 0
+    exact = json.loads((d / "broker_positions.json").read_text())["GOOG"]["net_exact"]
+    assert exact == "1" or float(exact) > 0  # decimal serialization, not a lossy float-only net
+    capture_meta = json.loads((d / "broker_capture_meta.json").read_text())
+    assert 0 < capture_meta["capture_started_ns"] <= capture_meta["capture_completed_ns"]
+    assert capture_meta["coverage_verified"] is False
+    assert capture_meta["broker_authentication_verified"] is False
     assert PAPER_ACCOUNT in (d / "broker_account.json").read_text()  # the raw original keeps the real ID
     note = json.loads((d / "NOTE.json").read_text())["note"]
     assert "not a pass" in note

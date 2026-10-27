@@ -50,6 +50,7 @@ def fixture(folder: Path) -> None:
                 "client_order_id": "A",
                 "venue_order_id": "BK1",
                 "status": "PARTIALLY_FILLED",
+                "quantity": "3",
                 "filled_qty": "1.25",
                 "events": [{"type": "OrderFilled", "trade_id": "EX1", "last_qty": "1.25", "ts_event": 3}],
             }
@@ -169,6 +170,15 @@ class PaperCaptureTests(unittest.TestCase):
         fixture(self.path)
         self.change("broker_positions.json", lambda doc: doc["GOOG"].update(net_exact=float("nan")))
         with self.assertRaisesRegex(LifecycleError, "invalid capture JSON"):
+            load(self.path)
+
+    def test_missing_fill_history_or_overfill_never_gets_fabricated(self):
+        self.change("broker_orders.json", lambda doc: doc[0].update(events=[]))
+        with self.assertRaisesRegex(LifecycleError, "complete per-order execution"):
+            load(self.path)
+        fixture(self.path)
+        self.change("broker_orders.json", lambda doc: doc[0].update(filled_qty="4"))
+        with self.assertRaisesRegex(LifecycleError, "overfilled"):
             load(self.path)
 
     def test_order_identity_and_execution_evidence_must_not_be_fabricated(self):

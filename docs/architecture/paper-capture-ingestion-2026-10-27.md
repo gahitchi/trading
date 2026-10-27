@@ -1,0 +1,73 @@
+# Private IBKR paper capture -> independent OMS reconciliation (read-only)
+
+**Stage:** integration bridge, experimental. **No authenticated custody, complete order-history coverage,
+new order submission, release of reservations, or automatic recovery authorization.**
+
+## What is implemented
+
+`lab.capture.snapshot` runs an existing NautilusTrader `DataActor`, not an execution strategy:
+it cannot place or cancel orders. The snapshot output now includes
+`broker_capture_meta.json` with **local** capture-start/completion nanoseconds and three
+explicitly **false** verification flags. `broker_positions.json` includes a new
+`net_exact` string reconstructed from native `Quantity` units and position
+side, alongside its older informational floating-point `net` field. Old
+captures lacking exact quantities or the metadata file fail closed.
+
+`lab.kernel.paper_capture_bridge.load_paper_capture(...)` accepts an
+already saved **private** raw capture directory and an independently pinned
+paper-account scope, ticker, instrument ID and instrument action version.
+It refuses unsupported paper ports or account mismatches, missing or
+symlinked evidence files, malformed JSON, stale/inconsistent local capture
+times, non-exact position components, missing broker IDs and partial
+order/fill histories. It binds five file hashes into a deterministic local
+SHA-256 manifest and projects orders and fills to
+`lab.kernel.broker_reconciliation.ReportedSnapshot`.
+
+This is a pure standard-library transformation: the bridge never imports the
+Nautilus runtime or establishes a broker connection. It exposes a `compare`
+method which calls the existing read-only journal-versus-reported-state
+oracle; **all four reported coverage flags remain false**, regardless of
+source input. Even matching position, orders and execution quantities result
+in explicit coverage findings. `can_submit_orders`,
+`broker_authenticated` and `can_release_reservations` always return
+`False`. It cannot qualify a broker adapter, give a green trading signal,
+issue an authority token, or modify the journal.
+
+A broker-facing copy may have been generated while IB Gateway was logged in,
+but a locally written hash and the account ID printed inside a JSON object
+do **not** authenticate the broker. Local `capture_completed_ns` is the
+end of the observation interval, **not** a synchronized broker as-of cursor.
+
+## Operator and privacy constraints
+
+Original captures contain actual account IDs, order IDs, quantities, balances,
+timestamps and other sensitive broker evidence. Keep them outside Git in a
+private access-controlled directory; never attach them to an issue or
+collaboration thread. Use the existing `lab.capture.sanitize` workflow and
+mandatory independent manual review before sharing any *sanitized* export.
+The bridge is designed for original private files; a sanitized export is not
+a valid broker-custody assertion.
+
+There is no operator requirement to run this feature yet. CI exercises
+synthetic, fabricated account and order IDs only. Real IBKR paper acceptance
+will be a separately supervised phase after protocol review.
+
+## Release-blocking next requirements
+
+1. Prove broker identity from the pinned paper session via authenticated
+   provider state, not from self-reported JSON account IDs.
+2. Obtain bounded, timestamped open **and closed** order histories and fills
+   with reconciliation cursors, replay across disconnects, an authoritative
+   position snapshot and explicit sequence/clock uncertainty.
+3. Verify actual fees, cash, financing, corporate actions, futures/FX legs
+   and margin against the independent double-entry ledger, without
+   treating an order event cache as a complete historical feed.
+4. On source gaps, time ambiguity, late fills, unknown open orders, or
+   failed parity, quarantine the execution stream and prevent order
+   resubmission or reservation release. Implement a separately approved,
+   journaled state transition for recovery.
+5. Validate against a credentialed, supervised paper broker with independent
+   audit and failure-injection tests before enabling the first live-transport
+   `submit` in the new OMS.
+
+Passing unit tests or CI here closes none of the release criteria.

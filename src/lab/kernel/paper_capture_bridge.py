@@ -195,7 +195,9 @@ def load_paper_capture(
         filled = _decimal_string(entry.get("filled_qty"), "cumulative fill")
         if filled < 0:
             raise LifecycleError("negative broker cumulative fill")
-        converted_orders.append(ReportedOrder(client_id, venue_id, state, filled))
+        original_quantity = _decimal_string(entry.get("quantity"), "original order quantity", positive=True)
+        if filled > original_quantity:
+            raise LifecycleError("reported order was overfilled")
         events = entry.get("events")
         if type(events) is not list:
             raise LifecycleError("broker order event history missing")
@@ -210,6 +212,9 @@ def load_paper_capture(
             if at > finished:
                 raise LifecycleError("execution timestamp lies beyond local capture")
             converted_fills.append(ReportedExecution(client_id, execution_id, quantity, at, finished))
+        if sum((e.quantity for e in converted_fills if e.client_order_id == client_id), Decimal("0")) != filled:
+            raise LifecycleError("capture lacks exact complete per-order execution history")
+        converted_orders.append(ReportedOrder(client_id, venue_id, state, filled))
     snapshot = ReportedSnapshot(
         account_scope=expected_account,
         instrument_id=instrument_id,
