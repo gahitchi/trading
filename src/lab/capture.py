@@ -30,7 +30,6 @@ import hashlib
 import hmac
 import json
 import os
-from decimal import Decimal
 import platform
 import re
 import shutil
@@ -39,6 +38,7 @@ import subprocess
 import sys
 import time
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from lab.config import LabConfig

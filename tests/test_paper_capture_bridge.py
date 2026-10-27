@@ -16,6 +16,7 @@ from lab.kernel.order_lifecycle import BrokerEvidence, LifecycleError, OfflineOr
 from lab.kernel.paper_capture_bridge import load_paper_capture
 from lab.markets.domain import OrderIntent, Side
 from lab.markets.journal import EventJournal
+from lab.safety import SafetyError
 
 ROOT = Path(__file__).resolve().parents[1]
 ACCOUNT = "IB-DUR123456"
@@ -146,14 +147,14 @@ class PaperCaptureTests(unittest.TestCase):
 
     def test_reject_live_port_or_wrong_account(self):
         self.change("identity.json", lambda doc: doc.update(paper_port=4001))
-        with self.assertRaises(Exception):
+        with self.assertRaises(SafetyError):
             load(self.path)
         fixture(self.path)
         self.change("broker_account.json", lambda doc: doc.update(account_id="IB-U123456"))
         with self.assertRaisesRegex(LifecycleError, "differs"):
             load(self.path)
         fixture(self.path)
-        with self.assertRaises(Exception):
+        with self.assertRaises(SafetyError):
             load_paper_capture(
                 self.path, expected_account="IB-U123456", ticker="GOOG", instrument_id=INSTRUMENT,
                 action_version="v1",
