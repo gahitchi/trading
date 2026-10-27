@@ -126,6 +126,7 @@ class PaperCaptureTests(unittest.TestCase):
             )
             session.plan(OrderIntent("A", INSTRUMENT, Side.SELL, Decimal("3"), 1, True), action_version="v1")
             session.prepare_dispatch("A", timestamp_ns=2)
+
             def evidence(event_id: str, at: int) -> BrokerEvidence:
                 return BrokerEvidence(event_id, ACCOUNT, "fixture", SOURCE, at - 1, at, "v1")
 
@@ -134,12 +135,15 @@ class PaperCaptureTests(unittest.TestCase):
             digest = session.state_digest()
             report = load(self.path).compare(session)
             self.assertFalse(report.internally_consistent)
-            self.assertEqual(report.findings, (
-                "CAUSAL_FENCE_UNASSERTED",
-                "EXECUTION_COVERAGE_UNASSERTED",
-                "ORDER_COVERAGE_UNASSERTED",
-                "POSITION_COVERAGE_UNASSERTED",
-            ))
+            self.assertEqual(
+                report.findings,
+                (
+                    "CAUSAL_FENCE_UNASSERTED",
+                    "EXECUTION_COVERAGE_UNASSERTED",
+                    "ORDER_COVERAGE_UNASSERTED",
+                    "POSITION_COVERAGE_UNASSERTED",
+                ),
+            )
             self.assertFalse(report.source_authenticated)
             self.assertFalse(report.broker_authorization)
             self.assertFalse(report.release_reservations)
@@ -156,7 +160,10 @@ class PaperCaptureTests(unittest.TestCase):
         fixture(self.path)
         with self.assertRaises(SafetyError):
             load_paper_capture(
-                self.path, expected_account="IB-U123456", ticker="GOOG", instrument_id=INSTRUMENT,
+                self.path,
+                expected_account="IB-U123456",
+                ticker="GOOG",
+                instrument_id=INSTRUMENT,
                 action_version="v1",
             )
 

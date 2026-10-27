@@ -261,8 +261,7 @@ def _make_actor(cfg: LabConfig, iids: dict, out_dir: Path, wait_s: float, histor
                         "net_exact": str(
                             sum(
                                 (
-                                    Decimal(str(x.quantity))
-                                    * (Decimal("-1") if x.signed_qty < 0 else Decimal("1"))
+                                    Decimal(str(x.quantity)) * (Decimal("-1") if x.signed_qty < 0 else Decimal("1"))
                                     for x in open_
                                 ),
                                 Decimal("0"),

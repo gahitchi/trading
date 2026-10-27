@@ -166,11 +166,14 @@ def load_paper_capture(
     check_paper_settings(identity.get("paper_port"), expected_account.removeprefix("IB-"))
     if meta.get("stream") != "NAUTILUS_IBKR_READ_ONLY":
         raise LifecycleError("capture stream is not the recognized read-only adapter")
-    if any(meta.get(flag) is not False for flag in (
-        "coverage_verified",
-        "broker_authentication_verified",
-        "causal_boundary_verified",
-    )):
+    if any(
+        meta.get(flag) is not False
+        for flag in (
+            "coverage_verified",
+            "broker_authentication_verified",
+            "causal_boundary_verified",
+        )
+    ):
         raise LifecycleError("read-only capture cannot claim authenticated or complete broker history")
     begun = _positive_ns(meta.get("capture_started_ns"), "capture start")
     finished = _positive_ns(meta.get("capture_completed_ns"), "capture completion")
