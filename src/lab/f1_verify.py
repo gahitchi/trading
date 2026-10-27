@@ -26,6 +26,11 @@ from lab.economic_store import EconomicEventStore, EconomicStoreError
 from lab.engine_events import EngineFactError
 
 
+def _decimal_text(value) -> str:
+    """Canonical JSON decimal text, independent of input's trailing zero scale."""
+    return "0" if value == 0 else format(value, "f")
+
+
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Read-only exact F1 economic reconciliation (no trading)")
     parser.add_argument("--journal", type=Path, required=True, help="Existing SQLite economic journal")
@@ -54,9 +59,9 @@ def run(argv: list[str] | None = None) -> int:
         "statement_sha256": parity.statement_sha256,
         "ledger_evidence_head": parity.journal_evidence_head,
         "events_replayed": len(book.events),
-        "cash_delta_usd": format(parity.cash_delta, "f"),
+        "cash_delta_usd": _decimal_text(parity.cash_delta),
         "position_deltas": [
-            {"symbol": symbol, "quantity_delta": format(delta, "f")}
+            {"symbol": symbol, "quantity_delta": _decimal_text(delta)}
             for symbol, delta in parity.position_deltas
         ],
         "independent_projection_matches": parity.internal_projection_matches,
