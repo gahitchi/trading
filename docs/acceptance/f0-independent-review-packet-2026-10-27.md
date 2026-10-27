@@ -22,6 +22,9 @@ For the chosen SHA, use its GitHub CI run to verify the following:
    the pinned Syft SPDX inventory and Grype vulnerability JSON of the built
    runtime image. An unresolved High/Critical finding or scanner failure
    blocks acceptance. The receipt signature is **not** an OCI image signature.
+   First baseline and triage: [F0 container vulnerability audit](../audits/f0-vulnerability-baseline-2026-10-27.md).
+   The initial Grype result is **failed** (3 Critical and 75 High package matches).
+   Do not reinterpret a vulnerability-gated CI failure as a successful F0 review.
 5. `package`: frozen runtime/build locks, source/sdist/wheel build,
    separate repeat wheel build with commit-timestamp `SOURCE_DATE_EPOCH`,
    complete committed `src/lab` package-to-wheel byte equality,
