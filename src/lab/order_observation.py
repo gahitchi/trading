@@ -14,11 +14,11 @@ from decimal import Decimal, InvalidOperation
 
 from lab.economic_ledger import SYMBOL, EconomicLedgerError, _calc, exact
 from lab.engine_events import (
+    SHA256,
     BrokerFillFact,
     EngineEconomicBook,
     EngineFactError,
     FillFact,
-    SHA256,
     _identity,
 )
 from lab.settlement_input import _reject_nonfinite, _unique_object
@@ -206,7 +206,7 @@ def parse_external_order_statement(
                 )
                 receipt_ids.add(source_ref)
                 receipt_count += 1
-            receipt_total = _calc(lambda: sum((receipt.quantity for receipt in receipts), Decimal(0)))
+            receipt_total = _calc(lambda receipts=tuple(receipts): sum((receipt.quantity for receipt in receipts), Decimal(0)))
             if receipt_total != executed:
                 raise EngineFactError("execution receipt quantities do not conserve reported executed quantity")
         ids.add(order_id)
