@@ -1,68 +1,93 @@
-# F1 independent-engine evidence custody and settled-cash intake
+# F1 independent engine — evidence, settlement and durable accounting
 
-**2026-10-27. Candidate branch:** `chatgpt/f1-evidence-custody-20261027`.
+**2026-10-27; implementation candidate:**
+`chatgpt/f1-durable-economic-20261027` (supersedes the exploratory
+`chatgpt/f1-evidence-custody-20261027` branch). **Qualification: BLOCKED.**
+The source of truth is Trading Lab's broker-neutral model, NOT NautilusTrader.
+All implementation here is offline research-only, with no order authority.
 
-**Qualification:** BLOCKED. Read-only/offline research implementation. Nothing
-here grants release authority, claims authenticated external data or changes
-the currently Nautilus-driven legacy execution path.
+## Implemented prototype capabilities
 
-## What this branch implements
+- `economic_ledger.py`: exact-Decimal signed FIFO inventory, long/short
+  fills, commissions, immutable double-entry postings and business-event replay.
+  Nontrade splits and fractional cash-in-lieu adjust share quantity/cost basis
+  without manufacturing a price print, executed trade or market volume.
+- `engine_events.py`: own typed source facts (fill, classified cash,
+  split, cash-in-lieu), stable source identity and account identity, strict
+  timestamp ordering, duplicate rejection and source-evidence SHA-256 chaining.
+- `settlement_input.py`: strict bounded JSON input for declared settled
+  USD activity and fractional cash-in-lieu. Rejects duplicate/extra fields,
+  wrong account/currency, float or nonfinite amounts and unsupported statuses.
+  Original exact bytes are hashed. No broker authenticity is inferred.
+- `economic_store.py`: SQLite WAL and FULL synchronization; transactional
+  BEGIN IMMEDIATE, explicit commit, rollback/close, idempotent exact-evidence
+  retries, event/source uniqueness, optimistic head fencing, replay-verified
+  postings/source hashes and original source-byte storage for classified
+  cash and cash-in-lieu.
+- `account_projection.py`: independently applies source economic facts
+  with rational `Fraction` arithmetic and exact bounded base-10 conversion.
+  This mathematically cross-checks cash and net quantities without using
+  journal postings or FIFO lots; it does not independently authenticate inputs.
+- Settle-only posting types: capital in/out, dividend credits, interest
+  credits, borrow rebates, dividend withholding, short-manufactured
+  distributions, financing debits and borrow fees. No unsourced balance delta
+  is treated as income, funding or principal.
 
-1. The canonical `EngineEconomicBook` remains **Trading Lab owned** and
-   depends on standard-library Decimal/accounting code, **not NautilusTrader**.
-2. Every appended economic fact contributes to a SHA-256 evidence chain
-   combining the preceding head, own-account ID, event ID, independent source
-   reference, nanosecond event timestamp, typed event kind and exact values.
-   This covers fill economics, dividend/carry/capital events and split ratios.
-3. The snapshot contract includes an explicitly supplied
-   `applied_evidence_head`. A matching list of trade IDs alone no longer
-   proves that a snapshot has observed the same provenance/amount/time input.
-   `audit()` independently replays all events and compares both the
-   economic postings and the complete source-evidence head.
-4. A `CashFact` requires a **declared SETTLED** status, a supported source
-   category matching the economic kind, a stable statement-record ID and a
-   lowercase SHA-256 digest. `EXPECTED`, `ESTIMATED`, `PENDING`,
-   foreign-currency amounts, invalid source types and unexplained cash deltas
-   cannot silently appear as settled ledger entries.
-5. `settlement_input.py` accepts one bounded UTF-8 JSON activity record,
-   rejects duplicate fields, unknown schema keys, floats/nonfinite amounts,
-   unsupported currencies and account mismatch, hashes the **original
-   exact bytes**, and converts it to the canonical cash fact. It does not
-   invent market transactions or inject fake executable liquidity.
+## Exactness and custody constraints
 
-These are technical **integrity and classification** checks. An operator,
-source adapter or attacker can still supply a fake `SETTLED` statement
-and a matching SHA-256 of those fake bytes. SHA-256 does not authenticate
-a broker or guarantee a transaction actually settled.
+- Every trade source must have unique ID, positive exact quantity/price
+  and explicitly specified nonnegative commission; unsupported currencies
+  are not silently converted.
+- Each cash adjustment must have a declared economic kind and `SETTLED`
+  source event. Modeled carry and expected entitlements must remain outside
+  the settled account ledger.
+- Cash-in-lieu supports strictly fractional quantities and exact FIFO
+  basis release, with no implicit rounding. Non-terminating fractions are
+  refused pending an externally reviewed remainder/rounding policy.
+- Persisted financial payloads require bounded scale and precision; even
+  extreme exponent strings cannot expand into unbounded serialized digits.
+- Local hash chaining detects inconsistent in-place edits, but an attacker
+  controlling the entire database can replace the entire history and
+  unkeyed hash root. An independently anchored digest/signature is required.
 
-## Remaining acceptance work
+## Mandatory work before F1 sign-off
 
-- F1.2: real independent engine account state and externally captured
-  order/fill streams (rather than snapshots constructed from journal fields);
-  checks for complete instrument scope and independent event ordering.
-- F1.3: authenticated raw statement origin and reconciliation to cash
-  entitlements, accrual vs settlement, withholding, distributions on short
-  positions, financing rebates, sub-cent rounding/custody and fractional
-  corporate actions. The current cash parser supports **only five** kinds
-  with strictly positive absolute amounts and predeclared directions.
-- F1.4: atomic append-only durable custody across original source bytes,
-  economic postings and native engine state; durable idempotency,
-  correction/supersession, snapshot checkpoints, journal signatures or
-  independently anchored digests. The current unkeyed chain can be fully
-  rewritten by a party with unrestricted write access.
-- F1.5: independent arithmetic scenarios, financial spot checks,
-  adversity/failure cases, restart parity and reviewer signoff.
-- F0 signoff and separate F6/F8 broker/release gates remain mandatory.
+1. **F1.2:** separately acquired engine/account and externally captured
+   broker transaction observations. The rational projector is a different
+   arithmetic path over the same events, **not** an external accounting oracle.
+   Account completeness, timestamp finality and independent fill capture
+   must be validated against the same transaction IDs.
+2. **F1.3:** currency-specific USD minor-unit and sub-cent remainders,
+   native broker commission/fee classification, ex-/pay-date entitlements,
+   tax jurisdiction, short distribution entitlement, mergers, complex
+   reversals and delisting settlement. Cash-in-lieu is presently strictly
+   fractional and cannot substitute for qualified delisting rules.
+3. **F1.4:** durable stored broker order + raw fill source bytes, atomic
+   broker observation/ledger/own-engine state commits, corrections and
+   supersession (do not rewrite immutable originals), migrations/backfills,
+   externally anchored evidence and bounded streaming performance.
+   Current replay-based append is not suitable for very long histories:
+   it rebuilds the journal and has superlinear cost.
+4. **F1.5:** externally independent arithmetic reference and broker-state
+   parity; actual partial-fill/cancel races, account-type and margin
+   semantics, crashes at transactional boundaries, adversarial corruption,
+   reproducible Arch results, source-custody review and separate owner sign-off.
 
-## Developer validation
+F0's user-operated Arch baseline checks have passed, but F0 approval and
+the strict Docker vulnerability gate are separate outstanding obligations.
+Neither F1 nor F6 nor F8 can be marked approved by the present isolated tests.
+
+## Development checks
 
 ```sh
 uv sync --frozen --python 3.13 --extra dev
-uv run --no-sync pytest -q tests/test_economic_ledger.py tests/test_engine_events.py tests/test_settlement_input.py
-uvx --from ruff==0.17.3 ruff check src/lab/economic_ledger.py src/lab/engine_events.py src/lab/settlement_input.py tests/test_economic_ledger.py tests/test_engine_events.py tests/test_settlement_input.py
-uvx --from ruff==0.17.3 ruff format --check src/lab/economic_ledger.py src/lab/engine_events.py src/lab/settlement_input.py tests/test_economic_ledger.py tests/test_engine_events.py tests/test_settlement_input.py
+uv run --no-sync pytest -q tests/test_economic_ledger.py tests/test_engine_events.py tests/test_settlement_input.py tests/test_economic_store.py tests/test_account_projection.py tests/test_settlement_semantics.py tests/test_cash_in_lieu.py
+uvx --from ruff==0.17.3 ruff check src tests tools
+uvx --from ruff==0.17.3 ruff format --check src tests tools
+python3 tools/collab.py check
 ```
 
-This branch explicitly does not modify `src/lab/agents/execution.py`,
-`src/lab/paper.py`, the broker order/risk path, the hard-stop rules or
-any existing Docker vulnerability gate.
+This branch does not modify the legacy Nautilus-based execution agent,
+paper-only broker gate, kill switch, independent release gates or Docker
+security policy. It is a replacement-engine **foundation**, not a completed
+trading engine or production-ready financial ledger.
