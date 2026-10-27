@@ -197,7 +197,7 @@ class EconomicLedger:
             if lot.symbol != symbol or (lot.quantity > 0) == (signed > 0) or remaining == 0:
                 lots.append(lot)
                 continue
-            close = min(abs(lot.quantity), remaining)
+            close = min(lot.quantity.copy_abs(), remaining)
             released = _calc(lambda lot=lot, close=close: lot.basis * close / abs(lot.quantity))
             inventory_delta = _calc(
                 lambda inventory_delta=inventory_delta, released=released: inventory_delta - released
@@ -209,7 +209,7 @@ class EconomicLedger:
             remaining = _calc(lambda remaining=remaining, close=close: remaining - close)
 
         if remaining:
-            opened_qty = remaining if side == "BUY" else -remaining
+            opened_qty = remaining if side == "BUY" else _calc(lambda: -remaining)
             basis = _calc(lambda: opened_qty * px)
             lots.append(Lot(symbol, opened_qty, basis))
             inventory_delta = _calc(lambda: inventory_delta + basis)
@@ -296,7 +296,7 @@ class EconomicLedger:
             if lot.symbol != symbol or not correct_side or remaining == 0:
                 lots.append(lot)
                 continue
-            close = min(abs(lot.quantity), remaining)
+            close = min(lot.quantity.copy_abs(), remaining)
             released = _calc(lambda lot=lot, close=close: lot.basis * close / abs(lot.quantity))
             released_total = _calc(lambda released_total=released_total, released=released: released_total + released)
             remaining = _calc(lambda remaining=remaining, close=close: remaining - close)
