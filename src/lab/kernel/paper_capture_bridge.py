@@ -36,6 +36,7 @@ _REQUIRED = (
     "broker_positions.json",
     "broker_orders.json",
     "broker_capture_meta.json",
+    "CAPTURE_STATUS.json",
 )
 _MAX_FILE_BYTES = 8 * 1024 * 1024
 _STATUS = {
@@ -100,6 +101,14 @@ def _read_private_capture(folder: Path) -> tuple[dict[str, object], str]:
             raise LifecycleError("capture document has invalid shape")
         documents[name] = data
         digests.append([name, hashlib.sha256(raw).hexdigest()])
+    status = documents["CAPTURE_STATUS.json"]
+    if (
+        type(status) is not dict
+        or status.get("state") != "COMPLETE_UNVERIFIED"
+        or status.get("broker_authenticated") is not False
+        or status.get("history_coverage_verified") is not False
+    ):
+        raise LifecycleError("capture is incomplete, unauthenticated, or has invalid status provenance")
     manifest = hashlib.sha256(json.dumps(digests, separators=(",", ":")).encode("ascii")).hexdigest()
     return documents, manifest
 

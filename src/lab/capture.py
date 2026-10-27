@@ -137,6 +137,30 @@ def _write(path: Path, data) -> None:
     os.replace(tmp, path)
 
 
+
+_CAPTURE_REQUIRED = (
+    "identity.json",
+    "broker_account.json",
+    "broker_positions.json",
+    "broker_orders.json",
+    "broker_bars.json",
+    "broker_capture_meta.json",
+)
+
+
+def _set_capture_status(folder: Path, state: str) -> None:
+    """Explicitly quarantine failures; even a completed cache is NOT authenticated."""
+    _write(
+        folder / "CAPTURE_STATUS.json",
+        {"state": state, "broker_authenticated": False, "history_coverage_verified": False},
+    )
+
+
+def _verify_capture_files(folder: Path) -> None:
+    if any(not (folder / name).is_file() for name in _CAPTURE_REQUIRED):
+        raise RuntimeError("capture incomplete: required broker snapshot files missing")
+
+
 # ----------------------------------------------------------------------------- snapshot (read-only node)
 
 
@@ -323,17 +347,25 @@ def snapshot(
     out = check_outside_repo(cfg, out)
     d = phase_dir(out, phase) / f"snapshot-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
     d.mkdir(parents=True, mode=0o700)
-    _write(d / "identity.json", identity(cfg, specs))
-    lock = acquire_runtime_lock(cfg)  # the paper node must be stopped: one connection, no interference
+    _set_capture_status(d, "IN_PROGRESS")
     try:
-        node, iids = _base_node(cfg, tickers, clients)
-        node.add_actor(_make_actor(cfg, iids, d, wait_s, history_days))
+        _write(d / "identity.json", identity(cfg, specs))
+        lock = acquire_runtime_lock(cfg)  # the paper node must be stopped: one connection, no interference
         try:
-            node.run()
+            node, iids = _base_node(cfg, tickers, clients)
+            node.add_actor(_make_actor(cfg, iids, d, wait_s, history_days))
+            try:
+                node.run()
+            finally:
+                node.dispose()
         finally:
-            node.dispose()
-    finally:
-        lock.close()
+            lock.close()
+        _verify_capture_files(d)
+    except BaseException:
+        # Preserve private incident evidence but never mistake this folder for a completed B01 capture.
+        _set_capture_status(d, "INCOMPLETE")
+        raise
+    _set_capture_status(d, "COMPLETE_UNVERIFIED")
     _write(d / "NOTE.json", {"note": GRADING_NOTE, "files": sorted(p.name for p in d.iterdir())})
     return d
 
@@ -347,21 +379,28 @@ async def snapshot_async(cfg, tickers, out, phase, *, wait_s=3.0, history_days=1
     out = check_outside_repo(cfg, out)
     d = phase_dir(out, phase) / f"snapshot-{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}"
     d.mkdir(parents=True, mode=0o700)
-    _write(d / "identity.json", identity(cfg, specs))
-    lock = acquire_runtime_lock(cfg)
+    _set_capture_status(d, "IN_PROGRESS")
     try:
-        node, iids = _base_node(cfg, tickers, clients)
-        node.add_actor(_make_actor(cfg, iids, d, wait_s, history_days))
-        task = asyncio.ensure_future(node.run_async())
+        _write(d / "identity.json", identity(cfg, specs))
+        lock = acquire_runtime_lock(cfg)
         try:
-            await asyncio.wait_for(task, wait_s + 30)
+            node, iids = _base_node(cfg, tickers, clients)
+            node.add_actor(_make_actor(cfg, iids, d, wait_s, history_days))
+            task = asyncio.ensure_future(node.run_async())
+            try:
+                await asyncio.wait_for(task, wait_s + 30)
+            finally:
+                if not task.done():
+                    node.handle().stop()
+                    await asyncio.wait_for(task, 30)
+                node.dispose()
         finally:
-            if not task.done():
-                node.handle().stop()
-                await asyncio.wait_for(task, 30)
-            node.dispose()
-    finally:
-        lock.close()
+            lock.close()
+        _verify_capture_files(d)
+    except BaseException:
+        _set_capture_status(d, "INCOMPLETE")
+        raise
+    _set_capture_status(d, "COMPLETE_UNVERIFIED")
     _write(d / "NOTE.json", {"note": GRADING_NOTE, "files": sorted(p.name for p in d.iterdir())})
     return d
 
