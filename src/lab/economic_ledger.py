@@ -188,7 +188,7 @@ class EconomicLedger:
         qty = exact(quantity, positive=True)
         px = exact(price, positive=True)
         fee = exact(commission, nonnegative=True)
-        signed = qty if side == "BUY" else -qty
+        signed = qty if side == "BUY" else _calc(lambda: -qty)
         remaining = qty
         lots: list[Lot] = []
         inventory_delta = Decimal(0)
