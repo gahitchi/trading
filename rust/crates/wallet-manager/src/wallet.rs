@@ -30,7 +30,9 @@ pub struct WalletBuckets {
 }
 impl WalletBuckets {
     pub fn new(initial_equity: FixedUsd) -> Result<Self, WalletError> {
-        if initial_equity.0 <= 0 { return Err(WalletError::InvalidAmount); }
+        if initial_equity.0 <= 0 {
+            return Err(WalletError::InvalidAmount);
+        }
         let reserve = narrow(i128::from(initial_equity.0) * 30 / 100)?;
         let active = narrow(i128::from(initial_equity.0) - i128::from(reserve))?;
         let floor = narrow(i128::from(active) * 96 / 100)?;
@@ -61,7 +63,9 @@ impl WalletBuckets {
         })
     }
 
-    pub fn halt_required(&self) -> bool { self.halt_required }
+    pub fn halt_required(&self) -> bool {
+        self.halt_required
+    }
 
     /// Receive an externally verified *net realized* close P&L, including
     /// broker fees, slippage, financing and funding. The unique settlement
@@ -72,12 +76,17 @@ impl WalletBuckets {
     /// and return Insolvent without manufacturing a negative bucket.
     /// External account reconciliation is mandatory in that case.
     pub fn settle_close(
-        &mut self, settlement_id: u64, net_pnl: FixedUsd, lock_rate_pct: u8,
+        &mut self,
+        settlement_id: u64,
+        net_pnl: FixedUsd,
+        lock_rate_pct: u8,
     ) -> Result<WalletSnapshot, WalletError> {
         if settlement_id == 0 || settlement_id <= self.last_settlement_id {
             return Err(WalletError::NonMonotonicSettlement);
         }
-        if lock_rate_pct > 100 { return Err(WalletError::InvalidPercentage); }
+        if lock_rate_pct > 100 {
+            return Err(WalletError::InvalidPercentage);
+        }
         let (next_vault, next_active) = if net_pnl.0 > 0 {
             let sweep = i128::from(net_pnl.0) * i128::from(lock_rate_pct) / 100;
             (
@@ -94,8 +103,8 @@ impl WalletBuckets {
         };
         // Reconciliation must remain representable before mutating state;
         // returning an error after crediting funds would break atomicity.
-        let next_total = i128::from(self.margin_reserve.0)
-            + i128::from(next_vault) + i128::from(next_active);
+        let next_total =
+            i128::from(self.margin_reserve.0) + i128::from(next_vault) + i128::from(next_active);
         narrow(next_total)?;
         let next_hwm = self.high_water_mark.0.max(next_active);
         let next_floor = narrow(i128::from(next_hwm) * 96 / 100)?;
@@ -104,19 +113,27 @@ impl WalletBuckets {
         self.high_water_mark = FixedUsd(next_hwm);
         self.floor = FixedUsd(next_floor);
         self.last_settlement_id = settlement_id;
-        if next_active <= next_floor { self.halt_required = true; }
+        if next_active <= next_floor {
+            self.halt_required = true;
+        }
         self.snapshot()
     }
 
     /// 1_000_000 = 100% cushion; integer squared CPPI damping.
     pub fn cppi_damper_ppm(&self) -> Result<u32, WalletError> {
-        if self.halt_required { return Ok(0); }
+        if self.halt_required {
+            return Ok(0);
+        }
         let cushion = i128::from(self.active_equity.0) - i128::from(self.floor.0);
-        if cushion <= 0 { return Ok(0); }
+        if cushion <= 0 {
+            return Ok(0);
+        }
         // The denominator is 4% of the *exact* high-water mark, not a
         // post-rounded floor, avoiding distortions at small balances.
         let denom = i128::from(self.high_water_mark.0) * 4;
-        if denom == 0 { return Err(WalletError::InvalidAmount); }
+        if denom == 0 {
+            return Err(WalletError::InvalidAmount);
+        }
         let linear_ppm = (cushion * 100_000_000 / denom).clamp(0, 1_000_000);
         let squared = linear_ppm * linear_ppm / 1_000_000;
         Ok(squared as u32)

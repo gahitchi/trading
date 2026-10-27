@@ -31,12 +31,15 @@ pub(crate) fn narrow(v: i128) -> Result<i64, WalletError> {
     i64::try_from(v).map_err(|_| WalletError::ArithmeticOverflow)
 }
 pub(crate) fn ratio(num: i128, den: i128) -> Result<i128, WalletError> {
-    if den <= 0 { return Err(WalletError::InvalidObservation); }
+    if den <= 0 {
+        return Err(WalletError::InvalidObservation);
+    }
     num.checked_mul(i128::from(SCALE))
         .ok_or(WalletError::ArithmeticOverflow)
         .map(|n| n / den)
 }
 pub(crate) fn mul_scaled(a: i128, b: i128) -> Result<i128, WalletError> {
-    a.checked_mul(b).ok_or(WalletError::ArithmeticOverflow)
+    a.checked_mul(b)
+        .ok_or(WalletError::ArithmeticOverflow)
         .map(|v| v / i128::from(SCALE))
 }

@@ -9,10 +9,20 @@ const MIN_EFFECTIVE_SAMPLES: i128 = 30;
 const MAX_OBSERVED_R: i128 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Strategy { A, B, C, D }
+pub enum Strategy {
+    A,
+    B,
+    C,
+    D,
+}
 impl Strategy {
     const fn index(self) -> usize {
-        match self { Self::A => 0, Self::B => 1, Self::C => 2, Self::D => 3 }
+        match self {
+            Self::A => 0,
+            Self::B => 1,
+            Self::C => 2,
+            Self::D => 3,
+        }
     }
 }
 
@@ -65,14 +75,21 @@ impl Evidence {
 /// Keep separate per-strategy histories. Observations are reward-to-ex-ante-
 /// risk multiples, never raw heterogeneous USD profit/loss magnitudes.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct BayesianKelly { strategies: [Evidence; 4] }
+pub struct BayesianKelly {
+    strategies: [Evidence; 4],
+}
 impl BayesianKelly {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Caller must first settle net P&L in the account's durable ledger.
     /// Observations >100R are rejected rather than silently clipping tails.
     pub fn observe(
-        &mut self, strategy: Strategy, net_pnl: FixedUsd, ex_ante_risk: FixedUsd,
+        &mut self,
+        strategy: Strategy,
+        net_pnl: FixedUsd,
+        ex_ante_risk: FixedUsd,
     ) -> Result<(), WalletError> {
         if ex_ante_risk.0 <= 0 || net_pnl.0 == 0 {
             return Err(WalletError::InvalidObservation);
@@ -85,12 +102,15 @@ impl BayesianKelly {
     pub fn estimate(&self, strategy: Strategy) -> Result<KellyEstimate, WalletError> {
         let e = self.strategies[strategy.index()];
         let scale = i128::from(SCALE);
-        let posterior_p = ratio(PRIOR_ALPHA * scale + e.wins,
-            (PRIOR_ALPHA + PRIOR_BETA) * scale + e.wins + e.losses)?;
-        let mean_win = ratio(15 * scale + e.win_sum_r,
-            PRIOR_PAYOFF_MASS * scale + e.wins)?;
-        let mean_loss = ratio(10 * scale + e.loss_sum_r,
-            PRIOR_PAYOFF_MASS * scale + e.losses)?;
+        let posterior_p = ratio(
+            PRIOR_ALPHA * scale + e.wins,
+            (PRIOR_ALPHA + PRIOR_BETA) * scale + e.wins + e.losses,
+        )?;
+        let mean_win = ratio(15 * scale + e.win_sum_r, PRIOR_PAYOFF_MASS * scale + e.wins)?;
+        let mean_loss = ratio(
+            10 * scale + e.loss_sum_r,
+            PRIOR_PAYOFF_MASS * scale + e.losses,
+        )?;
         let payoff_ratio = ratio(mean_win, mean_loss)?;
         let lose_p = scale - posterior_p;
         let loss_adjustment = ratio(lose_p, payoff_ratio)?;

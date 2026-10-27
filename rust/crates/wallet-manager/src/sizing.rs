@@ -18,7 +18,8 @@ impl ConvictionInputs {
     /// Formula weights 0.35 / 2.8, 0.35 / 4.5, 0.30 / 0.45.
     /// Clamped to [0.6, 1.85], all with integer arithmetic.
     pub fn multiplier_raw(self) -> Result<i64, WalletError> {
-        if self.ofi_abs_z_raw < 0 || self.isr_down_raw < 0
+        if self.ofi_abs_z_raw < 0
+            || self.isr_down_raw < 0
             || !(0..=SCALE).contains(&self.vpin_short_raw)
         {
             return Err(WalletError::InvalidObservation);
@@ -26,9 +27,8 @@ impl ConvictionInputs {
         let z = i128::from(self.ofi_abs_z_raw);
         let h = i128::from(self.isr_down_raw);
         let v = i128::from(self.vpin_short_raw);
-        let weighted = 35 * z * 10 / (100 * 28)
-            + 35 * h * 10 / (100 * 45)
-            + 30 * v * 100 / (100 * 45);
+        let weighted =
+            35 * z * 10 / (100 * 28) + 35 * h * 10 / (100 * 45) + 30 * v * 100 / (100 * 45);
         narrow(weighted.clamp(60_000_000, 185_000_000))
     }
 }
@@ -71,7 +71,9 @@ pub enum SizingDecision {
     Reject(NoTradeReason),
 }
 fn multiply_divide(a: i128, b: i128, d: i128) -> Result<i128, WalletError> {
-    if d <= 0 { return Err(WalletError::InvalidObservation); }
+    if d <= 0 {
+        return Err(WalletError::InvalidObservation);
+    }
     Ok(a.checked_mul(b).ok_or(WalletError::ArithmeticOverflow)? / d)
 }
 
@@ -89,7 +91,9 @@ pub fn compute_short_position_size(
     book: &FlatOrderBook,
     inputs: EntrySizingInputs,
 ) -> Result<SizingDecision, WalletError> {
-    operator.validate().map_err(|_| WalletError::InvalidObservation)?;
+    operator
+        .validate()
+        .map_err(|_| WalletError::InvalidObservation)?;
     if inputs.sigma_1m_bps_raw < 0
         || inputs.gross_open_and_pending_notional.0 < 0
         || inputs.minimum_order_notional.0 < 0
@@ -97,21 +101,31 @@ pub fn compute_short_position_size(
         return Err(WalletError::InvalidAmount);
     }
     let conviction = inputs.conviction.multiplier_raw()?;
-    if operator.mode == TradingMode::HaltAll { return Ok(SizingDecision::Reject(NoTradeReason::OperatorHalt)); }
-    if !matches!(operator.mode, TradingMode::ShortOnly
-        | TradingMode::ShortBiased | TradingMode::BiDirectional)
-    {
+    if operator.mode == TradingMode::HaltAll {
+        return Ok(SizingDecision::Reject(NoTradeReason::OperatorHalt));
+    }
+    if !matches!(
+        operator.mode,
+        TradingMode::ShortOnly | TradingMode::ShortBiased | TradingMode::BiDirectional
+    ) {
         return Ok(SizingDecision::Reject(NoTradeReason::WrongMode));
     }
     let mask = match strategy {
-        Strategy::A => 1, Strategy::B => 2, Strategy::C => 4, Strategy::D => 8,
+        Strategy::A => 1,
+        Strategy::B => 2,
+        Strategy::C => 4,
+        Strategy::D => 8,
     };
     if operator.strategy_enable_mask & mask == 0 {
         return Ok(SizingDecision::Reject(NoTradeReason::StrategyDisabled));
     }
-    if wallet.halt_required() { return Ok(SizingDecision::Reject(NoTradeReason::SessionFloor)); }
+    if wallet.halt_required() {
+        return Ok(SizingDecision::Reject(NoTradeReason::SessionFloor));
+    }
     let damper = wallet.cppi_damper_ppm()?;
-    if damper == 0 { return Ok(SizingDecision::Reject(NoTradeReason::SessionFloor)); }
+    if damper == 0 {
+        return Ok(SizingDecision::Reject(NoTradeReason::SessionFloor));
+    }
     let estimate = kelly.estimate(strategy)?;
     if !estimate.sample_ready {
         return Ok(SizingDecision::Reject(NoTradeReason::InsufficientSample));
@@ -122,16 +136,25 @@ pub fn compute_short_position_size(
     if book.bids().len() < 10 || book.asks().is_empty() || !book.has_uncrossed_top() {
         return Ok(SizingDecision::Reject(NoTradeReason::InsufficientBook));
     }
-    let lambda = book.bid_book_slope_10().map_err(|_| WalletError::InvalidBook)?;
+    let lambda = book
+        .bid_book_slope_10()
+        .map_err(|_| WalletError::InvalidBook)?;
     let Some(lambda) = lambda else {
         return Ok(SizingDecision::Reject(NoTradeReason::InsufficientBook));
     };
-    if lambda.0 < 0 { return Err(WalletError::InvalidBook); }
+    if lambda.0 < 0 {
+        return Err(WalletError::InvalidBook);
+    }
     let mut top5_raw: i128 = 0;
     for level in book.bids().iter().take(5) {
-        if level.price.0 <= 0 || level.qty.0 <= 0 { return Err(WalletError::InvalidBook); }
-        let notional = multiply_divide(i128::from(level.price.0), i128::from(level.qty.0), SCALE128)?;
-        top5_raw = top5_raw.checked_add(notional).ok_or(WalletError::ArithmeticOverflow)?;
+        if level.price.0 <= 0 || level.qty.0 <= 0 {
+            return Err(WalletError::InvalidBook);
+        }
+        let notional =
+            multiply_divide(i128::from(level.price.0), i128::from(level.qty.0), SCALE128)?;
+        top5_raw = top5_raw
+            .checked_add(notional)
+            .ok_or(WalletError::ArithmeticOverflow)?;
     }
     // Quote notional is in the same currency as the wallet only for USD-quoted
     // instruments. FX and non-USD quotes require a separate conversion gate.
@@ -146,7 +169,8 @@ pub fn compute_short_position_size(
     let risk2 = multiply_divide(risk1, i128::from(conviction), SCALE128)?;
     let kelly_notional = multiply_divide(risk2, BPS128, stop_raw)?;
     let leverage_total = equity * i128::from(operator.max_leverage_tenths) / 10;
-    let leverage_cap = (leverage_total - i128::from(inputs.gross_open_and_pending_notional.0)).max(0);
+    let leverage_cap =
+        (leverage_total - i128::from(inputs.gross_open_and_pending_notional.0)).max(0);
     if leverage_cap == 0 {
         return Ok(SizingDecision::Reject(NoTradeReason::NoLeverageCapacity));
     }
