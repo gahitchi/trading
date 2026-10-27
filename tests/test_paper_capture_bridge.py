@@ -222,18 +222,23 @@ class PaperCaptureTests(unittest.TestCase):
 
     def test_private_cli_requires_matching_paper_config_and_never_discloses_account(self):
         config = self.path / "lab.toml"
-        config.write_text(
-            '[paper]\naccount_id = "DUR123456"\nport = 4002\n[universe]\nGOOG = "XNAS"\n'
-        )
+        config.write_text('[paper]\naccount_id = "DUR123456"\nport = 4002\n[universe]\nGOOG = "XNAS"\n')
 
         def inspect() -> subprocess.CompletedProcess[str]:
             return subprocess.run(
                 [
-                    sys.executable, "-S", "-m", "lab.kernel.paper_capture_bridge",
-                    "--config", str(config),
-                    "--capture", str(self.path),
-                    "--ticker", "GOOG",
-                    "--action-version", "v1",
+                    sys.executable,
+                    "-S",
+                    "-m",
+                    "lab.kernel.paper_capture_bridge",
+                    "--config",
+                    str(config),
+                    "--capture",
+                    str(self.path),
+                    "--ticker",
+                    "GOOG",
+                    "--action-version",
+                    "v1",
                 ],
                 cwd=ROOT,
                 env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
@@ -260,7 +265,7 @@ class PaperCaptureTests(unittest.TestCase):
         self.assertEqual(wrong_port.returncode, 2)
         self.assertNotIn(ACCOUNT, wrong_port.stdout + wrong_port.stderr)
 
-        config.write_text(config.read_text().replace('DUR123456', 'U123456'))
+        config.write_text(config.read_text().replace("DUR123456", "U123456"))
         wrong_account = inspect()
         self.assertEqual(wrong_account.returncode, 2)
         self.assertNotIn(ACCOUNT, wrong_account.stdout + wrong_account.stderr)

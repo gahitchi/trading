@@ -168,9 +168,7 @@ def load_paper_capture(
     if account.get("account_id") != expected_account:
         raise LifecycleError("reported broker account differs from expected paper account")
     check_paper_settings(identity.get("paper_port"), expected_account.removeprefix("IB-"))
-    if expected_port is not None and (
-        type(expected_port) is not int or expected_port != identity.get("paper_port")
-    ):
+    if expected_port is not None and (type(expected_port) is not int or expected_port != identity.get("paper_port")):
         raise LifecycleError("capture paper gateway port differs from pinned configuration")
     if meta.get("stream") != "NAUTILUS_IBKR_READ_ONLY":
         raise LifecycleError("capture stream is not the recognized read-only adapter")
