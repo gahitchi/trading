@@ -281,7 +281,6 @@ def test_malformed_external_order_scope_never_authorizes_numerical_parity(tmp_pa
     assert "refused" in capsys.readouterr().err
 
 
-
 def test_cli_refuses_legacy_quantity_only_order_report_for_real_broker_fills(tmp_path, capsys):
     path = tmp_path / "broker-v1.db"
     store = EconomicEventStore(path, "SIM-001")
@@ -292,8 +291,16 @@ def test_cli_refuses_legacy_quantity_only_order_report_for_real_broker_fills(tmp
     orders = tmp_path / "orders.json"
     orders.write_bytes(order_report(schema_version=1))
     args = [
-        "--journal", str(path), "--account", "SIM-001",
-        "--statement", str(account), "--orders", str(orders), "--source", "broker",
+        "--journal",
+        str(path),
+        "--account",
+        "SIM-001",
+        "--statement",
+        str(account),
+        "--orders",
+        str(orders),
+        "--source",
+        "broker",
     ]
     assert run(args) == 3
     assert "v2 complete execution receipt" in capsys.readouterr().err
@@ -310,8 +317,16 @@ def test_cli_refuses_order_and_account_snapshots_from_distinct_times(tmp_path, c
     orders = tmp_path / "orders.json"
     orders.write_bytes(order_report(as_of_ns=31))
     args = [
-        "--journal", str(path), "--account", "SIM-001",
-        "--statement", str(account), "--orders", str(orders), "--source", "broker",
+        "--journal",
+        str(path),
+        "--account",
+        "SIM-001",
+        "--statement",
+        str(account),
+        "--orders",
+        str(orders),
+        "--source",
+        "broker",
     ]
     assert run(args) == 3
     assert "different snapshot times" in capsys.readouterr().err

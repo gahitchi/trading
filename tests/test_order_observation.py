@@ -214,7 +214,6 @@ def test_empty_broker_order_book_matches_empty_engine_account():
     assert parity.broker_fills_checked == 0
 
 
-
 def v2_report(*, receipts=None):
     """Version 2 requires an explicit complete execution receipt inventory."""
     payload = json.loads(report_bytes())
@@ -276,9 +275,7 @@ def test_v2_missing_original_receipt_is_hard_incompleteness_error():
 def test_v2_duplicate_cross_order_receipt_id_is_rejected():
     payload = json.loads(v2_report())
     other = order(order_id="order-2", executed="0.25")
-    other["execution_receipts"] = [
-        {"record_id": "r1", "quantity": "0.25", "source_sha256": "a" * 64}
-    ]
+    other["execution_receipts"] = [{"record_id": "r1", "quantity": "0.25", "source_sha256": "a" * 64}]
     payload["orders"].append(other)
     with pytest.raises(EngineFactError, match="duplicate execution receipt"):
         parse(json.dumps(payload).encode())

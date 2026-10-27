@@ -201,12 +201,12 @@ def parse_external_order_statement(
                 digest = receipt["source_sha256"]
                 if type(digest) is not str or not SHA256.fullmatch(digest):
                     raise EngineFactError("invalid execution receipt digest")
-                receipts.append(
-                    ReportedExecution(source_ref, _quantity(receipt["quantity"], positive=True), digest)
-                )
+                receipts.append(ReportedExecution(source_ref, _quantity(receipt["quantity"], positive=True), digest))
                 receipt_ids.add(source_ref)
                 receipt_count += 1
-            receipt_total = _calc(lambda receipts=tuple(receipts): sum((receipt.quantity for receipt in receipts), Decimal(0)))
+            receipt_total = _calc(
+                lambda receipts=tuple(receipts): sum((receipt.quantity for receipt in receipts), Decimal(0))
+            )
             if receipt_total != executed:
                 raise EngineFactError("execution receipt quantities do not conserve reported executed quantity")
         ids.add(order_id)
