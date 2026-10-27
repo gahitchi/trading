@@ -79,7 +79,7 @@ def test_snapshot_records_the_broker_view_without_placing_orders(goog_lab, goog,
     assert pseudo in (next(again.rglob("broker_account.json"))).read_text()
 
 
-def test_broker_connect_timeout_quarantines_partial_snapshot_without_authority(goog_lab, tmp_path, monkeypatch):
+def test_broker_connect_timeout_quarantines_partial_snapshot_without_authority(goog_lab, tmp_path_factory, monkeypatch):
     from dataclasses import replace
 
     from lab import paper
@@ -90,7 +90,7 @@ def test_broker_connect_timeout_quarantines_partial_snapshot_without_authority(g
         raise RuntimeError("data-connect timeout")
 
     monkeypatch.setattr(paper, "_base_node", reject)
-    location = tmp_path / "private-failed-b01"
+    location = tmp_path_factory.mktemp("private-failed-b01") / "evidence"
     with pytest.raises(RuntimeError, match="data-connect timeout"):
         capture.snapshot(cfg, ["GOOG"], location, "B01-readonly")
     captured = list((location / "B01-readonly").glob("snapshot-*"))
