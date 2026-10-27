@@ -191,9 +191,7 @@ class EngineEconomicBook:
         symbols = {lot.symbol for lot in self.ledger.lots}
         if symbols - observed.keys():
             raise EngineFactError("engine snapshot omitted a journal position")
-        deltas = tuple(
-            (symbol, observed[symbol] - self.ledger.position(symbol)) for symbol in sorted(observed)
-        )
+        deltas = tuple((symbol, observed[symbol] - self.ledger.position(symbol)) for symbol in sorted(observed))
         return EngineParity(
             _number(snapshot.cash, "engine cash") - self.ledger.balance("cash:USD"),
             deltas,
