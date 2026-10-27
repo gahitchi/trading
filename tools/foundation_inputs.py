@@ -80,7 +80,13 @@ def observation(directory: Path) -> dict:
                 config = tomllib.loads(data.decode("utf-8"))
             except (ValueError, UnicodeError) as exc:
                 raise foundation.FoundationError("unreadable research configuration") from exc
-            if config.get("universe", {}).get("SPY") != "ARCX" or config.get("trading", {}).get("speed") != "daily":
+            if (
+                not isinstance(config, dict)
+                or not isinstance(config.get("universe"), dict)
+                or not isinstance(config.get("trading"), dict)
+                or config["universe"].get("SPY") != "ARCX"
+                or config["trading"].get("speed") != "daily"
+            ):
                 raise foundation.FoundationError("reference research configuration does not match F0 scope")
         if role == "market_manifest":
             try:
