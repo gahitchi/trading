@@ -274,6 +274,36 @@ fn unsafe_account_sources_and_unreserved_orders_are_denied() {
     );
 }
 #[test]
+fn unresolved_reconciliation_or_missing_reservations_cancel_entries() {
+    let mut g = ready_gate();
+    let op = operator();
+    let mut c = context(VenueId::BybitLinear);
+    c.account.reconciled = false;
+    assert!(g.monitor(&c, wallet(), &op).unwrap().cancel_resting_entries);
+    c.account.reconciled = true;
+    c.account.reservations_current = false;
+    assert!(g.monitor(&c, wallet(), &op).unwrap().cancel_resting_entries);
+}
+#[test]
+fn forged_order_timestamps_tif_or_negative_hawkes_intensity_are_rejected() {
+    let mut g = ready_gate();
+    let op = operator();
+    let c = context(VenueId::BybitLinear);
+    let mut o = order(VenueId::BybitLinear, 0, 1);
+    o.created_at_ns = NOW + 1;
+    assert_eq!(g.validate_entry(&o, &c, wallet(), &op).unwrap(),
+        GateDecision::Rejected(RiskReason::BadOrder));
+    o.created_at_ns = NOW;
+    o.time_in_force = 255;
+    assert_eq!(g.validate_entry(&o, &c, wallet(), &op).unwrap(),
+        GateDecision::Rejected(RiskReason::BadOrder));
+    o.time_in_force = TimeInForce::Gtc as u8;
+    let mut invalid = c;
+    invalid.market.isr_up_scaled = -1;
+    assert_eq!(g.validate_entry(&o, &invalid, wallet(), &op).unwrap(),
+        GateDecision::Rejected(RiskReason::BadOrder));
+}
+#[test]
 fn latency_or_source_outage_requests_cancel_resting_entries() {
     let mut g = ready_gate();
     let mut c = context(VenueId::BinanceUsdM);

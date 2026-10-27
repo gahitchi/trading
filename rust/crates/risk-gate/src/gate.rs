@@ -103,7 +103,9 @@ impl RiskGate {
                 ..RiskDirective::default()
             });
         }
-        if self.latency.state().blocked
+        if !ctx.account.reconciled
+            || !ctx.account.reservations_current
+            || self.latency.state().blocked
             || !observed_is_fresh
             || !self.latency_sample_fresh(m.now_ns)
         {
@@ -127,6 +129,12 @@ impl RiskGate {
             return Err(RiskReason::InvalidPolicy);
         }
         if intent.client_order_id == 0
+            || intent.created_at_ns == 0
+            || intent.created_at_ns > m.now_ns
+            || m.now_ns - intent.created_at_ns > self.policy.max_quote_age_ns
+            || intent.time_in_force > 3
+            || intent.max_slippage_bps > 10_000
+            || m.isr_up_scaled < 0
             || intent.limit_price <= 0
             || intent.quantity <= 0
             || intent.symbol_id >= 9
