@@ -73,7 +73,9 @@ jobs:
           uv export --frozen --only-group build --no-emit-project --format requirements-txt --output-file requirements-build.lock
           git diff --exit-code -- requirements.lock requirements-build.lock
       - name: build source and wheel without unpinned build isolation
-        run: uv build --no-build-isolation
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
+          uv build --no-build-isolation
       - name: verify the installed app includes setup and browser assets
         run: |
           uv run --no-sync python - <<'PY'
@@ -93,6 +95,17 @@ jobs:
           python3 tools/foundation_manifest.py create --out "$RUNNER_TEMP/f0-candidate/source.json"
           python3 tools/foundation_manifest.py verify --input "$RUNNER_TEMP/f0-candidate/source.json"
           sha256sum dist/*.whl > "$RUNNER_TEMP/f0-candidate/wheel.sha256"
+      - name: independently repeat wheel command and verify packaged source bytes
+        run: |
+          mkdir -p "$RUNNER_TEMP/f0-wheel-repeat"
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)"
+          uv build --wheel --no-build-isolation --out-dir "$RUNNER_TEMP/f0-wheel-repeat"
+          python3 tools/foundation_wheel.py --first dist/*.whl \
+            --second "$RUNNER_TEMP/f0-wheel-repeat"/*.whl capture \
+            --out "$RUNNER_TEMP/f0-candidate/wheel-repeat.json"
+          python3 tools/foundation_wheel.py --first dist/*.whl \
+            --second "$RUNNER_TEMP/f0-wheel-repeat"/*.whl verify \
+            --input "$RUNNER_TEMP/f0-candidate/wheel-repeat.json"
       - name: retain F0 unsigned source and wheel identity evidence
         uses: actions/upload-artifact@v4
         with:
