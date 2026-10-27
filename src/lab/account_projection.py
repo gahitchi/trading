@@ -113,11 +113,7 @@ def project_account(book: EngineEconomicBook) -> ProjectedAccount:
     return ProjectedAccount(
         book.account_id,
         _fraction_decimal(cash),
-        tuple(
-            (symbol, _fraction_decimal(quantity))
-            for symbol, quantity in sorted(positions.items())
-            if quantity
-        ),
+        tuple((symbol, _fraction_decimal(quantity)) for symbol, quantity in sorted(positions.items()) if quantity),
         tuple(fact.event_id for fact in book.events),
         book.evidence_head,
     )
@@ -128,10 +124,7 @@ def compare_projection(book: EngineEconomicBook) -> IndependentProjectionParity:
     own = project_account(book)
     journal = book.ledger
     symbols = {symbol for symbol, _ in own.positions} | {lot.symbol for lot in journal.lots}
-    deltas = tuple(
-        (symbol, own.quantity(symbol) - journal.position(symbol))
-        for symbol in sorted(symbols)
-    )
+    deltas = tuple((symbol, own.quantity(symbol) - journal.position(symbol)) for symbol in sorted(symbols))
     return IndependentProjectionParity(
         own.cash - journal.balance("cash:USD"),
         deltas,
