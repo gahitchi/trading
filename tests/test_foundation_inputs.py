@@ -153,7 +153,7 @@ def test_explicit_private_pilot_config_does_not_mutate_tracked_operator_config(l
     assert "SPY" not in receipt.read_text()
     assert record["qualification"] == "BLOCKED"
     assert inputs.verify(root, receipt, config=private)["byte_identity_matches"] is True
-    with pytest.raises(source.FoundationError, match="differs"):
+    with pytest.raises(source.FoundationError, match="isolated"):
         inputs.verify(root, receipt)
     private.write_text('[universe]\nSPY = "ARCX"\n[trading]\nspeed = "15m"\n')
     with pytest.raises(source.FoundationError):
