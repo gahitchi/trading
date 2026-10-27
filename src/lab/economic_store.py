@@ -108,6 +108,44 @@ def _decode(payload: bytes) -> EconomicFact:
     return fact
 
 
+def _verify_source_binding(fact: EconomicFact, raw: bytes, account_id: str) -> None:
+    """Reparse original bytes and prove the *claimed* fact is exactly that record.
+
+    SHA256(raw) alone is insufficient: without this check a caller could
+    attach genuine cash-statement bytes to fabricated financial fields.
+    This is content integrity, never issuer authentication or finality.
+    """
+    from lab.settlement_input import (
+        _reject_nonfinite,
+        _unique_object,
+        parse_settled_cash_in_lieu_record,
+        parse_settled_cash_record,
+    )
+
+    if type(fact) not in (CashFact, CashInLieuFact):
+        raise EconomicStoreError("source binding requires classified cash fact")
+    if type(raw) is not bytes or not 0 < len(raw) <= MAX_SOURCE_BYTES:
+        raise EconomicStoreError("missing or invalid original settlement bytes")
+    if hashlib.sha256(raw).hexdigest() != fact.source_sha256:
+        raise EconomicStoreError("source digest does not match original statement bytes")
+    try:
+        document = json.loads(
+            raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_nonfinite
+        )
+        if type(document) is not dict or type(document.get("record_id")) is not str:
+            raise EconomicStoreError("settlement record is missing a typed source identifier")
+        suffix = ":" + document["record_id"]
+        if not fact.source_ref.endswith(suffix):
+            raise EconomicStoreError("source reference does not match original record")
+        namespace = _identity(fact.source_ref[: -len(suffix)], "source namespace")
+        parser = parse_settled_cash_record if type(fact) is CashFact else parse_settled_cash_in_lieu_record
+        observed = parser(raw, source_namespace=namespace, expected_account_id=account_id)
+    except (UnicodeError, ValueError, TypeError, EngineFactError) as exc:
+        raise EconomicStoreError("original statement cannot establish claimed economic source") from exc
+    if observed != fact:
+        raise EconomicStoreError("claimed economic fields do not match the original settlement record")
+
+
 class EconomicEventStore:
     """Single USD-account append-only event journal, independently replayed.
 
@@ -170,8 +208,7 @@ class EconomicEventStore:
             if type(fact) in (CashFact, CashInLieuFact):
                 if type(source_bytes) is not bytes or not 0 < len(source_bytes) <= MAX_SOURCE_BYTES:
                     raise EconomicStoreError("missing or invalid original settlement evidence")
-                if hashlib.sha256(source_bytes).hexdigest() != fact.source_sha256:
-                    raise EconomicStoreError("original settlement evidence does not match its digest")
+                _verify_source_binding(fact, source_bytes, self.account_id)
             elif source_bytes is not None:
                 raise EconomicStoreError("unsupported extra source bytes for noncash event")
             book = book.append(fact)
@@ -206,8 +243,7 @@ class EconomicEventStore:
         if type(fact) in (CashFact, CashInLieuFact):
             if type(source_bytes) is not bytes or not 0 < len(source_bytes) <= MAX_SOURCE_BYTES:
                 raise EconomicStoreError("cash event requires original source bytes")
-            if hashlib.sha256(source_bytes).hexdigest() != fact.source_sha256:
-                raise EconomicStoreError("cash event source digest does not match supplied bytes")
+            _verify_source_binding(fact, source_bytes, self.account_id)
         elif source_bytes is not None:
             raise EconomicStoreError("noncash source bytes have no qualified custody policy")
         if expected_head is not None and (type(expected_head) is not str or len(expected_head) != 64):
