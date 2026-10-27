@@ -158,3 +158,117 @@ def test_cli_never_requires_nautilus_native_objects(tmp_path, capsys):
     _, _, args = fixture(tmp_path)
     assert run(args) == 0
     assert capsys.readouterr().out.startswith('{"account_id":')
+
+
+
+def broker_receipt():
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "account_id": "SIM-001",
+            "record_id": "receipt-001",
+            "event_id": "broker-fill-001",
+            "timestamp_ns": 20,
+            "kind": "BROKER_FILL",
+            "status": "EXECUTED",
+            "source_kind": "BROKER_EXECUTION_REPORT",
+            "broker_order_id": "order-001",
+            "symbol": "SPY",
+            "side": "BUY",
+            "quote_currency": "USD",
+            "commission_currency": "USD",
+            "quantity": "2",
+            "price": "100",
+            "commission": "0.25",
+        },
+        sort_keys=True,
+    ).encode()
+
+
+def order_report(executed="2", status="FILLED", remaining="0"):
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "account_id": "SIM-001",
+            "record_id": "orders-001",
+            "as_of_ns": 30,
+            "source_kind": "BROKER_ORDER_STATEMENT",
+            "complete_order_scope": True,
+            "orders": [
+                {
+                    "broker_order_id": "order-001",
+                    "symbol": "SPY",
+                    "side": "BUY",
+                    "status": status,
+                    "requested_quantity": "2",
+                    "executed_quantity": executed,
+                    "remaining_quantity": remaining,
+                }
+            ],
+        },
+        sort_keys=True,
+    ).encode()
+
+
+def test_broker_fill_journal_requires_independent_order_scope(tmp_path, capsys):
+    path = tmp_path / "broker.db"
+    store = EconomicEventStore(path, "SIM-001")
+    store.append_cash_record(cash_activity(), source_namespace="broker")
+    store.append_broker_fill_record(broker_receipt(), source_namespace="broker")
+    statement = tmp_path / "account.json"
+    statement.write_bytes(report())
+    args = [
+        "--journal",
+        str(path),
+        "--account",
+        "SIM-001",
+        "--statement",
+        str(statement),
+        "--source",
+        "broker",
+    ]
+    assert run(args) == 3
+    assert "order report" in capsys.readouterr().err
+    assert store.load().ledger.position("SPY") == D("2")
+
+    orders = tmp_path / "orders.json"
+    orders.write_bytes(order_report())
+    assert run([*args, "--orders", str(orders)]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["order_parity_checked"] is True
+    assert output["broker_fills_checked"] == 1
+    assert output["order_deltas"][0]["quantity_delta"] == "0"
+    assert output["broker_source_authenticated"] is False
+    assert output["execution_authorized"] is False
+
+    orders.write_bytes(order_report(executed="1.5", status="PARTIALLY_FILLED", remaining="0.5"))
+    assert run([*args, "--orders", str(orders)]) == 2
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "MISMATCH"
+    assert output["order_deltas"][0]["quantity_delta"] == "-0.5"
+    assert store.load().ledger.position("SPY") == D("2")
+
+
+def test_malformed_external_order_scope_never_authorizes_numerical_parity(tmp_path, capsys):
+    path = tmp_path / "broker.db"
+    store = EconomicEventStore(path, "SIM-001")
+    store.append_cash_record(cash_activity(), source_namespace="broker")
+    store.append_broker_fill_record(broker_receipt(), source_namespace="broker")
+    statement = tmp_path / "account.json"
+    statement.write_bytes(report())
+    orders = tmp_path / "orders.json"
+    orders.write_bytes(order_report(status="CANCELED", remaining="1"))
+    args = [
+        "--journal",
+        str(path),
+        "--account",
+        "SIM-001",
+        "--statement",
+        str(statement),
+        "--source",
+        "broker",
+        "--orders",
+        str(orders),
+    ]
+    assert run(args) == 3
+    assert "refused" in capsys.readouterr().err
