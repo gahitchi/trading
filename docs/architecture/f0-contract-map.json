@@ -24,12 +24,13 @@
       "depends_on": [
         "F0"
       ],
-      "primary_owner": "src/lab/agents/execution.py",
+      "primary_owner": "src/lab/economic_ledger.py",
       "implementation_refs": [
+        "src/lab/engine_events.py",
         "src/lab/execution_store.py",
-        "src/lab/costs.py"
+        "src/lab/agents/execution.py"
       ],
-      "exit_evidence": "Independent exact-Decimal balanced ledger and native-account settlement parity; no synthetic trade from corporate action",
+      "exit_evidence": "Trading Lab-owned typed economic events, exact-Decimal cash/position conservation, classified native-to-our-model broker facts, durable restart and independent reconciliation; NautilusTrader only an optional comparative oracle",
       "status": "BLOCKED"
     },
     {
