@@ -223,7 +223,7 @@ class PaperCaptureTests(unittest.TestCase):
     def test_private_cli_requires_matching_paper_config_and_never_discloses_account(self):
         config = self.path / "lab.toml"
         config.write_text(
-            '[paper]\\naccount_id = "DUR123456"\\nport = 4002\\n[universe]\\nGOOG = "XNAS"\\n'
+            '[paper]\naccount_id = "DUR123456"\nport = 4002\n[universe]\nGOOG = "XNAS"\n'
         )
 
         def inspect() -> subprocess.CompletedProcess[str]:
