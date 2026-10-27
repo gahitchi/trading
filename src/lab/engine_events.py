@@ -8,6 +8,8 @@ classify unexplained balance changes, or attest upstream data authenticity.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -76,6 +78,7 @@ class EngineSnapshot:
     cash: Decimal
     positions: tuple[EnginePosition, ...]
     complete_instrument_scope: bool
+    applied_evidence_head: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +86,7 @@ class EngineParity:
     cash_delta: Decimal
     position_deltas: tuple[tuple[str, Decimal], ...]
     applied_event_ids: tuple[str, ...]
+    evidence_head: str
 
     @property
     def matches(self) -> bool:
@@ -102,6 +106,44 @@ def _number(value: object, description: str, *, positive: bool = False, nonnegat
         return exact(value, positive=positive, nonnegative=nonnegative)
     except EconomicLedgerError as exc:
         raise EngineFactError(f"invalid {description}") from exc
+
+
+
+def _evidence_digest(previous: str, account_id: str, fact: EconomicFact) -> str:
+    """Bind event identity, provenance, time and raw economic inputs.
+
+    This is an unkeyed integrity checksum, not a signature or a source-proof.
+    F1.4 must anchor it externally before independent custody claims.
+    """
+    common = {
+        "account": account_id,
+        "event": fact.event_id,
+        "source": fact.source_ref,
+        "time_ns": fact.timestamp_ns,
+    }
+    if type(fact) is FillFact:
+        payload = {
+            "kind": "FILL",
+            "symbol": fact.symbol,
+            "side": fact.side,
+            "quantity": format(fact.quantity, "f"),
+            "price": format(fact.price, "f"),
+            "commission": format(fact.commission, "f"),
+        }
+    elif type(fact) is CashFact:
+        payload = {"kind": fact.kind, "amount": format(fact.amount, "f")}
+    elif type(fact) is SplitFact:
+        payload = {
+            "kind": "SPLIT",
+            "symbol": fact.symbol,
+            "numerator": fact.numerator,
+            "denominator": fact.denominator,
+        }
+    else:
+        raise EngineFactError("unsupported evidence fact")
+    document = {"schema": 1, "previous": previous, **common, "business": payload}
+    encoded = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _event_ledger(ledger: EconomicLedger, fact: EconomicFact) -> EconomicLedger:
@@ -139,6 +181,7 @@ class EngineEconomicBook:
     account_id: str
     events: tuple[EconomicFact, ...] = ()
     ledger: EconomicLedger = field(default_factory=EconomicLedger)
+    evidence_head: str = "0" * 64
 
     def append(self, fact: EconomicFact) -> EngineEconomicBook:
         _identity(self.account_id, "account identity")
@@ -153,7 +196,8 @@ class EngineEconomicBook:
         if any(e.event_id == fact.event_id or e.source_ref == fact.source_ref for e in self.events):
             raise EngineFactError("duplicate event or source identity")
         new_ledger = _event_ledger(self.ledger, fact)
-        return EngineEconomicBook(self.account_id, (*self.events, fact), new_ledger)
+        next_head = _evidence_digest(self.evidence_head, self.account_id, fact)
+        return EngineEconomicBook(self.account_id, (*self.events, fact), new_ledger, next_head)
 
     def audit(self) -> None:
         """Rebuild independently from business facts, not saved ledger postings."""
@@ -163,6 +207,8 @@ class EngineEconomicBook:
         self.ledger.audit()
         if reconstructed.ledger != self.ledger:
             raise EngineFactError("journal differs from event-source replay")
+        if reconstructed.evidence_head != self.evidence_head:
+            raise EngineFactError("economic source identity, time or custody chain was altered")
 
     def reconcile(self, snapshot: EngineSnapshot) -> EngineParity:
         """Compare a separately observed complete engine account against facts."""
@@ -179,6 +225,8 @@ class EngineEconomicBook:
             fact.event_id for fact in self.events
         ):
             raise EngineFactError("engine snapshot omits, reorders or duplicates economic events")
+        if snapshot.applied_evidence_head != self.evidence_head:
+            raise EngineFactError("engine snapshot evidence fingerprint differs")
         if type(snapshot.positions) is not tuple or any(type(p) is not EnginePosition for p in snapshot.positions):
             raise EngineFactError("untyped engine positions")
         observed: dict[str, Decimal] = {}
@@ -196,4 +244,5 @@ class EngineEconomicBook:
             _number(snapshot.cash, "engine cash") - self.ledger.balance("cash:USD"),
             deltas,
             snapshot.applied_event_ids,
+            self.evidence_head,
         )
