@@ -220,6 +220,62 @@ class PaperCaptureTests(unittest.TestCase):
         with self.assertRaisesRegex(LifecycleError, "regular file"):
             load(self.path)
 
+    def test_private_cli_requires_matching_paper_config_and_never_discloses_account(self):
+        config = self.path / "lab.toml"
+        config.write_text(
+            '[paper]\\naccount_id = "DUR123456"\\nport = 4002\\n[universe]\\nGOOG = "XNAS"\\n'
+        )
+
+        def inspect() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [
+                    sys.executable, "-S", "-m", "lab.kernel.paper_capture_bridge",
+                    "--config", str(config),
+                    "--capture", str(self.path),
+                    "--ticker", "GOOG",
+                    "--action-version", "v1",
+                ],
+                cwd=ROOT,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+
+        good = inspect()
+        self.assertEqual(good.returncode, 0, good.stderr)
+        report = json.loads(good.stdout)
+        self.assertEqual(report["mode"], "UNQUALIFIED_PRIVATE_CAPTURE")
+        self.assertEqual(report["history_coverage"], "UNVERIFIED")
+        self.assertFalse(report["broker_authorization"])
+        self.assertFalse(report["broker_authenticated"])
+        self.assertFalse(report["release_reservations"])
+        self.assertEqual(report["order_count"], 1)
+        self.assertEqual(report["execution_count"], 1)
+        self.assertNotIn(ACCOUNT, good.stdout + good.stderr)
+
+        config.write_text(config.read_text().replace("port = 4002", "port = 7497"))
+        wrong_port = inspect()
+        self.assertEqual(wrong_port.returncode, 2)
+        self.assertNotIn(ACCOUNT, wrong_port.stdout + wrong_port.stderr)
+
+        config.write_text(config.read_text().replace('DUR123456', 'U123456'))
+        wrong_account = inspect()
+        self.assertEqual(wrong_account.returncode, 2)
+        self.assertNotIn(ACCOUNT, wrong_account.stdout + wrong_account.stderr)
+
+    def test_explicit_pinned_gateway_port_must_match_capture(self):
+        with self.assertRaisesRegex(LifecycleError, "gateway port"):
+            load_paper_capture(
+                self.path,
+                expected_account=ACCOUNT,
+                expected_port=7497,
+                ticker="GOOG",
+                instrument_id=INSTRUMENT,
+                action_version="v1",
+            )
+
     def test_strict_stdlib_import_no_broker_or_native_runtime(self):
         script = (
             "import sys; from lab.kernel.paper_capture_bridge import load_paper_capture; "

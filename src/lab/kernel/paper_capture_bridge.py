@@ -25,7 +25,7 @@ from lab.kernel.broker_reconciliation import (
     compare_reported_snapshot,
 )
 from lab.kernel.order_lifecycle import LifecycleError, OfflineOrderSession, _id, _ns, _quantity
-from lab.safety import check_paper_settings
+from lab.safety import SafetyError, check_paper_settings
 
 _REQUIRED = (
     "identity.json",
@@ -271,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
             instrument_id=f"{ticker}.{universe[ticker].upper()}",
             action_version=args.action_version,
         )
-    except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, ValueError, KeyError, SafetyError) as exc:
         # Do not print account identifiers, raw order IDs, broker payloads or original exception text.
         print(f"Read-only capture inspection blocked: {type(exc).__name__}. Review the private input.", file=sys.stderr)
         return 2

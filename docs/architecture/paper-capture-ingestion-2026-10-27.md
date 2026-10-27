@@ -38,6 +38,27 @@ but a locally written hash and the account ID printed inside a JSON object
 do **not** authenticate the broker. Local `capture_completed_ns` is the
 end of the observation interval, **not** a synchronized broker as-of cursor.
 
+## Local inspection command
+
+After a read-only capture is created by the existing controlled snapshot workflow, a
+standard-library-only diagnostic can inspect its **private raw** files. It takes the
+account and port from the operator's local `lab.toml`, **not command-line credentials**:
+
+```sh
+PYTHONPATH=src python -m lab.kernel.paper_capture_bridge \\
+  --config /path/to/lab.toml \\
+  --capture /private/outside-git/B03-daily/snapshot-directory \\
+  --ticker GOOG --action-version v1
+```
+
+This command makes no network connection and writes nothing. The output contains
+only a capture digest, snapshot token, event counts and explicit
+`UNQUALIFIED_PRIVATE_CAPTURE`/`UNVERIFIED` statuses, never raw account or
+trade IDs. Exit code 0 means that *this private file set could be parsed*; it
+does **not** approve a strategy or attest that IBKR emitted complete data.
+Account scope, instrument version and paper port must match the local config.
+The raw capture and its private provenance must never be published.
+
 ## Operator and privacy constraints
 
 Original captures contain actual account IDs, order IDs, quantities, balances,
