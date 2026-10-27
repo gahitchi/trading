@@ -80,6 +80,7 @@ def _historical_message_title(text: str, path: str, meta: dict) -> str | None:
         raise CollabError(f"{path}: registered historical metadata digest or fields changed")
     return title
 
+
 NAME = re.compile(r"^(?P<stamp>\d{8}T\d{6}Z)(?:-(?P<seq>\d+))?-(?P<kind>[a-z]+)\.md$")
 THREAD_ID = re.compile(r"^[CGH]\d{3}$")
 FINDING = re.compile(r"^- \*\*(?P<id>[A-Z]+\d+) \[(?P<tag>[a-z]+)\]\*\*")
