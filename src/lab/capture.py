@@ -155,7 +155,7 @@ def _set_capture_status(folder: Path, state: str) -> None:
     )
 
 
-def _verify_capture_files(folder: Path, *, expected_account: str, tickers: list[str]) -> None:
+def _verify_capture_files(folder: Path, *, expected_account: str, expected_port: int, tickers: list[str]) -> None:
     """Check local cache coherence before committing status COMPLETE_UNVERIFIED.
 
     This never authenticates the broker or asserts historical coverage.
@@ -182,8 +182,12 @@ def _verify_capture_files(folder: Path, *, expected_account: str, tickers: list[
     identity_record = record("identity.json")
     if not isinstance(account, dict) or account.get("account_id") != "IB-" + expected_account:
         raise RuntimeError("capture incomplete: broker account observation missing or mismatched")
-    if not isinstance(identity_record, dict) or identity_record.get("paper_port") is None:
-        raise RuntimeError("capture incomplete: paper session identity missing")
+    if (
+        not isinstance(identity_record, dict)
+        or type(identity_record.get("paper_port")) is not int
+        or identity_record["paper_port"] != expected_port
+    ):
+        raise RuntimeError("capture incomplete: pinned paper gateway port not observed")
     balances = account.get("balances")
     if not isinstance(balances, list) or not balances:
         raise RuntimeError("capture incomplete: broker balances not observed")
@@ -407,13 +411,17 @@ def snapshot(
                 node.dispose()
         finally:
             lock.close()
-        _verify_capture_files(d, expected_account=cfg.paper.account_id, tickers=tickers)
+        _verify_capture_files(
+            d, expected_account=cfg.paper.account_id, expected_port=cfg.paper.port, tickers=tickers
+        )
     except BaseException:
         # Preserve private incident evidence but never mistake this folder for a completed B01 capture.
         _set_capture_status(d, "INCOMPLETE")
         raise
-    _set_capture_status(d, "COMPLETE_UNVERIFIED")
+    # Status is the final atomic commit marker; any earlier failure leaves the
+    # capture INCOMPLETE or IN_PROGRESS, never eligible for inspection.
     _write(d / "NOTE.json", {"note": GRADING_NOTE, "files": sorted(p.name for p in d.iterdir())})
+    _set_capture_status(d, "COMPLETE_UNVERIFIED")
     return d
 
 
@@ -443,12 +451,16 @@ async def snapshot_async(cfg, tickers, out, phase, *, wait_s=3.0, history_days=1
                 node.dispose()
         finally:
             lock.close()
-        _verify_capture_files(d, expected_account=cfg.paper.account_id, tickers=tickers)
+        _verify_capture_files(
+            d, expected_account=cfg.paper.account_id, expected_port=cfg.paper.port, tickers=tickers
+        )
     except BaseException:
         _set_capture_status(d, "INCOMPLETE")
         raise
-    _set_capture_status(d, "COMPLETE_UNVERIFIED")
+    # Status is the final atomic commit marker; any earlier failure leaves the
+    # capture INCOMPLETE or IN_PROGRESS, never eligible for inspection.
     _write(d / "NOTE.json", {"note": GRADING_NOTE, "files": sorted(p.name for p in d.iterdir())})
+    _set_capture_status(d, "COMPLETE_UNVERIFIED")
     return d
 
 
