@@ -1,12 +1,14 @@
-# Rust Trading Engine — Parts 1–6 of 6
+# Rust Trading Engine — Parts 1–6 + Live Upgrade
 
 **Status:** Parts 1–4 passed Linux CI and independent Arch validation
 (91 total tests at Part 4); Parts 5 and 6 require independent Arch
 acceptance. Part 6 is a **synthetic offline paper integration prototype**,
 not a connected trading application. The standalone Rust workspace is
 not a release-ready replacement for the Python trading lab. The Rust workspace lives under `rust/` alongside, but remains
-fully isolated from, the legacy Python trading-lab application. No exchange
-keys, external orders, accounts, or live venue connections are present.
+fully isolated from, the legacy Python trading-lab application. The
+`market-data` crate can read **actual public Binance USD-M market streams**
+but still has no private keys, broker account access or live order routing.
+See [Live Upgrade Part 1](LIVE_UPGRADE_PART1.md).
 
 ## Delivered
 
@@ -38,6 +40,9 @@ keys, external orders, accounts, or live venue connections are present.
   risk-gated short/cover proposals, append-only fsync journal, partial-fill
   accounting, crash inspection and a command-line demo. It has no broker
   connector or network capability. See [Part 6 implementation](PART6.md).
+- `crates/market-data`: live (not simulated) Binance USD-M Futures REST
+  exchangeInfo bootstrap, separate public/regular-market WebSockets, complete
+  depth batches and Core 1 SPSC snapshot sync. This is **read-only**.
 - Unit tests cover arithmetic, layout, bitfields, order book invariants,
   buffer overflow, crossings, sequence disconnections and signal contracts.
 

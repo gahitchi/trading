@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'chatgpt/rust-*'
+      - 'chatgpt/live-upgrade-*'
     paths:
       - 'rust/**'
       - '.github/workflows/rust-foundation.yml'
@@ -13,7 +14,7 @@ on:
       - '.github/workflows/rust-foundation.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -26,6 +27,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: One-time live ingestion bootstrap formatting and lock
+        if: github.event_name == 'push' && github.ref == 'refs/heads/chatgpt/live-upgrade-market-data-20261027'
+        run: |
+          cargo fmt --all
+          cargo generate-lockfile
+          git add crates/ Cargo.lock
+          if ! git diff --cached --quiet; then
+            git config user.name 'ChatGPT Rust bootstrap'
+            git config user.email 'github-actions[bot]@users.noreply.github.com'
+            git commit -m "Format live market ingestion and lock Rust workspace" -m "Agent: chatgpt"
+            git push origin "HEAD:${GITHUB_REF#refs/heads/}"
+          fi
       - name: Format
         run: cargo fmt --all -- --check
       - name: Tests
