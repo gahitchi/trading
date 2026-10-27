@@ -52,7 +52,7 @@ def exact(value: Decimal | str | int, *, positive: bool = False, nonnegative: bo
         not number.is_finite()
         or len(number.as_tuple().digits) > MAX_DIGITS
         or number.as_tuple().exponent < -MAX_SCALE
-        or number.adjusted() > MAX_DIGITS
+        or number.adjusted() >= MAX_DIGITS
         or (positive and number <= 0)
         or (nonnegative and number < 0)
     ):
