@@ -197,3 +197,21 @@ def test_invalid_native_ledger_or_precision_cannot_be_accepted():
             NativeCashObservation("SIM-001", 123, d("-100"), (NativePositionObservation("SPY", d("1")),)),
             (replace(fill, price=d("101")),),
         )
+
+
+def test_real_nautilus_money_price_quantity_and_side_are_read_without_floats():
+    """Version-pinned library values; not a live/native AccountState test."""
+    from nautilus_trader.model import Currency, Money, OrderSide, Price, Quantity
+
+    instrument = fake_instrument()
+    event = SimpleNamespace(
+        trade_id="native1",
+        instrument_id=instrument.id,
+        order_side=OrderSide.BUY,
+        last_qty=Quantity.from_str("1.50"),
+        last_px=Price.from_str("100.25"),
+        commission=Money.from_decimal(d("0.25"), Currency.from_str("USD")),
+    )
+    assert observe_native_fill(event, instrument=instrument) == NativeFillObservation(
+        "native1", "SPY", "BUY", d("1.50"), d("100.25"), d("0.25")
+    )
