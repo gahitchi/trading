@@ -43,6 +43,11 @@ jobs:
   cross-runner-verification:
     needs: independent-wheel
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/checkout@v4
       - name: Download separate build artifacts
@@ -72,6 +77,11 @@ jobs:
             --second "$RUNNER_TEMP"/f0-independent/ubuntu-24.04/*.whl \
             verify --input "$RUNNER_TEMP/f0-independent/verified/cross-runner.json"
           # Still unsigned and unable to certify the release.
+      - name: Sign verified wheel provenance for public push candidates
+        if: github.event_name == 'push'
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ runner.temp }}/f0-independent/ubuntu-24.04/*.whl
       - uses: actions/upload-artifact@v4
         with:
           name: f0-two-runner-verification
