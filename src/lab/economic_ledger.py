@@ -167,7 +167,7 @@ class EconomicLedger:
         return self._post(
             event_id,
             kind,
-            (Posting("cash:USD", debit), Posting(account, -debit)),
+            (Posting("cash:USD", debit), Posting(account, _calc(lambda: -debit))),
             (("amount", _fmt(value)),),
             self.lots,
         )
