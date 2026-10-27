@@ -88,7 +88,18 @@ root-user containers, missing layers, changed dependencies, incompatible
 release versions, dirty checkouts, mutated receipts, and wrong release
 authorization all fail closed in synthetic fixture tests.
 
-**The snapshot does not prove reproducible binaries.** The image could have
+**The Docker CI job also scans the **built image** with exact-pinned
+Syft v1.55.0 and Grype v0.121.0, retaining an SPDX JSON inventory and
+vulnerability findings. Unresolved known **High/Critical** findings
+fail the scan job; medium/low findings still require reviewer assessment.
+A signed GitHub OIDC attestation binds the *container identity receipt*
+to the exact CI source/workflow, and `gh attestation verify` checks it.
+This is **not a signed OCI image or registry-published digest**, and a
+green scan is not evidence that the container is free of vulnerabilities
+the vulnerability database does not yet know about. Scanner failures
+cannot be treated as passing F0 acceptance.
+
+The snapshot does not prove reproducible binaries.** The image could have
 been built by a malicious or compromised CI runner, contain transitive
 software that is not covered by the lock, or vary between independent builds.
 A deterministic two-builder comparison, signed registry digest and

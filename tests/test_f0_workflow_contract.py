@@ -22,3 +22,16 @@ def test_all_f0_uv_actions_pin_supported_version_input(path):
     count = workflow.count("uses: astral-sh/setup-uv@")
     assert count >= 1
     assert len(SETUP_UV.findall(workflow)) == count
+
+
+def test_f0_container_security_steps_are_pinned_and_fail_closed():
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610" in workflow
+    assert "anchore/scan-action@1638637db639e0ade3258b51db49a9a137574c3e" in workflow
+    assert "syft-version: v1.55.0" in workflow
+    assert "grype-version: v0.121.0" in workflow
+    assert "severity-cutoff: high" in workflow
+    assert "fail-build: true" in workflow
+    assert "subject-path: ${{ runner.temp }}/f0-container/receipt.json" in workflow
+    assert '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml"' in workflow
+    assert "name: f0-container-security" in workflow

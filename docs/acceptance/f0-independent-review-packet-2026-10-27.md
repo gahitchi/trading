@@ -17,7 +17,11 @@ For the chosen SHA, use its GitHub CI run to verify the following:
 3. `test (3.13)` and `test (3.14)`: all fast tests, real-clock harness and
    offline real-price example on the **identical SHA**.
 4. `docker`: unprivileged image smoke and read-only, content-addressed
-   image/OS/Python package snapshot.
+   image/OS/Python package snapshot. Check exact-source GitHub OIDC signing
+   of the image **identity receipt** and its workflow verification; examine
+   the pinned Syft SPDX inventory and Grype vulnerability JSON of the built
+   runtime image. An unresolved High/Critical finding or scanner failure
+   blocks acceptance. The receipt signature is **not** an OCI image signature.
 5. `package`: frozen runtime/build locks, source/sdist/wheel build,
    separate repeat wheel build with commit-timestamp `SOURCE_DATE_EPOCH`,
    complete committed `src/lab` package-to-wheel byte equality,
@@ -59,7 +63,7 @@ external immutable review record; **do not manually edit generated receipts**.
 | Step | Current engineering implementation | Required independent exit |
 | --- | --- | --- |
 | R0.1 | `docs/architecture/f0-reference-scope.json`: SPY/ARCX, USD, NYSE calendar, IBKR **PAPER**, no order authority | Owner approval of actual symbol, data entitlement, time horizon, venue action version and scoped strategy |
-| R0.2 | Pinned Docker source/image and locks, OS/Python inventory, matching GitHub Ubuntu 22.04/24.04 wheels, signed and workflow-verified GitHub OIDC provenance | Independent provider and security review, clean Arch/Windows installation, verified signed image and deployment provenance |
+| R0.2 | Pinned Docker source/image and locks, OS/Python inventory, signed build-receipt custody, pinned Syft/Grype security scan, matching Ubuntu 22.04/24.04 wheels and verified wheel OIDC provenance | Triage scan findings, independent provider/security review, clean Arch/Windows installation, verified signed image and deployment provenance |
 | R0.3 | Lint, Python 3.13/3.14, Docker, package, test harness and collaboration checks | Independent exact-SHA green CI and no pending blocking tests |
 | R0.4 | Exact commit/tree source/image/wheel receipts; a local-only SHA-256 custody tool for the SPY configuration, vendor manifest and raw Parquet | Real local-data capture, point-in-time authenticity, independent source permissions/custody review |
 | R0.5 | `docs/architecture/f0-contract-map.json` complete F0–F8 gate ownership and order validator | Design and failure-mode review; resolve any rejected ownership and duplicate authority |
