@@ -20,6 +20,7 @@ from typing import Any
 
 from lab.economic_ledger import EconomicLedgerError, exact
 from lab.engine_events import (
+    BrokerFillFact,
     CashFact,
     CashInLieuFact,
     EconomicFact,
@@ -34,7 +35,13 @@ SCHEMA = 1
 MAX_EVENT_BYTES = 16_384
 MAX_SOURCE_BYTES = 65_536
 DECIMAL_FIELDS = frozenset({"quantity", "price", "commission", "amount", "cash"})
-TYPES: dict[str, type] = {"FILL": FillFact, "CASH": CashFact, "SPLIT": SplitFact, "CASH_IN_LIEU": CashInLieuFact}
+TYPES: dict[str, type] = {
+    "FILL": FillFact,
+    "BROKER_FILL": BrokerFillFact,
+    "CASH": CashFact,
+    "SPLIT": SplitFact,
+    "CASH_IN_LIEU": CashInLieuFact,
+}
 
 
 class EconomicStoreError(EngineFactError):
@@ -45,13 +52,15 @@ def _encode(fact: EconomicFact) -> bytes:
     kind = (
         "FILL"
         if type(fact) is FillFact
+        else "BROKER_FILL"
+        if type(fact) is BrokerFillFact
         else "CASH"
         if type(fact) is CashFact
         else "CASH_IN_LIEU"
         if type(fact) is CashInLieuFact
         else "SPLIT"
     )
-    if type(fact) not in (FillFact, CashFact, SplitFact, CashInLieuFact):
+    if type(fact) not in (FillFact, BrokerFillFact, CashFact, SplitFact, CashInLieuFact):
         raise EconomicStoreError("unexpected economic fact type")
     record = {"schema": SCHEMA, "type": kind}
     for name in (item.name for item in fields(fact)):
@@ -115,6 +124,7 @@ def _verify_source_binding(fact: EconomicFact, raw: bytes, account_id: str) -> N
     attach genuine cash-statement bytes to fabricated financial fields.
     This is content integrity, never issuer authentication or finality.
     """
+    from lab.fill_input import parse_broker_fill_record
     from lab.settlement_input import (
         _reject_nonfinite,
         _unique_object,
@@ -122,8 +132,8 @@ def _verify_source_binding(fact: EconomicFact, raw: bytes, account_id: str) -> N
         parse_settled_cash_record,
     )
 
-    if type(fact) not in (CashFact, CashInLieuFact):
-        raise EconomicStoreError("source binding requires classified cash fact")
+    if type(fact) not in (CashFact, CashInLieuFact, BrokerFillFact):
+        raise EconomicStoreError("source binding requires classified source fact")
     if type(raw) is not bytes or not 0 < len(raw) <= MAX_SOURCE_BYTES:
         raise EconomicStoreError("missing or invalid original settlement bytes")
     if hashlib.sha256(raw).hexdigest() != fact.source_sha256:
@@ -136,7 +146,12 @@ def _verify_source_binding(fact: EconomicFact, raw: bytes, account_id: str) -> N
         if not fact.source_ref.endswith(suffix):
             raise EconomicStoreError("source reference does not match original record")
         namespace = _identity(fact.source_ref[: -len(suffix)], "source namespace")
-        parser = parse_settled_cash_record if type(fact) is CashFact else parse_settled_cash_in_lieu_record
+        if type(fact) is CashFact:
+            parser = parse_settled_cash_record
+        elif type(fact) is CashInLieuFact:
+            parser = parse_settled_cash_in_lieu_record
+        else:
+            parser = parse_broker_fill_record
         observed = parser(raw, source_namespace=namespace, expected_account_id=account_id)
     except (UnicodeError, ValueError, TypeError, EngineFactError) as exc:
         raise EconomicStoreError("original statement cannot establish claimed economic source") from exc
@@ -216,7 +231,7 @@ class EconomicEventStore:
             fact = _decode(payload)
             if fact.event_id != event_id or fact.source_ref != source_ref:
                 raise EconomicStoreError("persisted economic/source identity differs")
-            if type(fact) in (CashFact, CashInLieuFact):
+            if type(fact) in (CashFact, CashInLieuFact, BrokerFillFact):
                 if type(source_bytes) is not bytes or not 0 < len(source_bytes) <= MAX_SOURCE_BYTES:
                     raise EconomicStoreError("missing or invalid original settlement evidence")
                 _verify_source_binding(fact, source_bytes, self.account_id)
@@ -253,7 +268,7 @@ class EconomicEventStore:
         payload = _encode(fact)
         if len(payload) > MAX_EVENT_BYTES:
             raise EconomicStoreError("oversized economic fact")
-        if type(fact) in (CashFact, CashInLieuFact):
+        if type(fact) in (CashFact, CashInLieuFact, BrokerFillFact):
             if type(source_bytes) is not bytes or not 0 < len(source_bytes) <= MAX_SOURCE_BYTES:
                 raise EconomicStoreError("cash event requires original source bytes")
             _verify_source_binding(fact, source_bytes, self.account_id)
@@ -315,5 +330,21 @@ class EconomicEventStore:
             raw,
             source_namespace=source_namespace,
             expected_account_id=self.account_id,
+        )
+        return self.append(fact, source_bytes=raw, expected_head=expected_head)
+
+
+    def append_broker_fill_record(
+        self, raw: bytes, *, source_namespace: str, expected_head: str | None = None
+    ) -> EngineEconomicBook:
+        """Atomically preserve raw broker execution claim and its exact economics.
+
+        This still requires authenticated broker adapters and an order-state
+        reconciliation path before use with supervised paper trading.
+        """
+        from lab.fill_input import parse_broker_fill_record
+
+        fact = parse_broker_fill_record(
+            raw, source_namespace=source_namespace, expected_account_id=self.account_id
         )
         return self.append(fact, source_bytes=raw, expected_head=expected_head)
