@@ -188,7 +188,9 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(verify(args.root, args.input), sort_keys=True))
     except (FoundationError, OSError) as exc:
         # Never report a broker account, local config, private evidence or environment variables.
-        print(f"F0 inventory refused: {type(exc).__name__}; check clean Git checkout and pinned inputs", file=sys.stderr)
+        print(
+            f"F0 inventory refused: {type(exc).__name__}; check clean Git checkout and pinned inputs", file=sys.stderr
+        )
         return 2
     return 0
 
