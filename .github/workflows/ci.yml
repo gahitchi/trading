@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
         with:
-          uv-version: "0.13.6"
+          version: "0.13.6"
       - run: uvx --from ruff==0.17.3 ruff check src tests tools
       - run: uvx --from ruff==0.17.3 ruff format --check src tests tools
 
@@ -48,7 +48,7 @@ jobs:
           fetch-depth: 0  # test_collab reads conversation openers from other branches
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
         with:
-          uv-version: "0.13.6"
+          version: "0.13.6"
           python-version: ${{ matrix.python }}
       - run: uv sync --frozen --extra dev
       - name: fast tier, in parallel
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
         with:
-          uv-version: "0.13.6"
+          version: "0.13.6"
           python-version: "3.13"
       - run: uv sync --frozen --group build
       - name: verify exported dependency graphs match the frozen lock

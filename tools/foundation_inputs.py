@@ -93,10 +93,7 @@ def observation(directory: Path) -> dict:
                 or config["trading"].get("speed") != "daily"
                 or not isinstance(account, str)
                 or (account and not account.startswith("DU"))
-                or (
-                    port is not None
-                    and (type(port) is not int or not 1 <= port <= 65535 or port in (4001, 7496))
-                )
+                or (port is not None and (type(port) is not int or not 1 <= port <= 65535 or port in (4001, 7496)))
                 or paper.get("mode", "paper") != "paper"
             ):
                 raise foundation.FoundationError("reference configuration is not isolated SPY/PAPER daily scope")
