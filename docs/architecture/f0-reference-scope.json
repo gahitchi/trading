@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "stage": "F0_REFERENCE_SLICE_UNQUALIFIED",
+  "purpose": "Reproducible single-instrument internal foundation; not market or broker qualification",
+  "instrument": {
+    "symbol": "SPY",
+    "type": "ETF",
+    "listing_venue": "ARCX",
+    "exchange_calendar": "XNYS",
+    "currency": "USD"
+  },
+  "operator": {
+    "broker": "IBKR",
+    "account_mode": "PAPER_ONLY",
+    "authority": "NONE_IN_F0",
+    "strategy_frequency": "1-DAY",
+    "research_policy": "NO_STRATEGY_QUALIFICATION_IN_F0"
+  },
+  "explicitly_excluded": [
+    "live-money execution",
+    "unattended broker order submission",
+    "short-selling or leveraged deployment",
+    "gold or other commodities",
+    "forex",
+    "crypto",
+    "additional brokers",
+    "natural-language order submission",
+    "automatic strategy promotion"
+  ],
+  "unverified_inputs": [
+    "actual broker account and entitlements",
+    "authenticated source and complete history",
+    "reference data and corporate actions",
+    "runtime configuration and market data digests",
+    "economic/account/ledger parity",
+    "broker-specific fees and settlement"
+  ]
+}
