@@ -129,9 +129,7 @@ def _verify_source_binding(fact: EconomicFact, raw: bytes, account_id: str) -> N
     if hashlib.sha256(raw).hexdigest() != fact.source_sha256:
         raise EconomicStoreError("source digest does not match original statement bytes")
     try:
-        document = json.loads(
-            raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_nonfinite
-        )
+        document = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_nonfinite)
         if type(document) is not dict or type(document.get("record_id")) is not str:
             raise EconomicStoreError("settlement record is missing a typed source identifier")
         suffix = ":" + document["record_id"]
