@@ -1,4 +1,4 @@
-# Rust Trading Engine — Parts 1–5 of 6
+# Rust Trading Engine — Parts 1–6 of 6
 
 **Status:** Parts 1–4 passed Linux CI and independent Arch validation
 (91 total tests at Part 4); Part 5 passes Linux CI (117 total tests), with
@@ -33,6 +33,10 @@ keys, external orders, accounts, or live venue connections are present.
   trip/recovery circuit, CPPI/squeeze supervisory directives, funding/basis
   breaker, quote/exposure/borrow checks, and token-bucket throttling.
   See [Part 5 scope and safety limitations](PART5.md).
+- `crates/paper-gateway`: supervised **offline synthetic paper** runner,
+  risk-gated short/cover proposals, append-only fsync journal, partial-fill
+  accounting, crash inspection and a command-line demo. It has no broker
+  connector or network capability. See [Part 6 implementation](PART6.md).
 - Unit tests cover arithmetic, layout, bitfields, order book invariants,
   buffer overflow, crossings, sequence disconnections and signal contracts.
 
