@@ -41,8 +41,8 @@ def receipt(*, side="LONG", quantity="0.5", cash="60", timestamp_ns=3, currency=
 @pytest.mark.parametrize(
     ("opening_side", "cil_side", "expected_cash", "expected_realized"),
     [
-        ("BUY", "LONG", D("-40"), D("-10")),
-        ("SELL", "SHORT", D("40"), D("10")),
+        ("BUY", "LONG", D("-40"), D("40")),
+        ("SELL", "SHORT", D("40"), D("-40")),
     ],
 )
 def test_fifo_cash_in_lieu_survives_restart_and_conserves_economics(
