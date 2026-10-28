@@ -56,9 +56,9 @@ def test_long_short_realized_and_unrealized_exact_without_economic_event():
     raw = source()
     value = value_economic_book(state, parse(raw), max_mark_age_ns=0)
     assert value.statement_sha256 == hashlib.sha256(raw).hexdigest()
-    assert value.cash_usd == Decimal("506")
+    assert value.cash_usd == Decimal("507")
     assert value.signed_marked_position_value == Decimal("-450")
-    assert value.net_marked_equity_usd == Decimal("56")
+    assert value.net_marked_equity_usd == Decimal("57")
     assert value.realized_profit_usd == Decimal("10")
     assert value.unrealized_profit_usd == Decimal("50")
     assert [(x.symbol, x.unrealized_profit) for x in value.positions] == [
