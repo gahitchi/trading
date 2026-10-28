@@ -112,6 +112,7 @@ Offline check on real prices: `cd examples/goog-offline && lab data sample && la
 | | |
 |---|---|
 | `lab data fetch / import / membership / sample / list [--speed]` | market data (daily or intraday) and the point-in-time universe |
+| `lab record [--symbols ...] [--check-only] [--status]` | record crypto order books, trades, mark prices and funding (public data, no keys) |
 | `lab backtest [signals] [--period] [--set p=v] [--target-vol] [--speed]` | strategies vs buy-and-hold, HTML report |
 | `lab risk-profile` | the limits the selected profile really trades with |
 | `lab null-test`, `lab pbo`, `lab walk-forward` | noise floor, overfitting probability, walk-forward analysis |
@@ -249,6 +250,25 @@ docker compose up -d                    # agents run daily; health, alerts, jour
 
 Daily cycle (New York time): 16:10 the signal agents fetch completed daily bars from IB; 16:15 the execution agent
 reconciles its ledger with IB and sends **market-on-open** orders; 09:30 they fill in the opening auction.
+
+### Crypto market-data recorder (fast trading)
+
+Fast-trading research needs order-book history, which exchanges don't give away: it has to be recorded.
+`lab record` connects to Binance USD-M futures public market data (no API keys, no execution client, no orders)
+and stores full-depth order-book updates, trades, mark prices and funding rates for each perpetual
+(default `BTCUSDT ETHUSDT SOLUSDT`) in a NautilusTrader Parquet catalog under `data/market/catalog/`, promoted
+every hour and at stop. `data/market/heartbeat.json` shows counts and the last event per instrument, and lists
+instruments silent for over a minute. A lost connection ends the process with an error; run it where it is
+restarted:
+
+```bash
+lab record --check-only                              # validate without connecting
+lab record --status                                  # what has been saved to the catalog so far
+docker compose --profile crypto up -d recorder       # 24/7, restarted after outages; LAB_RECORD_SYMBOLS overrides
+```
+
+Read it back with `ParquetDataCatalog("data/market/catalog").query_order_book_deltas(["BTCUSDT-PERP.BINANCE"])`.
+Binance is not available in every country; check that it is in yours.
 
 ### Optional London Gold PAPER strategy
 

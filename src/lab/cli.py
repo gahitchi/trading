@@ -659,6 +659,41 @@ def cmd_paper(cfg, a):
     return 0
 
 
+def cmd_record(cfg, a):
+    from lab.record import build_node, saved
+
+    out = Path(a.out) if a.out else cfg.data_dir / "market"
+    if a.status:
+        kinds = saved(out)
+        if not kinds:
+            raise SystemExit(f"nothing saved in {out / 'catalog'} yet (data is saved every hour and at a clean stop)")
+        for kind, instruments in kinds.items():
+            print(f"{kind:20} " + "  ".join(f"{i}: {n} file(s)" for i, n in instruments.items()))
+        return 0
+    try:
+        node, _ = build_node(a.symbols, out)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    symbols = " ".join(s.upper() for s in a.symbols)
+    print(f"market-data recorder ready: Binance USD-M {symbols} (order book, trades, mark price, funding) -> {out}")
+    if a.check_only:
+        node.dispose()
+        print("check only: configuration is valid; not connecting.")
+        return 0
+    print("connecting to Binance public market data... (Ctrl+C to stop)")
+    try:
+        node.run()
+    except KeyboardInterrupt:
+        print("stopping...")
+    except RuntimeError as e:
+        # Exits instead of retrying in-process: NautilusTrader keeps one LiveNode per process, and a Ctrl+C during
+        # a failed connection is otherwise lost. The compose `recorder` service restarts it.
+        raise SystemExit(f"recorder stopped: {e}") from e
+    finally:
+        node.dispose()
+    return 0
+
+
 def cmd_runtime(cfg, a):
     from lab.runtime_ops import run
 
@@ -1137,6 +1172,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--adopt-broker", action="store_true", help="reset the agents' ledger to the broker's current positions"
     )
     pp.set_defaults(fn=cmd_paper)
+
+    from lab.record import DEFAULT_SYMBOLS
+
+    rec = sub.add_parser("record", help="record crypto order books, trades, mark prices and funding (data only)")
+    rec.add_argument("--symbols", nargs="+", default=list(DEFAULT_SYMBOLS), help="Binance USD-M perpetuals")
+    rec.add_argument("--out", help="output directory (default: <data>/market)")
+    rec.add_argument("--check-only", action="store_true", help="validate the setup without connecting")
+    rec.add_argument("--status", action="store_true", help="list what has been saved to the catalog, then exit")
+    rec.set_defaults(fn=cmd_record)
 
     runtime = sub.add_parser("runtime", help="cold backup, upgrade preflight and broker-attested code migration")
     runtime.add_argument("action", choices=["backup", "preflight", "upgrade", "enable-gold"])
