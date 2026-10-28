@@ -660,9 +660,16 @@ def cmd_paper(cfg, a):
 
 
 def cmd_record(cfg, a):
-    from lab.record import build_node
+    from lab.record import build_node, saved
 
     out = Path(a.out) if a.out else cfg.data_dir / "market"
+    if a.status:
+        kinds = saved(out)
+        if not kinds:
+            raise SystemExit(f"nothing saved in {out / 'catalog'} yet (data is saved every hour and at a clean stop)")
+        for kind, instruments in kinds.items():
+            print(f"{kind:20} " + "  ".join(f"{i}: {n} file(s)" for i, n in instruments.items()))
+        return 0
     try:
         node, _ = build_node(a.symbols, out)
     except ValueError as e:
@@ -1172,6 +1179,7 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--symbols", nargs="+", default=list(DEFAULT_SYMBOLS), help="Binance USD-M perpetuals")
     rec.add_argument("--out", help="output directory (default: <data>/market)")
     rec.add_argument("--check-only", action="store_true", help="validate the setup without connecting")
+    rec.add_argument("--status", action="store_true", help="list what has been saved to the catalog, then exit")
     rec.set_defaults(fn=cmd_record)
 
     runtime = sub.add_parser("runtime", help="cold backup, upgrade preflight and broker-attested code migration")
