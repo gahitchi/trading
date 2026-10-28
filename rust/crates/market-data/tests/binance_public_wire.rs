@@ -273,13 +273,20 @@ fn live_usdm_feed_retains_sync_when_u_skips_but_pu_matches() {
         }}"#,
         StreamGroup::PublicDepth,
     );
-    assert_eq!(books.on_frame(&initial).unwrap(), Some(SyncOutcome::Buffered));
+    assert_eq!(
+        books.on_frame(&initial).unwrap(),
+        Some(SyncOutcome::Buffered)
+    );
     let snapshot_req = rx.try_recv().unwrap();
     let snapshot = parse_depth_snapshot(
         br#"{"lastUpdateId":100,"bids":[["100","1"]],"asks":[["101","1"]]}"#,
         snapshot_req,
-    ).unwrap();
-    assert_eq!(books.on_frame(&snapshot).unwrap(), Some(SyncOutcome::Activated));
+    )
+    .unwrap();
+    assert_eq!(
+        books.on_frame(&snapshot).unwrap(),
+        Some(SyncOutcome::Activated)
+    );
     let next = parse(
         r#"{"stream":"btcusdt@depth@100ms","data":{
             "e":"depthUpdate","E":1700000000100,"s":"BTCUSDT",

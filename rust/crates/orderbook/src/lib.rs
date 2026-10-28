@@ -861,16 +861,17 @@ mod tests {
         // Reproduces actual Arch Testnet values: after the verified bridge,
         // incoming U > previous u + 1, but pu matches previous u exactly.
         // Futures carries sequence continuity via pu, unlike Spot.
-        let mut sync = DepthSynchronizer::new(
-            SequencePolicy::BinanceUsdM, 10, 12, 4,
-        ).unwrap();
+        let mut sync = DepthSynchronizer::new(SequencePolicy::BinanceUsdM, 10, 12, 4).unwrap();
         sync.start_snapshot_fetch();
         assert_eq!(
             sync.install_snapshot(
-                SnapshotSequence::Binance { last_update_id: 465705655761 },
+                SnapshotSequence::Binance {
+                    last_update_id: 465705655761
+                },
                 &[p("100", "2")],
                 &[p("101", "2")],
-            ).unwrap(),
+            )
+            .unwrap(),
             SyncOutcome::AwaitingBridge
         );
         assert_eq!(
@@ -881,7 +882,8 @@ mod tests {
                     previous_final: Some(465705655700),
                 },
                 &[],
-            ).unwrap(),
+            )
+            .unwrap(),
             SyncOutcome::Activated
         );
         assert_eq!(
@@ -892,7 +894,8 @@ mod tests {
                     previous_final: Some(465705655761),
                 },
                 &[d(Side::Bid, "100", "3")],
-            ).unwrap(),
+            )
+            .unwrap(),
             SyncOutcome::Applied
         );
         assert!(sync.is_tradable());
@@ -901,16 +904,17 @@ mod tests {
     }
     #[test]
     fn binance_live_rejects_wrong_pu_even_when_u_is_adjacent() {
-        let mut sync = DepthSynchronizer::new(
-            SequencePolicy::BinanceUsdM, 10, 12, 4,
-        ).unwrap();
+        let mut sync = DepthSynchronizer::new(SequencePolicy::BinanceUsdM, 10, 12, 4).unwrap();
         sync.start_snapshot_fetch();
         assert_eq!(
             sync.install_snapshot(
-                SnapshotSequence::Binance { last_update_id: 100 },
+                SnapshotSequence::Binance {
+                    last_update_id: 100
+                },
                 &[p("100", "2")],
                 &[p("101", "2")],
-            ).unwrap(),
+            )
+            .unwrap(),
             SyncOutcome::AwaitingBridge
         );
         assert_eq!(
@@ -921,7 +925,8 @@ mod tests {
                     previous_final: Some(99),
                 },
                 &[],
-            ).unwrap(),
+            )
+            .unwrap(),
             SyncOutcome::Activated
         );
         assert_eq!(
@@ -932,7 +937,8 @@ mod tests {
                     previous_final: Some(100),
                 },
                 &[],
-            ).unwrap(),
+            )
+            .unwrap(),
             SyncOutcome::NeedsSnapshot
         );
         assert!(!sync.is_tradable());
