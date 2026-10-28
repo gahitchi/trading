@@ -205,7 +205,6 @@ def test_concurrent_writers_with_same_head_cannot_both_commit(tmp_path):
     assert len(store.load().events) == 2
 
 
-
 def test_legacy_sqlite_layout_migrates_atomically_without_changing_financial_evidence(tmp_path):
     path = tmp_path / "legacy-layout.sqlite"
     store = EconomicEventStore(path, "SIM-001")
@@ -223,9 +222,10 @@ def test_legacy_sqlite_layout_migrates_atomically_without_changing_financial_evi
         assert db.execute("PRAGMA user_version").fetchone() == (1,)
         assert db.execute("SELECT source_bytes FROM economic_events").fetchone()[0] == original
         for table in ("broker_order_events", "external_order_observations"):
-            assert db.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
-            ).fetchone() is not None
+            assert (
+                db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+                is not None
+            )
     assert EconomicEventStore(path, "SIM-001", readonly=True).load() == before
 
 
@@ -242,9 +242,10 @@ def test_legacy_migration_rejects_corrupt_economics_and_rolls_back_all_new_table
         EconomicEventStore(path, "SIM-001")
     with sqlite3.connect(path) as db:
         assert db.execute("PRAGMA user_version").fetchone() == (0,)
-        assert db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='broker_order_events'"
-        ).fetchone() is None
+        assert (
+            db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='broker_order_events'").fetchone()
+            is None
+        )
 
 
 def test_unknown_future_database_layout_never_downgrades_or_rewrites(tmp_path):
