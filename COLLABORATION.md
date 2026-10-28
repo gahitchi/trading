@@ -51,6 +51,8 @@ python3 tools/collab.py check                         # before every commit
 - Kinds: `proposal`, `review`, `question` (these open threads), `reply`, `agree`, `object`, `escalate`
   (to Gabriel), `close`, and `decision` (Gabriel).
 - Messages are **immutable**: never edit or delete a posted file; correct yourself in a new message. CI checks.
+- `check` fails on malformed messages in the branch being checked. A malformed message on another branch is
+  only a warning there, since nobody but its author can supersede it; fix it on your own branch.
 - The tool refuses to write as an agent on a branch that agent doesn't own.
 - Gabriel can write on any branch with `--agent gabriel`.
 
