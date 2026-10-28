@@ -112,7 +112,7 @@ Offline check on real prices: `cd examples/goog-offline && lab data sample && la
 | | |
 |---|---|
 | `lab data fetch / import / membership / sample / list [--speed]` | market data (daily or intraday) and the point-in-time universe |
-| `lab record [--symbols ...] [--check-only]` | record crypto order books, trades, mark prices and funding (public data, no keys) |
+| `lab record [--symbols ...] [--check-only] [--status]` | record crypto order books, trades, mark prices and funding (public data, no keys) |
 | `lab micro-study <symbol> [--horizons] [--fee-bps]` | do order-book and trade-flow features predict moves beyond trading costs? |
 | `lab fast backtest / paper <symbol>` | the first fast strategy on recorded data, or live data with simulated fills |
 | `lab backtest [signals] [--period] [--set p=v] [--target-vol] [--speed]` | strategies vs buy-and-hold, HTML report |
@@ -265,6 +265,7 @@ restarted:
 
 ```bash
 lab record --check-only                              # validate without connecting
+lab record --status                                  # what has been saved to the catalog so far
 docker compose --profile crypto up -d recorder       # 24/7, restarted after outages; LAB_RECORD_SYMBOLS overrides
 ```
 

@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 from nautilus_trader.backtest import BacktestEngine, BacktestEngineConfig
-from nautilus_trader.common import LoggerConfig, LogLevel
+from nautilus_trader.common import DataActor, DataActorConfig, LoggerConfig, LogLevel
 from nautilus_trader.execution import MakerTakerFeeModel
 from nautilus_trader.model import (
     AccountType,
@@ -14,6 +14,8 @@ from nautilus_trader.model import (
     BookOrder,
     CryptoPerpetual,
     Currency,
+    CustomData,
+    DataType,
     FundingRateUpdate,
     InstrumentId,
     MarkPriceUpdate,
@@ -30,7 +32,7 @@ from nautilus_trader.model import (
 )
 from nautilus_trader.persistence import ParquetDataCatalog
 
-from lab.record import MarketRecorder, MarketRecorderConfig, build_node, perpetual_ids, streaming_config
+from lab.record import MarketRecorder, MarketRecorderConfig, build_node, perpetual_ids, saved, streaming_config
 
 T0 = 1_761_000_000_000_000_000  # 2025-10-20
 MS = 1_000_000
@@ -62,7 +64,24 @@ def market_events(iid: InstrumentId, n: int, start_ns: int = T0) -> list:
     return events
 
 
-def record(out, instruments, events, *, stale_after_s=60):
+class VenueUpdate:
+    """Stands in for an adapter's own data type (Binance publishes BinanceFuturesMarkPriceUpdate), which the
+    Parquet writer has no schema for."""
+
+    def __init__(self, ts):
+        self.ts_event = self.ts_init = ts
+
+
+class VenueExtras(DataActor):
+    def on_start(self):
+        self.subscribe_trades(InstrumentId.from_str("BTCUSDT-PERP.BINANCE"))
+
+    def on_trade(self, trade):
+        dt = DataType("VenueUpdate", identifier=str(trade.instrument_id))
+        self.publish_data(dt, CustomData(dt, VenueUpdate(trade.ts_init)))
+
+
+def record(out, instruments, events, *, stale_after_s=60, extra_actors=()):
     engine = BacktestEngine(
         BacktestEngineConfig(logging=LoggerConfig(stdout_level=LogLevel.ERROR), streaming=streaming_config(out))
     )
@@ -81,6 +100,8 @@ def record(out, instruments, events, *, stale_after_s=60):
         )
     )
     engine.add_actor(recorder)
+    for actor in extra_actors:
+        engine.add_actor(actor)
     engine.run()
     engine.dispose()  # promotes the streamed files into the catalog
     return recorder
@@ -99,6 +120,23 @@ def test_recorded_market_data_is_readable_from_the_catalog(tmp_path):
     assert "FundingRateUpdate" in {str(t) for t in catalog.list_data_types()}
     assert recorder.counts[str(btc.id)] == {"book": 10, "trades": 10, "mark": 10, "funding": 1}
     assert recorder.counts[str(eth.id)] == {"book": 4, "trades": 4, "mark": 4, "funding": 1}
+
+
+def test_adapter_specific_data_is_not_streamed_and_does_not_break_saving(tmp_path):
+    btc = perpetual("BTCUSDT")
+    record(tmp_path, [btc], market_events(btc.id, 5), extra_actors=[VenueExtras(DataActorConfig())])
+
+    assert saved(tmp_path) == {
+        kind: {"BTCUSDT-PERP.BINANCE": n}
+        for kind, n in {
+            "crypto_perpetual": 1, "funding_rates": 1, "mark_prices": 1, "order_book_deltas": 2, "trades": 1
+        }.items()
+    }  # fmt: skip
+    assert len(ParquetDataCatalog(str(tmp_path / "catalog")).query_mark_price_updates([str(btc.id)])) == 5
+
+
+def test_nothing_saved_yet(tmp_path):
+    assert saved(tmp_path) == {}
 
 
 def test_heartbeat_reports_counts_and_flags_a_silent_instrument(tmp_path):

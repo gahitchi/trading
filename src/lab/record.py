@@ -134,6 +134,7 @@ class MarketRecorder(DataActor):
 
 
 def streaming_config(out: Path, *, promote_every_s: int = 3600):
+    from nautilus_trader.model import NautilusDataType as T
     from nautilus_trader.persistence import DataCatalogConfig, RotationConfig, StreamingConfig
 
     return StreamingConfig(
@@ -143,7 +144,24 @@ def streaming_config(out: Path, *, promote_every_s: int = 3600):
         promotion_interval_ms=promote_every_s * 1000,
         promote_on_close=True,
         delete_feather_after_promotion=True,
+        # Only the types the recorder is for. The Binance adapter also publishes its own data types (e.g.
+        # BinanceFuturesMarkPriceUpdate) that the writer cannot serialize; unfiltered, each one is a failed
+        # write and the writer fails to close, which skips the final promotion into the catalog.
+        data_types=[T.Instrument, T.OrderBookDelta, T.TradeTick, T.MarkPriceUpdate, T.FundingRateUpdate],
     )
+
+
+def saved(out: Path) -> dict[str, dict[str, int]]:
+    """What the catalog holds: {data type: {instrument: Parquet files}}. Data reaches the catalog when it is
+    promoted (every hour and at a clean stop); until then it is in <out>/stream."""
+    data = Path(out) / "catalog" / "data"
+    if not data.is_dir():
+        return {}
+    return {
+        kind.name: {inst.name: len(list(inst.glob("*.parquet"))) for inst in sorted(kind.iterdir()) if inst.is_dir()}
+        for kind in sorted(data.iterdir())
+        if kind.is_dir()
+    }
 
 
 def build_node(symbols, out: Path, *, promote_every_s: int = 3600):
@@ -171,6 +189,7 @@ def build_node(symbols, out: Path, *, promote_every_s: int = 3600):
         trader_id=TraderId("RECORDER-001"),
         streaming=streaming_config(out, promote_every_s=promote_every_s),
         data_clients={BINANCE: data_client},
+        delay_post_stop_secs=2,  # default 10s of waiting for residual events reads as a hang after Ctrl+C
     )
     if config.exec_clients:
         raise RuntimeError("the market-data recorder must not have an execution client")
