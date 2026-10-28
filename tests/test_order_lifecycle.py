@@ -226,7 +226,7 @@ def test_duplicate_broker_fill_receipt_on_new_order_event_refused(tmp_path):
         f,
     )
     before = store.load()
-    with pytest.raises(EconomicStoreError, match="diverged|duplicated|source"):
+    with pytest.raises(EconomicStoreError, match=r"diverged|duplicated|source"):
         append(
             store, lifecycle,
             order_raw("fill-two", kind="FILL", when=11, cumulative="0.8", remaining="0.2", fill=f),
@@ -291,7 +291,7 @@ def test_reordered_cumulative_fill_and_timestamp_are_rejected(tmp_path):
         original,
     )
     new_fill = fill_raw("fill-2", amount="0.3", when=9)
-    with pytest.raises(EconomicStoreError, match="terminal|reordered|nonconserving"):
+    with pytest.raises(EconomicStoreError, match=r"terminal|reordered|nonconserving"):
         append(
             store, lifecycle,
             order_raw("fill-reordered", kind="FILL", when=9, cumulative="0.7", remaining="0.3", fill=new_fill),
