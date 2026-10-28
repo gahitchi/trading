@@ -133,7 +133,7 @@ async fn connect_loop(
                         Ok(Some(Ok(Message::Close(_)))) | Ok(None) => {
                             eprintln!("market-data {group:?} websocket_closed; reconnecting");
                             break;
-                        },
+                        }
                         Ok(Some(Ok(_))) => {}
                         Ok(Some(Err(err))) => {
                             tx.send(Err(MarketDataError::WebSocket(err)))
