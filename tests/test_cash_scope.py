@@ -9,6 +9,7 @@ from lab.cash_scope import parse_cash_account_policy, validate_cash_account_scop
 from lab.engine_events import EngineEconomicBook, EngineFactError, FillFact, SplitFact
 
 
+
 def policy_raw(account="SIM-001", klass="EQUITY", currency="USD", account_type="USD_UNLEVERAGED_CASH"):
     return json.dumps(
         {
@@ -26,8 +27,10 @@ def policy_raw(account="SIM-001", klass="EQUITY", currency="USD", account_type="
     ).encode()
 
 
+
 def policy(raw=None):
     return parse_cash_account_policy(policy_raw() if raw is None else raw, expected_account_id="SIM-001")
+
 
 
 def seeded():
@@ -53,6 +56,7 @@ def seeded():
     return state.append(parse_settled_cash_record(raw, source_namespace="bank", expected_account_id="SIM-001"))
 
 
+
 def fill(state, id_, when, side, qty, price="100"):
     return state.append(
         FillFact(
@@ -67,6 +71,7 @@ def fill(state, id_, when, side, qty, price="100"):
         )
     )
 
+
 def test_fully_funded_long_buy_sale_and_reverse_split_are_accepted():
     state = seeded()
     state = fill(state, "buy", 2, "BUY", "2")
@@ -79,6 +84,7 @@ def test_fully_funded_long_buy_sale_and_reverse_split_are_accepted():
     assert result.min_settled_cash_usd >= 0
     assert not result.broker_account_type_authenticated
 
+
 def test_closed_intraday_short_history_stays_refused_even_if_final_position_flat():
     state = seeded()
     state = fill(state, "short", 2, "SELL", "1")
@@ -87,6 +93,7 @@ def test_closed_intraday_short_history_stays_refused_even_if_final_position_flat
     with pytest.raises(EngineFactError, match="short"):
         validate_cash_account_scope(state, policy())
 
+
 def test_cash_overdraft_in_any_historical_prefix_is_refused_after_later_deposit():
     state = EngineEconomicBook("SIM-001")
     state = fill(state, "unfunded-buy", 1, "BUY", "1")
@@ -94,6 +101,7 @@ def test_cash_overdraft_in_any_historical_prefix_is_refused_after_later_deposit(
     assert state.ledger.balance("cash:USD") > 0
     with pytest.raises(EngineFactError, match="negative"):
         validate_cash_account_scope(state, policy())
+
 
 
 def seeded_from(state, *, amount, when):
@@ -118,6 +126,7 @@ def seeded_from(state, *, amount, when):
     return state.append(parse_settled_cash_record(raw, source_namespace="bank", expected_account_id="SIM-001"))
 
 
+
 @pytest.mark.parametrize(
     "raw",
     [
@@ -131,12 +140,14 @@ def test_policy_rejects_unsupported_broker_semantics(raw):
     with pytest.raises(EngineFactError):
         policy(raw)
 
+
 def test_unfunded_buy_never_autofunds_and_does_not_modify_ledger():
     state = fill(EngineEconomicBook("SIM-001"), "buy", 1, "BUY", "1")
     before = state
     with pytest.raises(EngineFactError):
         validate_cash_account_scope(state, policy())
     assert state == before
+
 
 def test_local_cash_scope_manifest_cannot_be_mutated_after_source_hash():
     from dataclasses import replace
