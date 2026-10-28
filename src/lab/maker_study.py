@@ -12,10 +12,10 @@ order of negligible size at the best bid and one at the best ask:
 - cancelled, and replaced on the next tick, when the touch moves away from it.
 
 For each fill the markout is the move of the mid from the fill price to h seconds later, signed for the maker
-(positive = the fill was worth having), and net_bps is that minus the maker fee. The spread a fill captures shows
-up at h = 0 (at_fill_bps); adverse selection is how much of it the later mid takes back. Fills are split by the
-book imbalance when the order was placed: in the order's favour (> 0.33: more size on its own side, so price
-pressure towards it rising for a bid), against (< -0.33) or neutral.
+(positive = the fill was worth having), and net_bps is that minus the maker fee. at_fill_bps is the half spread a
+fill captures, against the last mid with the order still at the touch; adverse selection is how much of it the
+later mid takes back. Fills are split by the book imbalance when the order was placed: in the order's favour
+(> 0.33: more size on its own side, so price pressure towards it rising for a bid), against (< -0.33) or neutral.
 
 Descriptive research, not a strategy test: no inventory, no position limits, no partial fills, and a fill
 does not move the book.
@@ -52,11 +52,13 @@ class _Order:
     queue: float
     live_ns: int
     favour: float  # side x book imbalance when placed
+    touch_mid: float  # the mid at the last book update with the order at the touch
 
 
 def simulate_fills(deltas, trades, settings: MakerSettings):
-    """(fills, mids): fills as a DataFrame of ts, side, price, mid (at fill), favour; mids as (ts, mid) arrays
-    of every complete book update."""
+    """(fills, mids): fills as a DataFrame of ts, side, price, mid, favour; mids as (ts, mid) arrays of every
+    complete book update. A fill's mid is the last one with the order still at the touch: the book can show a level
+    gone before the trades that emptied it arrive, and the mid by then is already past the order's price."""
     from nautilus_trader.model import AggressorSide, BookType, OrderBook
 
     fills, mid_ts, mid_px = [], [], []
@@ -84,7 +86,7 @@ def simulate_fills(deltas, trades, settings: MakerSettings):
             else:
                 filled = hit * (o.price - px) > 0  # traded through its price
             if filled and ts >= o.live_ns:
-                fills.append((ts, hit, o.price, mid, o.favour))
+                fills.append((ts, hit, o.price, o.touch_mid, o.favour))
                 orders[hit] = None
             continue
         book.apply_delta(ev)
@@ -102,8 +104,10 @@ def simulate_fills(deltas, trades, settings: MakerSettings):
                 continue
             if side * (levels[0][0] - o.price) > 0:
                 orders[side] = None  # the touch moved away: cancel, requote on the next tick
-            else:
-                o.queue = min(o.queue, next((q for p, q in levels if p == o.price), 0.0))
+                continue
+            if levels[0][0] == o.price:
+                o.touch_mid = mid
+            o.queue = min(o.queue, next((q for p, q in levels if p == o.price), 0.0))
         if ts < next_tick:
             continue
         next_tick = ts - ts % step + step
@@ -111,7 +115,7 @@ def simulate_fills(deltas, trades, settings: MakerSettings):
         for side, levels in ((1, bids), (-1, asks)):
             if orders[side] is None:
                 favour = side * imb.imbalance if imb else math.nan
-                orders[side] = _Order(side, levels[0][0], levels[0][1], ts + latency, favour)
+                orders[side] = _Order(side, levels[0][0], levels[0][1], ts + latency, favour, mid)
     return (
         pd.DataFrame(fills, columns=["ts", "side", "price", "mid", "favour"]),
         (np.array(mid_ts, dtype=np.int64), np.array(mid_px)),
