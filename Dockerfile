@@ -1,5 +1,4 @@
-# trading-lab runtime image: the agents, paper trading and the CLI.
-# The AI research swarm runs on your own machine instead (it needs your Claude login).
+# trading-lab runtime image: the market-data recorder, fast paper trading and the CLI.
 #
 #   docker build -t trading-lab .
 #
@@ -12,15 +11,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    TZ=America/New_York
+    TZ=UTC
 
-# Freeze Debian package resolution as well as the parent image and Python graph.
-RUN rm -f /etc/apt/sources.list.d/debian.sources \
-    && printf '%s\n' 'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20261001T000000Z bookworm main' > /etc/apt/sources.list \
-    && apt-get update && apt-get install -y --no-install-recommends libseccomp2=2.5.4-1+deb12u1 \
-    && dpkg-query -W > /usr/local/share/trading-lab-os-packages.txt \
-    && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 1000 --shell /usr/sbin/nologin lab
+RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin lab
 WORKDIR /lab
 
 # Dependencies first (cached layer), then the code.
@@ -29,11 +22,8 @@ COPY src ./src
 RUN pip install --require-hashes -r requirements.lock -r requirements-build.lock && pip install --no-deps --no-build-isolation . && python -c "import lab, nautilus_trader; print('nautilus', nautilus_trader.__version__)"
 
 COPY lab.toml ./lab.toml
-RUN mkdir -p data results research && chown -R lab:lab /lab
+RUN mkdir -p data results && chown -R lab:lab /lab
 USER lab
 
-HEALTHCHECK --interval=60s --timeout=20s --start-period=180s --retries=3 \
-    CMD ["lab", "health", "--max-age", "180"]
-
 ENTRYPOINT ["lab"]
-CMD ["doctor"]
+CMD ["--help"]
