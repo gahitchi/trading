@@ -113,3 +113,35 @@ These synthetic fixtures do not establish independent real account
 reconciliation, authenticated broker-side reservations, exchange margin
 parity, full order-history recovery or permission to route live orders.
 They qualify a structural contract between independently tested crates.
+
+
+## Durably reserved paper exposure (single-session prototype)
+
+\`trading-protocol-lab::reservations\` implements a new file-per-session,
+create-only, append-only paper exposure reservation journal. An approved
+paper short consumes gross-notional capacity **before** any possible
+exchange-shaped request. Quantity, symbol, price, client ID, reservation
+sequence, cumulative reserved amount and a chained SHA-256 accidental
+corruption checksum are persisted and fsynced before the function reports
+success. An existing file may be opened only for bounded inspection.
+
+The journal **does not release any reservations** on ACKs, cancel requests,
+disconnects or process exits: only a future independently reconciled
+terminal-status and cash/position replay may safely free exposure.
+Reopening a journal is strictly inspect-only, including after a clean exit.
+Invalid amounts, duplicate or non-increasing client IDs, insufficient
+remaining budget, partial/torn tails, corrupted fields and inconsistent
+replayed totals fail closed. SHA-256 chaining is *not* authentication or
+tamper-proof storage.
+
+The paper research bridge validates exchange price and size filters
+**before** advancing the risk gate's preliminary approved order ID.
+\`reserve_paper_plan\` then persists a budget claim bound to the
+resulting paper-only plan.
+
+Limits: the journal is a single-writer, single-process **research**
+demonstrator. It does not prove account-scope atomicity across processes,
+broker-side open-order completeness, independently verified order terminal
+statuses, exchange margin models or real-money collateral protection. A
+coordinator with an authenticated reconciliation fence and a durable
+global reservation lock is still required before real routing.

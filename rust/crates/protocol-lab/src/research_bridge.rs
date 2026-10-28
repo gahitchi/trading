@@ -1,6 +1,7 @@
 //! Paper-only bridge between the independent Rust risk gate and the exact
 //! exchange wire contract. This is deliberately placed inside protocol-lab,
 //! never in the authenticated execution adapter.
+use crate::reservations::{PaperReservationJournal, Reservation};
 use trading_core_types::{
     AtomicOperatorState, FixedPrice, FixedQty, FixedUsd, OrderIntent, OrderSide as IntentSide,
     TimeInForce, VenueId, checked_notional,
@@ -21,6 +22,8 @@ pub enum ResearchPlanError {
     QuantityChanged,
     NotionalMismatch,
     ExchangeFilters,
+    ReservationMismatch,
+    ReservationFailed,
 }
 
 /// Qualification-only proposed order. This type contains no live routing
@@ -67,6 +70,19 @@ pub fn plan_paper_entry(
     {
         return Err(ResearchPlanError::InvalidIntent);
     }
+    // Qualify venue filters BEFORE consuming a gate token or accepting an
+    // order ID. A malformed price/quantity must never advance RiskGate.
+    let from_price = FixedPrice(intent.limit_price);
+    let order = PrepareOrder {
+        client_id: intent.client_order_id,
+        symbol_id: intent.symbol_id,
+        side: OrderSide::Sell,
+        kind: OrderKind::IocLimit,
+        quantity: FixedQty(intent.quantity),
+        limit: Some(from_price),
+    }
+    .prepare(&instrument.symbol, instrument.spec)
+    .map_err(|_| ResearchPlanError::ExchangeFilters)?;
     let decision = gate
         .validate_entry(intent, ctx, wallet, operator)
         .map_err(|_| ResearchPlanError::RiskFailed)?;
@@ -78,27 +94,16 @@ pub fn plan_paper_entry(
         GateDecision::Rejected(reason) => return Err(ResearchPlanError::Rejected(reason)),
         GateDecision::ProposedCover { .. } => return Err(ResearchPlanError::InvalidIntent),
     };
-    // A squeeze-related gate reduction is not a license to submit a
-    // different order. A distinct risk-approved intent is mandatory.
+    // A squeeze-related reduction is a new proposed quantity, not an
+    // authorization to silently execute a different order.
     if approved_qty.0 != intent.quantity {
         return Err(ResearchPlanError::QuantityChanged);
     }
-    let from_price = FixedPrice(intent.limit_price);
     let notional = checked_notional(from_price, approved_qty)
         .map_err(|_| ResearchPlanError::NotionalMismatch)?;
     if notional != approved_notional {
         return Err(ResearchPlanError::NotionalMismatch);
     }
-    let order = PrepareOrder {
-        client_id: intent.client_order_id,
-        symbol_id: intent.symbol_id,
-        side: OrderSide::Sell,
-        kind: OrderKind::IocLimit,
-        quantity: approved_qty,
-        limit: Some(from_price),
-    }
-    .prepare(&instrument.symbol, instrument.spec)
-    .map_err(|_| ResearchPlanError::ExchangeFilters)?;
     let Some(order_qty) = order.params.get("quantity").and_then(|v| v.as_str()) else {
         return Err(ResearchPlanError::ExchangeFilters);
     };
@@ -118,15 +123,50 @@ pub fn plan_paper_entry(
     })
 }
 
+
+/// Persist a paper-only, never-released gross exposure claim after a
+/// separately returned paper risk proposal. An ACK does not free capacity.
+/// This is not a broker reservation and must not be called by a live router.
+pub fn reserve_paper_plan(
+    journal:&mut PaperReservationJournal,
+    intent:&OrderIntent,
+    plan:&PaperOrderPlan,
+)->Result<Reservation,ResearchPlanError>{
+    if plan.order.client_id!=intent.client_order_id
+        || plan.modeled_qty.0!=intent.quantity
+        || plan.order.params["newClientOrderId"]!=format!("tl-{}",intent.client_order_id)
+        || plan.order.params["timeInForce"]!="IOC"
+        || intent.is_reduce_only()
+        || intent.side!=IntentSide::Sell as u8
+        || intent.venue_id!=VenueId::BinanceUsdM as u8
+    {
+        return Err(ResearchPlanError::ReservationMismatch);
+    }
+    let expected=checked_notional(FixedPrice(intent.limit_price),plan.modeled_qty)
+        .map_err(|_|ResearchPlanError::ReservationMismatch)?;
+    if expected!=plan.modeled_notional {
+        return Err(ResearchPlanError::ReservationMismatch);
+    }
+    journal.reserve(intent.client_order_id,intent.symbol_id,plan.modeled_qty,
+        FixedPrice(intent.limit_price))
+        .map_err(|_|ResearchPlanError::ReservationFailed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use trading_core_types::{ComplianceContext, FixedUsd, OperatorSnapshot, SCALE};
     use trading_risk_gate::{AccountEvidence, MarketEvidence, RiskPolicy};
     use trading_strategy_engine::{OrderEvent, OrderEventKind, OrderStatus, OrderTracker};
     use trading_wallet_manager::WalletBuckets;
 
+    static NEXT_JOURNAL:AtomicU64=AtomicU64::new(1);
+    fn journal_path()->std::path::PathBuf{
+        std::env::temp_dir().join(format!("trading-risk-reserve-{}-{}.log",
+            std::process::id(),NEXT_JOURNAL.fetch_add(1,Ordering::Relaxed)))
+    }
     fn table() -> InstrumentSpecTable {
         let data = json!({"symbols":[{"symbol":"BTCUSDT","status":"TRADING",
         "contractType":"PERPETUAL","quoteAsset":"USDT","marginAsset":"USDT",
@@ -309,4 +349,35 @@ mod tests {
         assert_eq!(tracker.cumulative_filled(), FixedQty(1_000_000));
         assert_eq!(wallet(), before);
     }
+    #[test]
+    fn paper_gate_proposal_is_durably_reserved_before_any_possible_send() {
+        let path=journal_path();
+        let mut journal=PaperReservationJournal::create(&path,2000*SCALE).unwrap();
+        let mut g=gate(true);
+        let op=AtomicOperatorState::new(OperatorSnapshot::default()).unwrap();
+        let original=intent();
+        let plan=plan_paper_entry(&mut g,&original,&context(),wallet(),&op,&table()).unwrap();
+        let proof=reserve_paper_plan(&mut journal,&original,&plan).unwrap();
+        assert_eq!(proof.client_id,42);
+        assert_eq!(proof.notional_raw,plan.modeled_notional.0);
+        assert_eq!(journal.snapshot().gross_reserved_raw,proof.notional_raw);
+        let original_bytes=std::fs::read(&path).unwrap();
+        assert!(original_bytes.ends_with(b"\n"));
+        drop(journal);
+        let inspected=PaperReservationJournal::inspect(&path).unwrap();
+        assert!(inspected.snapshot().inspect_only);
+        assert_eq!(inspected.snapshot().gross_reserved_raw,proof.notional_raw);
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn invalid_exchange_tick_does_not_consume_risk_approval() {
+        let mut i=intent();
+        i.limit_price+=1;
+        let op=AtomicOperatorState::new(OperatorSnapshot::default()).unwrap();
+        let mut g=gate(true);
+        assert!(matches!(plan_paper_entry(&mut g,&i,&context(),wallet(),&op,&table()),
+            Err(ResearchPlanError::ExchangeFilters)));
+        assert_eq!(g.snapshot().last_approved_order_id,0);
+    }
+
 }

@@ -2,6 +2,7 @@
 //! live application and never binds outside the IPv4 loopback interface.
 //! It uses Binance-shaped order WS-API ACKs and *separate* private WS events.
 pub mod research_bridge;
+pub mod reservations;
 
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
