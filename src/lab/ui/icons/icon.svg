@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Trading Lab">
-  <!-- A bench instrument's face: a spruce enclosure, a signal trace stepping up, and the status lamp it feeds. -->
-  <rect x="16" y="16" width="480" height="480" rx="112" fill="#1F5C4A"/>
-  <rect x="48" y="48" width="416" height="416" rx="84" fill="#14211D"/>
-  <path d="M104 360 H168 V296 H232 V232 H296 V168 H304" fill="none" stroke="#E9F1EC" stroke-width="32"
-        stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="374" cy="168" r="42" fill="#E8B04A"/>
-</svg>
