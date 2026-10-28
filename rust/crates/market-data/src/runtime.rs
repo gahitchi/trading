@@ -80,8 +80,10 @@ async fn connect_loop(
                 .await
                 .map_err(|_| MarketDataError::ChannelClosed)?;
         }
+        eprintln!("market-data {group:?} connecting; generation={generation}");
         match timeout(Duration::from_secs(10), connect_async(url.as_str())).await {
             Ok(Ok((mut ws, _response))) => {
+                eprintln!("market-data {group:?} websocket_connected; generation={generation}");
                 backoff = 1;
                 let connected_at = tokio::time::Instant::now();
                 loop {
@@ -128,7 +130,10 @@ async fn connect_loop(
                                 .map_err(MarketDataError::WebSocket)?;
                         }
                         Ok(Some(Ok(Message::Pong(_)))) => {}
-                        Ok(Some(Ok(Message::Close(_)))) | Ok(None) => break,
+                        Ok(Some(Ok(Message::Close(_)))) | Ok(None) => {
+                            eprintln!("market-data {group:?} websocket_closed; reconnecting");
+                            break;
+                        },
                         Ok(Some(Ok(_))) => {}
                         Ok(Some(Err(err))) => {
                             tx.send(Err(MarketDataError::WebSocket(err)))
@@ -241,9 +246,14 @@ impl LiveMarketDataEngine {
                             // Structural/REST/parser errors are fatal, never
                             // quietly substituted with a previous snapshot.
                             match err {
-                                MarketDataError::WebSocket(_) => {},
+                                MarketDataError::WebSocket(e) => {
+                                    eprintln!("market-data websocket transport_error={e}");
+                                },
                                 MarketDataError::InvalidResponse(
-                                    "websocket read timeout" | "websocket connect timeout") => {},
+                                    "websocket read timeout" | "websocket connect timeout"
+                                ) => {
+                                    eprintln!("market-data websocket timed out; retrying");
+                                },
                                 other => return Err(other),
                             }
                         }

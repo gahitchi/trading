@@ -4,7 +4,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
 use trading_market_data::{
@@ -64,38 +64,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .spawn(move || -> Result<(),String> {
             let mut books=LiveBookConsumer::new(&table2,snapshot_tx)
                 .map_err(|e|format!("{e}"))?;
-            let mut messages=0_u64;
-            let mut trades=0_u64;
-            let mut liqs=0_u64;
-            let mut marks=0_u64;
-            let mut idle=0_u16;
+            let mut messages = 0_u64;
+            let mut trades = 0_u64;
+            let mut liqs = 0_u64;
+            let mut marks = 0_u64;
+            let mut depth = 0_u64;
+            let mut snapshots = 0_u64;
+            let mut resets = 0_u64;
+            let mut last_report = Instant::now();
+            let mut idle = 0_u16;
             while !stop2.load(Ordering::Acquire) {
-                match consumer.pop(){
-                    Ok(frame)=>{
-                        idle=0;
+                match consumer.pop() {
+                    Ok(frame) => {
+                        idle = 0;
                         match &frame {
-                            LiveFrame::AggTrade(_)=>trades+=1,
-                            LiveFrame::ForcedLiquidation(_)=>liqs+=1,
-                            LiveFrame::Mark{..}=>marks+=1,
-                            _=>{}
+                            LiveFrame::AggTrade(_) => trades += 1,
+                            LiveFrame::ForcedLiquidation(_) => liqs += 1,
+                            LiveFrame::Mark { .. } => marks += 1,
+                            LiveFrame::Depth { .. } => depth += 1,
+                            LiveFrame::Snapshot { .. } => snapshots += 1,
+                            LiveFrame::Reset { .. } => resets += 1,
                         }
-                        books.on_frame(&frame).map_err(|e|{
+                        let outcome = books.on_frame(&frame).map_err(|e| {
                             books.disconnect_all();
                             format!("book invalidated: {e}")
                         })?;
-                        messages+=1;
-                        if messages%1000==0{
-                            eprintln!("events={messages} live_books={} trades={trades} liqs={liqs} mark={marks}",
-                                books.active_books());
+                        messages += 1;
+                        if messages <= 3 {
+                            eprintln!("market-watch first_frame={messages} depth={depth} snapshots={snapshots} resets={resets} trades={trades} marks={marks}");
+                        }
+                        if matches!(
+                            outcome,
+                            Some(trading_orderbook::SyncOutcome::Activated)
+                                | Some(trading_orderbook::SyncOutcome::NeedsSnapshot)
+                        ) {
+                            eprintln!("market-watch depth_sync={outcome:?} live_books={}", books.active_books());
                         }
                     }
-                    Err(rtrb::PopError::Empty)=>{
-                        idle=idle.saturating_add(1);
-                        if idle>=1000 {
+                    Err(rtrb::PopError::Empty) => {
+                        idle = idle.saturating_add(1);
+                        if idle >= 1000 {
                             std::thread::yield_now();
-                            idle=0;
-                        } else {std::hint::spin_loop();}
+                            idle = 0;
+                        } else {
+                            std::hint::spin_loop();
+                        }
                     }
+                }
+                if last_report.elapsed() >= Duration::from_secs(5) {
+                    eprintln!(
+                        "market-watch status events={messages} live_books={} depth={depth} snapshots={snapshots} resets={resets} trades={trades} liquidations={liqs} marks={marks}",
+                        books.active_books()
+                    );
+                    last_report = Instant::now();
                 }
             }
             books.disconnect_all();
