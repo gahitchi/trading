@@ -9,6 +9,8 @@ Layout (NautilusTrader's own catalog, readable with `ParquetDataCatalog(<out>/ca
   <out>/catalog/data/<type>/<instrument>/<start>_<end>_<hash>.parquet   promoted every hour and at stop
   <out>/stream/                                                       the open, not yet promoted files
   <out>/heartbeat.json                                                counts and last event per instrument
+
+`lab monitor` serves a read-only dashboard of the heartbeat and the catalog (lab.monitor).
 """
 
 from __future__ import annotations
@@ -70,8 +72,10 @@ class MarketRecorder(DataActor):
         self.iids = [InstrumentId.from_str(i) for i in config.instrument_ids]
         self.counts = {str(i): dict.fromkeys(KINDS, 0) for i in self.iids}
         self.last_ns = dict.fromkeys(self.counts, 0)
+        self.started_ns = 0
 
     def on_start(self):
+        self.started_ns = self.clock.timestamp_ns()
         for iid in self.iids:
             self.subscribe_book_deltas(iid, BookType.L2_MBP)
             self.subscribe_trades(iid)
@@ -116,6 +120,7 @@ class MarketRecorder(DataActor):
             self.config.heartbeat,
             {
                 "at": datetime.fromtimestamp(now / 1e9, UTC).isoformat(timespec="seconds"),
+                "started": datetime.fromtimestamp(self.started_ns / 1e9, UTC).isoformat(timespec="seconds"),
                 "running": running,
                 "instruments": {
                     k: {

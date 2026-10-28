@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#1F5C4A">
+<title>Market Data Monitor</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preload" href="/fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/monitor.css">
+<script src="/monitor.js" defer></script>
+</head>
+<body>
+<header class="bar">
+  <span class="brand"><img src="/icon.svg" alt="" width="30" height="30"><span>Market Data Monitor</span></span>
+  <span class="updated" id="updated" aria-live="polite">Connecting…</span>
+</header>
+
+<main>
+  <div id="notice" role="alert" hidden></div>
+
+  <section class="display" aria-label="Recorder status">
+    <div class="headline">
+      <div class="phase-line" id="status" data-status="unknown">
+        <span class="lamp" aria-hidden="true"></span><span id="status-label">Waiting for data</span>
+      </div>
+      <ul class="checks" id="checks" aria-label="Health checks"></ul>
+    </div>
+    <dl class="readouts">
+      <div><dt>Events / s</dt><dd id="rate">–</dd></div>
+      <div><dt>Uptime</dt><dd id="uptime">–</dd></div>
+      <div><dt>Recorded</dt><dd id="recorded">–</dd></div>
+      <div><dt>Catalog</dt><dd id="size">–</dd></div>
+      <div><dt>Pending promotion</dt><dd id="stream">–</dd></div>
+      <div><dt>Disk left</dt><dd id="disk">–</dd></div>
+    </dl>
+  </section>
+
+  <section class="panel" aria-labelledby="feeds-title">
+    <div class="panel-head">
+      <h2 id="feeds-title">Feeds</h2>
+      <p class="help">Events per second from the recorder's heartbeat, last 30 minutes. Counts reset when the recorder restarts.</p>
+    </div>
+    <div class="table-wrap">
+      <table class="feeds">
+        <thead>
+          <tr>
+            <th scope="col">Instrument</th><th scope="col">Venue</th><th scope="col">State</th>
+            <th scope="col">Last event</th><th scope="col" class="num">Events / s</th>
+            <th scope="col" class="spark-col">Last 30 min</th>
+            <th scope="col" class="num">Book</th><th scope="col" class="num">Trades</th>
+            <th scope="col" class="num">Mark</th><th scope="col" class="num">Funding</th>
+          </tr>
+        </thead>
+        <tbody id="feeds"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="data-title">
+    <div class="panel-head">
+      <h2 id="data-title">Recorded data</h2>
+      <p class="help">What the Parquet catalog holds. Coverage counts holes of over a minute between order-book files as missing: the recorder was down.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Instrument</th><th scope="col">From</th><th scope="col">To</th>
+            <th scope="col" class="num">Rows</th><th scope="col" class="num">Size</th>
+            <th scope="col" class="num">Files</th><th scope="col" class="num">Coverage</th><th scope="col">Largest gaps</th>
+          </tr>
+        </thead>
+        <tbody id="data"></tbody>
+      </table>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <caption>By data type</caption>
+        <thead><tr><th scope="col">Type</th><th scope="col" class="num">Rows</th><th scope="col" class="num">Size</th><th scope="col" class="num">Files</th></tr></thead>
+        <tbody id="types"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<div class="tip" id="tip" role="status" hidden></div>
+</body>
+</html>

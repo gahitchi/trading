@@ -81,7 +81,7 @@ jobs:
           from zipfile import ZipFile
           wheel = next(Path('dist').glob('*.whl'))
           with ZipFile(wheel) as z:
-              for name in ['lab/default.toml', 'lab/ui/index.html', 'lab/ui/app.js', 'lab/ui/app.css']:
+              for name in ['lab/default.toml', 'lab/ui/index.html', 'lab/ui/app.js', 'lab/ui/app.css', 'lab/monitor_ui/index.html', 'lab/monitor_ui/monitor.js', 'lab/monitor_ui/monitor.css']:
                   assert z.read(name), name
           PY
 
