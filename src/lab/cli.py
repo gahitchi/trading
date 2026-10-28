@@ -399,7 +399,7 @@ def cmd_carry_study(cfg, a):
     pnl, missing = cs.run(root, symbols, s, b, holdout=a.holdout)
     if not pnl:
         raise SystemExit(f"no carry data for {' '.join(symbols)} {'after' if a.holdout else 'before'} {b:%Y-%m-%d}")
-    st = cs.summary(pnl, symbols)
+    st = cs.summary(pnl)
     result = nullable_numbers({k: st[k] for k in ("days", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")})
     if a.holdout:
         fast_research.record_holdout(cfg.results_dir, key, params, int(b.value), result, a.again or "")
@@ -428,7 +428,7 @@ def cmd_carry_study(cfg, a):
     )
     if a.mode == "cash" and not a.holdout:
         always = cs.CarrySettings(**{**cs.asdict(s), "entry_apr": -1e9, "exit_apr": -1e9})
-        base = cs.summary(cs.run(root, symbols, always, b)[0], symbols)
+        base = cs.summary(cs.run(root, symbols, always, b)[0])
         print(f"  always in the trade, for comparison: net {base['apr']:+.2f}% a year, Sharpe {base['sharpe']:+.2f}")
     print(cs.per_symbol(pnl).to_string(index=False, float_format=lambda x: f"{x:.1f}"))
     print(

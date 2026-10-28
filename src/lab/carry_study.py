@@ -216,11 +216,12 @@ def expected_max_sharpe(trial_srs: list[float]) -> float:
     return sd * ((1 - EULER_GAMMA) * z(1 - 1 / n) + EULER_GAMMA * z(1 - 1 / (n * math.e)))
 
 
-def summary(pnl: dict[str, pd.DataFrame], symbols: list[str]) -> dict:
-    """Portfolio statistics on daily net returns: every symbol in `symbols` has 1/len(symbols) of the notional."""
+def summary(pnl: dict[str, pd.DataFrame]) -> dict:
+    """Portfolio statistics on daily net returns: each symbol with data has an equal share of the notional (a
+    symbol requested without data is left out, not counted as idle notional)."""
     if not pnl:
         return {"days": 0}
-    net = pd.concat({k: v["net"] for k, v in pnl.items()}, axis=1).fillna(0.0).sum(axis=1) / len(symbols)
+    net = pd.concat({k: v["net"] for k, v in pnl.items()}, axis=1).fillna(0.0).mean(axis=1)
     daily = net.resample("D").sum()
     x = daily.to_numpy()
     n = len(x)
@@ -228,7 +229,7 @@ def summary(pnl: dict[str, pd.DataFrame], symbols: list[str]) -> dict:
     sr = float(x.mean() / sd) if sd and sd > 0 else math.nan
     eq = np.cumsum(x)
     dd = float((np.maximum.accumulate(np.maximum(eq, 0)) - eq).max()) if n else 0.0
-    part = {k: sum(v[k].sum() for v in pnl.values()) / len(symbols) for k in ("funding", "basis", "cost")}
+    part = {k: sum(v[k].sum() for v in pnl.values()) / len(pnl) for k in ("funding", "basis", "cost")}
     years = n / 365 if n else math.nan
     skew = float(pd.Series(x).skew()) if n > 2 else 0.0
     kurt = float(pd.Series(x).kurt()) + 3 if n > 3 else 3.0

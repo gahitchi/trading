@@ -233,3 +233,44 @@ def test_cli_research_counts_trials_and_meets_the_holdout_once(tmp_path, capsys)
     trials = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
     assert [t["holdout"] for t in trials] == [False, False, False, True, True]
     assert all(t["kind"] == "carry-study" and "sr_daily" in t["result"] for t in trials)
+
+
+def test_the_portfolio_shares_notional_among_the_symbols_with_data(tmp_path):
+    market(tmp_path, "BTCUSDT", days=60, rate=2e-4)
+    s = cs.CarrySettings(lookback_h=24, entry_apr=5.0)
+    one, missing = cs.run(tmp_path, ["BTCUSDT", "XYZUSDT"], s, T0 + pd.Timedelta(days=100))
+    assert missing == ["XYZUSDT"]
+    alone = cs.per_symbol(one).iloc[0]
+    st = cs.summary(one)
+    # one symbol's net, not diluted by the symbol that has no data (reported 4 of 10 symbols' worth before)
+    assert st["apr"] * st["days"] / 365 == pytest.approx(alone["net_bps"] / 100)
+
+
+def test_fetching_waits_out_rate_limits_and_timeouts_but_not_answers():
+    from urllib.error import HTTPError
+
+    answers = iter([{"retCode": 10006, "retMsg": "Too many visits"}, TimeoutError(), {"retCode": 0, "ok": 1}])
+
+    def get(url):
+        a = next(answers)
+        if isinstance(a, Exception):
+            raise a
+        return a
+
+    waits = []
+    assert cd.patient(get, waits.append)("u") == {"retCode": 0, "ok": 1}
+    assert waits == [2, 4]
+
+    def limited(url):
+        return {"retCode": 10006, "retMsg": "Too many visits"}
+
+    with pytest.raises(cd.RateLimited):
+        cd.patient(limited, waits.append, tries=3)("u")
+
+    def unknown(url):
+        raise HTTPError(url, 400, "Invalid symbol", {}, None)
+
+    waits.clear()
+    with pytest.raises(HTTPError):
+        cd.patient(unknown, waits.append)("u")
+    assert waits == []
