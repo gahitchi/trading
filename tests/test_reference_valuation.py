@@ -45,7 +45,7 @@ def source(*, when=10, account="SIM-001", scope=True, currency="USD", marks=None
             "marks": marks,
         },
         sort_keys=True,
-        separators=(",", ":")
+        separators=(",", ":"),
     ).encode()
 
 

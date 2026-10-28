@@ -29,9 +29,7 @@ from lab.settlement_input import _reject_nonfinite, _unique_object
 
 MAX_POLICY_BYTES = 64 * 1024
 MAX_POLICY_INSTRUMENTS = 1024
-POLICY_FIELDS = frozenset(
-    {"schema_version", "account_id", "record_id", "account_type", "currency", "instruments"}
-)
+POLICY_FIELDS = frozenset({"schema_version", "account_id", "record_id", "account_type", "currency", "instruments"})
 INSTRUMENT_FIELDS = frozenset({"symbol", "asset_class", "quote_currency", "venue_class"})
 ASSET_CLASSES = frozenset({"EQUITY", "ETF"})
 
@@ -64,9 +62,7 @@ def parse_cash_account_policy(raw: bytes, *, expected_account_id: str) -> CashAc
     if type(raw) is not bytes or not 0 < len(raw) <= MAX_POLICY_BYTES:
         raise EngineFactError("cash-account scope requires bounded original bytes")
     try:
-        document = json.loads(
-            raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_nonfinite
-        )
+        document = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_nonfinite)
     except (UnicodeError, TypeError, ValueError) as exc:
         raise EngineFactError("invalid cash-account manifest") from exc
     if type(document) is not dict or set(document) != POLICY_FIELDS:
@@ -157,9 +153,7 @@ def validate_cash_account_scope(book: EngineEconomicBook, policy: CashAccountPol
             if inventory[fact.symbol] < 0:
                 raise EngineFactError("cash-in-lieu exceeds fully paid long shares")
             seen.add(fact.symbol)
-        elif type(fact) is CashFact and fact.kind in {
-            "BORROW_FEE", "FINANCING", "SHORT_DISTRIBUTION", "BORROW_REBATE"
-        }:
+        elif type(fact) is CashFact and fact.kind in {"BORROW_FEE", "FINANCING", "SHORT_DISTRIBUTION", "BORROW_REBATE"}:
             raise EngineFactError("margin financing, short distribution and borrow events are unsupported")
         for posting in entry.postings:
             if posting.account == "cash:USD":
