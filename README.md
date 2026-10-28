@@ -28,7 +28,7 @@ pytest -n auto
 |---|---|
 | `lab record [--venue binance\|bybit] [--symbols ...] [--check-only] [--status]` | record crypto order books, trades, mark prices and funding (public data, no keys) |
 | `lab monitor [--port 8766]` | read-only dashboard of the recorder's health and the recorded data |
-| `lab micro-study <symbol> [--horizons] [--fee-bps]` | do order-book and trade-flow features predict moves beyond trading costs? |
+| `lab micro-study <symbol> [--venue] [--leader] [--horizons] [--fee-bps]` | do order-book and trade-flow features predict moves beyond trading costs? |
 | `lab fast backtest / paper <symbol>` | the first fast strategy on recorded data, or live data with simulated fills |
 | `lab fast backtest <symbol> --holdout [--again REASON]`, `lab fast release <symbol> --reason` | the one-time holdout test; turning the holdout into research data |
 | `lab kill [--flatten]`, `lab resume` | kill switch: stop all new orders now (`results/KILL`), and clear it |
@@ -59,8 +59,8 @@ docker compose up -d                                 # both recorders and the da
 ```
 
 `LAB_RECORD_SYMBOLS` and `LAB_RECORD_BYBIT_SYMBOLS` override the symbols. Read the data back with
-`ParquetDataCatalog("data/market/catalog").query_order_book_deltas(["BTCUSDT-LINEAR.BYBIT"])`. The research
-commands below (`micro-study`, `fast`) still run on the Binance recordings only.
+`ParquetDataCatalog("data/market/catalog").query_order_book_deltas(["BTCUSDT-LINEAR.BYBIT"])`. `micro-study`
+reads either venue (`--venue`); `fast` still runs on the Binance recordings only.
 
 `lab monitor` (the `monitor` service) serves a read-only dashboard at
 http://127.0.0.1:8766: an overall status with the checks behind it (each venue's heartbeat fresh, every feed live, data
@@ -72,11 +72,14 @@ is JSON at `/api/status`; `/health` answers 503 while no recorder is running, fo
 restarting leaves no hole between files, so it doesn't show as a gap.
 
 `lab micro-study BTCUSDT` replays a recording in receive-time order and tests the fast-trading features in
-`lab.micro` (multi-level order-flow imbalance, book imbalance and microprice, aggressor-signed volume buckets;
-ported from the Rust research crate): rank correlation with forward mid returns at 1, 5 and 30 seconds, and the
+`lab.micro` (multi-level order-flow imbalance, book imbalance and microprice, aggressor-signed volume buckets,
+Hawkes buy/sell trade intensity, absorption at the touch, and with `--leader` a Kalman lead-lag gap; ported from the
+Rust research crate): rank correlation with forward mid returns at 1, 5 and 30 seconds, and the
 mean forward move in each feature's top and bottom decile next to a taker round trip (2 x fee + median spread).
 A feature is only worth a strategy where that move exceeds the cost. It places no orders and models no queue
-position or latency.
+position or latency. `--leader ETHUSDT` or `--leader BTCUSDT --leader-venue bybit` replays a second instrument's
+book and measures how much of its moves the studied symbol has not yet followed; research then stops at whichever
+of the two holdouts starts first.
 
 `lab fast backtest BTCUSDT` replays a recording through NautilusTrader's matching engine (L2 book, queue
 position, consumed liquidity, maker/taker fees, a fixed order latency) with the first fast strategy, an
@@ -115,7 +118,7 @@ that cannot be valued is denied. Every state change and denial goes to an option
 
 ```
 src/lab/record.py         market-data recorder (Binance USD-M, Bybit linear)
-src/lab/micro.py          order-book and trade-flow features (OFI, imbalance, microprice, flow toxicity)
+src/lab/micro.py          order-book and trade-flow features (OFI, imbalance, microprice, flow, Hawkes, lead-lag, absorption)
 src/lab/micro_study.py    do the features predict moves beyond costs?
 src/lab/fast.py           ImbalanceTaker strategy, backtest on recorded books, paper node
 src/lab/fast_research.py  forward holdout, holdout ledger, trial log

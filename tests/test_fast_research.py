@@ -4,7 +4,7 @@ every run counted."""
 import json
 
 import pytest
-from nautilus_trader.model import CryptoPerpetual, Currency, InstrumentId, Price, Quantity, Symbol
+from nautilus_trader.model import CryptoPerpetual, Currency, InstrumentId, OrderBookDelta, Price, Quantity, Symbol
 from nautilus_trader.persistence import ParquetDataCatalog
 
 from lab import fast_research as fr
@@ -136,3 +136,22 @@ def test_micro_study_reads_research_data_only(recording, tmp_path, capsys):
     assert "study settings tried: 1" in first
     with pytest.raises(SystemExit, match="holdout"):
         lab_main([*study, "--end", "2100-01-01"])
+
+
+def test_micro_study_keeps_the_leaders_holdout_unseen_too(recording, tmp_path, capsys):
+    path, results, last_ts, _ = recording
+    leader = InstrumentId.from_str("BTCUSDT-LINEAR.BYBIT")
+    deltas, *_ = tilted_market(1500)  # the leader's recording stops earlier, so its holdout starts earlier
+    ParquetDataCatalog(path).write_order_book_deltas(
+        [OrderBookDelta(leader, d.action, d.order, d.flags, d.sequence, d.ts_event, d.ts_init) for d in deltas]
+    )
+    (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
+    study = ["--config", str(tmp_path / "lab.toml"), "micro-study", "BTCUSDT", "--catalog", path]
+    assert lab_main([*study, "--leader", "BTCUSDT", "--leader-venue", "bybit"]) == 0
+    assert "lead_lag_bps" in capsys.readouterr().out
+    assert fr.boundary(results, path, str(leader)) == deltas[-1].ts_init + 1
+    trial = json.loads((results / fr.TRIALS).read_text().splitlines()[-1])
+    assert trial["window"][1] == deltas[-1].ts_init < last_ts  # cut at the leader's holdout, not the symbol's
+    assert trial["params"]["leader"] == str(leader)
+    with pytest.raises(SystemExit, match="another symbol or venue"):
+        lab_main([*study, "--leader", "BTCUSDT"])

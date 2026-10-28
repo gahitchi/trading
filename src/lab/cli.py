@@ -66,12 +66,17 @@ def cmd_micro_study(cfg, a):
     if not catalog.exists():
         raise SystemExit(f"no recorded market data at {catalog}; run `lab record` first")
     try:
-        iid = str(perpetual_ids([a.symbol])[0])
+        iid = str(perpetual_ids([a.symbol], a.venue)[0])
+        leader = str(perpetual_ids([a.leader], a.leader_venue)[0]) if a.leader else None
     except ValueError as e:
         raise SystemExit(str(e)) from e
+    if leader == iid:
+        raise SystemExit("--leader must be another symbol or venue")
     start, end = (int(pd.Timestamp(x, tz="UTC").value) if x else None for x in (a.start, a.end))
     try:
         start, end = fast_research.research_window(cfg.results_dir, str(catalog), iid, start, end)
+        if leader:  # the leader's own holdout stays unseen too
+            end = min(end, fast_research.research_window(cfg.results_dir, str(catalog), leader, start, None)[1])
     except ValueError as e:
         raise SystemExit(str(e)) from e
     settings = StudySettings(
@@ -79,12 +84,22 @@ def cmd_micro_study(cfg, a):
         horizons_s=tuple(a.horizons),
         taker_fee_bps=a.fee_bps,
         flow_bucket_notional=a.bucket,
+        hawkes_baseline_per_s=a.hawkes_mu,
+        lead_lag_max_interval_s=a.lead_lag_interval,
     )
-    samples, table = study(str(catalog), iid, settings, start, end)
+    samples, table = study(str(catalog), iid, settings, start, end, leader)
     if samples.empty:
         raise SystemExit(f"no order-book data for {iid} in {catalog} before its holdout")
     first, last = (pd.Timestamp(samples["ts"].iloc[i], tz="UTC") for i in (0, -1))
-    params = {"every_ms": a.every_ms, "horizons_s": list(a.horizons), "fee_bps": a.fee_bps, "bucket": a.bucket}
+    params = {
+        "every_ms": a.every_ms,
+        "horizons_s": list(a.horizons),
+        "fee_bps": a.fee_bps,
+        "bucket": a.bucket,
+        "hawkes_mu": a.hawkes_mu,
+        "leader": leader,
+        "lead_lag_interval": a.lead_lag_interval,
+    }
     n = fast_research.register_trial(
         cfg.results_dir, "micro-study", iid, params, (start, end),
         {"ic": {f"{r.feature}@{r.horizon_s:g}s": r.ic for r in table.itertuples() if r.ic == r.ic}},
@@ -270,7 +285,8 @@ def build_parser() -> argparse.ArgumentParser:
     mon.set_defaults(fn=cmd_monitor)
 
     ms = sub.add_parser("micro-study", help="do order-book and trade-flow features predict moves beyond costs?")
-    ms.add_argument("symbol", help="a recorded Binance USD-M perpetual, e.g. BTCUSDT")
+    ms.add_argument("symbol", help="a recorded perpetual, e.g. BTCUSDT")
+    ms.add_argument("--venue", choices=VENUES, default="binance", help="venue of the symbol (default binance)")
     ms.add_argument("--catalog", help="catalog directory (default: <data>/market/catalog)")
     ms.add_argument("--start", help="UTC start, e.g. 2026-11-01")
     ms.add_argument("--end", help="UTC end")
@@ -278,6 +294,12 @@ def build_parser() -> argparse.ArgumentParser:
     ms.add_argument("--horizons", type=float, nargs="+", default=[1.0, 5.0, 30.0], help="seconds ahead")
     ms.add_argument("--fee-bps", type=float, default=5.0, help="taker fee per side in bps (default 5)")
     ms.add_argument("--bucket", type=float, default=100_000.0, help="flow bucket notional in USDT")
+    ms.add_argument("--hawkes-mu", type=float, default=1.0, help="Hawkes baseline intensity, trades/s (default 1)")
+    ms.add_argument("--leader", help="lead-lag: a recorded symbol whose moves may lead, e.g. BTCUSDT")
+    ms.add_argument("--leader-venue", choices=VENUES, default="binance", help="venue of --leader (default binance)")
+    ms.add_argument(
+        "--lead-lag-interval", type=float, default=0.05, help="longest gap (s) between mids that is a return (0.05)"
+    )
     ms.set_defaults(fn=cmd_micro_study)
 
     fast = sub.add_parser("fast", help="fast crypto strategy: backtest on recorded data, paper on live data")
