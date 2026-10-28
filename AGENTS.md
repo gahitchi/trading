@@ -1,7 +1,6 @@
 # Working rules for AI agents on this repository
 
-Read by every agent (Claude reads it through `CLAUDE.md`). `COLLABORATION.md` is the protocol between the
-agents; this file is how each one works. Gabriel's decisions in `collab/decisions.md` override both.
+Read by every agent (Claude reads it through `CLAUDE.md`). Gabriel's instructions override it.
 
 ## How to change code
 
@@ -23,17 +22,13 @@ agents; this file is how each one works. Gabriel's decisions in `collab/decision
 
 ## Rules of this project
 
-- **Paper accounts only.** Never weaken the three paper-only guards (live ports, `DU` account IDs, the
-  account check before every order), and never add a code path that builds a live configuration.
-- **Branches:** Claude writes to `main` and `claude/*`; ChatGPT to `chatgpt/*` and `hardening/*`. Work in
-  turns; Gabriel starts each turn. Every commit, merges included, carries exactly one `Agent:` trailer.
-- **Hands off `chatgpt/nicola`.** Neither agent touches it: no commits, pushes, merges, rebases, resets,
-  deletion, cherry-picks or reviews, and nothing built on top of it. That includes ChatGPT, although the name
-  is under `chatgpt/*`. Only Gabriel decides what happens to it.
-- **Never commit secrets or raw broker evidence:** `.env`, `secrets/`, account numbers, tokens, IBKR
-  captures (only `lab.capture.sanitize` output belongs in Git).
-- **No look-ahead, ever.** A signal sees only closed bars; research respects the train/test/holdout split
-  and the intraday holdout boundary; every trial is counted.
-- **Before handing off:** `ruff check src tests tools`, `ruff format --check src tests tools`,
-  `pytest`, `python3 tools/collab.py check`, then a message in the thread with what changed, what was
-  verified, and what is still open.
+- **Paper only.** Never add a code path that sends real exchange orders or uses exchange API keys without
+  Gabriel's explicit decision. Never weaken the kill switch or the pre-trade risk manager.
+- **Branches:** work on `claude/*` branches and land changes on `main` through pull requests.
+- **Hands off other people's branches.** Never commit to, rebase, reset or delete `chatgpt/nicola` or any branch
+  owned by the collaborator ssirto (`chatgpt/gold-*`). Only Gabriel decides what happens to them.
+- **Never commit secrets:** `.env`, API keys, tokens, account numbers.
+- **No look-ahead, ever.** Research sees only data before the forward holdout; every configuration tried is
+  counted in the trial log.
+- **Before handing off:** `ruff check src tests`, `ruff format --check src tests`, `pytest -n auto`, then a
+  message with what changed, what was verified, and what is still open.

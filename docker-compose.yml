@@ -1,82 +1,16 @@
-# trading-lab deployment: IB Gateway (paper) + the agents.
+# trading-lab deployment: the crypto market-data recorders, one per exchange (public data only, no keys, no
+# orders), and their read-only dashboard.
 #
-# First time:
-#   cp .env.example .env              # fill in TWS_USERID and LAB_PAPER_ACCOUNT
-#   mkdir -p secrets && printf '%s' 'your-ibkr-password' > secrets/tws_password && chmod 600 secrets/tws_password
-#   docker compose up -d ib-gateway                                  # log in to the paper account
-#   docker compose run --rm -e LAB_IB_CLIENT_ID=8 lab paper --smoke --test-order
-#   docker compose up -d                                             # start the agents
-#
-# Everyday:
-#   docker compose logs -f lab        docker compose ps (health)       docker compose exec lab lab kill
+#   docker compose up -d               docker compose logs -f recorder      docker compose ps (health)
+#   docker compose run --rm recorder record --status
 
 name: trading-lab
 
 services:
-  ib-gateway:
-    # IB Gateway + IBC for automated login: https://github.com/gnzsnz/ib-gateway-docker
-    # Pinned for reproducibility; check that project for newer stable tags.
-    image: ghcr.io/gnzsnz/ib-gateway:10.50.1f@sha256:1e2236804ac949b789197c225a048c0c891c9958f948c87166226e5b647ff581
-    restart: always
-    environment:
-      TWS_USERID: ${TWS_USERID:?set TWS_USERID in .env}
-      TWS_PASSWORD_FILE: /run/secrets/tws_password
-      TRADING_MODE: paper            # the lab refuses live ports anyway; this keeps the gateway on paper
-      READ_ONLY_API: "no"
-      TWOFA_TIMEOUT_ACTION: restart
-      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
-      # Restart before regular US-equity sessions for daily and intraday modes.
-      AUTO_RESTART_TIME: "05:00 AM"
-      EXISTING_SESSION_DETECTED_ACTION: primary
-      TIME_ZONE: America/New_York
-      TZ: America/New_York
-      JAVA_HEAP_SIZE: "1024"
-      VNC_SERVER_PASSWORD: ${VNC_SERVER_PASSWORD:-}  # set it to watch the gateway GUI via VNC on 127.0.0.1:5900
-    secrets:
-      - tws_password
-    ports:
-      - "127.0.0.1:4002:4004"   # paper API, for running `lab doctor` or the swarm from the host
-      - "127.0.0.1:5900:5900"   # VNC, only active when VNC_SERVER_PASSWORD is set
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/4004' || exit 1"]
-      interval: 30s
-      timeout: 5s
-      start_period: 120s
-      retries: 5
-    logging: &logging
-      driver: json-file
-      options: {max-size: "10m", max-file: "5"}
-
-  lab:
-    build: .
-    image: trading-lab:latest
-    restart: unless-stopped
-    depends_on:
-      ib-gateway:
-        condition: service_healthy
-    environment:
-      LAB_IB_HOST: ib-gateway
-      LAB_IB_PORT: "4004"           # paper relay inside the gateway container
-      LAB_IB_CLIENT_ID: "7"
-      LAB_PAPER_ACCOUNT: ${LAB_PAPER_ACCOUNT:?set LAB_PAPER_ACCOUNT (DU...) in .env}
-      LAB_TELEGRAM_TOKEN: ${LAB_TELEGRAM_TOKEN:-}
-      LAB_TELEGRAM_CHAT_ID: ${LAB_TELEGRAM_CHAT_ID:-}
-      TZ: America/New_York
-    command: paper --signals ${LAB_SIGNALS:-sma_trend} --tickers ${LAB_TICKERS:-SPY QQQ}
-    volumes:
-      - ./lab.toml:/lab/lab.toml:ro
-      - ./results:/lab/results          # ledger, journal, heartbeat, kill switch: survives restarts
-      - ./research:/lab/research:ro     # promoted hypotheses
-      - ./data:/lab/data:ro
-    logging: *logging
-
-  # Crypto market-data recorders, one per exchange so one venue's outage never stops the other (public data only,
-  # no keys, no orders). Both write into data/market/catalog. Not started by a plain `up`:
-  #   docker compose --profile crypto up -d recorder recorder-bybit monitor
+  # One recorder per exchange, so one venue's outage never stops the other; both write into data/market/catalog.
   recorder: &recorder
     image: trading-lab:latest
     build: .
-    profiles: [crypto]
     restart: unless-stopped         # reconnects by restarting after a lost connection or exchange maintenance
     environment:
       TZ: UTC
@@ -92,7 +26,9 @@ services:
       timeout: 10s
       start_period: 120s
       retries: 3
-    logging: *logging
+    logging: &logging
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
 
   recorder-bybit:
     <<: *recorder
@@ -101,11 +37,10 @@ services:
       LAB_RECORD_VENUE: bybit
     command: record --venue bybit --symbols ${LAB_RECORD_BYBIT_SYMBOLS:-BTCUSDT ETHUSDT SOLUSDT}
 
-  # Read-only dashboard of the recorder and its data: http://127.0.0.1:8766 (same profile as the recorder).
+  # Read-only dashboard of the recorders and their data: http://127.0.0.1:8766
   monitor:
     image: trading-lab:latest
     build: .
-    profiles: [crypto]
     restart: unless-stopped
     environment:
       TZ: UTC
@@ -122,7 +57,3 @@ services:
       timeout: 10s
       retries: 3
     logging: *logging
-
-secrets:
-  tws_password:
-    file: ./secrets/tws_password
