@@ -203,3 +203,58 @@ def test_concurrent_writers_with_same_head_cannot_both_commit(tmp_path):
         results = list(pool.map(compete, events))
     assert sorted(results) == ["committed", "refused"]
     assert len(store.load().events) == 2
+
+
+
+def test_legacy_sqlite_layout_migrates_atomically_without_changing_financial_evidence(tmp_path):
+    path = tmp_path / "legacy-layout.sqlite"
+    store = EconomicEventStore(path, "SIM-001")
+    original = record()
+    before = store.append_cash_record(original, source_namespace="broker")
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE broker_order_events")
+        db.execute("DROP TABLE external_order_observations")
+        db.execute("PRAGMA user_version=0")
+    with pytest.raises(EconomicStoreError, match="unmigrated"):
+        EconomicEventStore(path, "SIM-001", readonly=True)
+    upgraded = EconomicEventStore(path, "SIM-001")
+    assert upgraded.load() == before
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA user_version").fetchone() == (1,)
+        assert db.execute("SELECT source_bytes FROM economic_events").fetchone()[0] == original
+        for table in ("broker_order_events", "external_order_observations"):
+            assert db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone() is not None
+    assert EconomicEventStore(path, "SIM-001", readonly=True).load() == before
+
+
+def test_legacy_migration_rejects_corrupt_economics_and_rolls_back_all_new_tables(tmp_path):
+    path = tmp_path / "legacy-corrupt.sqlite"
+    store = EconomicEventStore(path, "SIM-001")
+    store.append_cash_record(record(), source_namespace="broker")
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE broker_order_events")
+        db.execute("DROP TABLE external_order_observations")
+        db.execute("UPDATE economic_events SET source_bytes=? WHERE seq=1", (b"{}",))
+        db.execute("PRAGMA user_version=0")
+    with pytest.raises((EconomicStoreError, EngineFactError)):
+        EconomicEventStore(path, "SIM-001")
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA user_version").fetchone() == (0,)
+        assert db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='broker_order_events'"
+        ).fetchone() is None
+
+
+def test_unknown_future_database_layout_never_downgrades_or_rewrites(tmp_path):
+    path = tmp_path / "future-layout.sqlite"
+    EconomicEventStore(path, "SIM-001")
+    with sqlite3.connect(path) as db:
+        db.execute("PRAGMA user_version=98")
+    with pytest.raises(EconomicStoreError, match="future"):
+        EconomicEventStore(path, "SIM-001")
+    with pytest.raises(EconomicStoreError, match="unmigrated"):
+        EconomicEventStore(path, "SIM-001", readonly=True)
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA user_version").fetchone() == (98,)

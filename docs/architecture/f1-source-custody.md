@@ -294,3 +294,17 @@ The operator/reviewer must independently compare Git commit and CI artifact
 identity, anchor the exported receipt off-host and cross-check actual source
 receipts and cash/position/order statements. No private broker credentials
 or original account statement bytes should be uploaded to public CI.
+
+
+## F1.4 additive migration and backfill safety
+
+SQLite \`PRAGMA user_version=1\` now identifies the local economic-store
+layout independently of the canonical fact payload schema. Existing
+\`user_version=0\` legacy journals receive the required order-observation
+and order-lifecycle tables in a single writable \`BEGIN IMMEDIATE\`
+transaction. The journal's original cash/position/order evidence is replayed
+and verified *before* the version marker commits. Corruption rolls the schema
+change back completely. Read-only opening of an unmigrated or unsupported
+future layout is explicitly refused and cannot modify it. No original
+source event is changed during an additive migration; independently backed-up
+copies and an Arch migration/rollback drill remain external evidence.
