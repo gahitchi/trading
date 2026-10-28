@@ -351,6 +351,14 @@ exceed about 50: at 5m that is 25 stock-strategy pairs.
 - **Limits**: per-order notional cap, orders per day, daily buy turnover, NautilusTrader's order-rate limit, risk
   agent position/gross caps and drawdown circuit breaker.
 - **Alerts** (Telegram) for selected risk events, fills and a daily equity report; heartbeat-based Docker health check.
+- **Pre-trade risk for order-level strategies** (`lab.risk_manager`, for the fast crypto path): every strategy is a
+  `RiskManagedStrategy` sharing one `RiskManager` per trader, and `add_strategy` refuses any other. Each order
+  passes, across all strategies, the kill switch (re-read every second), a daily loss cap on equity including
+  unrealized PnL (persisted, so a restart neither forgets the loss nor clears the stop; flattens and allows only
+  reducing orders until the next UTC day), worst-case per-instrument and gross notional limits (position plus live
+  orders on the same side) and a live-order cap; then NautilusTrader's own RiskEngine (rate limits, notional per
+  order, precision, balance, reduce-only). Reducing orders always pass except during a kill-switch halt; anything
+  that cannot be valued is denied. Every state change and denial goes to an optional JSONL audit file.
 
 ## Layout
 
@@ -365,6 +373,7 @@ src/lab/
   experiments.py            comparison, trials registry, noise floor, PBO, walk-forward, holdout ledger
   stats.py                  PSR, DSR, PBO (CSCV), bootstrap CI
   paper.py                  the same agents on Interactive Brokers' paper account
+  risk_manager.py           pre-trade risk gate every order-level strategy trades through
   data.py  universe.py  costs.py  metrics.py  report.py  notify.py  safety.py  config.py  cli.py
 tests/                      pytest suite (offline; `pytest -m llm` adds a real model call)
 examples/goog-offline/      offline configuration on real GOOG prices
