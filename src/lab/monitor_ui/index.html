@@ -36,6 +36,45 @@
     </dl>
   </section>
 
+  <section class="panel" aria-labelledby="paper-title" id="paper">
+    <div class="panel-head">
+      <h2 id="paper-title">Paper trading and risk</h2>
+      <p class="help" id="paper-help">Simulated fills on the live book (<code>lab fast paper</code>): no exchange orders, no keys. P&amp;L counts from the run's first trade, net of fees.</p>
+    </div>
+    <div id="kill" class="kill" role="alert" hidden></div>
+    <div class="paper-head">
+      <div class="phase-line small" id="paper-status" data-status="unknown">
+        <span class="lamp" aria-hidden="true"></span><span id="paper-label">Not run yet</span>
+      </div>
+      <ul class="checks light" id="paper-checks" aria-label="Paper-trading checks"></ul>
+    </div>
+    <dl class="readouts light" id="paper-readouts">
+      <div><dt>Risk state</dt><dd id="p-state">–</dd></div>
+      <div><dt>Equity</dt><dd id="p-equity">–</dd></div>
+      <div><dt>Run P&amp;L</dt><dd id="p-pnl">–</dd></div>
+      <div><dt>Today vs loss cap</dt><dd id="p-day">–</dd></div>
+      <div><dt>Position</dt><dd id="p-position">–</dd></div>
+      <div><dt>Round trips</dt><dd id="p-trips">–</dd></div>
+    </dl>
+    <figure class="equity">
+      <figcaption>Equity, one sample a minute (<span id="p-ccy">USDT</span>)</figcaption>
+      <div id="p-curve"></div>
+    </figure>
+    <div class="table-wrap">
+      <table>
+        <caption>Strategy and limits</caption>
+        <tbody id="p-limits"></tbody>
+      </table>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <caption>Risk events, newest first</caption>
+        <thead><tr><th scope="col">Time (UTC)</th><th scope="col">Event</th><th scope="col">Detail</th></tr></thead>
+        <tbody id="p-events"></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="panel" aria-labelledby="feeds-title">
     <div class="panel-head">
       <h2 id="feeds-title">Feeds</h2>

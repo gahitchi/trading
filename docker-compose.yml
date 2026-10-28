@@ -50,6 +50,7 @@ services:
     volumes:
       - ./lab.toml:/lab/lab.toml:ro
       - ./data:/lab/data:ro
+      - ./results:/lab/results:ro      # paper-trading report, risk audit, kill switch
     healthcheck:
       # Healthy while the dashboard answers; /health itself says 503 while the recorder is down.
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/', timeout=5)"]

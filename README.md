@@ -68,8 +68,15 @@ promoted into the catalog within the hour, days of disk left at the current writ
 instrument over the last 30 minutes, and per instrument the rows and bytes in the catalog, the recorded span, and
 its coverage: holes of over a minute between order-book files, which is where the recorder was down. The same data
 is JSON at `/api/status`; `/health` answers 503 while no recorder is running, for an external uptime probe. It reads
-`data/market/` only and never connects to an exchange. A connection drop the adapter recovers from without
+`data/market/` and `results/` only and never connects to an exchange. A connection drop the adapter recovers from without
 restarting leaves no hole between files, so it doesn't show as a gap.
+
+Its paper-trading and risk panel follows `lab fast paper`: the run's equity curve (one sample a minute, the last
+24 hours), its P&L from before the first trade and net of fees, today's P&L against the daily loss cap, the open
+position, round trips with the t-statistic of their mean, the risk manager's state (ACTIVE, REDUCING, HALTED),
+its limits and denials, the latest risk events from `results/fast/risk-audit.jsonl`, and the kill switch. The
+paper node writes `results/fast/paper.json` every 5 seconds; a report older than 30 seconds reads as stopped.
+The simulated account starts again at `--capital` on every run, so the P&L is per run.
 
 `lab micro-study BTCUSDT` replays a recording in receive-time order and tests the fast-trading features in
 `lab.micro` (multi-level order-flow imbalance, book imbalance and microprice, aggressor-signed volume buckets;

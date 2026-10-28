@@ -233,6 +233,20 @@ class RiskManager:
             except OSError as e:
                 self._state_error = f"cannot write the risk audit {self.audit_path}: {e}"
 
+    def snapshot(self) -> dict:
+        """The state for a report or a dashboard: trading state, the day's loss against its cap, the limits and
+        the denials so far."""
+        day = self._day if self._day is not None and self._day.day == self._today else None
+        return {
+            "state": self.state.value,
+            "reason": self.reason,
+            "day": day.day if day else None,
+            "start_equity": day.start_equity if day else None,
+            "breach": day.breach if day else None,
+            "limits": asdict(self.limits),
+            "denials": dict(self.denials),
+        }
+
     # -- the pre-trade check
 
     def check(self, intent: Intent, book: dict[str, Exposure], *, live_orders: int, equity: float | None) -> str | None:
