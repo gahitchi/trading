@@ -148,3 +148,16 @@ def test_realized_profit_matches_original_fifo_journal_not_reference_marks():
     ledger = EconomicLedger().post_fill("open", "SPY", "BUY", "2", "100", commission="1")
     ledger = ledger.post_fill("close", "SPY", "SELL", "2", "130", commission="1")
     assert ledger.balance("income:realized") == Decimal("-60")
+
+
+
+def test_source_digest_cannot_be_reused_with_valid_but_mutated_valuation():
+    from dataclasses import replace
+
+    report = parse(source())
+    modified = replace(
+        report,
+        marks=(replace(report.marks[0], price=Decimal("140")), report.marks[1]),
+    )
+    with pytest.raises(EngineFactError, match="original evidence bytes"):
+        value_economic_book(book(), modified, max_mark_age_ns=0)

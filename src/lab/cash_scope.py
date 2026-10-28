@@ -41,6 +41,7 @@ class CashAccountPolicy:
     account_type: str
     currency: str
     instruments: tuple[str, ...]
+    original_bytes: bytes
     locally_declared_not_broker_verified: bool = True
 
 
@@ -107,6 +108,7 @@ def parse_cash_account_policy(raw: bytes, *, expected_account_id: str) -> CashAc
         "USD_UNLEVERAGED_CASH",
         "USD",
         tuple(sorted(symbols)),
+        raw,
     )
 
 
@@ -114,6 +116,11 @@ def validate_cash_account_scope(book: EngineEconomicBook, policy: CashAccountPol
     """Check *every* historical prefix, including now-closed short/overdraft states."""
     if type(book) is not EngineEconomicBook or type(policy) is not CashAccountPolicy:
         raise EngineFactError("cash-account check requires typed book and policy")
+    if (
+        type(policy.original_bytes) is not bytes
+        or parse_cash_account_policy(policy.original_bytes, expected_account_id=book.account_id) != policy
+    ):
+        raise EngineFactError("cash-account policy was mutated after original source validation")
     if (
         book.account_id != policy.account_id
         or policy.account_type != "USD_UNLEVERAGED_CASH"

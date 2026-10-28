@@ -49,6 +49,8 @@ class ReferenceMarkStatement:
     as_of_ns: int
     marks: tuple[ReferenceMark, ...]
     complete_instrument_scope: bool
+    source_namespace: str
+    original_bytes: bytes
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +142,8 @@ def parse_reference_mark_statement(
         as_of_ns=doc["as_of_ns"],
         marks=tuple(marks),
         complete_instrument_scope=True,
+        source_namespace=source_namespace,
+        original_bytes=raw,
     )
 
 
@@ -152,6 +156,17 @@ def value_economic_book(
     """Mark FIFO lots exactly without booking profit or accepting stale prices."""
     if type(book) is not EngineEconomicBook or type(statement) is not ReferenceMarkStatement:
         raise EngineFactError("typed economic book and independent mark statement required")
+    if (
+        type(statement.source_namespace) is not str
+        or type(statement.original_bytes) is not bytes
+        or parse_reference_mark_statement(
+            statement.original_bytes,
+            source_namespace=statement.source_namespace,
+            expected_account_id=book.account_id,
+        )
+        != statement
+    ):
+        raise EngineFactError("typed reference marks diverge from their original evidence bytes")
     if statement.account_id != book.account_id or statement.complete_instrument_scope is not True:
         raise EngineFactError("reference mark scope disagrees with journal account")
     if type(max_mark_age_ns) is not int or not 0 <= max_mark_age_ns <= 604_800_000_000_000:

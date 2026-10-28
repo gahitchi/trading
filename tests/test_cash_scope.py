@@ -141,3 +141,13 @@ def test_unfunded_buy_never_autofunds_and_does_not_modify_ledger():
     with pytest.raises(EngineFactError):
         validate_cash_account_scope(state, policy())
     assert state == before
+
+
+
+def test_local_cash_scope_manifest_cannot_be_mutated_after_source_hash():
+    from dataclasses import replace
+
+    baseline = policy()
+    altered = replace(baseline, instruments=())
+    with pytest.raises(EngineFactError, match="mutated"):
+        validate_cash_account_scope(seeded(), altered)
