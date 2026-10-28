@@ -274,3 +274,23 @@ reclassifications, external correction ordering across unsynchronized
 sources, and trading state. These require distinct economic contracts and
 reviewed original broker evidence; they are not allowed to masquerade as
 cash reversals. The local custody digest does not authenticate source origin.
+
+
+## F1.6 reproducible read-only local evidence manifest
+
+\`python -m lab.f1_evidence --journal ... --account ... --commit <full-git-sha>\`
+produces deterministic JSON with a canonical SHA-256 envelope over the
+**one-SQLite-transaction** replay of original economic facts, source inventory,
+the independently calculated rational account projection, typed order-state
+evidence chain, unresolved broker order IDs and all archived complete order
+reports. It explicitly flags incomplete locally tracked fill-to-order custody.
+Tampering with original bytes or archived observations makes the export fail.
+
+A supplied \`--commit\` SHA is a **declared value only**; this module cannot
+prove code-to-build identity, authenticate broker transactions, independently
+anchor the chain or certify F0/F1. Those fields always remain false; a
+matching local hash is not an external signature or a qualified trading account.
+The operator/reviewer must independently compare Git commit and CI artifact
+identity, anchor the exported receipt off-host and cross-check actual source
+receipts and cash/position/order statements. No private broker credentials
+or original account statement bytes should be uploaded to public CI.
