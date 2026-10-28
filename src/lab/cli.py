@@ -687,6 +687,37 @@ def cmd_record(cfg, a):
     return 0
 
 
+def cmd_micro_study(cfg, a):
+    from lab.micro_study import StudySettings, study
+    from lab.record import perpetual_ids
+
+    catalog = Path(a.catalog) if a.catalog else cfg.data_dir / "market" / "catalog"
+    if not catalog.exists():
+        raise SystemExit(f"no recorded market data at {catalog}; run `lab record` first")
+    try:
+        iid = str(perpetual_ids([a.symbol])[0])
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    start, end = (int(pd.Timestamp(x, tz="UTC").value) if x else None for x in (a.start, a.end))
+    settings = StudySettings(
+        every_ms=a.every_ms,
+        horizons_s=tuple(a.horizons),
+        taker_fee_bps=a.fee_bps,
+        flow_bucket_notional=a.bucket,
+    )
+    samples, table = study(str(catalog), iid, settings, start, end)
+    if samples.empty:
+        raise SystemExit(f"no order-book data for {iid} in {catalog}")
+    first, last = (pd.Timestamp(samples["ts"].iloc[i], tz="UTC") for i in (0, -1))
+    print(f"{iid}: {len(samples):,} samples every {a.every_ms} ms, {first:%Y-%m-%d %H:%M} .. {last:%Y-%m-%d %H:%M} UTC")
+    print(table.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
+    print(
+        "ic: rank correlation with the forward mid return. top/bottom: mean forward return (bps) in the feature's"
+        " top/bottom decile; it pays only where it exceeds cost_bps (taker round trip + median spread)."
+    )
+    return 0
+
+
 def cmd_runtime(cfg, a):
     from lab.runtime_ops import run
 
@@ -1173,6 +1204,17 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--out", help="output directory (default: <data>/market)")
     rec.add_argument("--check-only", action="store_true", help="validate the setup without connecting")
     rec.set_defaults(fn=cmd_record)
+
+    ms = sub.add_parser("micro-study", help="do order-book and trade-flow features predict moves beyond costs?")
+    ms.add_argument("symbol", help="a recorded Binance USD-M perpetual, e.g. BTCUSDT")
+    ms.add_argument("--catalog", help="catalog directory (default: <data>/market/catalog)")
+    ms.add_argument("--start", help="UTC start, e.g. 2026-11-01")
+    ms.add_argument("--end", help="UTC end")
+    ms.add_argument("--every-ms", type=int, default=100, help="sampling clock (default 100 ms)")
+    ms.add_argument("--horizons", type=float, nargs="+", default=[1.0, 5.0, 30.0], help="seconds ahead")
+    ms.add_argument("--fee-bps", type=float, default=5.0, help="taker fee per side in bps (default 5)")
+    ms.add_argument("--bucket", type=float, default=100_000.0, help="flow bucket notional in USDT")
+    ms.set_defaults(fn=cmd_micro_study)
 
     runtime = sub.add_parser("runtime", help="cold backup, upgrade preflight and broker-attested code migration")
     runtime.add_argument("action", choices=["backup", "preflight", "upgrade", "enable-gold"])
