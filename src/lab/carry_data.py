@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 
 import pandas as pd
 
@@ -25,12 +26,41 @@ BINANCE_FAPI = "https://fapi.binance.com/fapi/v1"
 BINANCE_SPOT = "https://api.binance.com/api/v3"
 BYBIT_V5 = "https://api.bybit.com/v5/market"
 HOUR_MS = 3_600_000
+TRIES = 6  # waits of 2, 4, ... 32 s between them: rate limits and timeouts pass, a dead network does not
+BYBIT_RATE_LIMITED = {10006, 10018}
 # (venue, market) -> what carry research reads from it
 SERIES = {
     ("binance", "perp"): ("funding", "close"),
     ("binance", "spot"): ("close",),
     ("bybit", "perp"): ("funding", "close"),
 }
+
+
+class RateLimited(TimeoutError):
+    """The venue asked us to slow down; retried, and like a timeout once the retries are spent."""
+
+
+def patient(get, sleep=time.sleep, tries=TRIES):
+    """`get` retried with exponential backoff on rate limits (HTTP 418/429, Bybit's HTTP-200 codes), server errors
+    and network timeouts. Other HTTP errors (an unknown symbol) are answers, not failures, and pass through."""
+
+    def call(url):
+        for k in range(tries):
+            try:
+                r = get(url)
+                if isinstance(r, dict) and r.get("retCode") in BYBIT_RATE_LIMITED:
+                    raise RateLimited(f"bybit: {r.get('retMsg')}")
+                return r
+            except HTTPError as e:
+                if (e.code not in (418, 429) and e.code < 500) or k == tries - 1:
+                    raise
+            except (URLError, TimeoutError):
+                if k == tries - 1:
+                    raise
+            sleep(2 ** (k + 1))
+        raise AssertionError("unreachable")
+
+    return call
 
 
 def _ms(ts: pd.Timestamp) -> int:
@@ -115,8 +145,11 @@ def _bybit_closes(symbol, start_ms, now_ms, get, pause):
     return rows
 
 
-def download(venue, market, kind, symbol, start_ms, now_ms, get=get_json, pause=lambda: time.sleep(0.5)):
+def download(
+    venue, market, kind, symbol, start_ms, now_ms, get=get_json, pause=lambda: time.sleep(0.5), sleep=time.sleep
+):
     """[(ts_ms, value)] from start_ms (inclusive) up to now_ms."""
+    get = patient(get, sleep)
     if (venue, market) == ("binance", "perp"):
         if kind == "funding":
             return _binance_funding(symbol, start_ms, now_ms, get, pause)
