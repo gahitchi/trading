@@ -146,7 +146,7 @@ def parse_broker_order_event(
             raise EconomicStoreError("order fill requires original execution SHA-256")
     elif fill_id is not None or fill_digest is not None:
         raise EconomicStoreError("non-fill order transition cannot claim an execution")
-    return BrokerOrderEvent(
+    event = BrokerOrderEvent(
         event_id=_identity(doc["event_id"], "order event identity"),
         source_ref=f"{source_namespace}:{_identity(doc['record_id'], 'order record identity')}",
         source_sha256=hashlib.sha256(raw).hexdigest(),
@@ -163,6 +163,12 @@ def parse_broker_order_event(
         fill_record_id=fill_id,
         fill_source_sha256=fill_digest,
     )
+    if (
+        event.cumulative_executed_quantity > event.requested_quantity
+        or event.remaining_quantity > event.requested_quantity
+    ):
+        raise EconomicStoreError("broker order quantities exceed requested quantity")
+    return event
 
 
 def _transition(
@@ -407,7 +413,10 @@ class OrderLifecycleStore:
             _transition(states.get(event.broker_order_id), event, fill)
             prior_head = book.evidence_head
             if fill is not None:
-                book = book.append(fill)
+                try:
+                    book = book.append(fill)
+                except EngineFactError as exc:
+                    raise EconomicStoreError("broker execution duplicates or violates economic source facts") from exc
                 payload = _encode(fill)
                 db.execute(
                     "INSERT INTO economic_events "

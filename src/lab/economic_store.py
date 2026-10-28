@@ -310,10 +310,14 @@ class EconomicEventStore:
         with closing(self._connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             book = self._read_locked(db)
-            if type(fact) is BrokerFillFact and db.execute(
-                "SELECT 1 FROM broker_order_events WHERE broker_order_id=? LIMIT 1",
-                (fact.broker_order_id,),
-            ).fetchone() is not None:
+            if (
+                type(fact) is BrokerFillFact
+                and db.execute(
+                    "SELECT 1 FROM broker_order_events WHERE broker_order_id=? LIMIT 1",
+                    (fact.broker_order_id,),
+                ).fetchone()
+                is not None
+            ):
                 raise EconomicStoreError("tracked broker fills require atomic order lifecycle custody")
             existing = db.execute(
                 "SELECT payload,source_bytes FROM economic_events WHERE event_id=?",
