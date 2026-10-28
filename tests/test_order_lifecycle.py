@@ -321,7 +321,6 @@ def test_preexisting_orphan_receipt_blocks_transition_and_does_not_forge_lifecyc
     assert len(store.load().events) == 1
 
 
-
 def complete_report(*, orders, when=40):
     from lab.order_observation import parse_external_order_statement
 
@@ -383,7 +382,11 @@ def test_complete_external_order_status_and_every_receipt_match_same_ledger_snap
         second,
     )
     report = complete_report(
-        orders=[order_summary(status="FILLED", executed="1", remaining="0", receipts=[receipt_of(first), receipt_of(second)])],
+        orders=[
+            order_summary(
+                status="FILLED", executed="1", remaining="0", receipts=[receipt_of(first), receipt_of(second)]
+            )
+        ],
     )
     parity = reconcile_order_lifecycle(lifecycle, report)
     assert parity.matches

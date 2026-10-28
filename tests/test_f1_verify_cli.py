@@ -332,7 +332,6 @@ def test_cli_refuses_order_and_account_snapshots_from_distinct_times(tmp_path, c
     assert "different snapshot times" in capsys.readouterr().err
 
 
-
 def test_opt_in_cli_requires_exact_order_lifecycle_not_just_receipt_quantity(tmp_path, capsys):
     from lab.order_lifecycle import OrderLifecycleStore
 
@@ -381,8 +380,17 @@ def test_opt_in_cli_requires_exact_order_lifecycle_not_just_receipt_quantity(tmp
     orders = tmp_path / "orders.json"
     orders.write_bytes(order_report())
     args = [
-        "--journal", str(path), "--account", "SIM-001", "--statement", str(account),
-        "--orders", str(orders), "--source", "broker", "--require-order-lifecycle",
+        "--journal",
+        str(path),
+        "--account",
+        "SIM-001",
+        "--statement",
+        str(account),
+        "--orders",
+        str(orders),
+        "--source",
+        "broker",
+        "--require-order-lifecycle",
     ]
     assert run(args) == 0
     response = json.loads(capsys.readouterr().out)
@@ -404,8 +412,17 @@ def test_opt_in_cli_cannot_certify_broker_fill_without_order_lifecycle(tmp_path,
     orders = tmp_path / "orders.json"
     orders.write_bytes(order_report())
     args = [
-        "--journal", str(path), "--account", "SIM-001", "--statement", str(account),
-        "--orders", str(orders), "--source", "broker", "--require-order-lifecycle",
+        "--journal",
+        str(path),
+        "--account",
+        "SIM-001",
+        "--statement",
+        str(account),
+        "--orders",
+        str(orders),
+        "--source",
+        "broker",
+        "--require-order-lifecycle",
     ]
     assert run(args) == 2
     response = json.loads(capsys.readouterr().out)

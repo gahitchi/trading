@@ -464,7 +464,6 @@ class OrderLifecycleStore:
             return verified
 
 
-
 @dataclass(frozen=True, slots=True)
 class LifecycleOrderDelta:
     broker_order_id: str
@@ -500,9 +499,7 @@ class LifecycleReportParity:
         return self.receipt_scope_checked and all(delta.matches for delta in self.order_deltas)
 
 
-def reconcile_order_lifecycle(
-    lifecycle: OrderLifecycleStore, report: object
-) -> LifecycleReportParity:
+def reconcile_order_lifecycle(lifecycle: OrderLifecycleStore, report: object) -> LifecycleReportParity:
     """Read-only order STATUS/quantity parity over one consistent SQLite view.
 
     This compares two externally CLAIMED datasets, not issuer identity or
