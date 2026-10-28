@@ -248,3 +248,29 @@ Even a status/quantity MATCH is NOT a broker-issued assertion and is not
 evidence of authentication, order authorization, broker finality or
 production readiness. Source authenticity and credential-safe adapter
 capture belong to later independent qualification.
+
+
+## F1.3 immutable source-bound settled cash corrections (Python candidate)
+
+A new \`CASH_REVERSAL\` event is accepted only against an earlier, immutable,
+settled \`CashFact\` carrying the exact original event ID, source reference,
+source SHA-256, original cash kind and original amount. A correction requires
+a *separate* original JSON record with \`source_kind=BROKER_CASH_CORRECTION\`,
+\`settlement_status=SETTLED\` and \`currency=USD\`. No undocumented adjustment
+or cash drift is converted into a deposit or fee.
+
+The typed \`CashReversalFact\` emits precisely negated original double-entry
+postings and preserves the original \`CashFact\` and original bytes. A second
+reversal referencing the same original cash event is blocked, including when
+the new source record ID differs. The event is replayed from original bytes
+on every \`EconomicEventStore.load()\`; the rational independent account
+projection performs the opposite sign calculation from the original source
+fact. The original and reversal commit independently in ordered transactions:
+the original must already be durable before a compensating reversal.
+
+**Deliberately unsupported:** correcting fills (FIFO inventory may have
+been subsequently consumed), split ratios, cash-in-lieu, delistings, tax
+reclassifications, external correction ordering across unsynchronized
+sources, and trading state. These require distinct economic contracts and
+reviewed original broker evidence; they are not allowed to masquerade as
+cash reversals. The local custody digest does not authenticate source origin.
