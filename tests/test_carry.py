@@ -28,12 +28,12 @@ def test_binance_pages_forward_and_skips_the_open_kline():
     def get(url):
         seen.append(url)
         start = int(url.split("startTime=")[1].split("&")[0])
-        return [[t, "0", "0", "0", str(t // H), "0"] for t in range(start, now, H)][:2]
+        return [[t, "0", "0", "0", str(t // H), "0", t + H - 1, "5e6"] for t in range(start, now, H)][:2]
 
     t0 = int(T0.value // 1_000_000)
     klines = cd._binance_closes(f"{cd.BINANCE_FAPI}/klines?symbol=X", 2, t0, now, get, lambda: None)
-    assert [t for t, _ in klines] == [t0 + k * H for k in range(1, 6)]  # stamped at the hour's end; 6 h is open
-    assert klines[0][1] == t0 // H
+    assert [k[0] for k in klines] == [t0 + k * H for k in range(1, 6)]  # stamped at the hour's end; 6 h is open
+    assert klines[0][1:] == (t0 // H, 5e6)  # close and quote volume
     assert len(seen) == 3 and all("limit=2" in u for u in seen)  # pages of 2 until a short page
 
 
@@ -56,7 +56,7 @@ def test_update_appends_only_what_is_new(tmp_path):
 
     def fake(venue, market, kind, symbol, start_ms, now_ms, **_):
         calls.append(start_ms)
-        return [(t, float(t // H)) for t in range(start_ms - start_ms % H + H, now_ms + 1, H)]
+        return [(t, float(t // H), 1e6) for t in range(start_ms - start_ms % H + H, now_ms + 1, H)]
 
     cd_download, cd.download = cd.download, fake
     try:
@@ -67,6 +67,16 @@ def test_update_appends_only_what_is_new(tmp_path):
     s = cd.load(tmp_path, "binance", "perp", "close", "X")
     assert s.index.is_unique and s.index[-1] == T0 + pd.Timedelta(hours=15)
     assert calls[1] == int(T0.value // 1_000_000) + 10 * H + 1  # resumes after the last cached row
+    turnover = cd.load(tmp_path, "binance", "perp", "turnover", "X")
+    assert len(turnover) == 15 and (turnover == 1e6).all()  # from the same klines
+    cd.path_of(tmp_path, "binance", "perp", "turnover", "X").unlink()  # a cache from before turnover was kept
+    cd.download = fake
+    try:
+        assert cd.update(tmp_path, "binance", "perp", "close", "X", T0, T0 + pd.Timedelta(hours=15)) == (0, 15)
+    finally:
+        cd.download = cd_download
+    assert calls[2] == int(T0.value // 1_000_000)  # back to `since` for the turnover
+    assert len(cd.load(tmp_path, "binance", "perp", "turnover", "X")) == 15
 
 
 # --- the backtest ---------------------------------------------------------------------------------------------
@@ -78,8 +88,9 @@ def write(root, venue, market, kind, symbol, s: pd.Series):
     pd.DataFrame({"ts": s.index, "value": s.to_numpy()}).to_parquet(p, index=False)
 
 
-def market(root, symbol="BTCUSDT", days=60, rate=1e-4, bybit_rate=0.0, seed=0, start=T0):
-    """Hourly spot and perpetual closes (the perpetual at a small noisy premium), funding every 8 h."""
+def market(root, symbol="BTCUSDT", days=60, rate=1e-4, bybit_rate=0.0, seed=0, start=T0, turnover=1e6):
+    """Hourly spot and perpetual closes (the perpetual at a small noisy premium), funding every 8 h, and the
+    perpetual's traded value per hour (USDT)."""
     rng = np.random.default_rng(seed)
     hours = pd.date_range(start + pd.Timedelta(hours=1), periods=days * 24, freq="h")
     spot = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, 0.003, len(hours)))), index=hours)
@@ -87,6 +98,7 @@ def market(root, symbol="BTCUSDT", days=60, rate=1e-4, bybit_rate=0.0, seed=0, s
     settle = pd.date_range(start, periods=days * 3, freq="8h")
     write(root, "binance", "spot", "close", symbol, spot)
     write(root, "binance", "perp", "close", symbol, perp)
+    write(root, "binance", "perp", "turnover", symbol, pd.Series(turnover, index=hours))
     write(root, "binance", "perp", "funding", symbol, pd.Series(rate, index=settle))
     write(root, "bybit", "perp", "close", symbol, perp * (1 + rng.normal(0, 1e-4, len(hours))))
     write(root, "bybit", "perp", "funding", symbol, pd.Series(bybit_rate, index=settle))
@@ -274,3 +286,57 @@ def test_fetching_waits_out_rate_limits_and_timeouts_but_not_answers():
     with pytest.raises(HTTPError):
         cd.patient(unknown, waits.append)("u")
     assert waits == []
+
+
+def test_a_thin_perpetual_is_never_opened():
+    lg = flat_legs(24 * 40)
+    thin = cs.Legs(lg.long, lg.short, lg.funding, pd.Series(1e5, index=lg.long.index))  # 2.4 M a day
+    s = cs.CarrySettings(lookback_h=24, entry_apr=5.0, min_turnover_m=5.0)
+    assert (cs.positions(cs.hourly(thin), s) == 0).all()
+    thick = cs.Legs(lg.long, lg.short, lg.funding, pd.Series(1e6, index=lg.long.index))  # 24 M a day
+    w = cs.positions(cs.hourly(thick), s)
+    assert w.iloc[-1] == 1 and w[w != 0].index[0] >= T0 + pd.Timedelta(days=30)  # once 30 days are known
+
+
+def test_the_highest_funding_fills_the_slots_and_holds_them(tmp_path):
+    rates = {"AUSDT": 1e-4, "BUSDT": 3e-4, "CUSDT": 2e-4, "DUSDT": 4e-4}
+    for i, (sym, r) in enumerate(rates.items()):
+        market(tmp_path, sym, days=60, rate=r, seed=i, turnover=1e6 if sym != "DUSDT" else 1e4)
+    s = cs.CarrySettings(lookback_h=24, entry_apr=5.0, top=2, min_turnover_m=5.0)
+    pnl, missing = cs.run(tmp_path, list(rates), s, T0 + pd.Timedelta(days=100))
+    assert not missing
+    held = {sym: v["w"].iloc[-1] for sym, v in pnl.items()}
+    assert held == {"AUSDT": 0, "BUSDT": 1, "CUSDT": 1, "DUSDT": 0}  # D pays most but is too thin
+    st = cs.summary(pnl, slots=2)
+    funding = (pnl["BUSDT"]["funding"].sum() + pnl["CUSDT"]["funding"].sum()) / 2
+    assert st["funding_apr"] == pytest.approx(funding / (st["days"] / 365) * 100)
+    with pytest.raises(ValueError, match="cash"):
+        cs.CarrySettings(mode="cross", top=2)
+
+
+def test_slot_choices_never_see_later_data():
+    s = cs.CarrySettings(lookback_h=24, entry_apr=5.0, top=1)
+    a, b = flat_legs(24 * 10, rate=1e-4), flat_legs(24 * 10, rate=2e-4)
+    cut = T0 + pd.Timedelta(days=5)
+    b_later = cs.Legs(b.long, b.short, b.funding.where(b.funding.index <= cut, -0.01))
+    base = cs.top_positions({"A": cs.hourly(a), "B": cs.hourly(b)}, s)
+    after = cs.top_positions({"A": cs.hourly(a), "B": cs.hourly(b_later)}, s)
+    for sym in "AB":
+        pd.testing.assert_series_equal(base[sym][base[sym].index <= cut], after[sym][after[sym].index <= cut])
+    assert after["A"].iloc[-1] == 1 and base["A"].iloc[-1] == 0  # A takes the slot once B's funding turns
+
+
+def test_cli_top_k_on_a_universe(tmp_path, capsys):
+    (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
+    root = tmp_path / "data" / "carry"
+    for i, r in enumerate((1e-4, 2e-4, 3e-4)):
+        market(root, f"S{i}USDT", days=400, rate=r, seed=i)
+    run = ["--config", str(tmp_path / "lab.toml"), "carry", "study", "--symbols", "S0USDT", "S1USDT", "S2USDT"]
+    assert lab_main([*run, "--top", "2", "--min-turnover", "5"]) == 0
+    out = capsys.readouterr().out
+    assert "top 2 of 3 symbol(s)" in out and "always in the trade" not in out
+    trials = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
+    assert trials[-1]["params"]["top"] == 2 and trials[-1]["params"]["min_turnover_m"] == 5.0
+    assert lab_main(run) == 0
+    trials = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
+    assert "top" not in trials[-1]["params"]  # defaults keep the fingerprints of earlier trials

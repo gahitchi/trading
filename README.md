@@ -33,8 +33,8 @@ pytest -n auto
 | `lab maker-study <symbol> [--venue] [--latency-ms] [--maker-bps]` | what do passive fills earn after the moves that follow them? |
 | `lab fast backtest / paper <symbol>` | the first fast strategy on recorded data, or live data with simulated fills |
 | `lab fast backtest <symbol> --holdout [--again REASON]`, `lab fast release <symbol> --reason` | the one-time holdout test; turning the holdout into research data |
-| `lab carry fetch [--symbols ...] [--since 2023-01-01]` | download or update hourly funding and closes (Binance spot and perpetual, Bybit perpetual) |
-| `lab carry study [--mode cash\|cross] [--lookback-h] [--entry-apr] [--exit-apr]` | does funding carry pay after costs? (holdout-guarded, logged) |
+| `lab carry fetch [--symbols ... \| --all] [--since 2023-01-01]` | download or update hourly funding and closes (Binance spot and perpetual, Bybit perpetual) |
+| `lab carry study [--mode cash\|cross] [--lookback-h] [--entry-apr] [--exit-apr] [--all --top K --min-turnover M]` | does funding carry pay after costs? (holdout-guarded, logged) |
 | `lab carry study --holdout [--again REASON]`, `lab carry release --reason` | the one-time carry holdout test; turning it into research data |
 | `lab kill [--flatten]`, `lab resume` | kill switch: stop all new orders now (`results/KILL`), and clear it |
 
@@ -151,6 +151,15 @@ both legs' taker fees (5 bps perpetual, 10 bps spot) and `--slippage-bps`. It re
 year split into funding, basis and costs, Sharpe, a Newey-West t-statistic (positions last days, so daily returns
 are autocorrelated), drawdown, an always-in benchmark for `cash`, and each symbol's P&L. Not modelled: leg
 rebalancing, liquidation of the short perpetual in a rally, spot borrow, volume-tier fees.
+
+On the majors the cash trade earns about what cash does, so the next place to look is the whole market, where
+the highest funding is on small altcoins. `lab carry fetch --all` downloads every pair that trades today as both a
+Binance perpetual and a Binance spot pair (Binance only; this takes hours, and an interrupted run resumes where it
+stopped). `lab carry study --all --top 10 --min-turnover 20` then lets the symbols compete for 10 equal slots: at each
+funding time it closes positions whose funding fell below `--exit-apr` and fills free slots with the highest funding
+above `--entry-apr` among perpetuals that traded at least 20 M USDT a day over the last 30 days, all known at that
+time. Today's list misses pairs delisted since, which flatters the result; thin altcoins also cost more to trade
+than the majors, so raise `--slippage-bps`.
 
 Carry has its own time holdout: the first study reserves the last 180 days fetched by then and everything fetched
 later (`results/carry_partition.json`). Research runs drop that data before computing anything; `--holdout` tests
