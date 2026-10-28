@@ -300,11 +300,14 @@ pub async fn run_selftest() -> Result<(), LabError> {
             ))
             .await?;
         let ack = private_next(&mut api_ws).await?;
-        let verified_ack=decode_order_response(77,"BTCUSDT","tl-42",&ack.to_string())
-            .map_err(|_|LabError::Protocol("production ACK decoder rejected response"))?;
-        if verified_ack!=(OrderWireEvent::Accepted {
-            id:77,exchange_order_id:Some(9001)
-        }) {
+        let verified_ack = decode_order_response(77, "BTCUSDT", "tl-42", &ack.to_string())
+            .map_err(|_| LabError::Protocol("production ACK decoder rejected response"))?;
+        if verified_ack
+            != (OrderWireEvent::Accepted {
+                id: 77,
+                exchange_order_id: Some(9001),
+            })
+        {
             return Err(LabError::Protocol("order ACK mismatch"));
         }
         // No fill can be inferred from the order ACK.
@@ -340,11 +343,11 @@ pub async fn run_selftest() -> Result<(), LabError> {
             ))
             .await?;
         let replay = private_next(&mut api_ws).await?;
-        let replay_outcome=decode_order_response(78,"BTCUSDT","tl-42",&replay.to_string())
-            .map_err(|_|LabError::Protocol("invalid duplicate response"))?;
+        let replay_outcome = decode_order_response(78, "BTCUSDT", "tl-42", &replay.to_string())
+            .map_err(|_| LabError::Protocol("invalid duplicate response"))?;
         // A duplicate ID may be evidence of an already-accepted order;
         // it must never be treated as unambiguously rejected.
-        if replay_outcome!=(OrderWireEvent::Uncertain {id:78}) {
+        if replay_outcome != (OrderWireEvent::Uncertain { id: 78 }) {
             return Err(LabError::Protocol("duplicate order not quarantined"));
         }
         // A bad signature MUST terminate the local session and surface

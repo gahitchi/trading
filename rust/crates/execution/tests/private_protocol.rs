@@ -90,38 +90,54 @@ fn a_real_order_ack_is_not_private_execution() {
 
 #[test]
 fn strict_production_order_ack_decoder_does_not_infer_fills() {
-    use trading_execution::{OrderWireEvent,decode_order_response};
+    use trading_execution::{OrderWireEvent, decode_order_response};
     let good = json!({"id":17,"status":200,"result":{
         "orderId":9871,"clientOrderId":"tl-42","symbol":"BTCUSDT","status":"NEW"
     }});
     assert_eq!(
-        decode_order_response(17,"BTCUSDT","tl-42",&good.to_string()).unwrap(),
-        OrderWireEvent::Accepted {id:17,exchange_order_id:Some(9871)}
+        decode_order_response(17, "BTCUSDT", "tl-42", &good.to_string()).unwrap(),
+        OrderWireEvent::Accepted {
+            id: 17,
+            exchange_order_id: Some(9871)
+        }
     );
-    let mut malformed=good.clone();
-    malformed["result"]["orderId"]=json!(0);
-    assert!(decode_order_response(17,"BTCUSDT","tl-42",&malformed.to_string()).is_err());
-    let mut mismatched=good.clone();
-    mismatched["result"]["clientOrderId"]=json!("tl-99");
-    assert!(decode_order_response(17,"BTCUSDT","tl-42",&mismatched.to_string()).is_err());
-    let mut mismatched_symbol=good.clone();
-    mismatched_symbol["result"]["symbol"]=json!("ETHUSDT");
-    assert!(decode_order_response(17,"BTCUSDT","tl-42",&mismatched_symbol.to_string()).is_err());
-    let mut wrong_id=good.clone();
-    wrong_id["id"]=json!(99);
-    assert!(decode_order_response(17,"BTCUSDT","tl-42",&wrong_id.to_string()).is_err());
+    let mut malformed = good.clone();
+    malformed["result"]["orderId"] = json!(0);
+    assert!(decode_order_response(17, "BTCUSDT", "tl-42", &malformed.to_string()).is_err());
+    let mut mismatched = good.clone();
+    mismatched["result"]["clientOrderId"] = json!("tl-99");
+    assert!(decode_order_response(17, "BTCUSDT", "tl-42", &mismatched.to_string()).is_err());
+    let mut mismatched_symbol = good.clone();
+    mismatched_symbol["result"]["symbol"] = json!("ETHUSDT");
+    assert!(decode_order_response(17, "BTCUSDT", "tl-42", &mismatched_symbol.to_string()).is_err());
+    let mut wrong_id = good.clone();
+    wrong_id["id"] = json!(99);
+    assert!(decode_order_response(17, "BTCUSDT", "tl-42", &wrong_id.to_string()).is_err());
 }
 #[test]
 fn failed_requests_only_become_rejected_when_unambiguous() {
-    use trading_execution::{OrderWireEvent,decode_order_response};
-    let rejected=json!({"id":23,"status":400,"error":{"code":-1121,"msg":"Invalid symbol."}});
-    assert_eq!(decode_order_response(23,"BTCUSDT","tl-42",&rejected.to_string()).unwrap(),
-        OrderWireEvent::Rejected{id:23,code:-1121});
-    for (status,code) in [(503,-1000),(400,-1006),(400,-1007),(400,-2010),
-        (429,-1003),(409,-1021)] {
-        let uncertain=json!({"id":23,"status":status,"error":{"code":code}});
-        assert_eq!(decode_order_response(23,"BTCUSDT","tl-42",&uncertain.to_string()).unwrap(),
-            OrderWireEvent::Uncertain{id:23});
+    use trading_execution::{OrderWireEvent, decode_order_response};
+    let rejected = json!({"id":23,"status":400,"error":{"code":-1121,"msg":"Invalid symbol."}});
+    assert_eq!(
+        decode_order_response(23, "BTCUSDT", "tl-42", &rejected.to_string()).unwrap(),
+        OrderWireEvent::Rejected {
+            id: 23,
+            code: -1121
+        }
+    );
+    for (status, code) in [
+        (503, -1000),
+        (400, -1006),
+        (400, -1007),
+        (400, -2010),
+        (429, -1003),
+        (409, -1021),
+    ] {
+        let uncertain = json!({"id":23,"status":status,"error":{"code":code}});
+        assert_eq!(
+            decode_order_response(23, "BTCUSDT", "tl-42", &uncertain.to_string()).unwrap(),
+            OrderWireEvent::Uncertain { id: 23 }
+        );
     }
     for bad in [
         json!({"id":23,"status":200,"result":{}}),
@@ -129,7 +145,7 @@ fn failed_requests_only_become_rejected_when_unambiguous() {
         json!({"id":23,"status":400,"result":{"orderId":3}}),
         json!({"id":23,"status":418,"error":{}}),
     ] {
-        assert!(decode_order_response(23,"BTCUSDT","tl-42",&bad.to_string()).is_err());
+        assert!(decode_order_response(23, "BTCUSDT", "tl-42", &bad.to_string()).is_err());
     }
-    assert!(decode_order_response(23,"BTCUSDT","tl-42","{invalid").is_err());
+    assert!(decode_order_response(23, "BTCUSDT", "tl-42", "{invalid").is_err());
 }
