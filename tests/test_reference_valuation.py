@@ -1,4 +1,5 @@
 """F1.1 read-only realized/unrealized USD reference valuation."""
+
 import hashlib
 import json
 from decimal import Decimal
@@ -20,9 +21,9 @@ def book():
         (2, "QQQ", "SELL", "3", "200"),
         (3, "SPY", "SELL", "1", "110"),
     ):
-        state = state.append(FillFact(
-            f"fill-{i}", f"simulated:{i}", i, symbol, side, Decimal(qty), Decimal(price), Decimal("1")
-        ))
+        state = state.append(
+            FillFact(f"fill-{i}", f"simulated:{i}", i, symbol, side, Decimal(qty), Decimal(price), Decimal("1"))
+        )
     return state
 
 
@@ -42,7 +43,9 @@ def source(*, when=10, account="SIM-001", scope=True, currency="USD", marks=None
             "quote_currency": currency,
             "complete_instrument_scope": scope,
             "marks": marks,
-        }, sort_keys=True, separators=(",", ":")
+        },
+        sort_keys=True,
+        separators=(",", ":")
     ).encode()
 
 
@@ -62,7 +65,8 @@ def test_long_short_realized_and_unrealized_exact_without_economic_event():
     assert value.realized_profit_usd == Decimal("10")
     assert value.unrealized_profit_usd == Decimal("50")
     assert [(x.symbol, x.unrealized_profit) for x in value.positions] == [
-        ("QQQ", Decimal("30")), ("SPY", Decimal("20"))
+        ("QQQ", Decimal("30")),
+        ("SPY", Decimal("20")),
     ]
     assert state.ledger == original
     assert len(state.events) == 3
@@ -78,22 +82,30 @@ def test_long_short_realized_and_unrealized_exact_without_economic_event():
         source(scope=False),
         source(currency="EUR"),
         source(marks=[{"symbol": "SPY", "price": "120", "observed_at_ns": 10}]),
-        source(marks=[
-            {"symbol": "SPY", "price": "120", "observed_at_ns": 10},
-            {"symbol": "SPY", "price": "130", "observed_at_ns": 10}
-        ]),
-        source(marks=[
-            {"symbol": "SPY", "price": "NaN", "observed_at_ns": 10},
-            {"symbol": "QQQ", "price": "190", "observed_at_ns": 10},
-        ]),
-        source(marks=[
-            {"symbol": "SPY", "price": "1E+99999", "observed_at_ns": 10},
-            {"symbol": "QQQ", "price": "190", "observed_at_ns": 10},
-        ]),
-        source(marks=[
-            {"symbol": "SPY", "price": "120", "observed_at_ns": 11},
-            {"symbol": "QQQ", "price": "190", "observed_at_ns": 10},
-        ]),
+        source(
+            marks=[
+                {"symbol": "SPY", "price": "120", "observed_at_ns": 10},
+                {"symbol": "SPY", "price": "130", "observed_at_ns": 10},
+            ]
+        ),
+        source(
+            marks=[
+                {"symbol": "SPY", "price": "NaN", "observed_at_ns": 10},
+                {"symbol": "QQQ", "price": "190", "observed_at_ns": 10},
+            ]
+        ),
+        source(
+            marks=[
+                {"symbol": "SPY", "price": "1E+99999", "observed_at_ns": 10},
+                {"symbol": "QQQ", "price": "190", "observed_at_ns": 10},
+            ]
+        ),
+        source(
+            marks=[
+                {"symbol": "SPY", "price": "120", "observed_at_ns": 11},
+                {"symbol": "QQQ", "price": "190", "observed_at_ns": 10},
+            ]
+        ),
     ],
 )
 def test_invalid_or_incomplete_source_is_refused(raw):

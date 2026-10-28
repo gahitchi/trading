@@ -97,9 +97,7 @@ def parse_reference_mark_statement(
     if type(raw) is not bytes or not 0 < len(raw) <= MAX_MARK_BYTES:
         raise EngineFactError("reference mark source must have bounded original bytes")
     try:
-        doc = json.loads(
-            raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_nonfinite
-        )
+        doc = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_nonfinite)
     except (ValueError, UnicodeError, TypeError) as exc:
         raise EngineFactError("invalid original reference mark evidence") from exc
     if type(doc) is not dict or set(doc) != MARK_FIELDS:
@@ -180,13 +178,15 @@ def value_economic_book(
     unrealized_total = Decimal(0)
     for symbol in sorted(symbols):
         qty = book.ledger.position(symbol)
-        basis = _calc(lambda symbol=symbol: sum(
-            (lot.basis for lot in book.ledger.lots if lot.symbol == symbol), Decimal(0)
-        ))
+        basis = _calc(
+            lambda symbol=symbol: sum((lot.basis for lot in book.ledger.lots if lot.symbol == symbol), Decimal(0))
+        )
         marked = _calc(lambda qty=qty, symbol=symbol: qty * prices[symbol])
         unrealized = _calc(lambda marked=marked, basis=basis: marked - basis)
         signed_total = _calc(lambda marked=marked, signed_total=signed_total: signed_total + marked)
-        unrealized_total = _calc(lambda unrealized=unrealized, unrealized_total=unrealized_total: unrealized_total + unrealized)
+        unrealized_total = _calc(
+            lambda unrealized=unrealized, unrealized_total=unrealized_total: unrealized_total + unrealized
+        )
         positions.append(ValuedPosition(symbol, qty, basis, prices[symbol], marked, unrealized))
     cash = book.ledger.balance("cash:USD")
     realized = _calc(lambda: -book.ledger.balance("income:realized"))

@@ -6,7 +6,7 @@ from decimal import Decimal
 import pytest
 
 from lab.cash_scope import parse_cash_account_policy, validate_cash_account_scope
-from lab.engine_events import CashFact, EngineEconomicBook, EngineFactError, FillFact, SplitFact
+from lab.engine_events import EngineEconomicBook, EngineFactError, FillFact, SplitFact
 
 
 def policy_raw(account="SIM-001", klass="EQUITY", currency="USD", account_type="USD_UNLEVERAGED_CASH"):
