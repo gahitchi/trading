@@ -92,6 +92,28 @@ services:
       retries: 3
     logging: *logging
 
+  # Read-only dashboard of the recorder and its data: http://127.0.0.1:8766 (same profile as the recorder).
+  monitor:
+    image: trading-lab:latest
+    build: .
+    profiles: [crypto]
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+    command: monitor --host 0.0.0.0 --port 8766
+    ports:
+      - "127.0.0.1:8766:8766"
+    volumes:
+      - ./lab.toml:/lab/lab.toml:ro
+      - ./data:/lab/data:ro
+    healthcheck:
+      # Healthy while the dashboard answers; /health itself says 503 while the recorder is down.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+    logging: *logging
+
 secrets:
   tws_password:
     file: ./secrets/tws_password

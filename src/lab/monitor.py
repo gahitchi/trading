@@ -1,0 +1,409 @@
+"""
+Read-only monitoring for the market-data recorder: is it alive, is every feed flowing, is the data reaching the
+catalog, how much has been recorded and how long the disk lasts at this rate.
+
+`lab monitor` serves it as a local dashboard (GET /) and as JSON (GET /api/status; GET /health answers 503 while
+the recorder is down). It reads <out>/heartbeat.json and the files under <out>; it never writes there and never
+talks to an exchange, so it can run beside the recorder, or after it, on the same data directory.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import shutil
+import threading
+import time
+from collections import deque
+from datetime import UTC, datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from lab.persistence import read_json
+
+NS = 1_000_000_000
+HEARTBEAT_MAX_AGE_S = 120  # the recorder writes every 10 s; the compose healthcheck allows the same 120 s
+PROMOTE_EVERY_S = 3600  # lab.record promotes the stream into the catalog every hour
+PROMOTE_GRACE_S = 900
+# Time series in the catalog. Everything else there is an instrument definition (e.g. crypto_perpetual), stamped
+# with the time it was loaded, which is no event time.
+SERIES = {
+    "order_book_deltas",
+    "order_book_depths",
+    "quotes",
+    "trades",
+    "bars",
+    "mark_prices",
+    "index_prices",
+    "funding_rates",
+}
+GAP_S = 60  # a hole longer than this between consecutive order-book files is an outage
+DISK_WARN_DAYS = 7
+DISK_FAIL_DAYS = 1
+HISTORY_S = 1800  # event-rate history kept for the dashboard
+RATE_WINDOW_S = 60
+CATALOG_TTL_S = 30  # the catalog only changes at promotion; rescanning it on every request is waste
+
+# "2025-10-20T22-40-00-001000000Z_2025-10-20T22-40-00-049000000Z_63736a17c5458205.parquet"
+_FILE = re.compile(r"(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-(\d{9})Z_(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-(\d{9})Z")
+
+
+def _ns(day: str, h: str, m: str, s: str, frac: str) -> int:
+    whole = datetime.fromisoformat(f"{day}T{h}:{m}:{s}+00:00")
+    return int(whole.timestamp()) * NS + int(frac)
+
+
+def file_span(name: str) -> tuple[int, int] | None:
+    """(first, last) event time in ns from a catalog file name, or None for a name the catalog didn't write."""
+    m = _FILE.match(name)
+    return (_ns(*m.groups()[:5]), _ns(*m.groups()[5:])) if m else None
+
+
+def _iso(ns: int | None) -> str | None:
+    return datetime.fromtimestamp(ns / NS, UTC).isoformat(timespec="seconds") if ns else None
+
+
+def _parse_iso(text) -> int | None:
+    try:
+        return int(datetime.fromisoformat(text).timestamp() * NS)
+    except (TypeError, ValueError):
+        return None
+
+
+def gaps(spans: list[tuple[int, int]], min_gap_ns: int) -> list[tuple[int, int]]:
+    """Holes longer than min_gap_ns between time spans (overlaps allowed), oldest first."""
+    out, covered = [], None
+    for first, last in sorted(spans):
+        if covered is not None and first - covered > min_gap_ns:
+            out.append((covered, first))
+        covered = last if covered is None else max(covered, last)
+    return out
+
+
+class Catalog:
+    """Inventory of a NautilusTrader Parquet catalog: files, bytes, rows and time coverage per type and
+    instrument. Row counts come from each file's Parquet footer and are cached by (size, mtime)."""
+
+    def __init__(self, root: Path):
+        self.root = Path(root)
+        self._rows: dict[Path, tuple[int, int, int]] = {}
+
+    def _count(self, path: Path, stat) -> int:
+        key = (stat.st_size, stat.st_mtime_ns)
+        hit = self._rows.get(path)
+        if hit and hit[:2] == key:
+            return hit[2]
+        import pyarrow.parquet as pq
+
+        try:
+            rows = pq.ParquetFile(path).metadata.num_rows
+        except Exception:  # a file being replaced right now; counted on the next scan
+            rows = 0
+        self._rows[path] = (*key, rows)
+        return rows
+
+    def scan(self) -> dict:
+        """{type: {instrument: {files, bytes, rows, spans}}}"""
+        data, out, seen = self.root / "data", {}, set()
+        if not data.is_dir():
+            return out
+        for kind in sorted(p for p in data.iterdir() if p.is_dir()):
+            for inst in sorted(p for p in kind.iterdir() if p.is_dir()):
+                entry = {"files": 0, "bytes": 0, "rows": 0, "spans": []}
+                for f in inst.glob("*.parquet"):
+                    try:
+                        stat = f.stat()
+                    except FileNotFoundError:
+                        continue
+                    seen.add(f)
+                    entry["files"] += 1
+                    entry["bytes"] += stat.st_size
+                    entry["rows"] += self._count(f, stat)
+                    if span := file_span(f.name):
+                        entry["spans"].append(span)
+                out.setdefault(kind.name, {})[inst.name] = entry
+        self._rows = {p: v for p, v in self._rows.items() if p in seen}
+        return out
+
+
+def _stream(out: Path, now_ns: int) -> dict:
+    files, size, oldest = 0, 0, None
+    stream = out / "stream"
+    if stream.is_dir():
+        for f in stream.rglob("*"):
+            try:
+                if not f.is_file() or f.name.startswith("_nautilus"):
+                    continue
+                stat = f.stat()
+            except FileNotFoundError:
+                continue
+            files += 1
+            size += stat.st_size
+            oldest = stat.st_mtime_ns if oldest is None else min(oldest, stat.st_mtime_ns)
+    return {"files": files, "bytes": size, "oldest_age_s": (now_ns - oldest) / NS if oldest else None}
+
+
+class Rates:
+    """Events per second per instrument, from successive heartbeats. A recorder restart resets its counters,
+    which clears the history instead of showing a negative rate."""
+
+    def __init__(self, keep_s: int = HISTORY_S):
+        self.keep_ns = keep_s * NS
+        self.samples: deque[tuple[int, dict[str, int]]] = deque()
+
+    def add(self, at_ns: int, totals: dict[str, int]):
+        if self.samples and at_ns <= self.samples[-1][0]:
+            return
+        if self.samples and any(totals.get(k, 0) < v for k, v in self.samples[-1][1].items()):
+            self.samples.clear()
+        self.samples.append((at_ns, totals))
+        while self.samples and at_ns - self.samples[0][0] > self.keep_ns:
+            self.samples.popleft()
+
+    def current(self, window_s: int = RATE_WINDOW_S) -> dict[str, float]:
+        if len(self.samples) < 2:
+            return {}
+        last_at, last = self.samples[-1]
+        first_at, first = next(
+            ((t, c) for t, c in self.samples if last_at - t <= window_s * NS and t < last_at), self.samples[-2]
+        )
+        dt = (last_at - first_at) / NS
+        return {k: (v - first.get(k, 0)) / dt for k, v in last.items()}
+
+    def history(self) -> dict[str, list[list]]:
+        """{instrument: [[iso time, events/s], ...]} between consecutive samples."""
+        out: dict[str, list[list]] = {}
+        pairs = list(zip(self.samples, list(self.samples)[1:], strict=False))
+        for (t0, c0), (t1, c1) in pairs:
+            dt = (t1 - t0) / NS
+            for k, v in c1.items():
+                out.setdefault(k, []).append([_iso(t1), round((v - c0.get(k, 0)) / dt, 3)])
+        return out
+
+
+def _check(name: str, state: str, detail: str) -> dict:
+    return {"name": name, "state": state, "detail": detail}
+
+
+def _age(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    for unit, size in (("d", 86400), ("h", 3600), ("min", 60)):
+        if seconds >= size:
+            return f"{seconds / size:.1f} {unit}"
+    return f"{seconds} s"
+
+
+class Monitor:
+    """Builds the status of one recorder output directory (lab.record's <out>)."""
+
+    def __init__(self, out: Path, *, catalog_ttl_s: int = CATALOG_TTL_S):
+        self.out = Path(out)
+        self.catalog = Catalog(self.out / "catalog")
+        self.rates = Rates()
+        self.ttl_ns = catalog_ttl_s * NS
+        self._scan: tuple[int, dict] | None = None
+        self.lock = threading.Lock()
+
+    def _heartbeat(self) -> dict | None:
+        try:
+            hb = read_json(self.out / "heartbeat.json")
+        except (OSError, ValueError):
+            return None
+        return hb if isinstance(hb, dict) and isinstance(hb.get("instruments"), dict) else None
+
+    def _inventory(self, now_ns: int) -> dict:
+        if self._scan is None or now_ns - self._scan[0] > self.ttl_ns or now_ns < self._scan[0]:
+            self._scan = (now_ns, self.catalog.scan())
+        return self._scan[1]
+
+    def status(self, now_ns: int | None = None) -> dict:
+        with self.lock:
+            return self._status(time.time_ns() if now_ns is None else now_ns)
+
+    def _status(self, now_ns: int) -> dict:
+        hb = self._heartbeat()
+        inv = self._inventory(now_ns)
+        hb_at = _parse_iso(hb.get("at")) if hb else None
+        started = _parse_iso(hb.get("started")) if hb else None
+        hb_age = (now_ns - hb_at) / NS if hb_at else None
+        running = bool(hb and hb.get("running")) and hb_age is not None and hb_age <= HEARTBEAT_MAX_AGE_S
+        feeds = hb["instruments"] if hb else {}
+        if hb_at:
+            self.rates.add(hb_at, {k: sum(v for v in c.values() if isinstance(v, int)) for k, c in feeds.items()})
+        rate, history = self.rates.current(), self.rates.history()
+        stale = set(hb.get("stale", [])) if hb else set()
+
+        instruments = []
+        for iid in sorted(set(feeds) | {i for by in inv.values() for i in by if "." in i}):
+            feed = feeds.get(iid)
+            last = _parse_iso(feed.get("last_event")) if feed else None
+            book = inv.get("order_book_deltas", {}).get(iid)
+            spans = sorted(book["spans"]) if book else []
+            holes = gaps(spans, GAP_S * NS)
+            first, end = (spans[0][0], max(s[1] for s in spans)) if spans else (None, None)
+            span_s = (end - first) / NS if spans else 0
+            missing_s = sum(b - a for a, b in holes) / NS
+            stored = [by[iid] for by in inv.values() if iid in by]
+            instruments.append(
+                {
+                    "id": iid,
+                    "symbol": iid.rsplit(".", 1)[0],
+                    "venue": iid.rsplit(".", 1)[-1],
+                    "state": (
+                        "not recording" if not feed or not running else "stale" if iid in stale or not last else "live"
+                    ),
+                    "last_event": _iso(last),
+                    "last_event_age_s": (now_ns - last) / NS if last else None,
+                    "counts": {k: v for k, v in feed.items() if isinstance(v, int)} if feed else {},
+                    "events_per_s": rate.get(iid) if running else None,
+                    "history": history.get(iid, []),
+                    "catalog": {
+                        "files": sum(e["files"] for e in stored),
+                        "bytes": sum(e["bytes"] for e in stored),
+                        "rows": sum(e["rows"] for e in stored),
+                        "first": _iso(first),
+                        "last": _iso(end),
+                        "coverage_pct": 100 * (1 - missing_s / span_s) if span_s > 0 else None,
+                        "gaps": [{"from": _iso(a), "to": _iso(b), "seconds": (b - a) / NS} for a, b in holes][-20:],
+                    },
+                }
+            )
+
+        by_type = {
+            kind: {k: sum(e[k] for e in by.values()) for k in ("files", "bytes", "rows")} for kind, by in inv.items()
+        }
+        total = {k: sum(t[k] for t in by_type.values()) for k in ("files", "bytes", "rows")}
+        all_spans = [s for kind, by in inv.items() if kind in SERIES for e in by.values() for s in e["spans"]]
+        newest = max((s[1] for s in all_spans), default=None)
+        oldest = min((s[0] for s in all_spans), default=None)
+        stream = _stream(self.out, now_ns)
+
+        usage = shutil.disk_usage(self.out if self.out.exists() else self.out.parent)
+        recorded_s = (newest - oldest) / NS if newest and oldest else 0
+        per_day = total["bytes"] / recorded_s * 86400 if recorded_s >= 3600 else None
+        runway = usage.free / per_day if per_day else None
+
+        checks = []
+        if not hb:
+            checks.append(_check("heartbeat", "fail", f"no heartbeat at {self.out / 'heartbeat.json'}"))
+        elif not hb.get("running"):
+            checks.append(_check("heartbeat", "fail", f"recorder stopped at {hb.get('at')}"))
+        elif hb_age is None or hb_age > HEARTBEAT_MAX_AGE_S:
+            checks.append(_check("heartbeat", "fail", f"last heartbeat {_age(hb_age or 0)} ago: recorder not running"))
+        else:
+            checks.append(_check("heartbeat", "ok", f"{_age(hb_age)} ago"))
+        if running:
+            silent = sorted(i for i in feeds if i in stale)
+            checks.append(
+                _check("feeds", "warn", "no data for over a minute: " + ", ".join(silent))
+                if silent
+                else _check("feeds", "ok", f"{len(feeds)} instrument(s) live")
+            )
+            due = PROMOTE_EVERY_S + PROMOTE_GRACE_S
+            if started and (now_ns - started) / NS > due and (newest is None or (now_ns - newest) / NS > due):
+                since = f"since {_iso(newest)}" if newest else "since the recorder started"
+                checks.append(_check("catalog", "fail", f"nothing promoted into the catalog {since}"))
+            else:
+                checks.append(
+                    _check("catalog", "ok", f"latest data in catalog: {_iso(newest) or 'first hour pending'}")
+                )
+        if runway is not None:
+            state = "fail" if runway < DISK_FAIL_DAYS else "warn" if runway < DISK_WARN_DAYS else "ok"
+            checks.append(_check("disk", state, f"{_age(runway * 86400)} left at {per_day / 1e9:.2f} GB/day"))
+
+        worst = {c["state"] for c in checks}
+        overall = "down" if not running else "degraded" if worst & {"fail", "warn"} else "ok"
+        return {
+            "now": _iso(now_ns),
+            "status": overall,
+            "checks": checks,
+            "recorder": {
+                "running": running,
+                "heartbeat_at": _iso(hb_at),
+                "heartbeat_age_s": hb_age,
+                "started": _iso(started),
+                "uptime_s": (now_ns - started) / NS if running and started else None,
+                "events_per_s": sum(rate.values()) if running and rate else None,
+            },
+            "instruments": instruments,
+            "catalog": {**total, "by_type": by_type, "first": _iso(oldest), "last": _iso(newest)},
+            "stream": stream,
+            "disk": {"free": usage.free, "total": usage.total, "bytes_per_day": per_day, "runway_days": runway},
+        }
+
+
+# ----------------------------------------------------------------------------- HTTP
+
+UI = Path(__file__).parent / "monitor_ui"
+# Every path served, fixed: nothing from the request reaches the filesystem.
+UI_FILES = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/monitor.js": ("monitor.js", "text/javascript"),
+    "/monitor.css": ("monitor.css", "text/css"),
+    "/icon.svg": ("icon.svg", "image/svg+xml"),
+    "/fonts/archivo-latin.woff2": ("fonts/archivo-latin.woff2", "font/woff2"),
+    "/fonts/archivo-latin-ext.woff2": ("fonts/archivo-latin-ext.woff2", "font/woff2"),
+}
+
+
+class MonitorServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, address, monitor: Monitor):
+        super().__init__(address, Handler)
+        self.monitor = monitor
+        port = self.server_address[1]
+        self.hosts = {f"localhost:{port}", f"127.0.0.1:{port}"}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(5)
+
+    def log_message(self, *args):
+        pass
+
+    def reply(self, code, body, content_type="application/json"):
+        raw = body if isinstance(body, bytes) else json.dumps(body, allow_nan=False).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+        )
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def do_GET(self):
+        # A fixed Host keeps other web pages from reading the status through DNS rebinding.
+        if self.headers.get("Host") not in self.server.hosts:
+            return self.reply(403, {"error": "local access only"})
+        if self.path in ("/api/status", "/health"):
+            try:
+                s = self.server.monitor.status()
+            except Exception as e:  # report, don't drop the connection
+                return self.reply(500, {"error": str(e)})
+            if self.path == "/health":
+                return self.reply(503 if s["status"] == "down" else 200, {"status": s["status"]})
+            return self.reply(200, s)
+        if self.path not in UI_FILES:
+            return self.reply(404, {"error": "not found"})
+        name, kind = UI_FILES[self.path]
+        return self.reply(200, (UI / name).read_bytes(), kind)
+
+
+def serve(out: Path, host: str = "127.0.0.1", port: int = 8766):
+    if host == "0.0.0.0" and not Path("/.dockerenv").exists():
+        raise ValueError("listening on all interfaces is reserved for the loopback-published Docker service")
+    server = MonitorServer((host, port), Monitor(out))
+    print(f"market-data monitor for {out}: http://127.0.0.1:{server.server_address[1]}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
