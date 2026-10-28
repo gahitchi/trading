@@ -1,5 +1,5 @@
-# trading-lab deployment: the crypto market-data recorder (public data only, no keys, no orders) and its
-# read-only dashboard.
+# trading-lab deployment: the crypto market-data recorders, one per exchange (public data only, no keys, no
+# orders), and their read-only dashboard.
 #
 #   docker compose up -d               docker compose logs -f recorder      docker compose ps (health)
 #   docker compose run --rm recorder record --status
@@ -7,19 +7,21 @@
 name: trading-lab
 
 services:
-  recorder:
+  # One recorder per exchange, so one venue's outage never stops the other; both write into data/market/catalog.
+  recorder: &recorder
     image: trading-lab:latest
     build: .
     restart: unless-stopped         # reconnects by restarting after a lost connection or exchange maintenance
     environment:
       TZ: UTC
-    command: record --symbols ${LAB_RECORD_SYMBOLS:-BTCUSDT ETHUSDT SOLUSDT}
+      LAB_RECORD_VENUE: binance
+    command: record --venue binance --symbols ${LAB_RECORD_SYMBOLS:-BTCUSDT ETHUSDT SOLUSDT}
     volumes:
       - ./lab.toml:/lab/lab.toml:ro
       - ./data:/lab/data              # writes data/market/
     healthcheck:
-      # Healthy while the heartbeat is fresh and every instrument has sent data in the last minute.
-      test: ["CMD", "python", "-c", "import json, datetime as d; h = json.load(open('/lab/data/market/heartbeat.json')); age = (d.datetime.now(d.UTC) - d.datetime.fromisoformat(h['at'])).total_seconds(); raise SystemExit(0 if h['running'] and age < 120 and not h['stale'] else 1)"]
+      # Healthy while the venue's heartbeat is fresh and every instrument has sent data in the last minute.
+      test: ["CMD", "python", "-c", "import json, os, datetime as d; h = json.load(open(f\"/lab/data/market/heartbeats/{os.environ['LAB_RECORD_VENUE']}.json\")); age = (d.datetime.now(d.UTC) - d.datetime.fromisoformat(h['at'])).total_seconds(); raise SystemExit(0 if h['running'] and age < 120 and not h['stale'] else 1)"]
       interval: 60s
       timeout: 10s
       start_period: 120s
@@ -28,7 +30,14 @@ services:
       driver: json-file
       options: {max-size: "10m", max-file: "5"}
 
-  # Read-only dashboard of the recorder and its data: http://127.0.0.1:8766
+  recorder-bybit:
+    <<: *recorder
+    environment:
+      TZ: UTC
+      LAB_RECORD_VENUE: bybit
+    command: record --venue bybit --symbols ${LAB_RECORD_BYBIT_SYMBOLS:-BTCUSDT ETHUSDT SOLUSDT}
+
+  # Read-only dashboard of the recorders and their data: http://127.0.0.1:8766
   monitor:
     image: trading-lab:latest
     build: .

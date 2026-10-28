@@ -26,7 +26,7 @@ pytest -n auto
 
 | Command | What it does |
 |---|---|
-| `lab record [--symbols ...] [--check-only] [--status]` | record crypto order books, trades, mark prices and funding (public data, no keys) |
+| `lab record [--venue binance\|bybit] [--symbols ...] [--check-only] [--status]` | record crypto order books, trades, mark prices and funding (public data, no keys) |
 | `lab monitor [--port 8766]` | read-only dashboard of the recorder's health and the recorded data |
 | `lab micro-study <symbol> [--horizons] [--fee-bps]` | do order-book and trade-flow features predict moves beyond trading costs? |
 | `lab fast backtest / paper <symbol>` | the first fast strategy on recorded data, or live data with simulated fills |
@@ -36,27 +36,38 @@ pytest -n auto
 ## Recording, research and paper trading
 
 Fast-trading research needs order-book history, which exchanges don't give away: it has to be recorded.
-`lab record` connects to Binance USD-M futures public market data (no API keys, no execution client, no orders)
-and stores full-depth order-book updates, trades, mark prices and funding rates for each perpetual
-(default `BTCUSDT ETHUSDT SOLUSDT`) in a NautilusTrader Parquet catalog under `data/market/catalog/`, promoted
-every hour and at stop. `data/market/heartbeat.json` shows counts and the last event per instrument, and lists
-instruments silent for over a minute. A lost connection ends the process with an error; run it where it is
-restarted:
+`lab record` connects to one exchange's public perpetual-futures market data (no API keys, no execution client,
+no orders) and stores order-book updates, trades, mark prices and funding rates for each perpetual (default
+`BTCUSDT ETHUSDT SOLUSDT`) in a NautilusTrader Parquet catalog under `data/market/catalog/`, promoted every hour
+and at stop:
+
+| `--venue` | Market | Instrument IDs | Order book |
+|---|---|---|---|
+| `binance` (default) | Binance USD-M | `BTCUSDT-PERP.BINANCE` | every change to the full book |
+| `bybit` | Bybit linear (USDT) | `BTCUSDT-LINEAR.BYBIT` | top 50 levels, pushed every 20 ms |
+
+Run one recorder per venue: each is its own process, so one exchange's outage or maintenance never interrupts
+the other's recording, and both write into the same catalog (each instrument has its own files).
+`data/market/heartbeats/<venue>.json` shows counts and the last event per instrument, and lists instruments
+silent for over a minute. A lost connection ends the process with an error; run it where it is restarted:
 
 ```bash
 lab record --check-only                              # validate without connecting
-lab record --status                                  # what has been saved to the catalog so far
-docker compose up -d recorder                        # 24/7, restarted after outages; LAB_RECORD_SYMBOLS overrides
+lab record --venue bybit --check-only
+lab record --status                                  # what has been saved to the catalog so far (all venues)
+docker compose up -d                                 # both recorders and the dashboard, restarted after outages
 ```
 
-Read it back with `ParquetDataCatalog("data/market/catalog").query_order_book_deltas(["BTCUSDT-PERP.BINANCE"])`.
+`LAB_RECORD_SYMBOLS` and `LAB_RECORD_BYBIT_SYMBOLS` override the symbols. Read the data back with
+`ParquetDataCatalog("data/market/catalog").query_order_book_deltas(["BTCUSDT-LINEAR.BYBIT"])`. The research
+commands below (`micro-study`, `fast`) still run on the Binance recordings only.
 
-`lab monitor` (or `docker compose up -d recorder monitor`) serves a read-only dashboard at
-http://127.0.0.1:8766: an overall status with the checks behind it (heartbeat fresh, every feed live, data
+`lab monitor` (the `monitor` service) serves a read-only dashboard at
+http://127.0.0.1:8766: an overall status with the checks behind it (each venue's heartbeat fresh, every feed live, data
 promoted into the catalog within the hour, days of disk left at the current write rate), events per second per
 instrument over the last 30 minutes, and per instrument the rows and bytes in the catalog, the recorded span, and
 its coverage: holes of over a minute between order-book files, which is where the recorder was down. The same data
-is JSON at `/api/status`; `/health` answers 503 while the recorder is down, for an external uptime probe. It reads
+is JSON at `/api/status`; `/health` answers 503 while no recorder is running, for an external uptime probe. It reads
 `data/market/` only and never connects to an exchange. A connection drop the adapter recovers from without
 restarting leaves no hole between files, so it doesn't show as a gap.
 
@@ -86,7 +97,7 @@ configuration on it once; a repeat needs `--again REASON`, and every holdout tes
 data and starts a new one; the boundary never moves back. Every run is logged in `results/fast_trials.jsonl`, and
 each report shows how many configurations have been tried on the research data: the more tried, the less a good
 result means.
-Binance is not available in every country; check that it is in yours.
+Binance and Bybit are not available in every country; check that they are in yours.
 
 
 ## Risk
@@ -103,7 +114,7 @@ that cannot be valued is denied. Every state change and denial goes to an option
 ## Layout
 
 ```
-src/lab/record.py         Binance USD-M market-data recorder
+src/lab/record.py         market-data recorder (Binance USD-M, Bybit linear)
 src/lab/micro.py          order-book and trade-flow features (OFI, imbalance, microprice, flow toxicity)
 src/lab/micro_study.py    do the features predict moves beyond costs?
 src/lab/fast.py           ImbalanceTaker strategy, backtest on recorded books, paper node

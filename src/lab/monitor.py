@@ -3,8 +3,8 @@ Read-only monitoring for the market-data recorder: is it alive, is every feed fl
 catalog, how much has been recorded and how long the disk lasts at this rate.
 
 `lab monitor` serves it as a local dashboard (GET /) and as JSON (GET /api/status; GET /health answers 503 while
-the recorder is down). It reads <out>/heartbeat.json and the files under <out>; it never writes there and never
-talks to an exchange, so it can run beside the recorder, or after it, on the same data directory.
+no recorder is running). It reads <out>/heartbeats/<venue>.json and the files under <out>; it never writes there
+and never talks to an exchange, so it can run beside the recorders, or after them, on the same data directory.
 """
 
 from __future__ import annotations
@@ -194,22 +194,27 @@ def _age(seconds: float) -> str:
 
 
 class Monitor:
-    """Builds the status of one recorder output directory (lab.record's <out>)."""
+    """Builds the status of one recorder output directory (lab.record's <out>), where one recorder per venue
+    writes <out>/heartbeats/<venue>.json and all of them share <out>/catalog."""
 
     def __init__(self, out: Path, *, catalog_ttl_s: int = CATALOG_TTL_S):
         self.out = Path(out)
         self.catalog = Catalog(self.out / "catalog")
-        self.rates = Rates()
+        self.rates: dict[str, Rates] = {}
         self.ttl_ns = catalog_ttl_s * NS
         self._scan: tuple[int, dict] | None = None
         self.lock = threading.Lock()
 
-    def _heartbeat(self) -> dict | None:
-        try:
-            hb = read_json(self.out / "heartbeat.json")
-        except (OSError, ValueError):
-            return None
-        return hb if isinstance(hb, dict) and isinstance(hb.get("instruments"), dict) else None
+    def _heartbeats(self) -> dict[str, dict | None]:
+        """{venue: heartbeat, or None when unreadable}"""
+        out = {}
+        for f in sorted((self.out / "heartbeats").glob("*.json")):
+            try:
+                hb = read_json(f)
+            except (OSError, ValueError):
+                hb = None
+            out[f.stem.upper()] = hb if isinstance(hb, dict) and isinstance(hb.get("instruments"), dict) else None
+        return out
 
     def _inventory(self, now_ns: int) -> dict:
         if self._scan is None or now_ns - self._scan[0] > self.ttl_ns or now_ns < self._scan[0]:
@@ -220,22 +225,74 @@ class Monitor:
         with self.lock:
             return self._status(time.time_ns() if now_ns is None else now_ns)
 
-    def _status(self, now_ns: int) -> dict:
-        hb = self._heartbeat()
-        inv = self._inventory(now_ns)
+    def _recorder(self, venue: str, hb: dict | None, inv: dict, now_ns: int) -> tuple[dict, list[dict]]:
+        """One venue's recorder summary and its checks."""
         hb_at = _parse_iso(hb.get("at")) if hb else None
         started = _parse_iso(hb.get("started")) if hb else None
         hb_age = (now_ns - hb_at) / NS if hb_at else None
         running = bool(hb and hb.get("running")) and hb_age is not None and hb_age <= HEARTBEAT_MAX_AGE_S
         feeds = hb["instruments"] if hb else {}
+        rates = self.rates.setdefault(venue, Rates())
         if hb_at:
-            self.rates.add(hb_at, {k: sum(v for v in c.values() if isinstance(v, int)) for k, c in feeds.items()})
-        rate, history = self.rates.current(), self.rates.history()
-        stale = set(hb.get("stale", [])) if hb else set()
+            rates.add(hb_at, {k: sum(v for v in c.values() if isinstance(v, int)) for k, c in feeds.items()})
+        rate = rates.current() if running else {}
+        name = venue.lower()
+
+        checks = []
+        if not hb:
+            checks.append(_check(name, "fail", "heartbeat unreadable"))
+        elif not hb.get("running"):
+            checks.append(_check(name, "fail", f"recorder stopped at {hb.get('at')}"))
+        elif not running:
+            checks.append(_check(name, "fail", f"last heartbeat {_age(hb_age or 0)} ago: recorder not running"))
+        else:
+            silent = sorted(i for i in feeds if i in set(hb.get("stale", [])))
+            up = f"up {_age((now_ns - started) / NS)}" if started else "running"
+            checks.append(
+                _check(name, "warn", "no data for over a minute: " + ", ".join(silent))
+                if silent
+                else _check(name, "ok", f"{up}, {len(feeds)} instrument(s) live")
+            )
+            due = PROMOTE_EVERY_S + PROMOTE_GRACE_S
+            newest = max(
+                (s[1] for kind, by in inv.items() if kind in SERIES for i in feeds if i in by for s in by[i]["spans"]),
+                default=None,
+            )
+            if started and (now_ns - started) / NS > due and (newest is None or (now_ns - newest) / NS > due):
+                since = f"since {_iso(newest)}" if newest else "since the recorder started"
+                checks.append(_check(f"{name} catalog", "fail", f"nothing promoted into the catalog {since}"))
+        summary = {
+            "venue": venue,
+            "running": running,
+            "heartbeat_at": _iso(hb_at),
+            "heartbeat_age_s": hb_age,
+            "started": _iso(started),
+            "uptime_s": (now_ns - started) / NS if running and started else None,
+            "events_per_s": sum(rate.values()) if rate else None,
+            "feeds": feeds,
+            "stale": set(hb.get("stale", [])) if hb else set(),
+            "rate": rate,
+            "history": rates.history(),
+        }
+        return summary, checks
+
+    def _status(self, now_ns: int) -> dict:
+        inv = self._inventory(now_ns)
+        recorders, checks = [], []
+        for venue, hb in self._heartbeats().items():
+            summary, venue_checks = self._recorder(venue, hb, inv, now_ns)
+            recorders.append(summary)
+            checks += venue_checks
+        if not recorders:
+            checks.append(_check("recorder", "fail", f"no heartbeat in {self.out / 'heartbeats'}"))
+        by_venue = {r["venue"]: r for r in recorders}
 
         instruments = []
-        for iid in sorted(set(feeds) | {i for by in inv.values() for i in by if "." in i}):
-            feed = feeds.get(iid)
+        feed_ids = {i for r in recorders for i in r["feeds"]}
+        for iid in sorted(feed_ids | {i for by in inv.values() for i in by if "." in i}):
+            venue = iid.rsplit(".", 1)[-1]
+            r = by_venue.get(venue)
+            feed = r["feeds"].get(iid) if r else None
             last = _parse_iso(feed.get("last_event")) if feed else None
             book = inv.get("order_book_deltas", {}).get(iid)
             spans = sorted(book["spans"]) if book else []
@@ -248,15 +305,19 @@ class Monitor:
                 {
                     "id": iid,
                     "symbol": iid.rsplit(".", 1)[0],
-                    "venue": iid.rsplit(".", 1)[-1],
+                    "venue": venue,
                     "state": (
-                        "not recording" if not feed or not running else "stale" if iid in stale or not last else "live"
+                        "not recording"
+                        if not feed or not r["running"]
+                        else "stale"
+                        if iid in r["stale"] or not last
+                        else "live"
                     ),
                     "last_event": _iso(last),
                     "last_event_age_s": (now_ns - last) / NS if last else None,
                     "counts": {k: v for k, v in feed.items() if isinstance(v, int)} if feed else {},
-                    "events_per_s": rate.get(iid) if running else None,
-                    "history": history.get(iid, []),
+                    "events_per_s": r["rate"].get(iid) if r and r["running"] else None,
+                    "history": r["history"].get(iid, []) if r else [],
                     "catalog": {
                         "files": sum(e["files"] for e in stored),
                         "bytes": sum(e["bytes"] for e in stored),
@@ -276,58 +337,30 @@ class Monitor:
         all_spans = [s for kind, by in inv.items() if kind in SERIES for e in by.values() for s in e["spans"]]
         newest = max((s[1] for s in all_spans), default=None)
         oldest = min((s[0] for s in all_spans), default=None)
-        stream = _stream(self.out, now_ns)
 
         usage = shutil.disk_usage(self.out if self.out.exists() else self.out.parent)
         recorded_s = (newest - oldest) / NS if newest and oldest else 0
         per_day = total["bytes"] / recorded_s * 86400 if recorded_s >= 3600 else None
         runway = usage.free / per_day if per_day else None
-
-        checks = []
-        if not hb:
-            checks.append(_check("heartbeat", "fail", f"no heartbeat at {self.out / 'heartbeat.json'}"))
-        elif not hb.get("running"):
-            checks.append(_check("heartbeat", "fail", f"recorder stopped at {hb.get('at')}"))
-        elif hb_age is None or hb_age > HEARTBEAT_MAX_AGE_S:
-            checks.append(_check("heartbeat", "fail", f"last heartbeat {_age(hb_age or 0)} ago: recorder not running"))
-        else:
-            checks.append(_check("heartbeat", "ok", f"{_age(hb_age)} ago"))
-        if running:
-            silent = sorted(i for i in feeds if i in stale)
-            checks.append(
-                _check("feeds", "warn", "no data for over a minute: " + ", ".join(silent))
-                if silent
-                else _check("feeds", "ok", f"{len(feeds)} instrument(s) live")
-            )
-            due = PROMOTE_EVERY_S + PROMOTE_GRACE_S
-            if started and (now_ns - started) / NS > due and (newest is None or (now_ns - newest) / NS > due):
-                since = f"since {_iso(newest)}" if newest else "since the recorder started"
-                checks.append(_check("catalog", "fail", f"nothing promoted into the catalog {since}"))
-            else:
-                checks.append(
-                    _check("catalog", "ok", f"latest data in catalog: {_iso(newest) or 'first hour pending'}")
-                )
         if runway is not None:
             state = "fail" if runway < DISK_FAIL_DAYS else "warn" if runway < DISK_WARN_DAYS else "ok"
             checks.append(_check("disk", state, f"{_age(runway * 86400)} left at {per_day / 1e9:.2f} GB/day"))
 
-        worst = {c["state"] for c in checks}
-        overall = "down" if not running else "degraded" if worst & {"fail", "warn"} else "ok"
+        running = [r for r in recorders if r["running"]]
+        bad = {c["state"] for c in checks} & {"fail", "warn"}
+        overall = "down" if not running else "degraded" if bad else "ok"
+        rates = [r["events_per_s"] for r in running if r["events_per_s"] is not None]
         return {
             "now": _iso(now_ns),
             "status": overall,
             "checks": checks,
-            "recorder": {
-                "running": running,
-                "heartbeat_at": _iso(hb_at),
-                "heartbeat_age_s": hb_age,
-                "started": _iso(started),
-                "uptime_s": (now_ns - started) / NS if running and started else None,
-                "events_per_s": sum(rate.values()) if running and rate else None,
-            },
+            "recorders": [
+                {k: v for k, v in r.items() if k not in ("feeds", "stale", "rate", "history")} for r in recorders
+            ],
+            "events_per_s": sum(rates) if rates else None,
             "instruments": instruments,
             "catalog": {**total, "by_type": by_type, "first": _iso(oldest), "last": _iso(newest)},
-            "stream": stream,
+            "stream": _stream(self.out, now_ns),
             "disk": {"free": usage.free, "total": usage.total, "bytes_per_day": per_day, "runway_days": runway},
         }
 

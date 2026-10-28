@@ -24,16 +24,17 @@ def cmd_record(cfg, a):
             print(f"{kind:20} " + "  ".join(f"{i}: {n} file(s)" for i, n in instruments.items()))
         return 0
     try:
-        node, _ = build_node(a.symbols, out)
+        node, _ = build_node(a.symbols, out, venue=a.venue)
     except ValueError as e:
         raise SystemExit(str(e)) from e
     symbols = " ".join(s.upper() for s in a.symbols)
-    print(f"market-data recorder ready: Binance USD-M {symbols} (order book, trades, mark price, funding) -> {out}")
+    market = {"binance": "Binance USD-M", "bybit": "Bybit linear"}[a.venue]
+    print(f"market-data recorder ready: {market} {symbols} (order book, trades, mark price, funding) -> {out}")
     if a.check_only:
         node.dispose()
         print("check only: configuration is valid; not connecting.")
         return 0
-    print("connecting to Binance public market data... (Ctrl+C to stop)")
+    print(f"connecting to {market} public market data... (Ctrl+C to stop)")
     try:
         node.run()
     except KeyboardInterrupt:
@@ -252,10 +253,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", help="path to lab.toml (default: search upwards from here)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    from lab.record import DEFAULT_SYMBOLS
+    from lab.record import DEFAULT_SYMBOLS, VENUES
 
     rec = sub.add_parser("record", help="record crypto order books, trades, mark prices and funding (data only)")
-    rec.add_argument("--symbols", nargs="+", default=list(DEFAULT_SYMBOLS), help="Binance USD-M perpetuals")
+    rec.add_argument("--venue", choices=VENUES, default="binance", help="exchange; run one recorder per venue")
+    rec.add_argument("--symbols", nargs="+", default=list(DEFAULT_SYMBOLS), help="USDT-margined perpetuals")
     rec.add_argument("--out", help="output directory (default: <data>/market)")
     rec.add_argument("--check-only", action="store_true", help="validate the setup without connecting")
     rec.add_argument("--status", action="store_true", help="list what has been saved to the catalog, then exit")

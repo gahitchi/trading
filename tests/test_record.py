@@ -32,15 +32,23 @@ from nautilus_trader.model import (
 )
 from nautilus_trader.persistence import ParquetDataCatalog
 
-from lab.record import MarketRecorder, MarketRecorderConfig, build_node, perpetual_ids, saved, streaming_config
+from lab.record import (
+    MarketRecorder,
+    MarketRecorderConfig,
+    build_node,
+    heartbeat_path,
+    perpetual_ids,
+    saved,
+    streaming_config,
+)
 
 T0 = 1_761_000_000_000_000_000  # 2025-10-20
 MS = 1_000_000
 USDT = Currency.from_str("USDT")
 
 
-def perpetual(symbol: str) -> CryptoPerpetual:
-    iid = InstrumentId.from_str(f"{symbol}-PERP.BINANCE")
+def perpetual(symbol: str, venue: str = "binance") -> CryptoPerpetual:
+    iid = perpetual_ids([symbol], venue)[0]
     return CryptoPerpetual(
         iid, Symbol(symbol), Currency.from_str(symbol[:-4]), USDT, USDT, False, 1, 3,
         Price.from_str("0.1"), Quantity.from_str("0.001"), 0, 0,
@@ -81,12 +89,15 @@ class VenueExtras(DataActor):
         self.publish_data(dt, CustomData(dt, VenueUpdate(trade.ts_init)))
 
 
-def record(out, instruments, events, *, stale_after_s=60, extra_actors=()):
+def record(out, instruments, events, *, venue="binance", stale_after_s=60, extra_actors=()):
+    """Records like the live recorder of `venue`: its own stream directory and heartbeat, the shared catalog."""
     engine = BacktestEngine(
-        BacktestEngineConfig(logging=LoggerConfig(stdout_level=LogLevel.ERROR), streaming=streaming_config(out))
+        BacktestEngineConfig(
+            logging=LoggerConfig(stdout_level=LogLevel.ERROR), streaming=streaming_config(out, venue=venue)
+        )
     )
     engine.add_venue(
-        Venue("BINANCE"), OmsType.NETTING, AccountType.MARGIN, [Money(10_000, USDT)], base_currency=USDT,
+        Venue(venue.upper()), OmsType.NETTING, AccountType.MARGIN, [Money(10_000, USDT)], base_currency=USDT,
         fee_model=MakerTakerFeeModel(Decimal("0.0002"), Decimal("0.0005")),
     )  # fmt: skip
     for inst in instruments:
@@ -95,7 +106,7 @@ def record(out, instruments, events, *, stale_after_s=60, extra_actors=()):
     recorder = MarketRecorder(
         MarketRecorderConfig(
             instrument_ids=[str(i.id) for i in instruments],
-            heartbeat=str(out / "heartbeat.json"),
+            heartbeat=str(heartbeat_path(out, venue)),
             stale_after_s=stale_after_s,
         )
     )
@@ -135,6 +146,20 @@ def test_adapter_specific_data_is_not_streamed_and_does_not_break_saving(tmp_pat
     assert len(ParquetDataCatalog(str(tmp_path / "catalog")).query_mark_price_updates([str(btc.id)])) == 5
 
 
+def test_binance_and_bybit_recordings_share_one_catalog(tmp_path):
+    # One process per venue, run one after the other here: each promotes only its own files.
+    binance, bybit = perpetual("BTCUSDT"), perpetual("BTCUSDT", "bybit")
+    record(tmp_path, [binance], market_events(binance.id, 6))
+    record(tmp_path, [bybit], market_events(bybit.id, 4), venue="bybit")
+
+    catalog = ParquetDataCatalog(str(tmp_path / "catalog"))
+    assert len(catalog.query_trade_ticks(["BTCUSDT-PERP.BINANCE"])) == 6
+    assert len(catalog.query_trade_ticks(["BTCUSDT-LINEAR.BYBIT"])) == 4
+    assert set(saved(tmp_path)["trades"]) == {"BTCUSDT-PERP.BINANCE", "BTCUSDT-LINEAR.BYBIT"}
+    for venue, n in (("binance", 6), ("bybit", 4)):
+        assert json.loads(heartbeat_path(tmp_path, venue).read_text())["instruments"].popitem()[1]["trades"] == n
+
+
 def test_nothing_saved_yet(tmp_path):
     assert saved(tmp_path) == {}
 
@@ -144,24 +169,30 @@ def test_heartbeat_reports_counts_and_flags_a_silent_instrument(tmp_path):
     late = T0 + 120 * 1_000 * MS  # ETH keeps trading two minutes after BTC went quiet
     record(tmp_path, [btc, eth], market_events(btc.id, 3) + market_events(eth.id, 3, start_ns=late))
 
-    hb = json.loads((tmp_path / "heartbeat.json").read_text())
+    hb = json.loads(heartbeat_path(tmp_path, "binance").read_text())
     assert hb["running"] is False  # written at stop
     assert hb["instruments"]["BTCUSDT-PERP.BINANCE"]["trades"] == 3
     assert hb["instruments"]["ETHUSDT-PERP.BINANCE"]["last_event"].startswith("2025-10-20T")
     assert hb["stale"] == ["BTCUSDT-PERP.BINANCE"]
 
 
-def test_symbols_become_binance_perpetual_ids():
+def test_symbols_become_perpetual_ids_of_each_venue():
     assert [str(i) for i in perpetual_ids(["btcusdt", "ETHUSDT"])] == ["BTCUSDT-PERP.BINANCE", "ETHUSDT-PERP.BINANCE"]
+    assert [str(i) for i in perpetual_ids(["BTCUSDT"], "bybit")] == ["BTCUSDT-LINEAR.BYBIT"]
     for bad in (["BTC-USDT"], ["BTCUSDT", "btcusdt"], [], ["X"]):
         with pytest.raises(ValueError):
             perpetual_ids(bad)
+    with pytest.raises(ValueError, match="unknown venue"):
+        perpetual_ids(["BTCUSDT"], "kraken")
 
 
-def test_the_live_recorder_node_is_data_only(tmp_path):
-    node, recorder = build_node(["BTCUSDT"], tmp_path)  # builds without connecting
+@pytest.mark.parametrize("venue", ["binance", "bybit"])
+def test_the_live_recorder_node_is_data_only(tmp_path, venue):
+    node, recorder = build_node(["BTCUSDT"], tmp_path, venue=venue)  # builds without connecting
     try:
-        assert recorder.iids == perpetual_ids(["BTCUSDT"])
+        assert recorder.iids == perpetual_ids(["BTCUSDT"], venue)
         assert str(node.environment) == "LIVE"
+        assert recorder.config.heartbeat == str(tmp_path / "heartbeats" / f"{venue}.json")
+        assert recorder.config.book_depth == (50 if venue == "bybit" else None)  # Binance: full-depth diffs
     finally:
         node.dispose()
