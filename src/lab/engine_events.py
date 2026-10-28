@@ -358,6 +358,11 @@ class EngineEconomicBook:
                 or fact.amount != original.amount
             ):
                 raise EngineFactError("cash reversal conflicts with the original sourced financial fact")
+            if any(
+                type(previous) is CashReversalFact and previous.target_event_id == fact.target_event_id
+                for previous in self.events
+            ):
+                raise EngineFactError("original settled cash event has already been reversed")
         new_ledger = _event_ledger(self.ledger, fact)
         next_head = _evidence_digest(self.evidence_head, self.account_id, fact)
         return EngineEconomicBook(self.account_id, (*self.events, fact), new_ledger, next_head)
