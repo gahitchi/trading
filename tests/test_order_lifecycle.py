@@ -100,11 +100,21 @@ def test_two_partial_fills_and_cancel_race_commit_only_real_broker_receipts(tmp_
     assert first.economic_head == initial
     assert first.unresolved_order_ids == ("order-1",)
     f1 = fill_raw()
-    append(store, lifecycle, order_raw("fill-step-1", kind="FILL", when=11, cumulative="0.4", remaining="0.6", fill=f1), f1)
-    append(store, lifecycle, order_raw("cancel-request", kind="CANCEL_REQUESTED", when=12, cumulative="0.4", remaining="0.6"))
+    append(
+        store, lifecycle, order_raw("fill-step-1", kind="FILL", when=11, cumulative="0.4", remaining="0.6", fill=f1), f1
+    )
+    append(
+        store,
+        lifecycle,
+        order_raw("cancel-request", kind="CANCEL_REQUESTED", when=12, cumulative="0.4", remaining="0.6"),
+    )
     f2 = fill_raw("fill-2", amount="0.3", when=13, price="101")
-    append(store, lifecycle, order_raw("fill-step-2", kind="FILL", when=13, cumulative="0.7", remaining="0.3", fill=f2), f2)
-    result = append(store, lifecycle, order_raw("cancel-ack", kind="CANCELED", when=14, cumulative="0.7", remaining="0"))
+    append(
+        store, lifecycle, order_raw("fill-step-2", kind="FILL", when=13, cumulative="0.7", remaining="0.3", fill=f2), f2
+    )
+    result = append(
+        store, lifecycle, order_raw("cancel-ack", kind="CANCELED", when=14, cumulative="0.7", remaining="0")
+    )
     assert result.sequence == 5
     assert result.states[0].status == "CANCELED"
     assert result.states[0].filled_quantity == D("0.7")
@@ -221,14 +231,16 @@ def test_duplicate_broker_fill_receipt_on_new_order_event_refused(tmp_path):
     append(store, lifecycle, order_raw())
     f = fill_raw()
     append(
-        store, lifecycle,
+        store,
+        lifecycle,
         order_raw("fill-one", kind="FILL", when=11, cumulative="0.4", remaining="0.6", fill=f),
         f,
     )
     before = store.load()
     with pytest.raises(EconomicStoreError, match=r"diverged|duplicated|source"):
         append(
-            store, lifecycle,
+            store,
+            lifecycle,
             order_raw("fill-two", kind="FILL", when=11, cumulative="0.8", remaining="0.2", fill=f),
             f,
         )
@@ -251,9 +263,7 @@ def test_parser_refuses_untrusted_order_evidence(change):
     record = json.loads(order_raw())
     record.update(change)
     with pytest.raises((EconomicStoreError, EngineFactError, ValueError)):
-        parse_broker_order_event(
-            json.dumps(record).encode(), source_namespace="broker", expected_account_id="SIM-001"
-        )
+        parse_broker_order_event(json.dumps(record).encode(), source_namespace="broker", expected_account_id="SIM-001")
 
 
 def test_parser_rejects_duplicate_keys_and_unbounded_original_bytes():
@@ -286,14 +296,16 @@ def test_reordered_cumulative_fill_and_timestamp_are_rejected(tmp_path):
     append(store, lifecycle, order_raw())
     original = fill_raw()
     append(
-        store, lifecycle,
+        store,
+        lifecycle,
         order_raw("fill-one", kind="FILL", when=11, cumulative="0.4", remaining="0.6", fill=original),
         original,
     )
     new_fill = fill_raw("fill-2", amount="0.3", when=9)
     with pytest.raises(EconomicStoreError, match=r"terminal|reordered|nonconserving"):
         append(
-            store, lifecycle,
+            store,
+            lifecycle,
             order_raw("fill-reordered", kind="FILL", when=9, cumulative="0.7", remaining="0.3", fill=new_fill),
             new_fill,
         )

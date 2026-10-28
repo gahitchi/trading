@@ -91,9 +91,7 @@ class OrderLifecycleSnapshot:
     @property
     def unresolved_order_ids(self) -> tuple[str, ...]:
         return tuple(
-            state.broker_order_id
-            for state in self.states
-            if state.status not in {"FILLED", "CANCELED", "REJECTED"}
+            state.broker_order_id for state in self.states if state.status not in {"FILLED", "CANCELED", "REJECTED"}
         )
 
 
@@ -106,9 +104,7 @@ def _quantity(value: object, description: str, *, positive: bool = False) -> Dec
         raise EconomicStoreError(f"invalid {description}") from exc
 
 
-def parse_broker_order_event(
-    raw: bytes, *, source_namespace: str, expected_account_id: str
-) -> BrokerOrderEvent:
+def parse_broker_order_event(raw: bytes, *, source_namespace: str, expected_account_id: str) -> BrokerOrderEvent:
     """Strictly parse a single untrusted, claimed-external order transition."""
     _identity(source_namespace, "order source namespace")
     _identity(expected_account_id, "order account")
@@ -156,9 +152,7 @@ def parse_broker_order_event(
         symbol=doc["symbol"],
         side=doc["side"],
         requested_quantity=_quantity(doc["requested_quantity"], "requested quantity", positive=True),
-        cumulative_executed_quantity=_quantity(
-            doc["cumulative_executed_quantity"], "cumulative executed quantity"
-        ),
+        cumulative_executed_quantity=_quantity(doc["cumulative_executed_quantity"], "cumulative executed quantity"),
         remaining_quantity=_quantity(doc["remaining_quantity"], "remaining quantity"),
         fill_record_id=fill_id,
         fill_source_sha256=fill_digest,
@@ -171,9 +165,7 @@ def parse_broker_order_event(
     return event
 
 
-def _transition(
-    old: BrokerOrderState | None, event: BrokerOrderEvent, fill: BrokerFillFact | None
-) -> BrokerOrderState:
+def _transition(old: BrokerOrderState | None, event: BrokerOrderEvent, fill: BrokerFillFact | None) -> BrokerOrderState:
     """Replay one order event without inventing execution, volume, or cash."""
     req = event.requested_quantity
     cum = event.cumulative_executed_quantity
@@ -188,8 +180,13 @@ def _transition(
         if event.kind == "REJECTED" and rem != 0:
             raise EconomicStoreError("rejected order cannot retain open quantity")
         return BrokerOrderState(
-            event.broker_order_id, event.symbol, event.side,
-            req, Decimal(0), event.kind, event.timestamp_ns,
+            event.broker_order_id,
+            event.symbol,
+            event.side,
+            req,
+            Decimal(0),
+            event.kind,
+            event.timestamp_ns,
         )
     if (
         old.status in ("FILLED", "CANCELED", "REJECTED")
@@ -228,8 +225,13 @@ def _transition(
     else:
         raise EconomicStoreError("new acceptance or rejection cannot replace an existing order")
     return BrokerOrderState(
-        event.broker_order_id, event.symbol, event.side,
-        req, cum, status, event.timestamp_ns,
+        event.broker_order_id,
+        event.symbol,
+        event.side,
+        req,
+        cum,
+        status,
+        event.timestamp_ns,
     )
 
 
@@ -280,14 +282,21 @@ def _replay(db: sqlite3.Connection, book: EngineEconomicBook) -> OrderLifecycleS
     for row in rows:
         count += 1
         (
-            seq, eid, sref, order_id, namespace, digest, raw_order, raw_fill,
-            pre, post, observed_chain,
+            seq,
+            eid,
+            sref,
+            order_id,
+            namespace,
+            digest,
+            raw_order,
+            raw_fill,
+            pre,
+            post,
+            observed_chain,
         ) = row
         if count > MAX_ORDER_EVENTS or seq != count or type(raw_order) is not bytes:
             raise EconomicStoreError("broker order journal sequence or original bytes are corrupted")
-        event = parse_broker_order_event(
-            raw_order, source_namespace=namespace, expected_account_id=book.account_id
-        )
+        event = parse_broker_order_event(raw_order, source_namespace=namespace, expected_account_id=book.account_id)
         if (
             event.event_id != eid
             or event.source_ref != sref
@@ -306,9 +315,7 @@ def _replay(db: sqlite3.Connection, book: EngineEconomicBook) -> OrderLifecycleS
         if event.kind == "FILL":
             if after != before + 1 or type(raw_fill) is not bytes:
                 raise EconomicStoreError("order fill is not atomic with exactly one economic event")
-            fill = parse_broker_fill_record(
-                raw_fill, source_namespace=namespace, expected_account_id=book.account_id
-            )
+            fill = parse_broker_fill_record(raw_fill, source_namespace=namespace, expected_account_id=book.account_id)
             expected_ref = f"{namespace}:{event.fill_record_id}"
             if (
                 fill.source_ref != expected_ref
