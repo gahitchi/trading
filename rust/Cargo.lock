@@ -1434,6 +1434,9 @@ dependencies = [
  "trading-core-types",
  "trading-execution",
  "trading-market-data",
+ "trading-risk-gate",
+ "trading-strategy-engine",
+ "trading-wallet-manager",
 ]
 
 [[package]]
