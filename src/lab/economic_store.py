@@ -34,6 +34,7 @@ from lab.engine_events import (
 )
 
 SCHEMA = 1
+LAYOUT_VERSION = 1
 MAX_EVENT_BYTES = 16_384
 MAX_SOURCE_BYTES = 65_536
 MAX_ORDER_OBSERVATIONS = 1024
@@ -204,6 +205,9 @@ class EconomicEventStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
+            legacy_layout = db.execute("PRAGMA user_version").fetchone()[0]
+            if type(legacy_layout) is not int or legacy_layout not in (0, LAYOUT_VERSION):
+                raise EconomicStoreError("unsupported future SQLite economic-store layout")
             db.execute(
                 "CREATE TABLE IF NOT EXISTS identity ("
                 "singleton INTEGER PRIMARY KEY CHECK(singleton=1), "
@@ -240,6 +244,13 @@ class EconomicEventStore:
                 )
             elif row != (SCHEMA, self.account_id):
                 raise EconomicStoreError("durable account or schema identity changed")
+            if legacy_layout == 0:
+                # Upgrade a legacy F1 journal in this same transaction. Rebuild
+                # before stamping the layout; partial migrations roll back.
+                from lab.order_lifecycle import _replay
+
+                _replay(db, self._read_locked(db))
+                db.execute(f"PRAGMA user_version={LAYOUT_VERSION}")
 
     def _connect(self) -> sqlite3.Connection:
         if self.readonly:
@@ -286,6 +297,8 @@ class EconomicEventStore:
     def load(self) -> EngineEconomicBook:
         with closing(self._connect()) as db, db:
             db.execute("BEGIN")
+            if db.execute("PRAGMA user_version").fetchone()[0] != LAYOUT_VERSION:
+                raise EconomicStoreError("unmigrated economic journal requires explicit writable migration")
             result = self._read_locked(db)
             db.execute("COMMIT")
             return result
