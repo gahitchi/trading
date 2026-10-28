@@ -351,6 +351,108 @@ def cmd_fast_paper(cfg, a):
     return 0
 
 
+def cmd_carry_fetch(cfg, a):
+    from urllib.error import HTTPError, URLError
+
+    from lab import carry_data
+
+    root = cfg.data_dir / "carry"
+    since, now = pd.Timestamp(a.since, tz="UTC"), pd.Timestamp.now(tz="UTC")
+    for sym in (s.upper() for s in a.symbols):
+        for (venue, market), kinds in carry_data.SERIES.items():
+            if venue not in a.venues:
+                continue
+            for kind in kinds:
+                name = f"{sym} {venue} {market} {kind}"
+                try:
+                    added, total = carry_data.update(root, venue, market, kind, sym, since, now)
+                except (HTTPError, ValueError) as e:  # e.g. no spot market for the symbol
+                    print(f"{name:34} not available ({e}): skipped")
+                    continue
+                except (URLError, TimeoutError) as e:
+                    raise SystemExit(f"could not reach {venue}: {e}") from e
+                print(f"{name:34} +{added:,} rows, {total:,} cached")
+    print(f"cached in {root}; next: lab carry study")
+    return 0
+
+
+def cmd_carry_study(cfg, a):
+    from lab import carry_study as cs
+    from lab.persistence import nullable_numbers
+
+    root = cfg.data_dir / "carry"
+    symbols = [s.upper() for s in a.symbols]
+    try:
+        s = cs.CarrySettings(
+            mode=a.mode, lookback_h=a.lookback_h, entry_apr=a.entry_apr, exit_apr=a.exit_apr,
+            rebalance_h=a.rebalance_h, perp_fee_bps=a.fee_bps, spot_fee_bps=a.spot_fee_bps, slippage_bps=a.slippage_bps,
+        )  # fmt: skip
+        b = cs.boundary(cfg.results_dir, root)
+        params = cs.params_of(s, symbols)
+        key = f"carry-{a.mode}"
+        if a.holdout:
+            fast_research.check_holdout(cfg.results_dir, key, params, int(b.value), a.again or "")
+        elif a.again:
+            raise SystemExit("--again only applies with --holdout")
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    pnl, missing = cs.run(root, symbols, s, b, holdout=a.holdout)
+    if not pnl:
+        raise SystemExit(f"no carry data for {' '.join(symbols)} {'after' if a.holdout else 'before'} {b:%Y-%m-%d}")
+    st = cs.summary(pnl, symbols)
+    result = nullable_numbers({k: st[k] for k in ("days", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")})
+    if a.holdout:
+        fast_research.record_holdout(cfg.results_dir, key, params, int(b.value), result, a.again or "")
+    first, last = min(v.index[0] for v in pnl.values()), max(v.index[-1] for v in pnl.values())
+    n = fast_research.register_trial(
+        cfg.results_dir, "carry-study", key, params, (int(first.value), int(last.value)), result, holdout=a.holdout
+    )
+    trade = {"cash": "long Binance spot / short Binance perpetual", "cross": "short the higher-funding perpetual, long the other (Binance vs Bybit)"}[a.mode]  # fmt: skip
+    print(f"carry {a.mode}: {trade}, {len(pnl)} symbol(s), {st['start']} .. {st['end']} UTC")
+    if a.holdout:
+        psr = cs.probabilistic_sharpe(st["sr_daily"], st["days"], st["skew"], st["kurt"])
+        print(f"  HOLDOUT test from {b:%Y-%m-%d} (recorded); P(Sharpe > 0) {psr:.2f}")
+    else:
+        srs = cs.trial_sharpes(cfg.results_dir, "carry-study", key)
+        dsr = cs.probabilistic_sharpe(st["sr_daily"], st["days"], st["skew"], st["kurt"], cs.expected_max_sharpe(srs))
+        print(
+            f"  research data only (holdout from {b:%Y-%m-%d}); configurations tried: {n}; "
+            f"deflated Sharpe {dsr:.2f} (the chance the edge is real, after {n} tries)"
+        )
+    if missing:
+        print(f"  no data, left out: {' '.join(missing)}")
+    print(
+        f"  net {st['apr']:+.2f}% a year (funding {st['funding_apr']:+.2f}, basis {st['basis_apr']:+.2f}, "
+        f"costs -{st['cost_apr']:.2f}), vol {st['vol']:.2f}%, Sharpe {st['sharpe']:+.2f}, "
+        f"t (Newey-West) {st['t_nw']:+.2f}, max drawdown {st['max_dd']:.2f}%, in market {st['in_market']:.0f}%"
+    )
+    if a.mode == "cash" and not a.holdout:
+        always = cs.CarrySettings(**{**cs.asdict(s), "entry_apr": -1e9, "exit_apr": -1e9})
+        base = cs.summary(cs.run(root, symbols, always, b)[0], symbols)
+        print(f"  always in the trade, for comparison: net {base['apr']:+.2f}% a year, Sharpe {base['sharpe']:+.2f}")
+    print(cs.per_symbol(pnl).to_string(index=False, float_format=lambda x: f"{x:.1f}"))
+    print(
+        "Returns per unit of notional per leg, equal notional per symbol, after taker fees and slippage on both"
+        " legs. The deflated Sharpe discounts the best of the configurations tried; under 0.95 the edge is not"
+        " established."
+    )
+    return 0
+
+
+def cmd_carry_release(cfg, a):
+    from lab import carry_study as cs
+
+    try:
+        old, new = cs.release(cfg.results_dir, cfg.data_dir / "carry", a.reason)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    print(
+        f"carry data {old:%Y-%m-%d %H:%M} .. {new:%Y-%m-%d %H:%M} UTC is now research data; the new holdout is "
+        "everything fetched from here on"
+    )
+    return 0
+
+
 def cmd_kill(cfg, a):
     from lab.notify import Notifier
     from lab.safety import set_kill_switch
@@ -481,6 +583,35 @@ def build_parser() -> argparse.ArgumentParser:
     rel.add_argument("--reason", required=True, help="recorded with the new boundary")
     rel.add_argument("--catalog", help="catalog directory (default: <data>/market/catalog)")
     rel.set_defaults(fn=cmd_fast_release)
+
+    from lab.carry_study import DEFAULT_SYMBOLS as CARRY_SYMBOLS
+    from lab.carry_study import MODES as CARRY_MODES
+
+    carry = sub.add_parser("carry", help="funding-carry research on hourly history (public REST data)")
+    csub = carry.add_subparsers(dest="sub", required=True)
+    cf = csub.add_parser("fetch", help="download or update funding and hourly closes into <data>/carry")
+    cf.add_argument("--symbols", nargs="+", default=list(CARRY_SYMBOLS), help="USDT pairs")
+    cf.add_argument("--since", default="2023-01-01", help="UTC start of the first download (default 2023-01-01)")
+    cf.add_argument("--venues", nargs="+", choices=VENUES, default=list(VENUES), help="default: all")
+    cf.set_defaults(fn=cmd_carry_fetch)
+    cst = csub.add_parser("study", help="does a carry trade pay after costs? (holdout-guarded, logged)")
+    cst.add_argument(
+        "--mode", choices=CARRY_MODES, default="cash", help="cash: spot vs perpetual; cross: Binance vs Bybit"
+    )
+    cst.add_argument("--symbols", nargs="+", default=list(CARRY_SYMBOLS), help="USDT pairs")
+    cst.add_argument("--lookback-h", type=int, default=72, help="hours of funding behind the signal (default 72)")
+    cst.add_argument("--entry-apr", type=float, default=10.0, help="open above this funding, %% a year (default 10)")
+    cst.add_argument("--exit-apr", type=float, default=0.0, help="close below this funding, %% a year (default 0)")
+    cst.add_argument("--rebalance-h", type=int, default=8, help="decide every N hours from 00:00 UTC (default 8)")
+    cst.add_argument("--fee-bps", type=float, default=5.0, help="perpetual taker fee per side, bps (default 5)")
+    cst.add_argument("--spot-fee-bps", type=float, default=10.0, help="spot taker fee per side, bps (default 10)")
+    cst.add_argument("--slippage-bps", type=float, default=1.0, help="per leg and side, bps (default 1)")
+    cst.add_argument("--holdout", action="store_true", help="the one-time test on the reserved holdout data")
+    cst.add_argument("--again", metavar="REASON", help="repeat a holdout test; the reason is recorded")
+    cst.set_defaults(fn=cmd_carry_study)
+    crl = csub.add_parser("release", help="turn the carry holdout into research data; later data is the new holdout")
+    crl.add_argument("--reason", required=True, help="recorded with the new boundary")
+    crl.set_defaults(fn=cmd_carry_release)
 
     k = sub.add_parser("kill", help="kill switch: stop all new orders now")
     k.add_argument("--flatten", action="store_true", help="also exit every position")
