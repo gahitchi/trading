@@ -28,6 +28,7 @@ impl BinanceEnvironment {
         match self {
             Self::Mainnet => "wss://fstream.binance.com/market",
             Self::Testnet => "wss://stream.binancefuture.com",
+            Self::Demo => "wss://demo-fstream.binance.com",
         }
     }
 }
