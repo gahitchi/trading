@@ -144,3 +144,28 @@ publicly. Expose only reviewed digests and redacted acceptance metadata.
 unsupported excluded behavior or genuine implementation defect. Any genuine
 defect requires a code change and rerun; do not mark F1 complete from this
 packet alone.
+
+
+## Deterministic Arch replay-performance probe
+
+Run the synthetic append-and-cold-restart probe on the same reviewed Python
+candidate. Measure representative batch sizes; record exact hardware,
+Python/SQLite versions, process isolation, input count, p50/p99 from repeated
+independent trials and operator-defined latency/memory budget. The utility
+measures total bounded append duration and cold replay, and verifies the
+original generated economic book against a full read-only rebuild.
+
+\`\`\`sh
+uv run --no-sync python -m lab.f1_benchmark --events 64
+uv run --no-sync python -m lab.f1_benchmark --events 256 \
+  --max-append-ms OPERATOR_SELECTED_LIMIT \
+  --max-cold-replay-ms OPERATOR_SELECTED_LIMIT
+\`\`\`
+
+When no budgets are supplied, the result's \`selected_limits_passed\`
+is null, **not** true. If a selected budget is exceeded the command exits 2.
+No source authentication, real hardware qualification or independent signoff
+is inferred from synthetic timings. This probe does not measure memory
+consumption or all broker-order-history replay paths; those require
+independent operator instrumentation and review. Full-replay append remains
+superlinear and may need redesign before continuous high-throughput use.
