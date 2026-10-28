@@ -358,9 +358,18 @@ def cmd_carry_fetch(cfg, a):
 
     root = cfg.data_dir / "carry"
     since, now = pd.Timestamp(a.since, tz="UTC"), pd.Timestamp.now(tz="UTC")
-    for sym in (s.upper() for s in a.symbols):
+    venues = a.venues or (["binance"] if a.all else list(carry_data.VENUES))
+    if a.all:
+        try:
+            symbols = carry_data.universe()
+        except (URLError, TimeoutError) as e:
+            raise SystemExit(f"could not reach binance: {e}") from e
+        print(f"{len(symbols)} USDT pairs trade as both a Binance perpetual and spot pair today")
+    else:
+        symbols = [s.upper() for s in a.symbols]
+    for sym in symbols:
         for (venue, market), kinds in carry_data.SERIES.items():
-            if venue not in a.venues:
+            if venue not in venues:
                 continue
             for kind in kinds:
                 name = f"{sym} {venue} {market} {kind}"
@@ -377,15 +386,17 @@ def cmd_carry_fetch(cfg, a):
 
 
 def cmd_carry_study(cfg, a):
+    from lab import carry_data
     from lab import carry_study as cs
     from lab.persistence import nullable_numbers
 
     root = cfg.data_dir / "carry"
-    symbols = [s.upper() for s in a.symbols]
+    symbols = carry_data.cached_symbols(root) if a.all else [s.upper() for s in a.symbols]
     try:
         s = cs.CarrySettings(
             mode=a.mode, lookback_h=a.lookback_h, entry_apr=a.entry_apr, exit_apr=a.exit_apr,
             rebalance_h=a.rebalance_h, perp_fee_bps=a.fee_bps, spot_fee_bps=a.spot_fee_bps, slippage_bps=a.slippage_bps,
+            top=a.top, min_turnover_m=a.min_turnover,
         )  # fmt: skip
         b = cs.boundary(cfg.results_dir, root)
         params = cs.params_of(s, symbols)
@@ -399,7 +410,7 @@ def cmd_carry_study(cfg, a):
     pnl, missing = cs.run(root, symbols, s, b, holdout=a.holdout)
     if not pnl:
         raise SystemExit(f"no carry data for {' '.join(symbols)} {'after' if a.holdout else 'before'} {b:%Y-%m-%d}")
-    st = cs.summary(pnl)
+    st = cs.summary(pnl, s.top)
     result = nullable_numbers({k: st[k] for k in ("days", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")})
     if a.holdout:
         fast_research.record_holdout(cfg.results_dir, key, params, int(b.value), result, a.again or "")
@@ -408,7 +419,10 @@ def cmd_carry_study(cfg, a):
         cfg.results_dir, "carry-study", key, params, (int(first.value), int(last.value)), result, holdout=a.holdout
     )
     trade = {"cash": "long Binance spot / short Binance perpetual", "cross": "short the higher-funding perpetual, long the other (Binance vs Bybit)"}[a.mode]  # fmt: skip
-    print(f"carry {a.mode}: {trade}, {len(pnl)} symbol(s), {st['start']} .. {st['end']} UTC")
+    who = f"top {s.top} of {len(pnl)} symbol(s) by funding" if s.top else f"{len(pnl)} symbol(s)"
+    if s.min_turnover_m:
+        who += f", perpetual turnover >= {s.min_turnover_m:g} M USDT a day"
+    print(f"carry {a.mode}: {trade}, {who}, {st['start']} .. {st['end']} UTC")
     if a.holdout:
         psr = cs.probabilistic_sharpe(st["sr_daily"], st["days"], st["skew"], st["kurt"])
         print(f"  HOLDOUT test from {b:%Y-%m-%d} (recorded); P(Sharpe > 0) {psr:.2f}")
@@ -420,19 +434,29 @@ def cmd_carry_study(cfg, a):
             f"deflated Sharpe {dsr:.2f} (the chance the edge is real, after {n} tries)"
         )
     if missing:
-        print(f"  no data, left out: {' '.join(missing)}")
+        print(
+            f"  no data, left out: {' '.join(missing[:20])}"
+            + (f" and {len(missing) - 20} more" if len(missing) > 20 else "")
+        )
     print(
         f"  net {st['apr']:+.2f}% a year (funding {st['funding_apr']:+.2f}, basis {st['basis_apr']:+.2f}, "
         f"costs -{st['cost_apr']:.2f}), vol {st['vol']:.2f}%, Sharpe {st['sharpe']:+.2f}, "
         f"t (Newey-West) {st['t_nw']:+.2f}, max drawdown {st['max_dd']:.2f}%, in market {st['in_market']:.0f}%"
     )
-    if a.mode == "cash" and not a.holdout:
+    if a.mode == "cash" and not a.holdout and not s.top:
         always = cs.CarrySettings(**{**cs.asdict(s), "entry_apr": -1e9, "exit_apr": -1e9})
         base = cs.summary(cs.run(root, symbols, always, b)[0])
         print(f"  always in the trade, for comparison: net {base['apr']:+.2f}% a year, Sharpe {base['sharpe']:+.2f}")
-    print(cs.per_symbol(pnl).to_string(index=False, float_format=lambda x: f"{x:.1f}"))
+    table = cs.per_symbol(pnl)
+    if s.top:  # a universe: the symbols that were held, best and worst
+        table = table[table["trades"] > 0].sort_values("net_bps", ascending=False)
+        if len(table) > 20:
+            print(f"  {len(table)} symbols were held; the 10 best and 10 worst:")
+            table = pd.concat([table.head(10), table.tail(10)])
+    print(table.to_string(index=False, float_format=lambda x: f"{x:.1f}"))
+    share = f"1/{s.top} of the notional per slot" if s.top else "equal notional per symbol"
     print(
-        "Returns per unit of notional per leg, equal notional per symbol, after taker fees and slippage on both"
+        f"Returns per unit of notional per leg, {share}, after taker fees and slippage on both"
         " legs. The deflated Sharpe discounts the best of the configurations tried; under 0.95 the edge is not"
         " established."
     )
@@ -592,7 +616,8 @@ def build_parser() -> argparse.ArgumentParser:
     cf = csub.add_parser("fetch", help="download or update funding and hourly closes into <data>/carry")
     cf.add_argument("--symbols", nargs="+", default=list(CARRY_SYMBOLS), help="USDT pairs")
     cf.add_argument("--since", default="2023-01-01", help="UTC start of the first download (default 2023-01-01)")
-    cf.add_argument("--venues", nargs="+", choices=VENUES, default=list(VENUES), help="default: all")
+    cf.add_argument("--all", action="store_true", help="every pair with a Binance perpetual and spot market today")
+    cf.add_argument("--venues", nargs="+", choices=VENUES, help="default: all (binance with --all)")
     cf.set_defaults(fn=cmd_carry_fetch)
     cst = csub.add_parser("study", help="does a carry trade pay after costs? (holdout-guarded, logged)")
     cst.add_argument(
@@ -606,6 +631,11 @@ def build_parser() -> argparse.ArgumentParser:
     cst.add_argument("--fee-bps", type=float, default=5.0, help="perpetual taker fee per side, bps (default 5)")
     cst.add_argument("--spot-fee-bps", type=float, default=10.0, help="spot taker fee per side, bps (default 10)")
     cst.add_argument("--slippage-bps", type=float, default=1.0, help="per leg and side, bps (default 1)")
+    cst.add_argument("--all", action="store_true", help="every symbol fetched (instead of --symbols)")
+    cst.add_argument("--top", type=int, default=0, help="cash: hold only the K highest-funding symbols (default: all)")
+    cst.add_argument(
+        "--min-turnover", type=float, default=0.0, help="open only where the perpetual traded >= M USDT a day (30 d)"
+    )
     cst.add_argument("--holdout", action="store_true", help="the one-time test on the reserved holdout data")
     cst.add_argument("--again", metavar="REASON", help="repeat a holdout test; the reason is recorded")
     cst.set_defaults(fn=cmd_carry_study)

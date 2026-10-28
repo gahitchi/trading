@@ -8,6 +8,7 @@ downloads what is missing and appends it to one Parquet file per series under <d
 Each series is (ts, value), ts in UTC nanoseconds:
   funding  ts: the settlement time, value: the rate paid by longs to shorts at it (fraction of notional)
   close    ts: the end of the hour, value: the last trade price of the hour that ends there
+  turnover ts: the end of the hour, value: the hour's traded value in USDT (stored with `close`, from the same klines)
 Klines still open are never stored.
 """
 
@@ -20,7 +21,7 @@ from urllib.error import HTTPError, URLError
 import pandas as pd
 
 from lab.persistence import file_lock
-from lab.survey import get_json
+from lab.survey import binance_perpetuals, get_json
 
 BINANCE_FAPI = "https://fapi.binance.com/fapi/v1"
 BINANCE_SPOT = "https://api.binance.com/api/v3"
@@ -28,6 +29,7 @@ BYBIT_V5 = "https://api.bybit.com/v5/market"
 HOUR_MS = 3_600_000
 TRIES = 6  # waits of 2, 4, ... 32 s between them: rate limits and timeouts pass, a dead network does not
 BYBIT_RATE_LIMITED = {10006, 10018}
+VENUES = ("binance", "bybit")
 # (venue, market) -> what carry research reads from it
 SERIES = {
     ("binance", "perp"): ("funding", "close"),
@@ -87,8 +89,9 @@ def _binance_closes(url, limit, start_ms, now_ms, get, pause):
     rows = []
     while start_ms < now_ms:
         page = get(f"{url}&interval=1h&startTime={start_ms}&limit={limit}")
-        # [open time, open, high, low, close, ...]; the hour ends at open + 1 h. The open kline is left out.
-        rows += [(int(k[0]) + HOUR_MS, float(k[4])) for k in page if int(k[0]) + HOUR_MS <= now_ms]
+        # [open time, open, high, low, close, volume, close time, quote volume, ...]; the hour ends at open + 1 h.
+        # The open kline is left out.
+        rows += [(int(k[0]) + HOUR_MS, float(k[4]), float(k[7])) for k in page if int(k[0]) + HOUR_MS <= now_ms]
         if len(page) < limit:
             break
         start_ms = int(page[-1][0]) + HOUR_MS
@@ -137,7 +140,7 @@ def _bybit_closes(symbol, start_ms, now_ms, get, pause):
             get,
             f"{BYBIT_V5}/kline?category=linear&symbol={symbol}&interval=60&start={start_ms}&end={end_ms}&limit=1000",
         )
-        rows += [(int(k[0]) + HOUR_MS, float(k[4])) for k in page if int(k[0]) + HOUR_MS <= now_ms]
+        rows += [(int(k[0]) + HOUR_MS, float(k[4]), float(k[6])) for k in page if int(k[0]) + HOUR_MS <= now_ms]
         if len(page) < 1000:
             break
         end_ms = min(int(k[0]) for k in page) - 1
@@ -148,7 +151,7 @@ def _bybit_closes(symbol, start_ms, now_ms, get, pause):
 def download(
     venue, market, kind, symbol, start_ms, now_ms, get=get_json, pause=lambda: time.sleep(0.5), sleep=time.sleep
 ):
-    """[(ts_ms, value)] from start_ms (inclusive) up to now_ms."""
+    """[(ts_ms, value)] from start_ms (inclusive) up to now_ms; [(ts_ms, close, turnover)] for closes."""
     get = patient(get, sleep)
     if (venue, market) == ("binance", "perp"):
         if kind == "funding":
@@ -173,21 +176,46 @@ def load(root: Path, venue: str, market: str, kind: str, symbol: str) -> pd.Seri
 
 
 def update(root: Path, venue, market, kind, symbol, since: pd.Timestamp, now: pd.Timestamp, **io) -> tuple[int, int]:
-    """Downloads what is missing after the cache's last row (or from `since`) and stores the union.
-    Returns (new rows, total rows)."""
+    """Downloads what is missing after the cache's last row (or from `since`) and stores the union; `close`
+    also stores `turnover` from the same klines (from `since` if only the closes were cached).
+    Returns (new rows, total rows) of `kind`."""
+    kinds = (kind, "turnover") if kind == "close" else (kind,)
     p = path_of(root, venue, market, kind, symbol)
     with file_lock(p.with_name(p.name + ".lock")):
-        old = load(root, venue, market, kind, symbol)
-        start = old.index[-1] + pd.Timedelta(milliseconds=1) if len(old) else since
+        old = [load(root, venue, market, k, symbol) for k in kinds]
+        start = min(o.index[-1] + pd.Timedelta(milliseconds=1) if len(o) else since for o in old)
         rows = download(venue, market, kind, symbol, _ms(start), _ms(now), **io)
-        new = pd.Series(
-            [v for _, v in rows], index=pd.to_datetime([t for t, _ in rows], unit="ms", utc=True), dtype=float
-        )
-        both = pd.concat([old, new]).sort_index()
-        both = both[~both.index.duplicated(keep="last")]
-        if len(new):
-            p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_name(p.name + ".tmp")
-            pd.DataFrame({"ts": both.index, "value": both.to_numpy()}).to_parquet(tmp, index=False)
-            tmp.replace(p)
-        return len(both) - len(old), len(both)
+        index = pd.to_datetime([r[0] for r in rows], unit="ms", utc=True)
+        counts = []
+        for col, (k, o) in enumerate(zip(kinds, old, strict=True), start=1):
+            new = pd.Series([r[col] for r in rows], index=index, dtype=float)
+            both = pd.concat([o, new]).sort_index()
+            both = both[~both.index.duplicated(keep="last")]
+            if len(new):
+                q = path_of(root, venue, market, k, symbol)
+                q.parent.mkdir(parents=True, exist_ok=True)
+                tmp = q.with_name(q.name + ".tmp")
+                pd.DataFrame({"ts": both.index, "value": both.to_numpy()}).to_parquet(tmp, index=False)
+                tmp.replace(q)
+            counts.append((len(both) - len(o), len(both)))
+        return counts[0]
+
+
+def cached_symbols(root: Path) -> list[str]:
+    """Every symbol with Binance perpetual funding in the cache."""
+    return sorted(
+        p.name.removeprefix("binance-perp-funding-").removesuffix(".parquet")
+        for p in Path(root).glob("binance-perp-funding-*.parquet")
+    )
+
+
+def universe(get=get_json) -> list[str]:
+    """Every USDT pair trading today both as a Binance USD-M perpetual and on Binance spot under the same name
+    (so not 1000PEPEUSDT, whose spot pair is PEPEUSDT). Today's list: delisted pairs are missing."""
+    get = patient(get)
+    spot = {
+        s["symbol"]
+        for s in get(f"{BINANCE_SPOT}/exchangeInfo?permissions=SPOT")["symbols"]
+        if s["quoteAsset"] == "USDT" and s["status"] == "TRADING"
+    }
+    return sorted(binance_perpetuals(get) & spot)

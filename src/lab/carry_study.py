@@ -16,10 +16,16 @@ position opens when it exceeds `entry_apr` and closes when it falls below `exit_
 down). The new position trades at the close of the hour ending at T, after T's funding has settled, so it first
 earns the next settlement. Each change of position pays both legs' taker fees and slippage on the notional changed.
 
+With `top` K (cash only), the symbols compete for K equal slots instead: at each rebalance hour, positions whose
+signal fell below `exit_apr` close, and free slots go to the highest signals above `entry_apr` among symbols whose
+perpetual traded at least `min_turnover_m` M USDT a day over the last 30 days (also known at T). This is the test
+on a whole universe, where the highest funding is usually on small altcoins.
+
 Per symbol and hour T the trade earns w(T-1h) x (long leg return - short leg return + funding difference at T),
 minus |w(T) - w(T-1h)| x cost. Returns are per unit of notional per leg; the portfolio gives every symbol an
 equal share of notional whether or not its trade is open. The cash trade also ties up the perpetual's margin
-beside the spot notional: divide by (1 + 1/leverage) for a return on capital. Not modelled: rebalancing the legs
+beside the spot notional: divide by (1 + 1/leverage) for a return on capital. With `top`, each slot has 1/K of the
+notional and an empty slot earns nothing. Not modelled: rebalancing the legs
 as prices drift, liquidation of the short perpetual on a rally (the spot leg covers it only if collateral can be
 moved in time), borrow costs, funding paid on mark rather than last price, and fees that depend on volume tier.
 
@@ -68,6 +74,8 @@ class CarrySettings:
     perp_fee_bps: float = 5.0  # taker, per side
     spot_fee_bps: float = 10.0  # Binance spot taker base tier
     slippage_bps: float = 1.0  # per leg and side
+    top: int = 0  # 0: every symbol trades on its own; K: the K highest signals share the notional
+    min_turnover_m: float = 0.0  # M USDT a day on the perpetual, 30-day mean, to open a position
 
     def __post_init__(self):
         if self.mode not in MODES:
@@ -76,6 +84,8 @@ class CarrySettings:
             raise ValueError("lookback_h must be >= 1 and rebalance_h must divide 24")
         if self.exit_apr > self.entry_apr:
             raise ValueError("exit_apr must not exceed entry_apr")
+        if self.top < 0 or (self.top and self.mode != "cash"):
+            raise ValueError("top applies to the cash trade only, and must be positive")
 
     @property
     def cost(self) -> float:
@@ -92,15 +102,17 @@ class Legs:
     long: pd.Series
     short: pd.Series
     funding: pd.Series
+    turnover: pd.Series | None = None  # the Binance perpetual's traded value per hour, USDT
 
 
 def legs(root: Path, mode: str, symbol: str) -> Legs | None:
     """The cached series of a symbol's trade, or None if any is missing."""
     perp = carry_data.load(root, "binance", "perp", "close", symbol)
+    turnover = carry_data.load(root, "binance", "perp", "turnover", symbol)
     f_bin = carry_data.load(root, "binance", "perp", "funding", symbol)
     if mode == "cash":
         spot = carry_data.load(root, "binance", "spot", "close", symbol)
-        out = Legs(long=spot, short=perp, funding=f_bin)
+        out = Legs(long=spot, short=perp, funding=f_bin, turnover=turnover)
     else:
         byb = carry_data.load(root, "bybit", "perp", "close", symbol)
         f_byb = carry_data.load(root, "bybit", "perp", "funding", symbol)
@@ -108,18 +120,19 @@ def legs(root: Path, mode: str, symbol: str) -> Legs | None:
             return None
         both = max(f_bin.index[0], f_byb.index[0])  # before both venues pay funding there is no difference
         diff = f_bin.sub(f_byb, fill_value=0.0)
-        out = Legs(long=byb, short=perp, funding=diff[diff.index >= both])
+        out = Legs(long=byb, short=perp, funding=diff[diff.index >= both], turnover=turnover)
     return None if out.long.empty or out.short.empty or f_bin.empty else out
 
 
 def truncate(lg: Legs, end: pd.Timestamp) -> Legs:
     """Only what was known before `end`."""
-    return Legs(*(s[s.index < end] for s in (lg.long, lg.short, lg.funding)))
+    return Legs(*(None if s is None else s[s.index < end] for s in (lg.long, lg.short, lg.funding, lg.turnover)))
 
 
 def hourly(lg: Legs) -> pd.DataFrame | None:
     """On the hourly grid where both legs trade: each leg's return over the hour ending at T, the funding settled
-    in it, and whether both legs printed a close at T (a trade may only change there)."""
+    in it, whether both legs printed a close at T (a trade may only change there), and the perpetual's mean daily
+    turnover over the 30 days up to T (NaN until 30 days of it are known)."""
     start = max(lg.long.index[0], lg.short.index[0]).ceil("h")
     end = min(lg.long.index[-1], lg.short.index[-1]).floor("h")
     if end <= start:
@@ -128,39 +141,90 @@ def hourly(lg: Legs) -> pd.DataFrame | None:
     closes = [s.groupby(s.index.floor("h")).last().reindex(grid) for s in (lg.long, lg.short)]
     rets = [c.ffill(limit=FILL_GAP_H).pct_change(fill_method=None) for c in closes]
     funding = lg.funding.groupby(lg.funding.index.floor("h")).sum().reindex(grid, fill_value=0.0)
+    if lg.turnover is not None and len(lg.turnover):
+        hourly_value = lg.turnover.groupby(lg.turnover.index.floor("h")).sum().reindex(grid, fill_value=0.0)
+        turnover = hourly_value.rolling(30 * 24, min_periods=30 * 24).sum() / 30
+    else:
+        turnover = pd.Series(np.nan, index=grid)
     return pd.DataFrame(
         {
             "r_long": rets[0].fillna(0.0),
             "r_short": rets[1].fillna(0.0),
             "funding": funding,
             "tradable": closes[0].notna() & closes[1].notna() & rets[0].notna() & rets[1].notna(),
+            "turnover_d": turnover,
         }
     )
 
 
+def signal(h: pd.DataFrame, s: CarrySettings) -> np.ndarray:
+    """The funding the trade earned over the last lookback_h hours up to and including T, % a year."""
+    x = h["funding"].rolling(s.lookback_h, min_periods=s.lookback_h).sum() * (HOURS_PER_YEAR / s.lookback_h)
+    return (x * 100).to_numpy()
+
+
+def liquid(h: pd.DataFrame, s: CarrySettings) -> np.ndarray:
+    if s.min_turnover_m <= 0:
+        return np.ones(len(h), dtype=bool)
+    return (h["turnover_d"] >= s.min_turnover_m * 1e6).to_numpy()  # NaN (not yet 30 days) is not liquid
+
+
 def positions(h: pd.DataFrame, s: CarrySettings) -> pd.Series:
-    """w(T), held from T to T + 1h: 0 or 1 (cash), -1, 0 or 1 (cross). Uses funding up to and including T."""
-    signal = h["funding"].rolling(s.lookback_h, min_periods=s.lookback_h).sum() * (HOURS_PER_YEAR / s.lookback_h)
-    signal = (signal * 100).to_numpy()  # % a year
+    """w(T), held from T to T + 1h: 0 or 1 (cash), -1, 0 or 1 (cross). Uses data up to and including T."""
+    signal_ = signal(h, s)
+    can_open = liquid(h, s)
     decide = (h.index.hour % s.rebalance_h == 0) & h["tradable"].to_numpy()
     sides = (1,) if s.mode == "cash" else (1, -1)
     w = np.zeros(len(h))
     cur = 0.0
     for i in range(len(h)):
-        if decide[i] and not math.isnan(signal[i]):
-            x = signal[i]
+        if decide[i] and not math.isnan(signal_[i]):
+            x = signal_[i]
             if cur and cur * x < s.exit_apr:
                 cur = 0.0
-            if not cur:
+            if not cur and can_open[i]:
                 cur = next((float(d) for d in sides if d * x > s.entry_apr), 0.0)
         w[i] = cur
     return pd.Series(w, index=h.index, name="w")
 
 
-def backtest(h: pd.DataFrame, s: CarrySettings, eval_from: pd.Timestamp | None = None) -> pd.DataFrame:
-    """Hourly P&L as a fraction of notional: basis, funding, cost, net, and the position w(T).
-    With eval_from, only hours from it on, as if the trade started flat just before it."""
-    w = positions(h, s)
+def top_positions(hs: dict[str, pd.DataFrame], s: CarrySettings) -> dict[str, pd.Series]:
+    """w(T) per symbol (0 or 1) when the symbols compete for s.top slots; uses data up to and including T only."""
+    syms = list(hs)
+    grid = hs[syms[0]].index
+    for h in hs.values():
+        grid = grid.union(h.index)
+    on_grid = [h.reindex(grid) for h in hs.values()]
+    x = np.column_stack([signal(h, s) for h in on_grid])
+    ok = np.column_stack(
+        [
+            h["tradable"].fillna(False).to_numpy(dtype=bool) & liquid(h, s) & ~np.isnan(sig)
+            for h, sig in zip(on_grid, x.T, strict=True)
+        ]
+    )
+    decide = grid.hour % s.rebalance_h == 0
+    ends = np.array([h.index[-1] for h in hs.values()])
+    w = np.zeros((len(grid), len(syms)))
+    held = np.zeros(len(syms), dtype=bool)
+    for i in range(len(grid)):
+        if decide[i]:
+            row = x[i]
+            held &= ~(row < s.exit_apr)  # a NaN signal (no price at T) keeps the position: it can't trade
+            held &= ends >= grid[i]  # a symbol whose history has ended frees its slot
+            free = s.top - int(held.sum())
+            if free > 0:
+                cand = np.flatnonzero(ok[i] & ~held & (row > s.entry_apr))
+                held[cand[np.argsort(-row[cand], kind="stable")][:free]] = True
+        w[i] = held
+    return {sym: pd.Series(w[:, j], index=grid, name="w").reindex(hs[sym].index) for j, sym in enumerate(syms)}
+
+
+def backtest(
+    h: pd.DataFrame, s: CarrySettings, eval_from: pd.Timestamp | None = None, w: pd.Series | None = None
+) -> pd.DataFrame:
+    """Hourly P&L as a fraction of notional: basis, funding, cost, net, and the position w(T) (computed here
+    unless given). With eval_from, only hours from it on, as if the trade started flat just before it."""
+    w = positions(h, s) if w is None else w
     prev = w.shift(1, fill_value=0.0)
     out = pd.DataFrame(
         {
@@ -216,12 +280,13 @@ def expected_max_sharpe(trial_srs: list[float]) -> float:
     return sd * ((1 - EULER_GAMMA) * z(1 - 1 / n) + EULER_GAMMA * z(1 - 1 / (n * math.e)))
 
 
-def summary(pnl: dict[str, pd.DataFrame]) -> dict:
-    """Portfolio statistics on daily net returns: each symbol with data has an equal share of the notional (a
-    symbol requested without data is left out, not counted as idle notional)."""
+def summary(pnl: dict[str, pd.DataFrame], slots: int = 0) -> dict:
+    """Portfolio statistics on daily net returns. Each symbol with data has an equal share of the notional (a
+    symbol requested without data is left out, not counted as idle notional), or with `slots`, each slot has."""
     if not pnl:
         return {"days": 0}
-    net = pd.concat({k: v["net"] for k, v in pnl.items()}, axis=1).fillna(0.0).mean(axis=1)
+    n_share = slots or len(pnl)
+    net = pd.concat({k: v["net"] for k, v in pnl.items()}, axis=1).fillna(0.0).sum(axis=1) / n_share
     daily = net.resample("D").sum()
     x = daily.to_numpy()
     n = len(x)
@@ -229,7 +294,7 @@ def summary(pnl: dict[str, pd.DataFrame]) -> dict:
     sr = float(x.mean() / sd) if sd and sd > 0 else math.nan
     eq = np.cumsum(x)
     dd = float((np.maximum.accumulate(np.maximum(eq, 0)) - eq).max()) if n else 0.0
-    part = {k: sum(v[k].sum() for v in pnl.values()) / len(pnl) for k in ("funding", "basis", "cost")}
+    part = {k: sum(v[k].sum() for v in pnl.values()) / n_share for k in ("funding", "basis", "cost")}
     years = n / 365 if n else math.nan
     skew = float(pd.Series(x).skew()) if n > 2 else 0.0
     kurt = float(pd.Series(x).kurt()) + 3 if n > 3 else 3.0
@@ -248,7 +313,10 @@ def summary(pnl: dict[str, pd.DataFrame]) -> dict:
         "funding_apr": part["funding"] / years * 100,
         "basis_apr": part["basis"] / years * 100,
         "cost_apr": part["cost"] / years * 100,
-        "in_market": float(np.mean([(v["w"] != 0).mean() for v in pnl.values()])) * 100,
+        "in_market": float(
+            (pd.concat({k: v["w"] != 0 for k, v in pnl.items()}, axis=1).fillna(False).sum(axis=1) / n_share).mean()
+        )
+        * 100,
     }
 
 
@@ -278,14 +346,21 @@ def run(
 ) -> tuple[dict[str, pd.DataFrame], list[str]]:
     """Hourly P&L per symbol on research data (before the boundary) or, with holdout, on the data from it on.
     Also returns the symbols left out for lack of data."""
-    pnl, missing = {}, []
+    hs, missing = {}, []
     for sym in symbols:
         lg = legs(root, s.mode, sym)
         if lg is not None and not holdout:
             lg = truncate(lg, boundary)
         h = hourly(lg) if lg is not None and len(lg.long) and len(lg.short) else None
-        r = backtest(h, s, boundary if holdout else None) if h is not None else None
-        if r is None or r.empty:
+        if h is None:
+            missing.append(sym)
+        else:
+            hs[sym] = h
+    ws = top_positions(hs, s) if s.top and hs else {}
+    pnl = {}
+    for sym, h in hs.items():
+        r = backtest(h, s, boundary if holdout else None, ws.get(sym))
+        if r.empty:
             missing.append(sym)
         else:
             pnl[sym] = r
@@ -368,4 +443,8 @@ def trial_sharpes(results_dir: Path, kind: str, instrument: str) -> list[float]:
 
 
 def params_of(s: CarrySettings, symbols: list[str]) -> dict:
-    return {**asdict(s), "symbols": sorted(symbols)}
+    p = {**asdict(s), "symbols": sorted(symbols)}
+    for k in ("top", "min_turnover_m"):  # left out at their defaults: earlier trials keep their fingerprints
+        if p[k] == CarrySettings.__dataclass_fields__[k].default:
+            del p[k]
+    return p
