@@ -2,7 +2,8 @@
 Does an order-book or trade-flow feature predict price moves bigger than the cost of trading them?
 
 Replays recorded order-book deltas and trades (lab record) in receive-time order (ts_init: what a live strategy
-would have seen, so no look-ahead), rebuilds the book, updates the lab.micro features on every complete book
+would have seen, so no look-ahead), rebuilds the book (and, for lead-lag, a leader instrument's book: another
+symbol or the same symbol on another venue), updates the lab.micro features on every complete book
 update and samples them on a fixed clock (default every 100 ms) so bursts don't dominate. For each horizon it
 reports:
 
@@ -22,10 +23,19 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from lab.micro import OFI_LEVELS, FlowToxicity, MultiLevelOfi, book_imbalance
+from lab.micro import (
+    OFI_LEVELS,
+    Absorption,
+    FlowToxicity,
+    HawkesIntensity,
+    KalmanLeadLag,
+    MultiLevelOfi,
+    book_imbalance,
+)
 
 F_LAST = 128
-FEATURES = ("ofi_z", "imbalance", "micro_bps", "flow_signed")
+FEATURES = ("ofi_z", "imbalance", "micro_bps", "flow_signed", "hawkes_skew", "absorption", "lead_lag_bps")
+TRADE, LEADER_BOOK, BOOK = 0, 1, 2  # at equal receive times: trades, then the leader's book, then the book
 
 
 @dataclass(frozen=True)
@@ -34,34 +44,51 @@ class StudySettings:
     horizons_s: tuple[float, ...] = (1.0, 5.0, 30.0)
     taker_fee_bps: float = 5.0  # Binance USD-M base tier, approximate; set your own
     flow_bucket_notional: float = 100_000.0  # quote currency (USDT) per volume bucket
+    hawkes_baseline_per_s: float = 1.0  # trades/s the Hawkes intensities are measured against
+    lead_lag_max_interval_s: float = 0.050  # longest gap between two mids that still counts as a return interval
 
 
 def _levels(levels) -> list[tuple[float, float]]:
     return [(float(lv.price), lv.size()) for lv in levels]
 
 
-def sample_features(deltas, trades, settings: StudySettings) -> pd.DataFrame:
-    """One row per sampling tick: ts (ns), mid, spread_bps and the features (NaN until each one is warm)."""
+def sample_features(deltas, trades, settings: StudySettings, leader_deltas=()) -> pd.DataFrame:
+    """One row per sampling tick: ts (ns), mid, spread_bps and the features (NaN until each one is warm;
+    lead_lag_bps stays NaN without leader_deltas)."""
     from nautilus_trader.model import AggressorSide, BookAction, BookType, OrderBook
 
     if not deltas:
         return pd.DataFrame(columns=["ts", "mid", "spread_bps", *FEATURES])
     book = OrderBook(deltas[0].instrument_id, BookType.L2_MBP)
+    leader_book = OrderBook(leader_deltas[0].instrument_id, BookType.L2_MBP) if leader_deltas else None
     ofi, flow = MultiLevelOfi(), FlowToxicity(settings.flow_bucket_notional)
+    hawkes, absorption = HawkesIntensity(settings.hawkes_baseline_per_s), Absorption()
+    lead_lag = KalmanLeadLag(settings.lead_lag_max_interval_s)
     step = settings.every_ms * 1_000_000
     next_tick = 0
-    ofi_z = flow_signed = np.nan
+    ofi_z = flow_signed = absorption_net = np.nan
     rows = []
-    # Stable sorts keep a batch's deltas in their recorded order; at equal times trades go first.
+    # Stable sorts keep a batch's deltas in their recorded order.
     events = heapq.merge(
-        ((d.ts_init, 1, d) for d in sorted(deltas, key=lambda d: d.ts_init)),
-        ((t.ts_init, 0, t) for t in sorted(trades, key=lambda t: t.ts_init)),
+        ((d.ts_init, BOOK, d) for d in sorted(deltas, key=lambda d: d.ts_init)),
+        ((d.ts_init, LEADER_BOOK, d) for d in sorted(leader_deltas, key=lambda d: d.ts_init)),
+        ((t.ts_init, TRADE, t) for t in sorted(trades, key=lambda t: t.ts_init)),
         key=lambda e: (e[0], e[1]),
     )
-    for ts, is_book, ev in events:
-        if not is_book:
-            f = flow.observe(float(ev.price) * float(ev.size), ev.aggressor_side == AggressorSide.BUY)
+    for ts, kind, ev in events:
+        if kind == TRADE:
+            buy = ev.aggressor_side == AggressorSide.BUY
+            f = flow.observe(float(ev.price) * float(ev.size), buy)
             flow_signed = f.signed if f else np.nan
+            hawkes.observe(ts, float(ev.price) * float(ev.size), buy)
+            absorption.trade(float(ev.size), buy)
+            continue
+        if kind == LEADER_BOOK:
+            leader_book.apply_delta(ev)
+            if ev.flags & F_LAST:
+                mid = _mid(leader_book)
+                if mid is not None:
+                    lead_lag.observe(True, ts, mid)
             continue
         if ev.action == BookAction.CLEAR:
             ofi.reset()  # rebuilt from a snapshot: level-to-level changes across it are not order flow
@@ -73,6 +100,11 @@ def sample_features(deltas, trades, settings: StudySettings) -> pd.DataFrame:
         snap = ofi.update(ts, bids, asks)
         if snap is not None:
             ofi_z = snap.z
+        if bids and asks and bids[0][0] < asks[0][0]:
+            a = absorption.update(ts, bids[0][0], asks[0][0])
+            absorption_net = a.net if a else np.nan
+            if leader_book is not None:
+                lead_lag.observe(False, ts, (bids[0][0] + asks[0][0]) / 2)
         if ts < next_tick:
             continue
         next_tick = ts - ts % step + step
@@ -80,8 +112,30 @@ def sample_features(deltas, trades, settings: StudySettings) -> pd.DataFrame:
         if imb is None:
             continue
         spread_bps = (asks[0][0] - bids[0][0]) / imb.mid * 10_000
-        rows.append((ts, imb.mid, spread_bps, ofi_z, imb.imbalance, imb.divergence_bps, flow_signed))
+        h = hawkes.snapshot(ts)
+        lag = lead_lag.gap_bps(ts) if lead_lag.gap_ns is not None else np.nan
+        rows.append(
+            (
+                ts,
+                imb.mid,
+                spread_bps,
+                ofi_z,
+                imb.imbalance,
+                imb.divergence_bps,
+                flow_signed,
+                h.skew if h else np.nan,
+                absorption_net,
+                lag,
+            )
+        )
     return pd.DataFrame(rows, columns=["ts", "mid", "spread_bps", *FEATURES])
+
+
+def _mid(book) -> float | None:
+    bids, asks = _levels(book.bids(1)), _levels(book.asks(1))
+    if not bids or not asks or bids[0][0] >= asks[0][0]:
+        return None
+    return (bids[0][0] + asks[0][0]) / 2
 
 
 def forward_returns_bps(samples: pd.DataFrame, horizon_s: float) -> pd.Series:
@@ -122,11 +176,12 @@ def evaluate(samples: pd.DataFrame, settings: StudySettings) -> pd.DataFrame:
     return pd.DataFrame(out, columns=["feature", "horizon_s", "n", "ic", "top_bps", "bottom_bps", "cost_bps"])
 
 
-def study(catalog_path: str, instrument_id: str, settings: StudySettings, start=None, end=None):
+def study(catalog_path: str, instrument_id: str, settings: StudySettings, start=None, end=None, leader_id=None):
     from nautilus_trader.persistence import ParquetDataCatalog
 
     catalog = ParquetDataCatalog(catalog_path)
     deltas = catalog.query_order_book_deltas([instrument_id], start, end)
     trades = catalog.query_trade_ticks([instrument_id], start, end)
-    samples = sample_features(deltas, trades, settings)
+    leader = catalog.query_order_book_deltas([leader_id], start, end) if leader_id else ()
+    samples = sample_features(deltas, trades, settings, leader)
     return samples, evaluate(samples, settings)
