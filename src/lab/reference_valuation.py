@@ -201,7 +201,9 @@ def value_economic_book(
     for symbol in sorted(symbols):
         qty = book.ledger.position(symbol)
         basis = _bounded_result(
-            _calc(lambda symbol=symbol: sum((lot.basis for lot in book.ledger.lots if lot.symbol == symbol), Decimal(0)))
+            _calc(
+                lambda symbol=symbol: sum((lot.basis for lot in book.ledger.lots if lot.symbol == symbol), Decimal(0))
+            )
         )
         marked = _bounded_result(_calc(lambda qty=qty, symbol=symbol: qty * prices[symbol]))
         unrealized = _bounded_result(_calc(lambda marked=marked, basis=basis: marked - basis))
