@@ -27,6 +27,7 @@ pytest -n auto
 | Command | What it does |
 |---|---|
 | `lab record [--symbols ...] [--check-only] [--status]` | record crypto order books, trades, mark prices and funding (public data, no keys) |
+| `lab monitor [--port 8766]` | read-only dashboard of the recorder's health and the recorded data |
 | `lab micro-study <symbol> [--horizons] [--fee-bps]` | do order-book and trade-flow features predict moves beyond trading costs? |
 | `lab fast backtest / paper <symbol>` | the first fast strategy on recorded data, or live data with simulated fills |
 | `lab fast backtest <symbol> --holdout [--again REASON]`, `lab fast release <symbol> --reason` | the one-time holdout test; turning the holdout into research data |
@@ -49,6 +50,15 @@ docker compose up -d recorder                        # 24/7, restarted after out
 ```
 
 Read it back with `ParquetDataCatalog("data/market/catalog").query_order_book_deltas(["BTCUSDT-PERP.BINANCE"])`.
+
+`lab monitor` (or `docker compose up -d recorder monitor`) serves a read-only dashboard at
+http://127.0.0.1:8766: an overall status with the checks behind it (heartbeat fresh, every feed live, data
+promoted into the catalog within the hour, days of disk left at the current write rate), events per second per
+instrument over the last 30 minutes, and per instrument the rows and bytes in the catalog, the recorded span, and
+its coverage: holes of over a minute between order-book files, which is where the recorder was down. The same data
+is JSON at `/api/status`; `/health` answers 503 while the recorder is down, for an external uptime probe. It reads
+`data/market/` only and never connects to an exchange. A connection drop the adapter recovers from without
+restarting leaves no hole between files, so it doesn't show as a gap.
 
 `lab micro-study BTCUSDT` replays a recording in receive-time order and tests the fast-trading features in
 `lab.micro` (multi-level order-flow imbalance, book imbalance and microprice, aggressor-signed volume buckets;
@@ -98,6 +108,7 @@ src/lab/micro.py          order-book and trade-flow features (OFI, imbalance, mi
 src/lab/micro_study.py    do the features predict moves beyond costs?
 src/lab/fast.py           ImbalanceTaker strategy, backtest on recorded books, paper node
 src/lab/fast_research.py  forward holdout, holdout ledger, trial log
+src/lab/monitor.py        read-only dashboard of the recorder and its data (assets in monitor_ui/)
 src/lab/risk_manager.py   pre-trade risk shared by every strategy
 src/lab/safety.py         kill switch
 src/lab/notify.py         Telegram alerts

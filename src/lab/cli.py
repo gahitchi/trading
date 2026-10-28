@@ -47,6 +47,16 @@ def cmd_record(cfg, a):
     return 0
 
 
+def cmd_monitor(cfg, a):
+    from lab.monitor import serve
+
+    try:
+        serve(Path(a.out) if a.out else cfg.data_dir / "market", a.host, a.port)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    return 0
+
+
 def cmd_micro_study(cfg, a):
     from lab.micro_study import StudySettings, study
     from lab.record import perpetual_ids
@@ -250,6 +260,12 @@ def build_parser() -> argparse.ArgumentParser:
     rec.add_argument("--check-only", action="store_true", help="validate the setup without connecting")
     rec.add_argument("--status", action="store_true", help="list what has been saved to the catalog, then exit")
     rec.set_defaults(fn=cmd_record)
+
+    mon = sub.add_parser("monitor", help="read-only dashboard of the recorder's health and recorded data")
+    mon.add_argument("--out", help="the recorder's output directory (default: <data>/market)")
+    mon.add_argument("--port", type=int, default=8766)
+    mon.add_argument("--host", choices=["127.0.0.1", "0.0.0.0"], default="127.0.0.1")
+    mon.set_defaults(fn=cmd_monitor)
 
     ms = sub.add_parser("micro-study", help="do order-book and trade-flow features predict moves beyond costs?")
     ms.add_argument("symbol", help="a recorded Binance USD-M perpetual, e.g. BTCUSDT")

@@ -45,6 +45,16 @@ jobs:
           git diff --exit-code -- requirements.lock requirements-build.lock
       - name: build source and wheel without unpinned build isolation
         run: uv build --no-build-isolation
+      - name: verify the wheel includes the dashboard assets
+        run: |
+          uv run --no-sync python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          wheel = next(Path('dist').glob('*.whl'))
+          with ZipFile(wheel) as z:
+              for name in ['lab/monitor_ui/index.html', 'lab/monitor_ui/monitor.js', 'lab/monitor_ui/monitor.css']:
+                  assert z.read(name), name
+          PY
 
   docker:
     runs-on: ubuntu-latest

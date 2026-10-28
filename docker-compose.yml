@@ -1,6 +1,7 @@
-# trading-lab deployment: the crypto market-data recorder (public data only, no keys, no orders).
+# trading-lab deployment: the crypto market-data recorder (public data only, no keys, no orders) and its
+# read-only dashboard.
 #
-#   docker compose up -d recorder      docker compose logs -f recorder      docker compose ps (health)
+#   docker compose up -d               docker compose logs -f recorder      docker compose ps (health)
 #   docker compose run --rm recorder record --status
 
 name: trading-lab
@@ -23,6 +24,27 @@ services:
       timeout: 10s
       start_period: 120s
       retries: 3
-    logging:
+    logging: &logging
       driver: json-file
       options: {max-size: "10m", max-file: "5"}
+
+  # Read-only dashboard of the recorder and its data: http://127.0.0.1:8766
+  monitor:
+    image: trading-lab:latest
+    build: .
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+    command: monitor --host 0.0.0.0 --port 8766
+    ports:
+      - "127.0.0.1:8766:8766"
+    volumes:
+      - ./lab.toml:/lab/lab.toml:ro
+      - ./data:/lab/data:ro
+    healthcheck:
+      # Healthy while the dashboard answers; /health itself says 503 while the recorder is down.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+    logging: *logging
