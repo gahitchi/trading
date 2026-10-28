@@ -24,12 +24,12 @@ from lab.account_observation import (
 from lab.economic_ledger import EconomicLedgerError
 from lab.economic_store import EconomicEventStore, EconomicStoreError
 from lab.engine_events import BrokerFillFact, EngineFactError
+from lab.order_lifecycle import OrderLifecycleStore, reconcile_order_lifecycle
 from lab.order_observation import (
     MAX_ORDER_REPORT_BYTES,
     parse_external_order_statement,
     reconcile_external_orders,
 )
-from lab.order_lifecycle import OrderLifecycleStore, reconcile_order_lifecycle
 
 
 def _decimal_text(value) -> str:
