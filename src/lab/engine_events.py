@@ -95,6 +95,23 @@ class CashFact:
 
 
 @dataclass(frozen=True, slots=True)
+class CashReversalFact:
+    """Explicit reversal of one settled CashFact, never a fabricated adjustment."""
+
+    event_id: str
+    source_ref: str
+    timestamp_ns: int
+    target_event_id: str
+    target_source_ref: str
+    target_source_sha256: str
+    original_kind: str
+    amount: Decimal
+    source_kind: str
+    settlement_status: str
+    source_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
 class SplitFact:
     event_id: str
     source_ref: str
@@ -118,7 +135,7 @@ class CashInLieuFact:
     source_sha256: str
 
 
-EconomicFact = FillFact | BrokerFillFact | CashFact | SplitFact | CashInLieuFact
+EconomicFact = FillFact | BrokerFillFact | CashFact | CashReversalFact | SplitFact | CashInLieuFact
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +224,18 @@ def _evidence_digest(previous: str, account_id: str, fact: EconomicFact) -> str:
             "settlement_status": fact.settlement_status,
             "source_sha256": fact.source_sha256,
         }
+    elif type(fact) is CashReversalFact:
+        payload = {
+            "kind": "CASH_REVERSAL",
+            "target_event_id": fact.target_event_id,
+            "target_source_ref": fact.target_source_ref,
+            "target_source_sha256": fact.target_source_sha256,
+            "original_kind": fact.original_kind,
+            "amount": format(fact.amount, "f"),
+            "source_kind": fact.source_kind,
+            "settlement_status": fact.settlement_status,
+            "source_sha256": fact.source_sha256,
+        }
     elif type(fact) is CashInLieuFact:
         payload = {
             "kind": "CASH_IN_LIEU",
@@ -261,6 +290,20 @@ def _event_ledger(ledger: EconomicLedger, fact: EconomicFact) -> EconomicLedger:
             if type(fact.source_sha256) is not str or not SHA256.fullmatch(fact.source_sha256):
                 raise EngineFactError("cash evidence lacks a canonical source digest")
             return ledger.post_cash(fact.event_id, fact.kind, _number(fact.amount, "cash amount", positive=True))
+        if type(fact) is CashReversalFact:
+            if fact.source_kind != "BROKER_CASH_CORRECTION" or fact.settlement_status != "SETTLED":
+                raise EngineFactError("cash reversal requires explicit settled correction source")
+            if type(fact.target_source_sha256) is not str or not SHA256.fullmatch(fact.target_source_sha256):
+                raise EngineFactError("cash reversal target must identify the original source bytes")
+            if type(fact.source_sha256) is not str or not SHA256.fullmatch(fact.source_sha256):
+                raise EngineFactError("cash reversal must bind original correction bytes")
+            _identity(fact.target_source_ref, "cash reversal original source reference")
+            return ledger.post_cash_reversal(
+                fact.event_id,
+                fact.target_event_id,
+                fact.original_kind,
+                _number(fact.amount, "reversal amount", positive=True),
+            )
         if type(fact) is CashInLieuFact:
             if fact.source_kind != "BROKER_CASH_ACTIVITY" or fact.settlement_status != "SETTLED":
                 raise EngineFactError("cash-in-lieu requires classified settled broker cash activity")
@@ -293,7 +336,7 @@ class EngineEconomicBook:
 
     def append(self, fact: EconomicFact) -> EngineEconomicBook:
         _identity(self.account_id, "account identity")
-        if type(fact) not in (FillFact, BrokerFillFact, CashFact, SplitFact, CashInLieuFact):
+        if type(fact) not in (FillFact, BrokerFillFact, CashFact, CashReversalFact, SplitFact, CashInLieuFact):
             raise EngineFactError("unsupported economic event")
         _identity(fact.event_id, "event identity")
         _identity(fact.source_ref, "independent source reference")
@@ -303,6 +346,18 @@ class EngineEconomicBook:
             raise EngineFactError("out-of-order economic event")
         if any(e.event_id == fact.event_id or e.source_ref == fact.source_ref for e in self.events):
             raise EngineFactError("duplicate event or source identity")
+        if type(fact) is CashReversalFact:
+            originals = [event for event in self.events if event.event_id == fact.target_event_id]
+            if len(originals) != 1 or type(originals[0]) is not CashFact:
+                raise EngineFactError("cash reversal must reference a prior settled cash fact")
+            original = originals[0]
+            if (
+                fact.target_source_ref != original.source_ref
+                or fact.target_source_sha256 != original.source_sha256
+                or fact.original_kind != original.kind
+                or fact.amount != original.amount
+            ):
+                raise EngineFactError("cash reversal conflicts with the original sourced financial fact")
         new_ledger = _event_ledger(self.ledger, fact)
         next_head = _evidence_digest(self.evidence_head, self.account_id, fact)
         return EngineEconomicBook(self.account_id, (*self.events, fact), new_ledger, next_head)

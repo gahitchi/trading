@@ -172,6 +172,42 @@ class EconomicLedger:
             self.lots,
         )
 
+    def post_cash_reversal(
+        self,
+        event_id: str,
+        target_event_id: str,
+        original_kind: str,
+        amount: Decimal | str | int,
+    ) -> EconomicLedger:
+        """Compensate one *settled cash* posting without altering its original.
+
+        Trade corrections and corporate-action corrections are not reducible
+        to cash reversals. They must go through separate, reviewed policies.
+        """
+        _name(target_event_id, IDENTIFIER, "reversed event identity")
+        if original_kind not in KINDS:
+            raise EconomicLedgerError("cash reversal cannot target noncash economics")
+        quantity = exact(amount, positive=True)
+        match = [entry for entry in self.journal if entry.event_id == target_event_id]
+        if len(match) != 1:
+            raise EconomicLedgerError("cash reversal target must exist in this account")
+        original = match[0]
+        if original.kind != original_kind or original.details != (("amount", _fmt(quantity)),):
+            raise EconomicLedgerError("cash reversal does not match original settled economics")
+        if any(
+            entry.kind == "CASH_REVERSAL" and dict(entry.details).get("target_event_id") == target_event_id
+            for entry in self.journal
+        ):
+            raise EconomicLedgerError("settled cash event already reversed")
+        postings = tuple(Posting(item.account, _calc(lambda item=item: -item.amount)) for item in original.postings)
+        return self._post(
+            event_id,
+            "CASH_REVERSAL",
+            postings,
+            (("target_event_id", target_event_id), ("original_kind", original_kind), ("amount", _fmt(quantity))),
+            self.lots,
+        )
+
     def post_fill(
         self,
         event_id: str,
@@ -411,6 +447,12 @@ class EconomicLedger:
                     if set(details) != {"amount"}:
                         raise EconomicLedgerError("cash event payload is incomplete")
                     replay = replay.post_cash(event.event_id, event.kind, details["amount"])
+                elif event.kind == "CASH_REVERSAL":
+                    if set(details) != {"target_event_id", "original_kind", "amount"}:
+                        raise EconomicLedgerError("cash reversal payload is incomplete")
+                    replay = replay.post_cash_reversal(
+                        event.event_id, details["target_event_id"], details["original_kind"], details["amount"]
+                    )
                 else:
                     raise EconomicLedgerError("unknown economic event in journal")
             except (KeyError, TypeError, ValueError) as exc:

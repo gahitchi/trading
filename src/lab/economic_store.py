@@ -23,6 +23,7 @@ from lab.engine_events import (
     SHA256,
     BrokerFillFact,
     CashFact,
+    CashReversalFact,
     CashInLieuFact,
     EconomicFact,
     EngineEconomicBook,
@@ -41,6 +42,7 @@ TYPES: dict[str, type] = {
     "FILL": FillFact,
     "BROKER_FILL": BrokerFillFact,
     "CASH": CashFact,
+    "CASH_REVERSAL": CashReversalFact,
     "SPLIT": SplitFact,
     "CASH_IN_LIEU": CashInLieuFact,
 }
@@ -71,11 +73,13 @@ def _encode(fact: EconomicFact) -> bytes:
         if type(fact) is BrokerFillFact
         else "CASH"
         if type(fact) is CashFact
+        else "CASH_REVERSAL"
+        if type(fact) is CashReversalFact
         else "CASH_IN_LIEU"
         if type(fact) is CashInLieuFact
         else "SPLIT"
     )
-    if type(fact) not in (FillFact, BrokerFillFact, CashFact, SplitFact, CashInLieuFact):
+    if type(fact) not in (FillFact, BrokerFillFact, CashFact, CashReversalFact, SplitFact, CashInLieuFact):
         raise EconomicStoreError("unexpected economic fact type")
     record = {"schema": SCHEMA, "type": kind}
     for name in (item.name for item in fields(fact)):
@@ -147,7 +151,7 @@ def _verify_source_binding(fact: EconomicFact, raw: bytes, account_id: str) -> N
         parse_settled_cash_record,
     )
 
-    if type(fact) not in (CashFact, CashInLieuFact, BrokerFillFact):
+    if type(fact) not in (CashFact, CashReversalFact, CashInLieuFact, BrokerFillFact):
         raise EconomicStoreError("source binding requires classified source fact")
     if type(raw) is not bytes or not 0 < len(raw) <= MAX_SOURCE_BYTES:
         raise EconomicStoreError("missing or invalid original settlement bytes")
@@ -161,7 +165,11 @@ def _verify_source_binding(fact: EconomicFact, raw: bytes, account_id: str) -> N
         if not fact.source_ref.endswith(suffix):
             raise EconomicStoreError("source reference does not match original record")
         namespace = _identity(fact.source_ref[: -len(suffix)], "source namespace")
-        if type(fact) is CashFact:
+        if type(fact) is CashReversalFact:
+            from lab.settlement_input import parse_settled_cash_reversal_record
+
+            parser = parse_settled_cash_reversal_record
+        elif type(fact) is CashFact:
             parser = parse_settled_cash_record
         elif type(fact) is CashInLieuFact:
             parser = parse_settled_cash_in_lieu_record
@@ -262,7 +270,7 @@ class EconomicEventStore:
             fact = _decode(payload)
             if fact.event_id != event_id or fact.source_ref != source_ref:
                 raise EconomicStoreError("persisted economic/source identity differs")
-            if type(fact) in (CashFact, CashInLieuFact, BrokerFillFact):
+            if type(fact) in (CashFact, CashReversalFact, CashInLieuFact, BrokerFillFact):
                 if type(source_bytes) is not bytes or not 0 < len(source_bytes) <= MAX_SOURCE_BYTES:
                     raise EconomicStoreError("missing or invalid original settlement evidence")
                 _verify_source_binding(fact, source_bytes, self.account_id)
@@ -299,7 +307,7 @@ class EconomicEventStore:
         payload = _encode(fact)
         if len(payload) > MAX_EVENT_BYTES:
             raise EconomicStoreError("oversized economic fact")
-        if type(fact) in (CashFact, CashInLieuFact, BrokerFillFact):
+        if type(fact) in (CashFact, CashReversalFact, CashInLieuFact, BrokerFillFact):
             if type(source_bytes) is not bytes or not 0 < len(source_bytes) <= MAX_SOURCE_BYTES:
                 raise EconomicStoreError("cash event requires original source bytes")
             _verify_source_binding(fact, source_bytes, self.account_id)
@@ -357,6 +365,17 @@ class EconomicEventStore:
             raw,
             source_namespace=source_namespace,
             expected_account_id=self.account_id,
+        )
+        return self.append(fact, source_bytes=raw, expected_head=expected_head)
+
+    def append_cash_reversal_record(
+        self, raw: bytes, *, source_namespace: str, expected_head: str | None = None
+    ) -> EngineEconomicBook:
+        """Apply only a sourced correction that reverses one original CashFact."""
+        from lab.settlement_input import parse_settled_cash_reversal_record
+
+        fact = parse_settled_cash_reversal_record(
+            raw, source_namespace=source_namespace, expected_account_id=self.account_id
         )
         return self.append(fact, source_bytes=raw, expected_head=expected_head)
 

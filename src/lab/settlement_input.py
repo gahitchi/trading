@@ -11,7 +11,7 @@ import hashlib
 import json
 from decimal import Decimal, InvalidOperation
 
-from lab.engine_events import CashFact, CashInLieuFact, EngineEconomicBook, EngineFactError, _identity
+from lab.engine_events import CashFact, CashInLieuFact, CashReversalFact, EngineEconomicBook, EngineFactError, _identity
 
 REQUIRED = frozenset(
     {
@@ -191,5 +191,85 @@ def parse_settled_cash_in_lieu_record(raw: bytes, *, source_namespace: str, expe
         cash=cash,
         source_kind=doc["source_kind"],
         settlement_status=doc["settlement_status"],
+        source_sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+CASH_REVERSAL_FIELDS = frozenset(
+    {
+        "schema_version",
+        "account_id",
+        "record_id",
+        "event_id",
+        "timestamp_ns",
+        "kind",
+        "source_kind",
+        "settlement_status",
+        "currency",
+        "amount",
+        "target_event_id",
+        "target_source_ref",
+        "target_source_sha256",
+        "original_kind",
+    }
+)
+
+
+def parse_settled_cash_reversal_record(
+    raw: bytes, *, source_namespace: str, expected_account_id: str
+) -> CashReversalFact:
+    """Sourced compensating cash reversal; never changes its original event."""
+    from lab.economic_ledger import KINDS, exact
+
+    _identity(source_namespace, "reversal namespace")
+    _identity(expected_account_id, "reversal account")
+    if type(raw) is not bytes or not 0 < len(raw) <= MAX_RECORD_BYTES:
+        raise EngineFactError("cash reversal requires bounded original correction bytes")
+    try:
+        record = json.loads(
+            raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_nonfinite
+        )
+    except (UnicodeError, TypeError, ValueError) as exc:
+        raise EngineFactError("invalid cash reversal evidence") from exc
+    if type(record) is not dict or set(record) != CASH_REVERSAL_FIELDS:
+        raise EngineFactError("cash reversal requires exact independently claimed source fields")
+    if type(record["schema_version"]) is not int or record["schema_version"] != 1:
+        raise EngineFactError("unsupported cash reversal schema")
+    if type(record["account_id"]) is not str or record["account_id"] != expected_account_id:
+        raise EngineFactError("foreign reversal account")
+    if (
+        record["kind"] != "CASH_REVERSAL"
+        or record["source_kind"] != "BROKER_CASH_CORRECTION"
+        or record["settlement_status"] != "SETTLED"
+        or record["currency"] != "USD"
+    ):
+        raise EngineFactError("unsupported or unsettled cash reversal")
+    if type(record["timestamp_ns"]) is not int or record["timestamp_ns"] <= 0:
+        raise EngineFactError("invalid reversal source timestamp")
+    if type(record["amount"]) is not str or len(record["amount"]) > 80:
+        raise EngineFactError("cash reversal amount must be a bounded decimal string")
+    if type(record["original_kind"]) is not str or record["original_kind"] not in KINDS:
+        raise EngineFactError("cash reversal can only target a supported cash posting")
+    from lab.engine_events import SHA256
+
+    if type(record["target_source_sha256"]) is not str or not SHA256.fullmatch(
+        record["target_source_sha256"]
+    ):
+        raise EngineFactError("cash reversal lacks exact original source checksum")
+    try:
+        amount = exact(Decimal(record["amount"]), positive=True)
+    except (InvalidOperation, ValueError) as exc:
+        raise EngineFactError("invalid cash reversal amount") from exc
+    return CashReversalFact(
+        event_id=_identity(record["event_id"], "reversal event"),
+        source_ref=f"{source_namespace}:{_identity(record['record_id'], 'reversal source record')}",
+        timestamp_ns=record["timestamp_ns"],
+        target_event_id=_identity(record["target_event_id"], "reversed original event"),
+        target_source_ref=_identity(record["target_source_ref"], "reversed original source"),
+        target_source_sha256=record["target_source_sha256"],
+        original_kind=record["original_kind"],
+        amount=amount,
+        source_kind=record["source_kind"],
+        settlement_status=record["settlement_status"],
         source_sha256=hashlib.sha256(raw).hexdigest(),
     )

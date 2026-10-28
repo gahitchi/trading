@@ -16,6 +16,7 @@ from lab.economic_ledger import _calc
 from lab.engine_events import (
     BrokerFillFact,
     CashFact,
+    CashReversalFact,
     CashInLieuFact,
     EngineEconomicBook,
     EngineFactError,
@@ -99,6 +100,21 @@ def project_account(book: EngineEconomicBook) -> ProjectedAccount:
             if sign is None:
                 raise EngineFactError("projection refuses unclassified cash")
             cash += sign * Fraction(fact.amount)
+        elif type(fact) is CashReversalFact:
+            target = next((old for old in book.events if old.event_id == fact.target_event_id), None)
+            if type(target) is not CashFact:
+                raise EngineFactError("cash reversal projection lacks a prior original cash source")
+            if (
+                target.source_ref != fact.target_source_ref
+                or target.source_sha256 != fact.target_source_sha256
+                or target.kind != fact.original_kind
+                or target.amount != fact.amount
+            ):
+                raise EngineFactError("cash reversal projection found a conflicting original fact")
+            sign = SOURCE_CASH_SIGN.get(target.kind)
+            if sign is None:
+                raise EngineFactError("cash reversal projection refuses unclassified cash")
+            cash -= sign * Fraction(target.amount)
         elif type(fact) is CashInLieuFact:
             previous = positions.get(fact.symbol, Fraction(0))
             expected_sign = 1 if fact.side == "LONG" else -1
