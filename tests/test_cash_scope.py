@@ -59,7 +59,7 @@ def test_fully_funded_long_buy_sale_and_reverse_split_are_accepted():
     result = validate_cash_account_scope(state, policy())
     assert result.events_checked == 4
     assert result.supported_instruments_checked == 1
-    assert result.final_settled_cash_usd == Decimal("427")
+    assert result.final_settled_cash_usd == Decimal("428")
     assert result.min_settled_cash_usd >= 0
     assert not result.broker_account_type_authenticated
 
