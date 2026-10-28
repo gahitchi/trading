@@ -9,6 +9,9 @@ license.workspace = true
 trading-core-types = { path = "../core-types" }
 trading-execution = { path = "../execution" }
 trading-market-data = { path = "../market-data" }
+trading-risk-gate = { path = "../risk-gate" }
+trading-wallet-manager = { path = "../wallet-manager" }
+trading-strategy-engine = { path = "../strategy-engine" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 futures-util = "0.3"

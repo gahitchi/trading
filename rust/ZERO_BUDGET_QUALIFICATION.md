@@ -90,3 +90,26 @@ Linux in an isolated test. It does not yet establish external
 authenticated Binance account availability, wallet settlement, full
 strategy/risk integration, or crash-time order-history backfill. The
 new tests intentionally avoid an API URL override in production builds.
+
+
+## Paper-only risk / wallet / wire-contract bridge
+
+\`trading-protocol-lab::research_bridge\` now links the existing independent
+\`RiskGate::validate_entry\` to the existing \`WalletSnapshot\`, 64-byte
+\`OrderIntent\` and production \`PrepareOrder::prepare\` (tick, lot, min
+notional, IOC and exact decimal serialization). It is deliberately
+located in the **protocol-lab test component**, not the production
+authenticated execution service. It cannot send an order.
+
+A positive paper risk verdict is just a \`ProposedEntry\`, NOT a broker
+authorization. The bridge explicitly refuses non-paper contexts, wrong
+venue/symbol/side/TIF, stale or uncalibrated feed, unreconciled paper
+account, changed quantity (including a legitimate risk squeeze reduction
+that would require new approval), or exchange step/tick violations.
+Existing strategy-engine \`OrderTracker\` tests additionally confirm
+that a wire ACK does not create any fill or wallet settlement.
+
+These synthetic fixtures do not establish independent real account
+reconciliation, authenticated broker-side reservations, exchange margin
+parity, full order-history recovery or permission to route live orders.
+They qualify a structural contract between independently tested crates.

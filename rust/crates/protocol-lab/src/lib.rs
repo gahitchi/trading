@@ -1,6 +1,8 @@
 //! Deliberately isolated synthetic *test exchange*. Never deployed in the
 //! live application and never binds outside the IPv4 loopback interface.
 //! It uses Binance-shaped order WS-API ACKs and *separate* private WS events.
+pub mod research_bridge;
+
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use serde_json::{Value, json};
