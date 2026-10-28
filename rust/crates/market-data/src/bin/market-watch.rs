@@ -134,10 +134,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             outcome,
                             Some(trading_orderbook::SyncOutcome::Activated)
                                 | Some(trading_orderbook::SyncOutcome::NeedsSnapshot)
-                        ) {
-                            if resync_count <= 24 || matches!(outcome, Some(trading_orderbook::SyncOutcome::Activated)) {
-                                eprintln!("market-watch depth_sync={outcome:?} live_books={}", books.active_books());
-                            }
+                        ) && (resync_count <= 24
+                            || matches!(outcome, Some(trading_orderbook::SyncOutcome::Activated)))
+                        {
+                            eprintln!("market-watch depth_sync={outcome:?} live_books={}", books.active_books());
                         }
                     }
                     Err(rtrb::PopError::Empty) => {
