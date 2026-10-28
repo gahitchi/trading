@@ -14,7 +14,6 @@ from lab.reference_valuation import (
 )
 
 
-
 def book():
     state = EngineEconomicBook("SIM-001")
     for i, symbol, side, qty, price in (
