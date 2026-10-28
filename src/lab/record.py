@@ -11,7 +11,8 @@ Data only: the node has no execution client, uses no API keys and cannot place o
 
 Layout (NautilusTrader's own catalog, readable with `ParquetDataCatalog(<out>/catalog)`):
   <out>/catalog/data/<type>/<instrument>/<start>_<end>_<hash>.parquet   promoted every hour and at stop
-  <out>/stream/<venue>/                                               the open, not yet promoted files
+  <out>/stream/<venue>/                                               the open, not yet promoted files; what a
+                                                                      killed run left is recovered at next start
   <out>/heartbeats/<venue>.json                                       counts and last event per instrument
 
 `lab monitor` serves a read-only dashboard of the heartbeat and the catalog (lab.monitor).
@@ -172,6 +173,71 @@ def streaming_config(out: Path, *, promote_every_s: int = 3600, venue: str | Non
         # write and the writer fails to close, which skips the final promotion into the catalog.
         data_types=[T.Instrument, T.OrderBookDelta, T.TradeTick, T.MarkPriceUpdate, T.FundingRateUpdate],
     )
+
+
+# The streamed families worth recovering from a dead run, by stream directory. Instrument definitions are sent
+# again on every start, so a dead run's copies are left out.
+RECOVERED = {
+    "order_book_deltas": "OrderBookDelta",
+    "trades": "TradeTick",
+    "mark_prices": "MarkPriceUpdate",
+    "funding_rates": "FundingRateUpdate",
+}
+_ENVIRONMENTS = {"live": "LIVE", "sandbox": "SANDBOX", "backtest": "BACKTEST"}
+
+
+def recover_stream(stream: Path, catalog: Path) -> list[dict]:
+    """Saves into `catalog` what earlier runs left unpromoted in `stream` (<stream>/<environment>/<run>/), then
+    deletes those runs. A run killed before it could save (SIGKILL, a stop that timed out) leaves its last hour
+    there, and no later run ever promotes it. Call only before this stream's recorder starts: every run found is
+    taken for dead. A run whose data would overlap the catalog, or that fails to convert, is left in place.
+    Returns {run, files, bytes, error} per run found with data."""
+    import shutil
+
+    from nautilus_trader.common import Environment
+    from nautilus_trader.model import NautilusDataType as T
+    from nautilus_trader.persistence import ParquetDataCatalog
+
+    from lab.monitor import file_span
+
+    staging = stream / "data"  # where a catalog rooted at the stream writes what it converts
+    results = []
+    for env, env_name in _ENVIRONMENTS.items():
+        runs = sorted(p for p in (stream / env).glob("*") if p.is_dir())
+        for run in runs:
+            files = [f for f in run.rglob("*") if f.is_file() and not f.name.startswith("_nautilus")]
+            if not files:
+                continue
+            result = {"run": str(run), "files": len(files), "bytes": sum(f.stat().st_size for f in files)}
+            results.append(result)
+            shutil.rmtree(staging, ignore_errors=True)
+            try:
+                source = ParquetDataCatalog(str(stream))
+                for name, data_type in RECOVERED.items():
+                    if (run / name).is_dir():
+                        source.convert_stream_to_data(
+                            run.name, getattr(T, data_type), environment=getattr(Environment, env_name)
+                        )
+                moves = []
+                for f in sorted(staging.rglob("*.parquet")):
+                    dest = catalog / "data" / f.relative_to(staging)
+                    if dest.exists():
+                        continue  # moved by an earlier recovery that died before deleting the run
+                    a, b = file_span(f.name)
+                    for other in dest.parent.glob("*.parquet"):
+                        span = file_span(other.name)
+                        if span and span[0] <= b and a <= span[1]:
+                            raise ValueError(f"{f.relative_to(staging)} overlaps {other.name} in the catalog")
+                    moves.append((f, dest))
+                for f, dest in moves:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(f, dest)
+                shutil.rmtree(run)
+            except Exception as e:  # a run that can't be recovered must not stop the recording
+                result["error"] = f"{type(e).__name__}: {e}"
+            finally:
+                shutil.rmtree(staging, ignore_errors=True)
+    return results
 
 
 def saved(out: Path) -> dict[str, dict[str, int]]:

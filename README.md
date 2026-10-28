@@ -52,8 +52,9 @@ Run one recorder per venue: each is its own process, so one exchange's outage or
 the other's recording, and both write into the same catalog (each instrument has its own files).
 `data/market/heartbeats/<venue>.json` shows counts and the last event per instrument, and lists instruments
 silent for over a minute. A lost connection ends the process with an error; run it where it is restarted. Stop
-it with Ctrl+C or SIGTERM and give it time to save (compose allows 2 minutes): a killed run's last hour stays in
-`data/market/stream/` and never reaches the catalog.
+it with Ctrl+C or SIGTERM and give it time to save (compose allows 2 minutes). If a run is killed anyway, what it
+had written but not saved stays in `data/market/stream/`; the venue's recorder moves it into the catalog when it
+next starts, and prints what it recovered.
 
 
 ```bash
