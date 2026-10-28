@@ -288,7 +288,8 @@ impl UserDataStreamManager {
             let key = match self.start().await {
                 Ok(key) => key,
                 Err(_) => {
-                    tx.send(PrivateEvent::Disconnected).await
+                    tx.send(PrivateEvent::Disconnected)
+                        .await
                         .map_err(|_| ExecutionError::UnexpectedState)?;
                     tokio::time::sleep(Duration::from_secs(retry_seconds)).await;
                     retry_seconds = (retry_seconds * 2).min(30);
