@@ -280,3 +280,36 @@ def test_every_new_commit_names_exactly_one_known_author(repo):
     git(root, "checkout", "-q", "chatgpt/audit")
     git(root, "merge", "-q", "--no-ff", "--no-edit", "chatgpt/side")  # an unsigned merge commit
     assert tool.main(["check", "--base", base]) == 1
+
+
+UNTITLED = "---\nagent: chatgpt\nthread: G001\nkind: proposal\nat: 2026-10-22T15:00:00Z\n---\n\nno title\n"
+BAD_STAMP = "---\nagent: chatgpt\nthread: G002\nkind: proposal\nat: 2026-10-22T15:01:00.5Z\ntitle: t\n---\n\nx\n"
+
+
+def _chatgpt_branch_with_malformed_messages(root):
+    git(root, "checkout", "-qb", "chatgpt/broken")
+    for thread, name, text in (("G001", "20261022T150000Z", UNTITLED), ("G002", "20261022T150100Z", BAD_STAMP)):
+        d = root / "collab/outbox/chatgpt" / thread
+        d.mkdir(parents=True)
+        (d / f"{name}-proposal.md").write_text(text)
+    commit(root, "malformed messages")
+    git(root, "checkout", "-q", "main")
+
+
+def test_another_branchs_malformed_messages_are_warnings_not_failures(repo, capsys):
+    """Messages are immutable: a malformed one on another agent's branch cannot be fixed by anyone else, so it
+    must not fail every other branch's CI (G040-G044, 2026-10-27)."""
+    tool, root = repo
+    _chatgpt_branch_with_malformed_messages(root)
+    assert tool.main(["check"]) == 0
+    out = capsys.readouterr().out
+    assert "WARNING G001: the first message" in out
+    assert "WARNING chatgpt/broken: collab/outbox/chatgpt/G002/" in out
+    assert "0 error(s), 2 warning(s)" in out
+
+
+def test_malformed_messages_in_this_tree_still_fail(repo):
+    tool, root = repo
+    _chatgpt_branch_with_malformed_messages(root)
+    git(root, "checkout", "-q", "chatgpt/broken")  # the author's own branch: it must fix its messages here
+    assert tool.main(["check"]) == 1
