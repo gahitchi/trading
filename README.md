@@ -113,6 +113,7 @@ Offline check on real prices: `cd examples/goog-offline && lab data sample && la
 |---|---|
 | `lab data fetch / import / membership / sample / list [--speed]` | market data (daily or intraday) and the point-in-time universe |
 | `lab record [--symbols ...] [--check-only] [--status]` | record crypto order books, trades, mark prices and funding (public data, no keys) |
+| `lab micro-study <symbol> [--horizons] [--fee-bps]` | do order-book and trade-flow features predict moves beyond trading costs? |
 | `lab backtest [signals] [--period] [--set p=v] [--target-vol] [--speed]` | strategies vs buy-and-hold, HTML report |
 | `lab risk-profile` | the limits the selected profile really trades with |
 | `lab null-test`, `lab pbo`, `lab walk-forward` | noise floor, overfitting probability, walk-forward analysis |
@@ -268,6 +269,13 @@ docker compose --profile crypto up -d recorder       # 24/7, restarted after out
 ```
 
 Read it back with `ParquetDataCatalog("data/market/catalog").query_order_book_deltas(["BTCUSDT-PERP.BINANCE"])`.
+
+`lab micro-study BTCUSDT` replays a recording in receive-time order and tests the fast-trading features in
+`lab.micro` (multi-level order-flow imbalance, book imbalance and microprice, aggressor-signed volume buckets;
+ported from the Rust research crate): rank correlation with forward mid returns at 1, 5 and 30 seconds, and the
+mean forward move in each feature's top and bottom decile next to a taker round trip (2 x fee + median spread).
+A feature is only worth a strategy where that move exceeds the cost. It places no orders and models no queue
+position or latency.
 Binance is not available in every country; check that it is in yours.
 
 ### Optional London Gold PAPER strategy
