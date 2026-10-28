@@ -116,6 +116,79 @@ def cmd_micro_study(cfg, a):
     return 0
 
 
+def cmd_survey(cfg, a):
+    from urllib.error import URLError
+
+    from lab.survey import survey
+
+    try:
+        table = survey(a.venue, a.samples, a.interval, a.maker_bps)
+    except (URLError, TimeoutError) as e:
+        raise SystemExit(f"could not reach {a.venue}: {e}") from e
+    table = table[table["turnover_musd"] >= a.min_turnover].head(a.top)
+    if table.empty:
+        raise SystemExit("no perpetual passed the turnover filter")
+    print(
+        f"{a.venue} USDT perpetuals, {a.samples} sample(s) {a.interval:g} s apart, 24 h turnover >= {a.min_turnover:g} M USDT"
+    )
+    print(table.to_string(index=False, float_format=lambda x: f"{x:.2f}"))
+    print(
+        f"room_bps: median spread minus a maker round trip (2 x {a.maker_bps:g} bps). Positive room is necessary, not"
+        " sufficient: `lab maker-study` measures what fills give back to the moves that follow them."
+    )
+    picks = " ".join(table.loc[table["room_bps"] > 0, "symbol"].head(10))
+    if picks:
+        var = "LAB_RECORD_SYMBOLS" if a.venue == "binance" else "LAB_RECORD_BYBIT_SYMBOLS"
+        print(f'to record the widest: {var}="{picks}" in .env, then docker compose up -d')
+    return 0
+
+
+def cmd_maker_study(cfg, a):
+    from lab.maker_study import MakerSettings, study
+    from lab.record import perpetual_ids
+
+    catalog = Path(a.catalog) if a.catalog else cfg.data_dir / "market" / "catalog"
+    if not catalog.exists():
+        raise SystemExit(f"no recorded market data at {catalog}; run `lab record` first")
+    try:
+        iid = str(perpetual_ids([a.symbol], a.venue)[0])
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    start, end = (int(pd.Timestamp(x, tz="UTC").value) if x else None for x in (a.start, a.end))
+    try:
+        start, end = fast_research.research_window(cfg.results_dir, str(catalog), iid, start, end)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    settings = MakerSettings(
+        every_ms=a.every_ms, latency_ms=a.latency_ms, horizons_s=tuple(a.horizons), maker_fee_bps=a.maker_bps
+    )
+    fills, mids, table = study(str(catalog), iid, settings, start, end)
+    if not len(mids[0]):
+        raise SystemExit(f"no order-book data for {iid} in {catalog} before its holdout")
+    params = {
+        "every_ms": a.every_ms,
+        "latency_ms": a.latency_ms,
+        "horizons_s": list(a.horizons),
+        "maker_bps": a.maker_bps,
+    }
+    n = fast_research.register_trial(
+        cfg.results_dir, "maker-study", iid, params, (start, end),
+        {"net_bps": {f"{r.group}@{r.horizon_s:g}s": r.net_bps for r in table.itertuples() if r.net_bps == r.net_bps}},
+    )  # fmt: skip
+    first, last = (pd.Timestamp(mids[0][i], tz="UTC") for i in (0, -1))
+    print(f"{iid}: {len(fills):,} passive fills, {first:%Y-%m-%d %H:%M} .. {last:%Y-%m-%d %H:%M} UTC")
+    print(
+        f"research data only (holdout from {pd.Timestamp(end + 1, tz='UTC'):%Y-%m-%d %H:%M} UTC); study settings tried: {n}"
+    )
+    print(table.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
+    print(
+        "at_fill: half spread captured against the mid. markout: the maker's gain h seconds later, net: after the"
+        f" {a.maker_bps:g} bps maker fee, t: net over its standard error (fills overlap in time, so it overstates)."
+        " group: book imbalance when the order was placed, in its favour, neutral or against."
+    )
+    return 0
+
+
 def _fast_config(cfg, a, *, report=None):
     from lab.fast import ImbalanceTakerConfig
     from lab.record import perpetual_ids
@@ -303,6 +376,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--lead-lag-interval", type=float, default=0.05, help="longest gap (s) between mids that is a return (0.05)"
     )
     ms.set_defaults(fn=cmd_micro_study)
+
+    sv = sub.add_parser("survey", help="which perpetuals quote a spread wider than a maker round trip? (live, public)")
+    sv.add_argument("--venue", choices=VENUES, default="binance")
+    sv.add_argument("--samples", type=int, default=30, help="quote snapshots (default 30)")
+    sv.add_argument("--interval", type=float, default=10.0, help="seconds between snapshots (default 10)")
+    sv.add_argument("--maker-bps", type=float, default=2.0, help="maker fee per side in bps (default 2)")
+    sv.add_argument("--min-turnover", type=float, default=20.0, help="minimum 24 h turnover, M USDT (default 20)")
+    sv.add_argument("--top", type=int, default=30, help="rows to show (default 30)")
+    sv.set_defaults(fn=cmd_survey)
+
+    mk = sub.add_parser("maker-study", help="what do passive fills earn after the moves that follow them?")
+    mk.add_argument("symbol", help="a recorded perpetual, e.g. BTCUSDT")
+    mk.add_argument("--venue", choices=VENUES, default="binance", help="venue of the symbol (default binance)")
+    mk.add_argument("--catalog", help="catalog directory (default: <data>/market/catalog)")
+    mk.add_argument("--start", help="UTC start, e.g. 2026-11-01")
+    mk.add_argument("--end", help="UTC end")
+    mk.add_argument("--every-ms", type=int, default=100, help="requote clock (default 100 ms)")
+    mk.add_argument("--latency-ms", type=int, default=50, help="from placing an order to it resting (default 50)")
+    mk.add_argument("--horizons", type=float, nargs="+", default=[1.0, 5.0, 30.0, 60.0], help="seconds after fill")
+    mk.add_argument("--maker-bps", type=float, default=2.0, help="maker fee per side in bps (default 2)")
+    mk.set_defaults(fn=cmd_maker_study)
 
     fast = sub.add_parser("fast", help="fast crypto strategy: backtest on recorded data, paper on live data")
     fsub = fast.add_subparsers(dest="sub", required=True)
