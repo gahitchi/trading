@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from lab import data, experiments
+from lab import data, experiments, fast_research
 from lab.borrow import BorrowUnavailable
 from lab.config import ConfigError, LabConfig, Period, load_config
 from lab.signals.builtin import BUILTIN
@@ -706,6 +706,10 @@ def cmd_micro_study(cfg, a):
     except ValueError as e:
         raise SystemExit(str(e)) from e
     start, end = (int(pd.Timestamp(x, tz="UTC").value) if x else None for x in (a.start, a.end))
+    try:
+        start, end = fast_research.research_window(cfg.results_dir, str(catalog), iid, start, end)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
     settings = StudySettings(
         every_ms=a.every_ms,
         horizons_s=tuple(a.horizons),
@@ -714,9 +718,17 @@ def cmd_micro_study(cfg, a):
     )
     samples, table = study(str(catalog), iid, settings, start, end)
     if samples.empty:
-        raise SystemExit(f"no order-book data for {iid} in {catalog}")
+        raise SystemExit(f"no order-book data for {iid} in {catalog} before its holdout")
     first, last = (pd.Timestamp(samples["ts"].iloc[i], tz="UTC") for i in (0, -1))
+    params = {"every_ms": a.every_ms, "horizons_s": list(a.horizons), "fee_bps": a.fee_bps, "bucket": a.bucket}
+    n = fast_research.register_trial(
+        cfg.results_dir, "micro-study", iid, params, (start, end),
+        {"ic": {f"{r.feature}@{r.horizon_s:g}s": r.ic for r in table.itertuples() if r.ic == r.ic}},
+    )  # fmt: skip
     print(f"{iid}: {len(samples):,} samples every {a.every_ms} ms, {first:%Y-%m-%d %H:%M} .. {last:%Y-%m-%d %H:%M} UTC")
+    print(
+        f"research data only (holdout from {pd.Timestamp(end + 1, tz='UTC'):%Y-%m-%d %H:%M} UTC); study settings tried: {n}"
+    )
     print(table.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
     print(
         "ic: rank correlation with the forward mid return. top/bottom: mean forward return (bps) in the feature's"
@@ -749,10 +761,26 @@ def cmd_fast_backtest(cfg, a):
     if not catalog.exists():
         raise SystemExit(f"no recorded market data at {catalog}; run `lab record` first")
     start, end = (int(pd.Timestamp(x, tz="UTC").value) if x else None for x in (a.start, a.end))
+    config = _fast_config(cfg, a)
+    iid = config.instrument_id
+    params = {
+        "strategy": "imbalance_taker", "size": a.size, "threshold": a.threshold, "hold_s": a.hold,
+        "max_loss": a.max_loss, "capital": a.capital, "taker_bps": a.fee_bps, "maker_bps": a.maker_bps,
+        "latency_ms": a.latency_ms,
+    }  # fmt: skip
     try:
+        if a.holdout:
+            if a.start or a.end:
+                raise SystemExit("--holdout runs on the whole holdout; --start/--end don't apply")
+            start = fast_research.boundary(cfg.results_dir, str(catalog), iid)
+            fast_research.check_holdout(cfg.results_dir, iid, params, start, a.again or "")
+        else:
+            if a.again:
+                raise SystemExit("--again only applies with --holdout")
+            start, end = fast_research.research_window(cfg.results_dir, str(catalog), iid, start, end)
         r = backtest(
             str(catalog),
-            _fast_config(cfg, a),
+            config,
             start=start,
             end=end,
             capital=a.capital,
@@ -762,14 +790,40 @@ def cmd_fast_backtest(cfg, a):
         )
     except ValueError as e:
         raise SystemExit(str(e)) from e
+    result = {k: r[k] for k in ("entries", "pnl", "commissions", "round_trips", "mean_trip", "t_stat", "stopped")}
+    if a.holdout:
+        fast_research.record_holdout(cfg.results_dir, iid, params, start, result, a.again or "")
+    n = fast_research.register_trial(
+        cfg.results_dir, "fast-backtest", iid, params, (r["start_ns"], r["end_ns"]), result, holdout=a.holdout
+    )
     first, last = (pd.Timestamp(r[k], tz="UTC") for k in ("start_ns", "end_ns"))
-    print(f"{r['instrument']} imbalance taker, {first:%Y-%m-%d %H:%M} .. {last:%Y-%m-%d %H:%M} UTC")
+    print(f"{iid} imbalance taker, {first:%Y-%m-%d %H:%M} .. {last:%Y-%m-%d %H:%M} UTC")
+    print(
+        f"  {'HOLDOUT test (recorded)' if a.holdout else 'research data'}; configurations tried on research data: {n}"
+    )
     print(
         f"  entries {r['entries']}, fills {r['fills']}, commissions {r['commissions']:.4f}, "
         f"P&L after costs {r['pnl']:+.4f} (quote currency)"
     )
+    print(f"  round trips {r['round_trips']}, mean {r['mean_trip']:+.5f} each, t-stat {r['t_stat']:+.2f}")
     if r["stopped"]:
         print(f"  stopped: {r['stopped']}")
+    return 0
+
+
+def cmd_fast_release(cfg, a):
+    from lab.record import perpetual_ids
+
+    catalog = Path(a.catalog) if a.catalog else cfg.data_dir / "market" / "catalog"
+    try:
+        iid = str(perpetual_ids([a.symbol])[0])
+        old, new = fast_research.release(cfg.results_dir, str(catalog), iid, a.reason)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    print(
+        f"{iid}: data {pd.Timestamp(old, tz='UTC'):%Y-%m-%d %H:%M} .. {pd.Timestamp(new, tz='UTC'):%Y-%m-%d %H:%M} UTC "
+        "is now research data; the new holdout is everything recorded from here on"
+    )
     return 0
 
 
@@ -1320,8 +1374,16 @@ def build_parser() -> argparse.ArgumentParser:
             fp.add_argument("--start", help="UTC start")
             fp.add_argument("--end", help="UTC end")
             fp.add_argument("--latency-ms", type=float, default=50.0, help="order latency (default 50 ms)")
+            fp.add_argument("--holdout", action="store_true", help="the one-time test on the reserved holdout data")
+            fp.add_argument("--again", metavar="REASON", help="repeat a holdout test; the reason is recorded")
         else:
             fp.add_argument("--check-only", action="store_true", help="validate the setup without connecting")
+
+    rel = fsub.add_parser("release", help="turn the holdout into research data and start a new holdout (logged)")
+    rel.add_argument("symbol", help="Binance USD-M perpetual, e.g. BTCUSDT")
+    rel.add_argument("--reason", required=True, help="recorded with the new boundary")
+    rel.add_argument("--catalog", help="catalog directory (default: <data>/market/catalog)")
+    rel.set_defaults(fn=cmd_fast_release)
 
     runtime = sub.add_parser("runtime", help="cold backup, upgrade preflight and broker-attested code migration")
     runtime.add_argument("action", choices=["backup", "preflight", "upgrade", "enable-gold"])
