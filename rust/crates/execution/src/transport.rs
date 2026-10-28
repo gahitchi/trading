@@ -42,6 +42,68 @@ pub struct OrderAck {
     pub id: u64,
     pub exchange_order_id: Option<u64>,
 }
+/// Parse the exact exchange API response used by the production socket.
+///
+/// An order ACK is only an order receipt; it never constitutes a fill.
+/// Ambiguous replies (including 5xx, backend timeouts, rate limits and
+/// duplicates) are NOT interpreted as a safe order rejection.
+pub fn decode_order_response(
+    expected_id: u64,
+    expected_symbol: &str,
+    expected_client_id: &str,
+    raw: &str,
+) -> Result<OrderWireEvent, ExecutionError> {
+    if expected_id == 0 || expected_symbol.is_empty() || expected_client_id.is_empty()
+        || raw.len() > 65_536
+    {
+        return Err(ExecutionError::InvalidMessage("invalid order response context"));
+    }
+    let response: Value = serde_json::from_str(raw)?;
+    if response.get("id").and_then(Value::as_u64) != Some(expected_id) {
+        return Err(ExecutionError::UnexpectedState);
+    }
+    let status = response.get("status").and_then(Value::as_u64)
+        .ok_or(ExecutionError::UnexpectedState)?;
+    if status == 200 {
+        if response.get("error").is_some() {
+            return Err(ExecutionError::UnexpectedState);
+        }
+        let result = response.get("result").ok_or(ExecutionError::UnexpectedState)?;
+        let order_id = result.get("orderId").and_then(Value::as_u64)
+            .filter(|&id| id > 0)
+            .ok_or(ExecutionError::UnexpectedState)?;
+        if result.get("clientOrderId").and_then(Value::as_str)
+            != Some(expected_client_id)
+            || result.get("symbol").and_then(Value::as_str) != Some(expected_symbol)
+        {
+            return Err(ExecutionError::UnexpectedState);
+        }
+        return Ok(OrderWireEvent::Accepted {
+            id: expected_id,
+            exchange_order_id: Some(order_id),
+        });
+    }
+    if response.get("result").is_some() {
+        return Err(ExecutionError::UnexpectedState);
+    }
+    let code = response.get("error").and_then(|e| e.get("code"))
+        .and_then(Value::as_i64)
+        .ok_or(ExecutionError::UnexpectedState)?;
+    // Binance -1006/-1007 are explicitly uncertain execution outcomes.
+    // Duplicate-client errors can also mean an earlier request was accepted.
+    // Rate limits and any 5xx are conservatively treated as uncertain.
+    if matches!(status, 408 | 409 | 418 | 429)
+        || status >= 500
+        || matches!(code, -1006 | -1007 | -2010)
+    {
+        return Ok(OrderWireEvent::Uncertain { id: expected_id });
+    }
+    if (400..500).contains(&status) && code < 0 {
+        return Ok(OrderWireEvent::Rejected { id: expected_id, code });
+    }
+    Err(ExecutionError::UnexpectedState)
+}
+
 struct IntentJournal {
     file: File,
     highest_request: u64,
@@ -178,6 +240,8 @@ impl ExchangeSocket {
     async fn send_and_confirm(
         &mut self,
         id: u64,
+        symbol: &str,
+        client_id: &str,
         body: String,
     ) -> Result<OrderWireEvent, ExecutionError> {
         // A successfully transmitted JSON-RPC request is NOT an order
@@ -191,28 +255,11 @@ impl ExchangeSocket {
             loop {
                 match self.socket.next().await {
                     Some(Ok(Message::Text(raw))) => {
-                        let v: Value = serde_json::from_str(raw.as_str())?;
-                        if v.get("id").and_then(Value::as_u64) != Some(id) {
-                            self.poisoned = true;
+                        let event=decode_order_response(id,symbol,client_id,raw.as_str())?;
+                        if matches!(event,OrderWireEvent::Uncertain{..}) {
                             return Err(ExecutionError::UnexpectedState);
                         }
-                        let code = v.get("status").and_then(Value::as_u64).unwrap_or(0);
-                        if code == 200 {
-                            let order_id = v
-                                .get("result")
-                                .and_then(|o| o.get("orderId"))
-                                .and_then(Value::as_u64);
-                            return Ok(OrderWireEvent::Accepted {
-                                id,
-                                exchange_order_id: order_id,
-                            });
-                        }
-                        let error = v
-                            .get("error")
-                            .and_then(|o| o.get("code"))
-                            .and_then(Value::as_i64)
-                            .unwrap_or(-1);
-                        return Ok(OrderWireEvent::Rejected { id, code: error });
+                        return Ok(event);
                     }
                     Some(Ok(Message::Ping(data))) => {
                         self.socket
@@ -243,9 +290,11 @@ impl ExchangeSocket {
         }
         let id = self.next_id;
         self.next_id = id.checked_add(1).ok_or(ExecutionError::UnexpectedState)?;
+        let expected_client_id=format!("tl-{}",order.client_id);
+        let symbol=order.symbol.clone();
         let request = self.request(id, "order.place", order.params)?;
         self.journal.record(id, "place", order.client_id)?;
-        self.send_and_confirm(id, request.to_json()).await
+        self.send_and_confirm(id,&symbol,&expected_client_id,request.to_json()).await
     }
     pub async fn cancel(
         &mut self,
@@ -258,9 +307,10 @@ impl ExchangeSocket {
         let id = self.next_id;
         self.next_id = id.checked_add(1).ok_or(ExecutionError::UnexpectedState)?;
         let params = cancel_params(symbol, client_id)?;
+        let expected_client_id=format!("tl-{client_id}");
         let request = self.request(id, "order.cancel", params)?;
         self.journal.record(id, "cancel", client_id)?;
-        self.send_and_confirm(id, request.to_json()).await
+        self.send_and_confirm(id,symbol,&expected_client_id,request.to_json()).await
     }
 }
 #[cfg(test)]

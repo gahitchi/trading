@@ -47,3 +47,21 @@ Binance Developer Documentation: https://developers.binance.com/en/docs/introduc
 NautilusTrader Binance connector environment comparison: https://nautilustrader.io/docs/latest/integrations/binance/
 
 Demo public endpoints were verified against connector documentation; no authenticated Demo order-WS endpoint has been empirically qualified in this branch.
+
+## Shared production order-response qualification
+
+The isolated protocol lab now exercises \`trading_execution::decode_order_response\`,
+the same decoder used by the real \`ExchangeSocket\`. It strictly binds a
+successful response to its expected request ID, symbol, client order ID
+and positive exchange order ID. It never treats an ACK as a fill.
+
+Explicit non-ambiguous 4xx errors produce \`Rejected\`. Backend timeouts
+(\`-1006\`, \`-1007\`), 5xx, duplicate-client-ID responses (\`-2010\`),
+and rate limits produce \`Uncertain\`. The production socket latches
+into its halted state on uncertainty and does not resend. Missing fields,
+unexpected IDs, and malformed responses also halt the socket.
+
+This is a protocol validation milestone, not production order readiness.
+The local test fixture still does **not** call the full production
+\`ExchangeSocket::place\` networking path; that requires further isolated
+socket injection and durable journal recovery verification.

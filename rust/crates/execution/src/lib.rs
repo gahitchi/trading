@@ -23,7 +23,7 @@ pub use private::{
 pub use reconciliation::{
     AccountReconciler, ObservedBalance, ObservedPosition, ReconcileOutcome, ReconciliationStatus,
 };
-pub use transport::{ExchangeSocket, ExchangeSocketMode, OrderAck, OrderWireEvent};
+pub use transport::{ExchangeSocket, ExchangeSocketMode, OrderAck, OrderWireEvent, decode_order_response};
 
 use trading_market_data::BinanceEnvironment;
 #[derive(Debug)]

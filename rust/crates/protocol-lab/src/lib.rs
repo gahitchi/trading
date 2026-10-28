@@ -15,7 +15,7 @@ use std::{
 use tokio::{net::TcpListener, sync::mpsc, time::timeout};
 use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message};
 use trading_core_types::{FixedQty, SCALE};
-use trading_execution::{PrivateEvent, parse_private_event};
+use trading_execution::{OrderWireEvent, PrivateEvent, decode_order_response, parse_private_event};
 use trading_market_data::{BinanceEnvironment, InstrumentSpecTable};
 
 const TEST_KEY: &str = "TEST_ONLY_LOCAL_KEY";
@@ -300,7 +300,11 @@ pub async fn run_selftest() -> Result<(), LabError> {
             ))
             .await?;
         let ack = private_next(&mut api_ws).await?;
-        if ack["status"] != 200 || ack["id"] != 77 || ack["result"]["orderId"] != 9001 {
+        let verified_ack=decode_order_response(77,"BTCUSDT","tl-42",&ack.to_string())
+            .map_err(|_|LabError::Protocol("production ACK decoder rejected response"))?;
+        if verified_ack!=OrderWireEvent::Accepted {
+            id:77,exchange_order_id:Some(9001)
+        } {
             return Err(LabError::Protocol("order ACK mismatch"));
         }
         // No fill can be inferred from the order ACK.
@@ -336,8 +340,12 @@ pub async fn run_selftest() -> Result<(), LabError> {
             ))
             .await?;
         let replay = private_next(&mut api_ws).await?;
-        if replay["status"] != 400 || replay["error"]["code"] != -2010 {
-            return Err(LabError::Protocol("duplicate order not rejected"));
+        let replay_outcome=decode_order_response(78,"BTCUSDT","tl-42",&replay.to_string())
+            .map_err(|_|LabError::Protocol("invalid duplicate response"))?;
+        // A duplicate ID may be evidence of an already-accepted order;
+        // it must never be treated as unambiguously rejected.
+        if replay_outcome!=OrderWireEvent::Uncertain {id:78} {
+            return Err(LabError::Protocol("duplicate order not quarantined"));
         }
         // A bad signature MUST terminate the local session and surface
         // an error. No positive ACK should be emitted.
