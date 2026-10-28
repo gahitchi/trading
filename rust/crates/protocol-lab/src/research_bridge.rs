@@ -123,33 +123,37 @@ pub fn plan_paper_entry(
     })
 }
 
-
 /// Persist a paper-only, never-released gross exposure claim after a
 /// separately returned paper risk proposal. An ACK does not free capacity.
 /// This is not a broker reservation and must not be called by a live router.
 pub fn reserve_paper_plan(
-    journal:&mut PaperReservationJournal,
-    intent:&OrderIntent,
-    plan:&PaperOrderPlan,
-)->Result<Reservation,ResearchPlanError>{
-    if plan.order.client_id!=intent.client_order_id
-        || plan.modeled_qty.0!=intent.quantity
-        || plan.order.params["newClientOrderId"]!=format!("tl-{}",intent.client_order_id)
-        || plan.order.params["timeInForce"]!="IOC"
+    journal: &mut PaperReservationJournal,
+    intent: &OrderIntent,
+    plan: &PaperOrderPlan,
+) -> Result<Reservation, ResearchPlanError> {
+    if plan.order.client_id != intent.client_order_id
+        || plan.modeled_qty.0 != intent.quantity
+        || plan.order.params["newClientOrderId"] != format!("tl-{}", intent.client_order_id)
+        || plan.order.params["timeInForce"] != "IOC"
         || intent.is_reduce_only()
-        || intent.side!=IntentSide::Sell as u8
-        || intent.venue_id!=VenueId::BinanceUsdM as u8
+        || intent.side != IntentSide::Sell as u8
+        || intent.venue_id != VenueId::BinanceUsdM as u8
     {
         return Err(ResearchPlanError::ReservationMismatch);
     }
-    let expected=checked_notional(FixedPrice(intent.limit_price),plan.modeled_qty)
-        .map_err(|_|ResearchPlanError::ReservationMismatch)?;
-    if expected!=plan.modeled_notional {
+    let expected = checked_notional(FixedPrice(intent.limit_price), plan.modeled_qty)
+        .map_err(|_| ResearchPlanError::ReservationMismatch)?;
+    if expected != plan.modeled_notional {
         return Err(ResearchPlanError::ReservationMismatch);
     }
-    journal.reserve(intent.client_order_id,intent.symbol_id,plan.modeled_qty,
-        FixedPrice(intent.limit_price))
-        .map_err(|_|ResearchPlanError::ReservationFailed)
+    journal
+        .reserve(
+            intent.client_order_id,
+            intent.symbol_id,
+            plan.modeled_qty,
+            FixedPrice(intent.limit_price),
+        )
+        .map_err(|_| ResearchPlanError::ReservationFailed)
 }
 
 #[cfg(test)]
@@ -162,10 +166,13 @@ mod tests {
     use trading_strategy_engine::{OrderEvent, OrderEventKind, OrderStatus, OrderTracker};
     use trading_wallet_manager::WalletBuckets;
 
-    static NEXT_JOURNAL:AtomicU64=AtomicU64::new(1);
-    fn journal_path()->std::path::PathBuf{
-        std::env::temp_dir().join(format!("trading-risk-reserve-{}-{}.log",
-            std::process::id(),NEXT_JOURNAL.fetch_add(1,Ordering::Relaxed)))
+    static NEXT_JOURNAL: AtomicU64 = AtomicU64::new(1);
+    fn journal_path() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "trading-risk-reserve-{}-{}.log",
+            std::process::id(),
+            NEXT_JOURNAL.fetch_add(1, Ordering::Relaxed)
+        ))
     }
     fn table() -> InstrumentSpecTable {
         let data = json!({"symbols":[{"symbol":"BTCUSDT","status":"TRADING",
@@ -351,33 +358,35 @@ mod tests {
     }
     #[test]
     fn paper_gate_proposal_is_durably_reserved_before_any_possible_send() {
-        let path=journal_path();
-        let mut journal=PaperReservationJournal::create(&path,2000*SCALE).unwrap();
-        let mut g=gate(true);
-        let op=AtomicOperatorState::new(OperatorSnapshot::default()).unwrap();
-        let original=intent();
-        let plan=plan_paper_entry(&mut g,&original,&context(),wallet(),&op,&table()).unwrap();
-        let proof=reserve_paper_plan(&mut journal,&original,&plan).unwrap();
-        assert_eq!(proof.client_id,42);
-        assert_eq!(proof.notional_raw,plan.modeled_notional.0);
-        assert_eq!(journal.snapshot().gross_reserved_raw,proof.notional_raw);
-        let original_bytes=std::fs::read(&path).unwrap();
+        let path = journal_path();
+        let mut journal = PaperReservationJournal::create(&path, 2000 * SCALE).unwrap();
+        let mut g = gate(true);
+        let op = AtomicOperatorState::new(OperatorSnapshot::default()).unwrap();
+        let original = intent();
+        let plan =
+            plan_paper_entry(&mut g, &original, &context(), wallet(), &op, &table()).unwrap();
+        let proof = reserve_paper_plan(&mut journal, &original, &plan).unwrap();
+        assert_eq!(proof.client_id, 42);
+        assert_eq!(proof.notional_raw, plan.modeled_notional.0);
+        assert_eq!(journal.snapshot().gross_reserved_raw, proof.notional_raw);
+        let original_bytes = std::fs::read(&path).unwrap();
         assert!(original_bytes.ends_with(b"\n"));
         drop(journal);
-        let inspected=PaperReservationJournal::inspect(&path).unwrap();
+        let inspected = PaperReservationJournal::inspect(&path).unwrap();
         assert!(inspected.snapshot().inspect_only);
-        assert_eq!(inspected.snapshot().gross_reserved_raw,proof.notional_raw);
+        assert_eq!(inspected.snapshot().gross_reserved_raw, proof.notional_raw);
         std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn invalid_exchange_tick_does_not_consume_risk_approval() {
-        let mut i=intent();
-        i.limit_price+=1;
-        let op=AtomicOperatorState::new(OperatorSnapshot::default()).unwrap();
-        let mut g=gate(true);
-        assert!(matches!(plan_paper_entry(&mut g,&i,&context(),wallet(),&op,&table()),
-            Err(ResearchPlanError::ExchangeFilters)));
-        assert_eq!(g.snapshot().last_approved_order_id,0);
+        let mut i = intent();
+        i.limit_price += 1;
+        let op = AtomicOperatorState::new(OperatorSnapshot::default()).unwrap();
+        let mut g = gate(true);
+        assert!(matches!(
+            plan_paper_entry(&mut g, &i, &context(), wallet(), &op, &table()),
+            Err(ResearchPlanError::ExchangeFilters)
+        ));
+        assert_eq!(g.snapshot().last_approved_order_id, 0);
     }
-
 }
