@@ -6,13 +6,53 @@ use crate::{
 };
 use futures_util::{SinkExt, StreamExt};
 use rtrb::PushError;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::{sync::mpsc, time::timeout};
+use std::{sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
+use tokio::{sync::{mpsc, Semaphore}, time::{timeout, Instant, sleep_until}};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 const MAX_STREAMS_PER_SOCKET: usize = 512;
 const MAX_BACKOFF_SECONDS: u64 = 30;
 const MAX_DEPTH_BODY: usize = 1_048_576;
+const SNAPSHOT_MIN_SPACING: Duration = Duration::from_secs(1);
+const MAX_SIMULTANEOUS_SNAPSHOTS: usize = 2;
+
+/// A bounded, per-symbol latest-request queue. Obsolete generations and
+/// request IDs are replaced, not issued as extra REST calls. This is only
+/// the cold REST recovery path, never a strategy/core hot-path structure.
+struct SnapshotQueue {
+    pending: Vec<Option<SnapshotRequest>>,
+    next_symbol: usize,
+}
+impl SnapshotQueue {
+    fn new(symbols: usize) -> Self {
+        Self { pending: vec![None; symbols], next_symbol: 0 }
+    }
+    fn push(&mut self, req: SnapshotRequest) -> Result<(), MarketDataError> {
+        let slot = self.pending.get_mut(usize::from(req.symbol_id))
+            .ok_or(MarketDataError::InvalidResponse("unknown snapshot symbol"))?;
+        if slot.is_none_or(|previous|
+            (req.generation, req.request_id) > (previous.generation, previous.request_id))
+        {
+            *slot = Some(req);
+        }
+        Ok(())
+    }
+    fn has_pending(&self) -> bool {
+        self.pending.iter().any(Option::is_some)
+    }
+    fn pop_next(&mut self) -> Option<SnapshotRequest> {
+        if self.pending.is_empty() { return None; }
+        for n in 0..self.pending.len() {
+            let index = (self.next_symbol + n) % self.pending.len();
+            if let Some(req) = self.pending[index].take() {
+                self.next_symbol = (index + 1) % self.pending.len();
+                return Some(req);
+            }
+        }
+        None
+    }
+}
+
 
 fn receive_unix_ns() -> Result<u64, MarketDataError> {
     let n = SystemTime::now()
@@ -234,6 +274,9 @@ impl LiveMarketDataEngine {
             tx.clone(),
         ));
         let workers = [public, market];
+        let snapshot_slots = Arc::new(Semaphore::new(MAX_SIMULTANEOUS_SNAPSHOTS));
+        let mut pending_snapshots = SnapshotQueue::new(self.table.instruments().len());
+        let mut next_snapshot_at = Instant::now();
         loop {
             tokio::select! {
                 maybe=incoming.recv()=>{
@@ -261,36 +304,69 @@ impl LiveMarketDataEngine {
                 }
                 maybe=requests.recv()=>{
                     let req=maybe.ok_or(MarketDataError::ChannelClosed)?;
-                    let symbol=self.table.by_id(req.symbol_id)
-                        .ok_or(MarketDataError::InvalidResponse("unknown snapshot request"))?
-                        .symbol.clone();
-                    let rest=self.rest.clone();
-                    let env=self.table.environment();
-                    let tx2=tx.clone();
-                    tokio::spawn(async move {
-                        let mut delay=Duration::from_millis(250);
-                        for attempt in 0..5 {
-                            match fetch_depth_snapshot(&rest,env,&symbol,req).await {
-                                Ok(snapshot)=>{
-                                    let _=tx2.send(Ok(snapshot)).await;
-                                    return;
-                                }
-                                Err(err) if attempt==4=>{
-                                    let _=tx2.send(Err(err)).await;
-                                    return;
-                                }
-                                Err(_)=>{
-                                    tokio::time::sleep(delay).await;
-                                    delay=(delay*2).min(Duration::from_secs(4));
-                                }
-                            }
-                        }
-                    });
+                    pending_snapshots.push(req)?;
+                }
+                _=sleep_until(next_snapshot_at), if pending_snapshots.has_pending()=>{
+                    let permit = snapshot_slots.clone().try_acquire_owned();
+                    if let Ok(permit) = permit {
+                        let req=pending_snapshots.pop_next()
+                            .ok_or(MarketDataError::InvalidResponse("empty snapshot queue"))?;
+                        let symbol=self.table.by_id(req.symbol_id)
+                            .ok_or(MarketDataError::InvalidResponse("unknown snapshot request"))?
+                            .symbol.clone();
+                        let rest=self.rest.clone();
+                        let env=self.table.environment();
+                        let tx2=tx.clone();
+                        // No more than one new 1000-level snapshot per second,
+                        // with at most two requests outstanding. This protects
+                        // the shared Binance IP request-weight budget when the
+                        // feed repeatedly loses sequence synchronization.
+                        next_snapshot_at=Instant::now()+SNAPSHOT_MIN_SPACING;
+                        tokio::spawn(async move {
+                            let _slot=permit;
+                            let result=fetch_depth_snapshot(&rest,env,&symbol,req).await;
+                            let _=tx2.send(result).await;
+                        });
+                    } else {
+                        // Both REST permits are in use; retry later instead of
+                        // issuing an unbounded burst or losing the request.
+                        next_snapshot_at=Instant::now()+SNAPSHOT_MIN_SPACING;
+                    }
                 }
             }
             if workers.iter().all(tokio::task::JoinHandle::is_finished) {
                 return Err(MarketDataError::ChannelClosed);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod snapshot_queue_tests {
+    use super::{SnapshotQueue, SnapshotRequest};
+    fn req(symbol_id: u16, generation: u64, request_id: u64) -> SnapshotRequest {
+        SnapshotRequest { symbol_id, generation, request_id }
+    }
+    #[test]
+    fn newest_per_symbol_supersedes_stale_snapshot_requests() {
+        let mut q = SnapshotQueue::new(3);
+        q.push(req(0, 1, 1)).unwrap();
+        q.push(req(0, 1, 4)).unwrap();
+        q.push(req(0, 1, 3)).unwrap();
+        q.push(req(1, 2, 1)).unwrap();
+        assert_eq!(q.pop_next(), Some(req(0, 1, 4)));
+        assert_eq!(q.pop_next(), Some(req(1, 2, 1)));
+        assert!(!q.has_pending());
+    }
+    #[test]
+    fn queue_is_fair_and_rejects_unknown_symbol_ids() {
+        let mut q = SnapshotQueue::new(2);
+        assert!(q.push(req(2, 1, 1)).is_err());
+        q.push(req(0, 1, 1)).unwrap();
+        q.push(req(1, 1, 1)).unwrap();
+        assert_eq!(q.pop_next(), Some(req(0, 1, 1)));
+        q.push(req(0, 1, 2)).unwrap();
+        assert_eq!(q.pop_next(), Some(req(1, 1, 1)));
+        assert_eq!(q.pop_next(), Some(req(0, 1, 2)));
     }
 }

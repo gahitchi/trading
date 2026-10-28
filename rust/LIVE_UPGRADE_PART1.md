@@ -111,3 +111,35 @@ actual network smoke tests on the target Arch host.
    reconciliation, exchange-confirmed fills/commissions/funding/insurance,
    live risk gate and kill switch, reserved order state, end-to-end
    acceptance, rollout gates and performance testing. No fake fills.
+
+## Arch 2026-10-28 public-feed incident and snapshot protection
+
+The 39-second BTCUSDT/ETHUSDT/SOLUSDT Testnet run established both WebSocket
+connections and received live depth, trade and mark price events. However,
+all three books repeatedly cycled through `Activated` and `NeedsSnapshot`.
+One 5-second interval showed 124 cumulative REST depth snapshots after
+approximately 30 seconds. **Do not qualify this feed for order routing** on
+the strength of a transient `Activated`.
+
+The follow-up changes add:
+- One global REST depth snapshot start per second, with no more than two
+  concurrent requests. At a weight of 20 per 1000-level request, this caps
+  sustained depth-snapshot demand to around 1200 weight/minute, before other
+  clients or API calls on the same IP.
+- Per-symbol coalescing so obsolete pending snapshot generations/IDs never
+  trigger a burst of redundant HTTP requests.
+- Error-safe, bounded SPSC handoff remains mandatory; no fabricated
+  continuity or forced `Live` state.
+- Diagnostic `resync` records identifying the affected symbol, preceding
+  state, prior local `u`, incoming `U/u/pu`, and failed snapshot ID.
+  The first 24 incidents are logged and later incidents sampled to avoid
+  unlimited console output.
+- Regression checks that reject mismatched `pu`, and that verify snapshot
+  request coalescing and round-robin scheduling.
+
+**Root-cause uncertainty:** The first diagnostic log does not include
+per-event sequence IDs and therefore cannot distinguish a genuine Binance
+Testnet `pu` gap, an invalid post-snapshot bridge, or an order-book
+state-machine error. Never disable continuity validation to hide this
+problem. Use the new resync details to localize the cause on Arch before
+claiming production-quality market-data acceptance.

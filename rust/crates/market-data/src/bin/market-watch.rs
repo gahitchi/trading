@@ -71,6 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut depth = 0_u64;
             let mut snapshots = 0_u64;
             let mut resets = 0_u64;
+            let mut resync_count = 0_u64;
             let mut last_report = Instant::now();
             let mut idle = 0_u16;
             while !stop2.load(Ordering::Acquire) {
@@ -85,6 +86,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             LiveFrame::Snapshot { .. } => snapshots += 1,
                             LiveFrame::Reset { .. } => resets += 1,
                         }
+                        // Capture sequence state *before* the synchronizer
+                        // mutates it. A failed bridge resets its last ID to
+                        // zero; logging only afterwards hides the diagnosis.
+                        let prior = match &frame {
+                            LiveFrame::Depth { symbol_id, first, final_id, previous_final, .. } => {
+                                books.book(*symbol_id).map(|b| (
+                                    *symbol_id,
+                                    "depth",
+                                    b.state(),
+                                    b.last_update_id(),
+                                    *first, *final_id, *previous_final,
+                                ))
+                            }
+                            LiveFrame::Snapshot { request, last_update_id, .. } => {
+                                books.book(request.symbol_id).map(|b| (
+                                    request.symbol_id,
+                                    "snapshot",
+                                    b.state(),
+                                    b.last_update_id(),
+                                    *last_update_id, 0, 0,
+                                ))
+                            }
+                            _ => None,
+                        };
                         let outcome = books.on_frame(&frame).map_err(|e| {
                             books.disconnect_all();
                             format!("book invalidated: {e}")
@@ -93,12 +118,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if messages <= 3 {
                             eprintln!("market-watch first_frame={messages} depth={depth} snapshots={snapshots} resets={resets} trades={trades} marks={marks}");
                         }
+                        if matches!(outcome, Some(trading_orderbook::SyncOutcome::NeedsSnapshot)) {
+                            resync_count += 1;
+                            // Log the first failures and then sample,
+                            // avoiding a log flood while preserving proof.
+                            if resync_count <= 24 || resync_count % 50 == 0 {
+                                if let Some((symbol, kind, state, old_id, first, final_id, pu)) = prior {
+                                    eprintln!(
+                                        "market-watch resync={resync_count} symbol_id={symbol} kind={kind} prior_state={state:?} local_last={old_id} U_or_snapshot={first} u={final_id} pu={pu}"
+                                    );
+                                }
+                            }
+                        }
                         if matches!(
                             outcome,
                             Some(trading_orderbook::SyncOutcome::Activated)
                                 | Some(trading_orderbook::SyncOutcome::NeedsSnapshot)
                         ) {
-                            eprintln!("market-watch depth_sync={outcome:?} live_books={}", books.active_books());
+                            if resync_count <= 24 || matches!(outcome, Some(trading_orderbook::SyncOutcome::Activated)) {
+                                eprintln!("market-watch depth_sync={outcome:?} live_books={}", books.active_books());
+                            }
                         }
                     }
                     Err(rtrb::PopError::Empty) => {
@@ -113,7 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if last_report.elapsed() >= Duration::from_secs(5) {
                     eprintln!(
-                        "market-watch status events={messages} live_books={} depth={depth} snapshots={snapshots} resets={resets} trades={trades} liquidations={liqs} marks={marks}",
+                        "market-watch status events={messages} live_books={} depth={depth} snapshots={snapshots} resets={resets} resyncs={resync_count} trades={trades} liquidations={liqs} marks={marks}",
                         books.active_books()
                     );
                     last_report = Instant::now();
