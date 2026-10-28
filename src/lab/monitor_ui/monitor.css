@@ -104,7 +104,7 @@ main { padding: 4px 28px 28px; display: grid; gap: 20px; }
 [data-status="degraded"] .lamp { background: var(--pause); box-shadow: 0 0 10px var(--pause); }
 [data-status="down"] .lamp { background: var(--block); box-shadow: 0 0 10px var(--block); }
 .checks { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
-.checks li { display: grid; grid-template-columns: 54px 84px 1fr; gap: 8px; color: var(--display-dim); }
+.checks li { display: grid; grid-template-columns: 54px 128px 1fr; gap: 8px; color: var(--display-dim); }
 .checks b { font-weight: 600; color: var(--display-ink); }
 .badge { font-size: 12px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
 .badge.ok { color: var(--run); }

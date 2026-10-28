@@ -11,6 +11,7 @@ import pytest
 from nautilus_trader.model import CryptoPerpetual
 
 from lab.monitor import NS, Monitor, MonitorServer, Rates, file_span, gaps
+from lab.record import heartbeat_path
 from tests.test_record import T0, market_events, perpetual, record
 
 MIN = 60 * NS
@@ -20,11 +21,12 @@ def iso(ns):
     return datetime.fromtimestamp(ns / NS, UTC).isoformat()
 
 
-def heartbeat(out, at_ns, *, running=True, started_ns=None, stale=(), **counts):
+def heartbeat(out, at_ns, *, venue="binance", running=True, started_ns=None, stale=(), **counts):
     instruments = {
         iid: {"book": n, "trades": n, "mark": n, "funding": 1, "last_event": iso(at_ns)} for iid, n in counts.items()
     }
-    (out / "heartbeat.json").write_text(
+    heartbeat_path(out, venue).parent.mkdir(parents=True, exist_ok=True)
+    heartbeat_path(out, venue).write_text(
         json.dumps(
             {
                 "at": iso(at_ns),
@@ -38,6 +40,7 @@ def heartbeat(out, at_ns, *, running=True, started_ns=None, stale=(), **counts):
 
 
 BTC = "BTCUSDT-PERP.BINANCE"
+BYBIT_BTC = "BTCUSDT-LINEAR.BYBIT"
 
 
 def test_file_names_give_the_recorded_span():
@@ -96,15 +99,15 @@ def test_a_healthy_recorder_is_ok_and_reports_its_rate(tmp_path):
     s = m.status(T0 + 15 * NS)
 
     assert s["status"] == "ok", s["checks"]
-    assert s["recorder"]["events_per_s"] == pytest.approx(3 * 300 / 10)
+    assert s["events_per_s"] == pytest.approx(3 * 300 / 10)
     assert s["instruments"][0]["state"] == "live"
-    assert s["recorder"]["uptime_s"] == 65  # started a minute before the second heartbeat
+    assert s["recorders"][0]["uptime_s"] == 65  # started a minute before the second heartbeat
 
 
 def test_an_old_heartbeat_means_the_recorder_is_down(tmp_path):
     heartbeat(tmp_path, T0, **{BTC: 1})
     s = Monitor(tmp_path).status(T0 + 3 * MIN)
-    assert s["status"] == "down" and s["recorder"]["running"] is False
+    assert s["status"] == "down" and s["recorders"][0]["running"] is False
     assert s["instruments"][0]["state"] == "not recording"
     assert "not running" in s["checks"][0]["detail"]
 
@@ -125,11 +128,37 @@ def test_data_not_reaching_the_catalog_fails(tmp_path):
     # Running for two hours with an empty catalog: promotion is broken (e.g. the writer failed to close).
     heartbeat(tmp_path, T0, started_ns=T0 - 120 * MIN, **{BTC: 5})
     s = Monitor(tmp_path).status(T0 + NS)
-    catalog = next(c for c in s["checks"] if c["name"] == "catalog")
+    catalog = next(c for c in s["checks"] if c["name"] == "binance catalog")
     assert s["status"] == "degraded" and catalog["state"] == "fail"
     # In its first hour nothing is due yet.
     heartbeat(tmp_path, T0, started_ns=T0 - 30 * MIN, **{BTC: 5})
     assert Monitor(tmp_path).status(T0 + NS)["status"] == "ok"
+
+
+def test_each_venue_has_its_own_recorder_and_one_down_degrades(tmp_path):
+    heartbeat(tmp_path, T0, **{BTC: 5})
+    heartbeat(tmp_path, T0 - 5 * MIN, venue="bybit", **{BYBIT_BTC: 5})  # Bybit's recorder died five minutes ago
+
+    s = Monitor(tmp_path).status(T0 + NS)
+
+    assert s["status"] == "degraded"
+    assert {r["venue"]: r["running"] for r in s["recorders"]} == {"BINANCE": True, "BYBIT": False}
+    assert {c["name"]: c["state"] for c in s["checks"]} == {"binance": "ok", "bybit": "fail"}
+    assert {i["id"]: (i["venue"], i["state"]) for i in s["instruments"]} == {
+        BTC: ("BINANCE", "live"),
+        BYBIT_BTC: ("BYBIT", "not recording"),
+    }
+
+
+def test_both_venues_recorded_into_one_catalog_are_inventoried(tmp_path):
+    binance, bybit = perpetual("BTCUSDT"), perpetual("BTCUSDT", "bybit")
+    record(tmp_path, [binance], market_events(binance.id, 6))
+    record(tmp_path, [bybit], market_events(bybit.id, 4), venue="bybit")
+
+    s = Monitor(tmp_path).status(T0 + MIN)
+
+    assert {i["id"]: i["catalog"]["rows"] for i in s["instruments"]} == {BTC: 6 * 3 + 2, BYBIT_BTC: 4 * 3 + 2}
+    assert [r["venue"] for r in s["recorders"]] == ["BINANCE", "BYBIT"]
 
 
 def test_an_outage_between_files_shows_as_a_gap(tmp_path):

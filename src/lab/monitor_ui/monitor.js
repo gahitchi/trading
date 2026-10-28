@@ -102,9 +102,10 @@ function render(s) {
       el("li", {}, el("span", { class: `badge ${c.state}` }, c.state), el("b", {}, c.name), el("span", {}, c.detail)),
     ),
   );
-  const r = s.recorder;
-  $("rate").textContent = rate(r.events_per_s);
-  $("uptime").textContent = duration(r.uptime_s);
+  $("rate").textContent = rate(s.events_per_s);
+  const up = s.recorders.filter((r) => r.running);
+  $("recorders").textContent = s.recorders.length ? `${up.length} of ${s.recorders.length}` : "none";
+  $("recorders").title = s.recorders.map((r) => `${r.venue}: ${r.running ? `up ${duration(r.uptime_s)}` : "down"}`).join(", ");
   const span = s.catalog.first && s.catalog.last ? (Date.parse(s.catalog.last) - Date.parse(s.catalog.first)) / 1000 : null;
   $("recorded").textContent = duration(span);
   $("size").textContent = bytes(s.catalog.bytes);
@@ -115,7 +116,7 @@ function render(s) {
     (s.disk.bytes_per_day ? `, writing ${bytes(s.disk.bytes_per_day)} per day` : "");
 
   const feeds = $("feeds");
-  if (!s.instruments.length) emptyRow(feeds, 10, "No instruments yet. Start the recorder: lab record");
+  if (!s.instruments.length) emptyRow(feeds, 10, "No instruments yet. Start a recorder: lab record --venue binance");
   else
     feeds.replaceChildren(
       ...s.instruments.map((i) => {
