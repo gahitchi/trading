@@ -2,6 +2,7 @@
 serves it read-only on a fixed set of paths."""
 
 import json
+import os
 import threading
 import urllib.error
 import urllib.request
@@ -161,6 +162,40 @@ def test_both_venues_recorded_into_one_catalog_are_inventoried(tmp_path):
 
     assert {i["id"]: i["catalog"]["rows"] for i in s["instruments"]} == {BTC: 6 * 3 + 2, BYBIT_BTC: 4 * 3 + 2}
     assert [r["venue"] for r in s["recorders"]] == ["BINANCE", "BYBIT"]
+
+
+def test_instrument_definitions_without_market_data_are_not_listed(tmp_path):
+    # The Bybit adapter loads every linear instrument, and the stream saves each one's definition.
+    btc, eth, sol = (perpetual(s, "bybit") for s in ("BTCUSDT", "ETHUSDT", "SOLUSDT"))
+    record(tmp_path, [btc, eth, sol], market_events(btc.id, 4), venue="bybit")
+    heartbeat(tmp_path, T0, venue="bybit", **{BYBIT_BTC: 4})
+
+    s = Monitor(tmp_path).status(T0 + NS)
+
+    assert [i["id"] for i in s["instruments"]] == [BYBIT_BTC]
+    assert s["catalog"]["by_type"]["crypto_perpetual"]["files"] == 3  # still counted as stored data
+
+
+def test_stream_files_left_by_a_run_that_stopped_without_saving_are_flagged(tmp_path):
+    started = T0 - 30 * MIN
+    heartbeat(tmp_path, T0, started_ns=started, **{BTC: 5})
+
+    def stream_file(path, mtime_ns, size):
+        f = tmp_path / "stream" / path
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"x" * size)
+        os.utime(f, ns=(mtime_ns, mtime_ns))
+
+    stream_file("binance/live/run-now/trades/trades_1.feather", T0, 100)  # this run's, promoted within the hour
+    stream_file("binance/live/run-killed/trades/trades_0.feather.partial", started - MIN, 2_000_000)
+    stream_file("bybit/live/run-old/trades/trades_0.feather.partial", T0, 500_000)  # no Bybit recorder running
+
+    s = Monitor(tmp_path).status(T0 + NS)
+
+    assert s["stream"]["files"] == 3 and s["stream"]["bytes"] == 2_500_100
+    assert s["stream"]["leftover"] == {"files": 2, "bytes": 2_500_000}
+    stream = next(c for c in s["checks"] if c["name"] == "stream")
+    assert s["status"] == "degraded" and stream["state"] == "warn" and stream["detail"].startswith("2.5 MB in 2")
 
 
 def test_an_outage_between_files_shows_as_a_gap(tmp_path):
