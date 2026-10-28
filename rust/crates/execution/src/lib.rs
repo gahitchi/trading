@@ -12,8 +12,8 @@ mod transport;
 pub use auth::{Authentication, SignedRequest, SigningMode};
 pub use order::{ExchangeOrder, OrderKind, OrderSide, PrepareOrder};
 pub use private::{
-    AccountBalance, AccountPosition, PrivateEvent, UserDataStreamManager,
-    parse_private_event, execution_report_ring,
+    AccountBalance, AccountPosition, PrivateEvent, UserDataStreamManager, execution_report_ring,
+    parse_private_event,
 };
 pub use transport::{ExchangeSocket, ExchangeSocketMode, OrderAck, OrderWireEvent};
 
@@ -32,40 +32,52 @@ pub enum ExecutionError {
     Numeric(trading_core_types::NumericError),
 }
 impl From<std::io::Error> for ExecutionError {
-    fn from(e:std::io::Error)->Self{Self::Storage(e)}
+    fn from(e: std::io::Error) -> Self {
+        Self::Storage(e)
+    }
 }
 impl From<reqwest::Error> for ExecutionError {
-    fn from(e:reqwest::Error)->Self{Self::Http(e)}
+    fn from(e: reqwest::Error) -> Self {
+        Self::Http(e)
+    }
 }
 impl From<serde_json::Error> for ExecutionError {
-    fn from(e:serde_json::Error)->Self{Self::Json(e)}
+    fn from(e: serde_json::Error) -> Self {
+        Self::Json(e)
+    }
 }
 impl From<trading_core_types::NumericError> for ExecutionError {
-    fn from(e:trading_core_types::NumericError)->Self{Self::Numeric(e)}
+    fn from(e: trading_core_types::NumericError) -> Self {
+        Self::Numeric(e)
+    }
 }
 impl std::fmt::Display for ExecutionError {
-    fn fmt(&self, f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Never print credential-bearing reqwest URLs/headers.
         match self {
-            Self::Storage(e)=>write!(f,"storage error: {e}"),
-            Self::Configuration(e) | Self::InvalidMessage(e)=>write!(f,"{e}"),
-            Self::Numeric(_)=>write!(f,"invalid fixed-point number"),
-            _=>write!(f,"{}",match self {
-                Self::Unauthorized=>"unauthorized",
-                Self::Disabled=>"routing disabled",
-                Self::UnexpectedState=>"uncertain exchange order state",
-                Self::Transport=>"websocket transport failure",
-                Self::Http(_)=>"HTTP exchange request failure",
-                Self::Json(_)=>"invalid exchange JSON",
-                _=>"execution failure",
-            })
+            Self::Storage(e) => write!(f, "storage error: {e}"),
+            Self::Configuration(e) | Self::InvalidMessage(e) => write!(f, "{e}"),
+            Self::Numeric(_) => write!(f, "invalid fixed-point number"),
+            _ => write!(
+                f,
+                "{}",
+                match self {
+                    Self::Unauthorized => "unauthorized",
+                    Self::Disabled => "routing disabled",
+                    Self::UnexpectedState => "uncertain exchange order state",
+                    Self::Transport => "websocket transport failure",
+                    Self::Http(_) => "HTTP exchange request failure",
+                    Self::Json(_) => "invalid exchange JSON",
+                    _ => "execution failure",
+                }
+            ),
         }
     }
 }
 impl std::error::Error for ExecutionError {}
-pub fn endpoint(env:BinanceEnvironment)->&'static str{
+pub fn endpoint(env: BinanceEnvironment) -> &'static str {
     match env {
-        BinanceEnvironment::Mainnet=>"wss://ws-fapi.binance.com/ws-fapi/v1",
-        BinanceEnvironment::Testnet=>"wss://testnet.binancefuture.com/ws-fapi/v1",
+        BinanceEnvironment::Mainnet => "wss://ws-fapi.binance.com/ws-fapi/v1",
+        BinanceEnvironment::Testnet => "wss://testnet.binancefuture.com/ws-fapi/v1",
     }
 }

@@ -1,12 +1,10 @@
 use serde_json::json;
-use trading_market_data::{BinanceEnvironment,InstrumentSpecTable};
-use trading_execution::{
-    PrivateEvent,SigningMode,parse_private_event,endpoint,
-};
-use trading_core_types::{ExecutionStatus,SCALE};
+use trading_core_types::{ExecutionStatus, SCALE};
+use trading_execution::{PrivateEvent, SigningMode, endpoint, parse_private_event};
+use trading_market_data::{BinanceEnvironment, InstrumentSpecTable};
 
-fn table()->InstrumentSpecTable{
-    let response=json!({"symbols":[{"symbol":"BTCUSDT","status":"TRADING",
+fn table() -> InstrumentSpecTable {
+    let response = json!({"symbols":[{"symbol":"BTCUSDT","status":"TRADING",
         "contractType":"PERPETUAL","quoteAsset":"USDT","marginAsset":"USDT",
         "filters":[
             {"filterType":"PRICE_FILTER","tickSize":"0.10","minPrice":"0.10","maxPrice":"1000000"},
@@ -14,9 +12,13 @@ fn table()->InstrumentSpecTable{
             {"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"100"},
             {"filterType":"MIN_NOTIONAL","notional":"5.0"}]}]});
     InstrumentSpecTable::from_exchange_info(
-        &response,&["BTCUSDT".into()],BinanceEnvironment::Testnet).unwrap()
+        &response,
+        &["BTCUSDT".into()],
+        BinanceEnvironment::Testnet,
+    )
+    .unwrap()
 }
-const ORDER:&str=r#"{
+const ORDER: &str = r#"{
     "e":"ORDER_TRADE_UPDATE","E":1700000000000,"T":1700000000000,
     "o":{"s":"BTCUSDT","c":"tl-42","i":924,"S":"SELL",
     "X":"PARTIALLY_FILLED","x":"TRADE","L":"50000.10","l":"0.010",
@@ -24,52 +26,64 @@ const ORDER:&str=r#"{
     "t":3001}
 }"#;
 #[test]
-fn real_fill_payload_preserves_fills_and_fees_without_optimistic_account_mutation(){
-    let event=parse_private_event(ORDER,&table()).unwrap();
-    let PrivateEvent::Order(report)=event else {panic!("expected exchange fill")};
-    assert_eq!(report.event.client_order_id,42);
-    assert_eq!(report.event.status,ExecutionStatus::PartiallyFilled as u8);
-    assert_eq!(report.event.fill_price,50_000*SCALE + 10_000_000);
-    assert_eq!(report.event.last_filled_qty,1_000_000);
-    assert_eq!(report.event.cumulative_qty,1_000_000);
-    assert_eq!(report.event.commission,20_000_000);
-    assert_eq!(report.event.realized_pnl,150_000_000);
-    assert_eq!(report.exchange_order_id,924);
-    assert_eq!(report.trade_id,3001);
-    assert_eq!(report.event.flags&1,1);
+fn real_fill_payload_preserves_fills_and_fees_without_optimistic_account_mutation() {
+    let event = parse_private_event(ORDER, &table()).unwrap();
+    let PrivateEvent::Order(report) = event else {
+        panic!("expected exchange fill")
+    };
+    assert_eq!(report.event.client_order_id, 42);
+    assert_eq!(report.event.status, ExecutionStatus::PartiallyFilled as u8);
+    assert_eq!(report.event.fill_price, 50_000 * SCALE + 10_000_000);
+    assert_eq!(report.event.last_filled_qty, 1_000_000);
+    assert_eq!(report.event.cumulative_qty, 1_000_000);
+    assert_eq!(report.event.commission, 20_000_000);
+    assert_eq!(report.event.realized_pnl, 150_000_000);
+    assert_eq!(report.exchange_order_id, 924);
+    assert_eq!(report.trade_id, 3001);
+    assert_eq!(report.event.flags & 1, 1);
 }
 #[test]
-fn private_account_wallet_is_usdt_and_position_amount_is_signed(){
-    let raw=r#"{"e":"ACCOUNT_UPDATE","E":1700000000123,"T":1700000000110,
+fn private_account_wallet_is_usdt_and_position_amount_is_signed() {
+    let raw = r#"{"e":"ACCOUNT_UPDATE","E":1700000000123,"T":1700000000110,
     "a":{"m":"ORDER","B":[{"a":"USDT","wb":"100.25","cw":"95.10","bc":"0"}],
     "P":[{"s":"BTCUSDT","pa":"-0.010","ep":"50000.10","ps":"BOTH"}]}}"#;
-    let PrivateEvent::Account(a)=parse_private_event(raw,&table()).unwrap()
-        else {panic!("expected account update")};
-    assert_eq!(a.balances[0].wallet_balance_raw,100*SCALE+25_000_000);
-    assert_eq!(a.balances[0].cross_wallet_balance_raw,95*SCALE+10_000_000);
-    assert_eq!(a.positions[0].position_amount_raw,-1_000_000);
-    assert_eq!(a.positions[0].position_side,"BOTH");
+    let PrivateEvent::Account(a) = parse_private_event(raw, &table()).unwrap() else {
+        panic!("expected account update")
+    };
+    assert_eq!(a.balances[0].wallet_balance_raw, 100 * SCALE + 25_000_000);
+    assert_eq!(
+        a.balances[0].cross_wallet_balance_raw,
+        95 * SCALE + 10_000_000
+    );
+    assert_eq!(a.positions[0].position_amount_raw, -1_000_000);
+    assert_eq!(a.positions[0].position_side, "BOTH");
 }
 #[test]
-fn external_liquidation_and_expired_listenkey_trigger_reconciliation(){
-    let raw=ORDER.replace("tl-42","autoclose-123");
-    assert!(matches!(parse_private_event(&raw,&table()).unwrap(),
-        PrivateEvent::ReconciliationRequired(_)));
-    assert!(matches!(parse_private_event(
-        r#"{"e":"listenKeyExpired","E":1700000000000}"#,
-        &table()).unwrap(),PrivateEvent::ReconciliationRequired(_)));
+fn external_liquidation_and_expired_listenkey_trigger_reconciliation() {
+    let raw = ORDER.replace("tl-42", "autoclose-123");
+    assert!(matches!(
+        parse_private_event(&raw, &table()).unwrap(),
+        PrivateEvent::ReconciliationRequired(_)
+    ));
+    assert!(matches!(
+        parse_private_event(r#"{"e":"listenKeyExpired","E":1700000000000}"#, &table()).unwrap(),
+        PrivateEvent::ReconciliationRequired(_)
+    ));
 }
 #[test]
-fn non_usdt_commission_is_preserved_but_not_marked_converted(){
-    let raw=ORDER.replace(r#""N":"USDT""#,r#""N":"BNB""#);
-    let PrivateEvent::Order(e)=parse_private_event(&raw,&table()).unwrap()
-        else {panic!("expected order")};
-    assert_eq!(e.event.flags&1,0);
-    assert_eq!(e.commission_asset,"BNB");
+fn non_usdt_commission_is_preserved_but_not_marked_converted() {
+    let raw = ORDER.replace(r#""N":"USDT""#, r#""N":"BNB""#);
+    let PrivateEvent::Order(e) = parse_private_event(&raw, &table()).unwrap() else {
+        panic!("expected order")
+    };
+    assert_eq!(e.event.flags & 1, 0);
+    assert_eq!(e.commission_asset, "BNB");
 }
 #[test]
-fn a_real_order_ack_is_not_private_execution(){
-    assert_eq!(endpoint(BinanceEnvironment::Testnet),
-        "wss://testnet.binancefuture.com/ws-fapi/v1");
-    assert_ne!(SigningMode::Ed25519,SigningMode::HmacSha256);
+fn a_real_order_ack_is_not_private_execution() {
+    assert_eq!(
+        endpoint(BinanceEnvironment::Testnet),
+        "wss://testnet.binancefuture.com/ws-fapi/v1"
+    );
+    assert_ne!(SigningMode::Ed25519, SigningMode::HmacSha256);
 }
