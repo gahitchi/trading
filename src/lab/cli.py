@@ -13,7 +13,7 @@ from lab.config import ConfigError, load_config
 
 
 def cmd_record(cfg, a):
-    from lab.record import build_node, saved
+    from lab.record import build_node, recover_stream, saved
 
     out = Path(a.out) if a.out else cfg.data_dir / "market"
     if a.status:
@@ -23,6 +23,16 @@ def cmd_record(cfg, a):
         for kind, instruments in kinds.items():
             print(f"{kind:20} " + "  ".join(f"{i}: {n} file(s)" for i, n in instruments.items()))
         return 0
+    if not a.check_only:
+        # Before this run's writer starts: what a killed earlier run left unsaved is otherwise never promoted.
+        # Binance also takes the shared stream directory used before there was one per venue.
+        streams = [out / "stream" / a.venue] + ([out / "stream"] if a.venue == "binance" else [])
+        for run in (r for stream in streams for r in recover_stream(stream, out / "catalog")):
+            size = f"{run['files']} file(s), {run['bytes'] / 1e6:.1f} MB"
+            if "error" in run:
+                print(f"could not recover {run['run']} ({size}), left in place: {run['error']}")
+            else:
+                print(f"recovered {run['run']} into the catalog ({size})")
     try:
         node, _ = build_node(a.symbols, out, venue=a.venue)
     except ValueError as e:

@@ -1,7 +1,11 @@
 """The market-data recorder: everything it subscribes to lands in a readable Parquet catalog; it never trades."""
 
 import json
+import shutil
+import subprocess
+import sys
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from nautilus_trader.backtest import BacktestEngine, BacktestEngineConfig
@@ -38,6 +42,7 @@ from lab.record import (
     build_node,
     heartbeat_path,
     perpetual_ids,
+    recover_stream,
     saved,
     streaming_config,
 )
@@ -196,3 +201,73 @@ def test_the_live_recorder_node_is_data_only(tmp_path, venue):
         assert recorder.config.book_depth == (50 if venue == "bybit" else None)  # Binance: full-depth diffs
     finally:
         node.dispose()
+
+
+# Records 5 s of market data and dies by SIGKILL three seconds in, as a container killed on stop does.
+KILLED_RUN = """
+import os, signal, sys
+from pathlib import Path
+from nautilus_trader.common import DataActor
+from tests.test_record import market_events, perpetual, record
+
+class Kill(DataActor):
+    trades = 0
+    def on_start(self):
+        self.subscribe_trades(perpetual("BTCUSDT").id)
+    def on_trade(self, trade):
+        self.trades += 1
+        if self.trades == 3000:
+            os.kill(os.getpid(), signal.SIGKILL)
+
+btc = perpetual("BTCUSDT")
+record(Path(sys.argv[1]), [btc], market_events(btc.id, 5000), extra_actors=[Kill()])
+"""
+
+
+def killed_run(out):
+    root = Path(__file__).parent.parent
+    p = subprocess.run([sys.executable, "-c", KILLED_RUN, str(out)], cwd=root, env={"PYTHONPATH": f"{root}/src:{root}"})
+    assert p.returncode == -9
+    return out / "stream" / "binance"
+
+
+def test_a_killed_runs_unsaved_stream_is_recovered_into_the_catalog(tmp_path):
+    stream = killed_run(tmp_path)
+    catalog = lambda: ParquetDataCatalog(str(tmp_path / "catalog"))  # noqa: E731
+    btc = ["BTCUSDT-PERP.BINANCE"]
+    assert catalog().query_trade_ticks(btc) == []  # the run died before its first promotion
+    (run,) = stream.glob("*/*")
+    assert any(run.rglob("*.feather.partial"))
+
+    (result,) = recover_stream(stream, tmp_path / "catalog")
+
+    assert "error" not in result and not run.exists()
+    assert len(catalog().query_trade_ticks(btc)) == 2000  # what it had flushed (each second) before dying
+    assert len(catalog().query_mark_price_updates(btc)) == 2000
+    assert recover_stream(stream, tmp_path / "catalog") == []
+    # The next recording of the same instrument promotes beside the recovered files.
+    later = T0 + 3_600_000 * MS
+    reloaded = CryptoPerpetual(
+        InstrumentId.from_str(btc[0]), Symbol("BTCUSDT"), Currency.from_str("BTC"), USDT, USDT, False, 1, 3,
+        Price.from_str("0.1"), Quantity.from_str("0.001"), later, later,
+    )  # fmt: skip
+    record(tmp_path, [reloaded], market_events(reloaded.id, 10, start_ns=later))
+    assert len(catalog().query_trade_ticks(btc)) == 2010
+
+
+def test_a_run_that_would_overlap_the_catalog_is_left_in_place(tmp_path):
+    stream = killed_run(tmp_path)
+    (run,) = stream.glob("*/*")
+    copy = tmp_path / "copy"
+    shutil.copytree(run, copy)
+    recover_stream(stream, tmp_path / "catalog")
+    shutil.copytree(copy, run)
+    # Recovered again (an earlier recovery that died before deleting the run): the same files, nothing to do.
+    assert "error" not in recover_stream(stream, tmp_path / "catalog")[0] and not run.exists()
+
+    shutil.copytree(copy, run)
+    trades = next((tmp_path / "catalog" / "data" / "trades").rglob("*.parquet"))
+    trades.rename(trades.with_name(trades.name.rsplit("_", 1)[0] + "_0000000000000000.parquet"))  # same span
+    (result,) = recover_stream(stream, tmp_path / "catalog")
+    assert "overlaps" in result["error"] and run.exists()
+    assert not (stream / "data").exists()  # nothing half-converted left behind
