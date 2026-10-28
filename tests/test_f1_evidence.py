@@ -27,7 +27,8 @@ def cash(*, event_id="credit", record_id="cash-r1", time=1):
             "currency": "USD",
             "amount": "250",
         },
-        sort_keys=True, separators=(",", ":"),
+        sort_keys=True,
+        separators=(",", ":"),
     ).encode()
 
 
@@ -50,7 +51,8 @@ def order():
             "fill_record_id": None,
             "fill_source_sha256": None,
         },
-        sort_keys=True, separators=(",", ":"),
+        sort_keys=True,
+        separators=(",", ":"),
     ).encode()
 
 
@@ -64,9 +66,12 @@ def test_same_frozen_journal_produces_identical_readonly_manifest_across_restart
     first = build_f1_local_evidence(ro, declared_commit_sha=SHA)
     second = build_f1_local_evidence(EconomicEventStore(path, "SIM-001", readonly=True), declared_commit_sha=SHA)
     assert first == second
-    assert first.sha256 == hashlib.sha256(
-        json.dumps(first.manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
-    ).hexdigest()
+    assert (
+        first.sha256
+        == hashlib.sha256(
+            json.dumps(first.manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+        ).hexdigest()
+    )
     report = first.manifest
     assert report["purpose"] == "F1_LOCAL_UNQUALIFIED_REPLAY_EVIDENCE"
     assert report["source_inventory_count"] == 1
@@ -119,7 +124,8 @@ def test_missing_broker_order_lifecycle_is_explicitly_not_complete(tmp_path):
             "price": "100",
             "commission": "0",
         },
-        sort_keys=True, separators=(",", ":"),
+        sort_keys=True,
+        separators=(",", ":"),
     ).encode()
     store.append_broker_fill_record(original_fill, source_namespace="broker")
     report = build_f1_local_evidence(store, declared_commit_sha=SHA).manifest

@@ -67,9 +67,7 @@ def _verify_archived_observations(db: sqlite3.Connection, book: EngineEconomicBo
             or type(raw) is not bytes
         ):
             raise EconomicStoreError("archived order statement sequence/head corrupted")
-        report = parse_external_order_statement(
-            raw, source_namespace=namespace, expected_account_id=book.account_id
-        )
+        report = parse_external_order_statement(raw, source_namespace=namespace, expected_account_id=book.account_id)
         if (
             report.schema_version != 2
             or report.source_ref != source_ref
@@ -110,19 +108,13 @@ def build_f1_local_evidence(store: EconomicEventStore, *, declared_commit_sha: s
         if not parity.matches:
             raise EconomicStoreError("independent rational projection disagrees with double-entry ledger")
         lifecycle = _replay(db, book)
-        orders = db.execute(
-            "SELECT source_namespace,source_bytes FROM broker_order_events ORDER BY seq"
-        ).fetchall()
+        orders = db.execute("SELECT source_namespace,source_bytes FROM broker_order_events ORDER BY seq").fetchall()
         tracked_fill_source_refs = set()
         for namespace, raw_order in orders:
-            order = parse_broker_order_event(
-                raw_order, source_namespace=namespace, expected_account_id=book.account_id
-            )
+            order = parse_broker_order_event(raw_order, source_namespace=namespace, expected_account_id=book.account_id)
             if order.kind == "FILL":
                 tracked_fill_source_refs.add(f"{namespace}:{order.fill_record_id}")
-        all_fill_refs = {
-            fact.source_ref for fact in book.events if type(fact) is BrokerFillFact
-        }
+        all_fill_refs = {fact.source_ref for fact in book.events if type(fact) is BrokerFillFact}
         if not tracked_fill_source_refs <= all_fill_refs:
             raise EconomicStoreError("order custody claims broker fills absent from economic history")
         complete_lifecycle_coverage = all_fill_refs == tracked_fill_source_refs
