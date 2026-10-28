@@ -14,8 +14,12 @@ from lab.settlement_input import parse_settled_cash_reversal_record
 
 
 def cash_record(
-    *, event_id="dividend-original", record_id="bank-original", when=1,
-    kind="DIVIDEND", amount="12.50",
+    *,
+    event_id="dividend-original",
+    record_id="bank-original",
+    when=1,
+    kind="DIVIDEND",
+    amount="12.50",
 ):
     return json.dumps(
         {
@@ -30,12 +34,21 @@ def cash_record(
             "currency": "USD",
             "amount": amount,
         },
-        sort_keys=True, separators=(",", ":"),
+        sort_keys=True,
+        separators=(",", ":"),
     ).encode()
 
 
-def reversal_record(original_raw, *, original_ns="broker", record_id="correction-one",
-                    event_id="reverse-dividend", amount="12.50", when=2, **changes):
+def reversal_record(
+    original_raw,
+    *,
+    original_ns="broker",
+    record_id="correction-one",
+    event_id="reverse-dividend",
+    amount="12.50",
+    when=2,
+    **changes,
+):
     original = json.loads(original_raw)
     correction = {
         "schema_version": 1,
@@ -99,9 +112,7 @@ def test_reversal_compensates_both_positive_and_negative_cash_flows(tmp_path, ki
     store = EconomicEventStore(tmp_path / "currency.sqlite", "SIM-001")
     original = cash_record(kind=kind, amount=amount)
     first = store.append_cash_record(original, source_namespace="broker")
-    restored = store.append_cash_reversal_record(
-        reversal_record(original, amount=amount), source_namespace="broker"
-    )
+    restored = store.append_cash_reversal_record(reversal_record(original, amount=amount), source_namespace="broker")
     assert restored.ledger.balance("cash:USD") == 0
     assert len(restored.ledger.journal) == 2
     assert compare_projection(restored).matches
@@ -171,12 +182,8 @@ def test_reversal_rejects_unbounded_decimal_and_duplicate_json_keys():
     original = cash_record()
     for payload in (reversal_record(original, amount="1E+99999999"), reversal_record(original, amount="NaN")):
         with pytest.raises((EconomicStoreError, EngineFactError)):
-            parse_settled_cash_reversal_record(
-                payload, source_namespace="broker", expected_account_id="SIM-001"
-            )
+            parse_settled_cash_reversal_record(payload, source_namespace="broker", expected_account_id="SIM-001")
     raw = reversal_record(original)
     duplicate = raw.replace(b'"account_id":"SIM-001",', b'"account_id":"SIM-001","account_id":"SIM-001",')
     with pytest.raises(EngineFactError):
-        parse_settled_cash_reversal_record(
-            duplicate, source_namespace="broker", expected_account_id="SIM-001"
-        )
+        parse_settled_cash_reversal_record(duplicate, source_namespace="broker", expected_account_id="SIM-001")

@@ -226,9 +226,7 @@ def parse_settled_cash_reversal_record(
     if type(raw) is not bytes or not 0 < len(raw) <= MAX_RECORD_BYTES:
         raise EngineFactError("cash reversal requires bounded original correction bytes")
     try:
-        record = json.loads(
-            raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_nonfinite
-        )
+        record = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_object, parse_constant=_reject_nonfinite)
     except (UnicodeError, TypeError, ValueError) as exc:
         raise EngineFactError("invalid cash reversal evidence") from exc
     if type(record) is not dict or set(record) != CASH_REVERSAL_FIELDS:
@@ -252,9 +250,7 @@ def parse_settled_cash_reversal_record(
         raise EngineFactError("cash reversal can only target a supported cash posting")
     from lab.engine_events import SHA256
 
-    if type(record["target_source_sha256"]) is not str or not SHA256.fullmatch(
-        record["target_source_sha256"]
-    ):
+    if type(record["target_source_sha256"]) is not str or not SHA256.fullmatch(record["target_source_sha256"]):
         raise EngineFactError("cash reversal lacks exact original source checksum")
     try:
         amount = exact(Decimal(record["amount"]), positive=True)
