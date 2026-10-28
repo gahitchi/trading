@@ -6,8 +6,14 @@ use crate::{
 };
 use futures_util::{SinkExt, StreamExt};
 use rtrb::PushError;
-use std::{sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
-use tokio::{sync::{mpsc, Semaphore}, time::{timeout, Instant, sleep_until}};
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use tokio::{
+    sync::{Semaphore, mpsc},
+    time::{Instant, sleep_until, timeout},
+};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 const MAX_STREAMS_PER_SOCKET: usize = 512;
@@ -25,14 +31,19 @@ struct SnapshotQueue {
 }
 impl SnapshotQueue {
     fn new(symbols: usize) -> Self {
-        Self { pending: vec![None; symbols], next_symbol: 0 }
+        Self {
+            pending: vec![None; symbols],
+            next_symbol: 0,
+        }
     }
     fn push(&mut self, req: SnapshotRequest) -> Result<(), MarketDataError> {
-        let slot = self.pending.get_mut(usize::from(req.symbol_id))
+        let slot = self
+            .pending
+            .get_mut(usize::from(req.symbol_id))
             .ok_or(MarketDataError::InvalidResponse("unknown snapshot symbol"))?;
-        if slot.is_none_or(|previous|
-            (req.generation, req.request_id) > (previous.generation, previous.request_id))
-        {
+        if slot.is_none_or(|previous| {
+            (req.generation, req.request_id) > (previous.generation, previous.request_id)
+        }) {
             *slot = Some(req);
         }
         Ok(())
@@ -41,7 +52,9 @@ impl SnapshotQueue {
         self.pending.iter().any(Option::is_some)
     }
     fn pop_next(&mut self) -> Option<SnapshotRequest> {
-        if self.pending.is_empty() { return None; }
+        if self.pending.is_empty() {
+            return None;
+        }
         for n in 0..self.pending.len() {
             let index = (self.next_symbol + n) % self.pending.len();
             if let Some(req) = self.pending[index].take() {
@@ -52,7 +65,6 @@ impl SnapshotQueue {
         None
     }
 }
-
 
 fn receive_unix_ns() -> Result<u64, MarketDataError> {
     let n = SystemTime::now()
@@ -345,7 +357,11 @@ impl LiveMarketDataEngine {
 mod snapshot_queue_tests {
     use super::{SnapshotQueue, SnapshotRequest};
     fn req(symbol_id: u16, generation: u64, request_id: u64) -> SnapshotRequest {
-        SnapshotRequest { symbol_id, generation, request_id }
+        SnapshotRequest {
+            symbol_id,
+            generation,
+            request_id,
+        }
     }
     #[test]
     fn newest_per_symbol_supersedes_stale_snapshot_requests() {

@@ -223,34 +223,38 @@ fn corruption_and_unknown_filter_fail_closed() {
 
 #[test]
 fn real_style_pu_discontinuity_invalidates_live_book_without_soft_acceptance() {
-    let t=table(BinanceEnvironment::Testnet);
-    let (tx,mut rx)=mpsc::channel(8);
-    let mut c=LiveBookConsumer::new(&t,tx).unwrap();
-    c.on_frame(&LiveFrame::Reset{generation:1}).unwrap();
-    let first=parse(
+    let t = table(BinanceEnvironment::Testnet);
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut c = LiveBookConsumer::new(&t, tx).unwrap();
+    c.on_frame(&LiveFrame::Reset { generation: 1 }).unwrap();
+    let first = parse(
         r#"{"stream":"btcusdt@depth@100ms","data":{
         "e":"depthUpdate","E":1700000000000,"s":"BTCUSDT",
         "U":100,"u":105,"pu":99,"b":[["100","2"]],"a":[["101","2"]]
         }}"#,
-        StreamGroup::PublicDepth
+        StreamGroup::PublicDepth,
     );
-    assert_eq!(c.on_frame(&first).unwrap(),Some(SyncOutcome::Buffered));
-    let req=rx.try_recv().unwrap();
-    let snapshot=parse_depth_snapshot(
+    assert_eq!(c.on_frame(&first).unwrap(), Some(SyncOutcome::Buffered));
+    let req = rx.try_recv().unwrap();
+    let snapshot = parse_depth_snapshot(
         br#"{"lastUpdateId":100,"bids":[["100","1"]],"asks":[["101","1"]]}"#,
-        req
-    ).unwrap();
-    assert_eq!(c.on_frame(&snapshot).unwrap(),Some(SyncOutcome::Activated));
+        req,
+    )
+    .unwrap();
+    assert_eq!(c.on_frame(&snapshot).unwrap(), Some(SyncOutcome::Activated));
     assert!(c.book(0).unwrap().is_tradable());
-    let inconsistent=parse(
+    let inconsistent = parse(
         r#"{"stream":"btcusdt@depth@100ms","data":{
         "e":"depthUpdate","E":1700000000100,"s":"BTCUSDT",
         "U":106,"u":110,"pu":103,"b":[["100","3"]],"a":[["101","2"]]
         }}"#,
-        StreamGroup::PublicDepth
+        StreamGroup::PublicDepth,
     );
-    assert_eq!(c.on_frame(&inconsistent).unwrap(),Some(SyncOutcome::NeedsSnapshot));
+    assert_eq!(
+        c.on_frame(&inconsistent).unwrap(),
+        Some(SyncOutcome::NeedsSnapshot)
+    );
     assert!(!c.book(0).unwrap().is_tradable());
-    let new_request=rx.try_recv().unwrap();
+    let new_request = rx.try_recv().unwrap();
     assert!(new_request.request_id > req.request_id);
 }
