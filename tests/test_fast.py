@@ -18,6 +18,7 @@ from nautilus_trader.model import (
 from nautilus_trader.persistence import ParquetDataCatalog
 
 from lab.fast import ImbalanceTaker, ImbalanceTakerConfig, backtest, build_paper_node
+from lab.risk_manager import RiskManagedStrategy, TradingState
 from lab.safety import set_kill_switch
 
 IID = "BTCUSDT-PERP.BINANCE"
@@ -112,8 +113,8 @@ def test_fees_and_latency_are_charged(market):
 
 def test_loss_limit_flattens_and_stops(market):
     path, *_ = market
-    r = backtest(path, cfg(max_loss=0.5), taker_bps=5, maker_bps=2, latency_ms=0)
-    assert r["stopped"].startswith("loss limit")
+    r = backtest(path, cfg(), max_loss=0.5, taker_bps=5, maker_bps=2, latency_ms=0)
+    assert r["stopped"].startswith("daily loss")
     assert r["pnl"] > -1.0  # stopped near the limit, not at the end of the run
 
 
@@ -121,12 +122,25 @@ def test_kill_switch_stops_new_orders(market, tmp_path):
     path, *_ = market
     kill = tmp_path / "KILL"
     set_kill_switch(kill, "halt", "operator test")
-    r = backtest(path, cfg(kill_file=str(kill)), taker_bps=0, maker_bps=0, latency_ms=0)
-    assert r["stopped"] == "kill switch: operator test"
-    assert r["entries"] <= 10  # whatever opened before the first one-second check
+    r = backtest(path, cfg(), kill_file=str(kill), taker_bps=0, maker_bps=0, latency_ms=0)
+    assert r["stopped"] == "kill switch (halt): operator test"
+    assert r["entries"] == 0  # the risk manager reads the kill file before the first order
+    assert r["risk_denials"].get("halted", 0) > 0
 
 
-@pytest.mark.parametrize("bad", [{"threshold": 0}, {"threshold": 1.5}, {"trade_size": 0}, {"max_loss": -1}])
+def test_position_limit_is_enforced_by_the_risk_manager(market):
+    path, *_ = market
+    r = backtest(path, cfg(trade_size=0.02), max_position=15.0, taker_bps=0, maker_bps=0, latency_ms=0)
+    assert r["entries"] == 0 and r["risk_denials"].get("position_limit", 0) > 0  # 0.02 BTC is ~20 USDT
+
+
+def test_bad_limits_are_refused(market):
+    path, *_ = market
+    with pytest.raises(ValueError):
+        backtest(path, cfg(), max_loss=0)
+
+
+@pytest.mark.parametrize("bad", [{"threshold": 0}, {"threshold": 1.5}, {"trade_size": 0}, {"hold_s": -1}])
 def test_config_rejects_nonsense(bad):
     with pytest.raises(ValueError):
         cfg(**bad)
@@ -135,7 +149,8 @@ def test_config_rejects_nonsense(bad):
 def test_paper_node_uses_simulated_execution_only():
     node, strategy = build_paper_node(cfg())  # builds without connecting
     try:
-        assert isinstance(strategy, ImbalanceTaker)
+        assert isinstance(strategy, ImbalanceTaker) and isinstance(strategy, RiskManagedStrategy)
+        assert strategy.risk.state is TradingState.ACTIVE and strategy.risk.venues == ["BINANCE"]
         assert str(node.environment) == "LIVE"
     finally:
         node.dispose()
