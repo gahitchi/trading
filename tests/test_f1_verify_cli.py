@@ -330,3 +330,86 @@ def test_cli_refuses_order_and_account_snapshots_from_distinct_times(tmp_path, c
     ]
     assert run(args) == 3
     assert "different snapshot times" in capsys.readouterr().err
+
+
+
+def test_opt_in_cli_requires_exact_order_lifecycle_not_just_receipt_quantity(tmp_path, capsys):
+    from lab.order_lifecycle import OrderLifecycleStore
+
+    path = tmp_path / "broker-with-order.db"
+    store = EconomicEventStore(path, "SIM-001")
+    store.append_cash_record(cash_activity(), source_namespace="broker")
+    life = OrderLifecycleStore(store)
+    ack = {
+        "schema_version": 1,
+        "account_id": "SIM-001",
+        "record_id": "broker-ack-001",
+        "event_id": "broker-order-ack-001",
+        "timestamp_ns": 15,
+        "source_kind": "BROKER_ORDER_EVENT",
+        "broker_order_id": "order-001",
+        "kind": "ACCEPTED",
+        "symbol": "SPY",
+        "side": "BUY",
+        "requested_quantity": "2",
+        "cumulative_executed_quantity": "0",
+        "remaining_quantity": "2",
+        "fill_record_id": None,
+        "fill_source_sha256": None,
+    }
+    life.append(json.dumps(ack).encode(), source_namespace="broker", expected_head=store.load().evidence_head)
+    execution = broker_receipt()
+    filled = {
+        **ack,
+        "record_id": "broker-order-fill-001",
+        "event_id": "broker-order-fill-event-001",
+        "timestamp_ns": 20,
+        "kind": "FILL",
+        "cumulative_executed_quantity": "2",
+        "remaining_quantity": "0",
+        "fill_record_id": "receipt-001",
+        "fill_source_sha256": hashlib.sha256(execution).hexdigest(),
+    }
+    life.append(
+        json.dumps(filled).encode(),
+        source_namespace="broker",
+        expected_head=store.load().evidence_head,
+        raw_fill=execution,
+    )
+    account = tmp_path / "account.json"
+    account.write_bytes(report())
+    orders = tmp_path / "orders.json"
+    orders.write_bytes(order_report())
+    args = [
+        "--journal", str(path), "--account", "SIM-001", "--statement", str(account),
+        "--orders", str(orders), "--source", "broker", "--require-order-lifecycle",
+    ]
+    assert run(args) == 0
+    response = json.loads(capsys.readouterr().out)
+    assert response["status"] == "MATCH"
+    assert response["order_lifecycle_checked"] is True
+    assert response["order_lifecycle_matches"] is True
+    assert response["order_lifecycle_deltas"][0]["recorded_status"] == "FILLED"
+    assert response["order_lifecycle_deltas"][0]["reported_status"] == "FILLED"
+    assert not response["execution_authorized"]
+
+
+def test_opt_in_cli_cannot_certify_broker_fill_without_order_lifecycle(tmp_path, capsys):
+    path = tmp_path / "untracked.db"
+    store = EconomicEventStore(path, "SIM-001")
+    store.append_cash_record(cash_activity(), source_namespace="broker")
+    store.append_broker_fill_record(broker_receipt(), source_namespace="broker")
+    account = tmp_path / "account.json"
+    account.write_bytes(report())
+    orders = tmp_path / "orders.json"
+    orders.write_bytes(order_report())
+    args = [
+        "--journal", str(path), "--account", "SIM-001", "--statement", str(account),
+        "--orders", str(orders), "--source", "broker", "--require-order-lifecycle",
+    ]
+    assert run(args) == 2
+    response = json.loads(capsys.readouterr().out)
+    assert response["status"] == "MISMATCH"
+    assert response["order_lifecycle_checked"] is True
+    assert response["order_lifecycle_matches"] is False
+    assert response["order_lifecycle_deltas"][0]["recorded_status"] is None

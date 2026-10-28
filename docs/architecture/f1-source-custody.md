@@ -222,3 +222,29 @@ and partial reports remain unproven; account corrections and compensating
 economic entries need separate contracts. The lifecycle is intentionally
 isolated from the legacy Nautilus execution agent, operator risk controls
 and real-money order routing. F1 and F6 qualification remain BLOCKED.
+
+
+## F1.5 lifecycle state versus independent order-report verification
+
+The read-only reconcile_order_lifecycle function performs order-state
+reconstruction and externally supplied version-2 broker order report
+comparison under one SQLite read transaction. The check includes original
+receipt-identity parity, complete broker order set, exact requested and
+executed quantities, remaining open quantity, final-vs-pending status,
+and observation freshness. A locally CANCEL_PENDING order cannot silently
+match a broker statement that does not report a matching pending state.
+Untracked externally reported orders and unreported local orders produce
+explicit mismatch diagnostics, not fabricated events.
+
+The offline lab.f1_verify command accepts opt-in --require-order-lifecycle.
+With that flag, the account and order observations must be for the same
+as-of timestamp, order receipt inventory must be version 2, and the
+economic book and reconstructed order lifecycle must have the same ledger
+head. Mismatch exits with code 2, invalid/stale evidence with code 3.
+The default legacy F1 verifier remains backwards-compatible and does not
+claim that untracked order state has been independently verified.
+
+Even a status/quantity MATCH is NOT a broker-issued assertion and is not
+evidence of authentication, order authorization, broker finality or
+production readiness. Source authenticity and credential-safe adapter
+capture belong to later independent qualification.

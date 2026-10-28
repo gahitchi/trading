@@ -319,3 +319,133 @@ def test_preexisting_orphan_receipt_blocks_transition_and_does_not_forge_lifecyc
         append(store, lifecycle, order_raw())
     assert lifecycle.inspect().sequence == 0
     assert len(store.load().events) == 1
+
+
+
+def complete_report(*, orders, when=40):
+    from lab.order_observation import parse_external_order_statement
+
+    raw = json.dumps(
+        {
+            "schema_version": 2,
+            "account_id": "SIM-001",
+            "record_id": "independent-orders",
+            "as_of_ns": when,
+            "source_kind": "BROKER_ORDER_STATEMENT",
+            "complete_order_scope": True,
+            "orders": orders,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return parse_external_order_statement(raw, source_namespace="broker", expected_account_id="SIM-001")
+
+
+def order_summary(*, status, requested="1", executed="0", remaining="1", receipts=None, order_id="order-1"):
+    return {
+        "broker_order_id": order_id,
+        "symbol": "SPY",
+        "side": "BUY",
+        "status": status,
+        "requested_quantity": requested,
+        "executed_quantity": executed,
+        "remaining_quantity": remaining,
+        "execution_receipts": [] if receipts is None else receipts,
+    }
+
+
+def receipt_of(raw):
+    doc = json.loads(raw)
+    return {
+        "record_id": doc["record_id"],
+        "quantity": doc["quantity"],
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def test_complete_external_order_status_and_every_receipt_match_same_ledger_snapshot(tmp_path):
+    from lab.order_lifecycle import reconcile_order_lifecycle
+
+    store, lifecycle = make(tmp_path)
+    append(store, lifecycle, order_raw())
+    first = fill_raw()
+    append(
+        store,
+        lifecycle,
+        order_raw("first", kind="FILL", when=11, cumulative="0.4", remaining="0.6", fill=first),
+        first,
+    )
+    second = fill_raw("fill-2", amount="0.6", when=12)
+    append(
+        store,
+        lifecycle,
+        order_raw("second", kind="FILL", when=12, cumulative="1", remaining="0", fill=second),
+        second,
+    )
+    report = complete_report(
+        orders=[order_summary(status="FILLED", executed="1", remaining="0", receipts=[receipt_of(first), receipt_of(second)])],
+    )
+    parity = reconcile_order_lifecycle(lifecycle, report)
+    assert parity.matches
+    assert parity.receipt_scope_checked
+    assert parity.economic_head == store.load().evidence_head
+    assert parity.order_head == lifecycle.inspect().evidence_head
+    assert parity.order_deltas[0].matches
+    assert not parity.broker_source_authenticated
+    assert not parity.execution_authorized
+
+
+def test_external_status_disagreement_is_visible_despite_exact_fill_quantity(tmp_path):
+    from lab.order_lifecycle import reconcile_order_lifecycle
+
+    store, lifecycle = make(tmp_path)
+    append(store, lifecycle, order_raw())
+    execution = fill_raw()
+    append(
+        store,
+        lifecycle,
+        order_raw("partial", kind="FILL", when=11, cumulative="0.4", remaining="0.6", fill=execution),
+        execution,
+    )
+    mismatch = complete_report(
+        orders=[order_summary(status="CANCELED", executed="0.4", remaining="0", receipts=[receipt_of(execution)])],
+    )
+    parity = reconcile_order_lifecycle(lifecycle, mismatch)
+    assert not parity.matches
+    assert parity.order_deltas[0].recorded_status == "PARTIALLY_FILLED"
+    assert parity.order_deltas[0].reported_status == "CANCELED"
+    assert parity.order_deltas[0].remaining_delta == D("-0.6")
+    assert store.load().ledger.position("SPY") == D("0.4")
+
+
+def test_untracked_external_zero_fill_order_prevents_complete_lifecycle_match(tmp_path):
+    from lab.order_lifecycle import reconcile_order_lifecycle
+
+    _, lifecycle = make(tmp_path)
+    report = complete_report(orders=[order_summary(status="ACCEPTED", order_id="unknown-1")])
+    parity = reconcile_order_lifecycle(lifecycle, report)
+    assert not parity.matches
+    assert parity.order_deltas[0].recorded_status is None
+
+
+def test_cancel_pending_cannot_be_mistaken_for_final_reported_status(tmp_path):
+    from lab.order_lifecycle import reconcile_order_lifecycle
+
+    store, lifecycle = make(tmp_path)
+    append(store, lifecycle, order_raw())
+    append(store, lifecycle, order_raw("cancel-pending", kind="CANCEL_REQUESTED", when=12))
+    report = complete_report(orders=[order_summary(status="ACCEPTED")], when=13)
+    parity = reconcile_order_lifecycle(lifecycle, report)
+    assert not parity.matches
+    assert parity.order_deltas[0].recorded_status == "CANCEL_PENDING"
+
+
+def test_external_order_status_report_before_latest_custody_is_refused(tmp_path):
+    from lab.order_lifecycle import reconcile_order_lifecycle
+
+    store, lifecycle = make(tmp_path)
+    append(store, lifecycle, order_raw())
+    append(store, lifecycle, order_raw("cancel-pending", kind="CANCEL_REQUESTED", when=12))
+    report = complete_report(orders=[order_summary(status="ACCEPTED")], when=11)
+    with pytest.raises(EconomicStoreError, match="older"):
+        reconcile_order_lifecycle(lifecycle, report)
