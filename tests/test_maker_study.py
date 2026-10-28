@@ -117,3 +117,14 @@ def test_maker_study_command_respects_the_holdout_and_logs_the_trial(tmp_path, c
     assert trial["kind"] == "maker-study" and trial["window"][1] == deltas[-1].ts_init
     with pytest.raises(SystemExit, match="holdout"):
         lab_main([*study, "--end", "2100-01-01"])
+
+
+def test_the_spread_captured_is_measured_while_the_order_was_still_at_the_touch():
+    """The book can show the bid level gone before the trades that emptied it arrive: the fill then prints with
+    the mid already below the bid. The half spread captured is against the last mid with the order at the touch."""
+    deltas = snap(0) + snap(55 * MS, bid=99.85, ask=99.95)  # the book drops a tick before the prints arrive
+    fills, mids = run(deltas + snap(100 * MS, bid=99.85, ask=99.95), [trade(60 * MS, 99.95, 3.0)])
+    assert list(fills["price"]) == [99.95]
+    assert fills["mid"][0] == pytest.approx(100.0)  # not 99.90, the mid after the level had gone
+    table = evaluate(fills, mids, MakerSettings(horizons_s=(0.0,))).set_index("group")
+    assert table.loc["all", "at_fill_bps"] > 0 > table.loc["all", "markout_bps"]
