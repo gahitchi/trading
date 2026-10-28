@@ -40,6 +40,11 @@ See [Live Upgrade Part 1](LIVE_UPGRADE_PART1.md).
   risk-gated short/cover proposals, append-only fsync journal, partial-fill
   accounting, crash inspection and a command-line demo. It has no broker
   connector or network capability. See [Part 6 implementation](PART6.md).
+- `crates/execution`: authenticated Binance USD-M Futures WebSocket
+  signing/order transport, real private user stream, bounded execution
+  report and account update channels. Mainnet orders are sealed, and
+  all real order routing remains unqualified pending independent Part 3
+  reconciliation. See [Live Upgrade Part 2](LIVE_UPGRADE_PART2.md).
 - `crates/market-data`: live (not simulated) Binance USD-M Futures REST
   exchangeInfo bootstrap, separate public/regular-market WebSockets, complete
   depth batches and Core 1 SPSC snapshot sync. This is **read-only**.
