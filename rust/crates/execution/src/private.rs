@@ -55,6 +55,7 @@ pub enum PrivateEvent {
     Order(ExchangeFill),
     Account(AccountUpdate),
     ReconciliationRequired(&'static str),
+    Connected,
     Disconnected,
 }
 fn value<'a>(v: &'a Value, k: &str) -> Result<&'a Value, ExecutionError> {
@@ -311,6 +312,9 @@ impl UserDataStreamManager {
                 }
             };
             retry_seconds = 1;
+            tx.send(PrivateEvent::Connected)
+                .await
+                .map_err(|_| ExecutionError::UnexpectedState)?;
             let mut heartbeat = tokio::time::interval(Duration::from_secs(25 * 60));
             heartbeat.tick().await;
             loop {

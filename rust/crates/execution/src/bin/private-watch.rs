@@ -51,6 +51,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 match next {
                     Some(PrivateEvent::Order(_))=>orders+=1,
                     Some(PrivateEvent::Account(_))=>accounts+=1,
+                    Some(PrivateEvent::Connected)=>{
+                        println!("private stream websocket connected");
+                    },
                     Some(PrivateEvent::ReconciliationRequired(reason))=>{
                         eprintln!("PRIVATE STREAM RECONCILIATION REQUIRED: {reason}");
                     }
