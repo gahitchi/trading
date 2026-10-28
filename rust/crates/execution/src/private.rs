@@ -254,6 +254,7 @@ impl UserDataStreamManager {
         match self.environment {
             BinanceEnvironment::Mainnet => "wss://fstream.binance.com/private/ws/",
             BinanceEnvironment::Testnet => "wss://stream.binancefuture.com/ws/",
+            BinanceEnvironment::Demo => "wss://demo-fstream.binance.com/ws/",
         }
     }
     async fn start(&self) -> Result<String, ExecutionError> {

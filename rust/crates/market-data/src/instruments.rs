@@ -7,18 +7,21 @@ use trading_core_types::{FixedPrice, InstrumentSpec, NumericError};
 pub enum BinanceEnvironment {
     Mainnet,
     Testnet,
+    Demo,
 }
 impl BinanceEnvironment {
     pub const fn rest(self) -> &'static str {
         match self {
             Self::Mainnet => "https://fapi.binance.com",
             Self::Testnet => "https://testnet.binancefuture.com",
+            Self::Demo => "https://demo-fapi.binance.com",
         }
     }
     pub const fn ws_public(self) -> &'static str {
         match self {
             Self::Mainnet => "wss://fstream.binance.com/public",
             Self::Testnet => "wss://stream.binancefuture.com",
+            Self::Demo => "wss://demo-fstream.binance.com",
         }
     }
     pub const fn ws_market(self) -> &'static str {

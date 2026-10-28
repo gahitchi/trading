@@ -22,7 +22,8 @@ fn parse_args() -> Result<(BinanceEnvironment, Vec<String>), String> {
                 env = match args.next().as_deref() {
                     Some("mainnet") => BinanceEnvironment::Mainnet,
                     Some("testnet") => BinanceEnvironment::Testnet,
-                    _ => return Err("expected mainnet or testnet".into()),
+                    Some("demo") => BinanceEnvironment::Demo,
+                    _ => return Err("expected mainnet, testnet, or demo".into()),
                 };
             }
             "--symbols" => {

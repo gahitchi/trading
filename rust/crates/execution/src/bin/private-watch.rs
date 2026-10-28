@@ -14,6 +14,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "--environment" => {
                 environment = match args.next().as_deref() {
                     Some("testnet") => BinanceEnvironment::Testnet,
+                    Some("demo") => BinanceEnvironment::Demo,
                     Some("mainnet") => BinanceEnvironment::Mainnet,
                     _ => return Err("invalid environment".into()),
                 };
