@@ -130,8 +130,11 @@ class Catalog:
         return out
 
 
-def _stream(out: Path, now_ns: int) -> dict:
-    files, size, oldest = 0, 0, None
+def _stream(out: Path, now_ns: int, started: dict[str, int | None]) -> dict:
+    """Files waiting in out/stream/<venue> to be promoted into the catalog. A file last written before its venue's
+    recorder started is left over from an earlier run that stopped without saving (killed, or a stop that timed
+    out): a recorder only ever promotes its own run's files, so these stay out of the catalog for good."""
+    files, size, oldest, left_files, left_size = 0, 0, None, 0, 0
     stream = out / "stream"
     if stream.is_dir():
         for f in stream.rglob("*"):
@@ -144,7 +147,16 @@ def _stream(out: Path, now_ns: int) -> dict:
             files += 1
             size += stat.st_size
             oldest = stat.st_mtime_ns if oldest is None else min(oldest, stat.st_mtime_ns)
-    return {"files": files, "bytes": size, "oldest_age_s": (now_ns - oldest) / NS if oldest else None}
+            since = started.get(f.relative_to(stream).parts[0].upper())
+            if since is None or stat.st_mtime_ns < since:
+                left_files += 1
+                left_size += stat.st_size
+    return {
+        "files": files,
+        "bytes": size,
+        "oldest_age_s": (now_ns - oldest) / NS if oldest else None,
+        "leftover": {"files": left_files, "bytes": left_size},
+    }
 
 
 class Rates:
@@ -319,9 +331,22 @@ class Monitor:
             checks.append(_check("recorder", "fail", f"no heartbeat in {self.out / 'heartbeats'}"))
         by_venue = {r["venue"]: r for r in recorders}
 
+        stream = _stream(self.out, now_ns, {r["venue"]: _parse_iso(r["started"]) for r in recorders})
+        if left := stream["leftover"]["files"]:
+            checks.append(
+                _check(
+                    "stream",
+                    "warn",
+                    f"{stream['leftover']['bytes'] / 1e6:.1f} MB in {left} file(s) left by a recorder run that stopped "
+                    "without saving; they are never promoted into the catalog",
+                )
+            )
+
+        # Recorded instruments: the live feeds, plus any with market data in the catalog. Not every instrument
+        # definition in it: an adapter that loads a whole venue (Bybit) streams hundreds of definitions.
         instruments = []
         feed_ids = {i for r in recorders for i in r["feeds"]}
-        for iid in sorted(feed_ids | {i for by in inv.values() for i in by if "." in i}):
+        for iid in sorted(feed_ids | {i for kind, by in inv.items() if kind in SERIES for i in by}):
             venue = iid.rsplit(".", 1)[-1]
             r = by_venue.get(venue)
             feed = r["feeds"].get(iid) if r else None
@@ -392,7 +417,7 @@ class Monitor:
             "events_per_s": sum(rates) if rates else None,
             "instruments": instruments,
             "catalog": {**total, "by_type": by_type, "first": _iso(oldest), "last": _iso(newest)},
-            "stream": _stream(self.out, now_ns),
+            "stream": stream,
             "disk": {"free": usage.free, "total": usage.total, "bytes_per_day": per_day, "runway_days": runway},
             "paper": self._paper(now_ns) if self.results else None,
         }

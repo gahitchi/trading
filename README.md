@@ -49,7 +49,10 @@ and at stop:
 Run one recorder per venue: each is its own process, so one exchange's outage or maintenance never interrupts
 the other's recording, and both write into the same catalog (each instrument has its own files).
 `data/market/heartbeats/<venue>.json` shows counts and the last event per instrument, and lists instruments
-silent for over a minute. A lost connection ends the process with an error; run it where it is restarted:
+silent for over a minute. A lost connection ends the process with an error; run it where it is restarted. Stop
+it with Ctrl+C or SIGTERM and give it time to save (compose allows 2 minutes): a killed run's last hour stays in
+`data/market/stream/` and never reaches the catalog.
+
 
 ```bash
 lab record --check-only                              # validate without connecting
@@ -64,8 +67,8 @@ reads either venue (`--venue`); `fast` still runs on the Binance recordings only
 
 `lab monitor` (the `monitor` service) serves a read-only dashboard at
 http://127.0.0.1:8766: an overall status with the checks behind it (each venue's heartbeat fresh, every feed live, data
-promoted into the catalog within the hour, days of disk left at the current write rate), events per second per
-instrument over the last 30 minutes, and per instrument the rows and bytes in the catalog, the recorded span, and
+promoted into the catalog within the hour, no stream files left by a run that was killed before saving, days of
+disk left at the current write rate), events per second per instrument over the last 30 minutes, and per instrument the rows and bytes in the catalog, the recorded span, and
 its coverage: holes of over a minute between order-book files, which is where the recorder was down. The same data
 is JSON at `/api/status`; `/health` answers 503 while no recorder is running, for an external uptime probe. It reads
 `data/market/` and `results/` only and never connects to an exchange. A connection drop the adapter recovers from without

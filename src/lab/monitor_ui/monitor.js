@@ -110,7 +110,11 @@ function render(s) {
   $("recorded").textContent = duration(span);
   $("size").textContent = bytes(s.catalog.bytes);
   $("size").title = `${int.format(s.catalog.rows)} rows in ${int.format(s.catalog.files)} files`;
-  $("stream").textContent = s.stream.files ? `${bytes(s.stream.bytes)} · ${s.stream.files} file(s)` : "none";
+  // The running recorders' files, promoted hourly. Leftovers of runs that stopped without saving never are:
+  // the "stream" check reports those.
+  const left = s.stream.leftover, pending = s.stream.files - left.files;
+  $("stream").textContent = pending ? `${bytes(s.stream.bytes - left.bytes)} · ${pending} file(s)` : "none";
+  $("stream").title = left.files ? `not counted: ${bytes(left.bytes)} in ${left.files} leftover file(s)` : "";
   $("disk").textContent = s.disk.runway_days != null ? duration(s.disk.runway_days * 86400) : `${bytes(s.disk.free)} free`;
   $("disk").title = `${bytes(s.disk.free)} free of ${bytes(s.disk.total)}` +
     (s.disk.bytes_per_day ? `, writing ${bytes(s.disk.bytes_per_day)} per day` : "");

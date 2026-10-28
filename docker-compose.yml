@@ -12,6 +12,9 @@ services:
     image: trading-lab:latest
     build: .
     restart: unless-stopped         # reconnects by restarting after a lost connection or exchange maintenance
+    # On stop the recorder saves up to an hour of streamed data into the catalog. Docker's default 10 s then
+    # SIGKILLs it mid-save, and a killed run's stream files are never promoted.
+    stop_grace_period: 2m
     environment:
       TZ: UTC
       LAB_RECORD_VENUE: binance
