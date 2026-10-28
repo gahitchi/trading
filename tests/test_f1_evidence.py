@@ -148,7 +148,6 @@ def test_manifest_rejects_noncanonical_source_revision(tmp_path, bad):
         build_f1_local_evidence(store, declared_commit_sha=bad)
 
 
-
 def test_read_only_evidence_requires_original_scoped_cash_account_policy_when_requested(tmp_path):
     from lab.cash_scope import parse_cash_account_policy
 
@@ -180,11 +179,6 @@ def test_read_only_evidence_requires_original_scoped_cash_account_policy_when_re
 
     policy = tmp_path / "account-policy.json"
     policy.write_bytes(raw)
-    assert run([
-        "--journal", str(path), "--account", "SIM-001", "--commit", SHA,
-        "--require-cash-account-scope",
-    ]) == 3
-    assert run([
-        "--journal", str(path), "--account", "SIM-001", "--commit", SHA,
-        "--cash-policy", str(policy), "--require-cash-account-scope",
-    ]) == 0
+    base_args = ["--journal", str(path), "--account", "SIM-001", "--commit", SHA]
+    assert run([*base_args, "--require-cash-account-scope"]) == 3
+    assert run([*base_args, "--cash-policy", str(policy), "--require-cash-account-scope"]) == 0

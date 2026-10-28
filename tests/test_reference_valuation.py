@@ -27,7 +27,6 @@ def book():
     return state
 
 
-
 def source(*, when=10, account="SIM-001", scope=True, currency="USD", marks=None):
     if marks is None:
         marks = [
@@ -48,7 +47,6 @@ def source(*, when=10, account="SIM-001", scope=True, currency="USD", marks=None
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
-
 
 
 def parse(raw):
@@ -75,7 +73,6 @@ def test_long_short_realized_and_unrealized_exact_without_economic_event():
     assert not value.broker_source_authenticated
     assert not value.executable_market_price
     assert not value.trading_authorized
-
 
 
 @pytest.mark.parametrize(

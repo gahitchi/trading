@@ -26,10 +26,8 @@ def policy_raw(account="SIM-001", klass="EQUITY", currency="USD", account_type="
     ).encode()
 
 
-
 def policy(raw=None):
     return parse_cash_account_policy(policy_raw() if raw is None else raw, expected_account_id="SIM-001")
-
 
 
 def seeded():
@@ -53,7 +51,6 @@ def seeded():
         separators=(",", ":"),
     ).encode()
     return state.append(parse_settled_cash_record(raw, source_namespace="bank", expected_account_id="SIM-001"))
-
 
 
 def fill(state, id_, when, side, qty, price="100"):
@@ -102,7 +99,6 @@ def test_cash_overdraft_in_any_historical_prefix_is_refused_after_later_deposit(
         validate_cash_account_scope(state, policy())
 
 
-
 def seeded_from(state, *, amount, when):
     from lab.settlement_input import parse_settled_cash_record
 
@@ -123,7 +119,6 @@ def seeded_from(state, *, amount, when):
         separators=(",", ":"),
     ).encode()
     return state.append(parse_settled_cash_record(raw, source_namespace="bank", expected_account_id="SIM-001"))
-
 
 
 @pytest.mark.parametrize(
