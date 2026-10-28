@@ -48,7 +48,7 @@ def seeded():
             "amount": "500",
         },
         sort_keys=True,
-        separators=(",", ":")
+        separators=(",", ":"),
     ).encode()
     return state.append(parse_settled_cash_record(raw, source_namespace="bank", expected_account_id="SIM-001"))
 
