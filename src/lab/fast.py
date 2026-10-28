@@ -1,10 +1,11 @@
 """
-Fast trading: one strategy, the same code in a backtest on recorded data and in paper trading on live data.
+Fast trading: the same strategy code in a backtest on recorded data and in paper trading on live data.
 
 ImbalanceTaker is the first, deliberately simple, hypothesis: when the 5-level book imbalance (lab.micro) is
 extreme, take liquidity in its direction and leave after a fixed holding time. Orders are limit orders at the
 opposite touch, immediate-or-cancel: they take what is shown there and never sweep a thin book. It exists to exercise the
-platform end to end; `lab micro-study` decides whether the imbalance is worth trading at all.
+platform end to end; `lab micro-study` decides whether the imbalance is worth trading at all. The passive
+counterpart, PassiveMaker, is in lab.maker and runs through the same backtest and paper node.
 
 Guards: the strategy is a RiskManagedStrategy (lab.risk_manager), so every order passes the trader's risk manager
 and then NautilusTrader's RiskEngine: the lab kill switch (`lab kill`), a daily loss cap that flattens and stops new
@@ -100,11 +101,13 @@ def fast_risk(
     return RiskManager(limits, [venue], kill_file=kill_file, state_path=state_path, audit_path=audit_path)
 
 
-class ImbalanceTaker(RiskManagedStrategy):
-    def __init__(self, config: ImbalanceTakerConfig, risk: RiskManager):
+class FastStrategy(RiskManagedStrategy):
+    """What every fast strategy shares: the instrument's book, the run report for `lab monitor`, exits at the touch
+    and the count of filled entries. Subclasses trade in on_book_deltas and name their parameters in params()."""
+
+    def __init__(self, config, risk: RiskManager):
         super().__init__(config, risk)
         self.iid = InstrumentId.from_str(config.instrument_id)
-        self.entry_ns = None
         self.stopped_reason = None
         self.entries = 0  # filled entries; a rejected or unfilled IOC entry is not a trade
         self.entry_orders = set()
@@ -123,6 +126,9 @@ class ImbalanceTaker(RiskManagedStrategy):
         self._close()
         if self.config.report:
             self._write_report(running=False)
+
+    def params(self) -> dict:
+        raise NotImplementedError
 
     def _on_report(self, _event):
         self._write_report(running=True)
@@ -158,11 +164,7 @@ class ImbalanceTaker(RiskManagedStrategy):
             "running": running,
             "strategy": type(self).__name__,
             "instrument": str(self.iid),
-            "params": {
-                "trade_size": self.config.trade_size,
-                "threshold": self.config.threshold,
-                "hold_s": self.config.hold_s,
-            },
+            "params": self.params(),
             "equity": equity,
             "start_equity": self.start_equity,
             "pnl": equity - self.start_equity if equity is not None and self.start_equity is not None else None,
@@ -211,6 +213,15 @@ class ImbalanceTaker(RiskManagedStrategy):
     def _busy(self) -> bool:
         return bool(self.cache.orders_open(instrument_id=self.iid, strategy_id=self.strategy_id))
 
+
+class ImbalanceTaker(FastStrategy):
+    def __init__(self, config: ImbalanceTakerConfig, risk: RiskManager):
+        super().__init__(config, risk)
+        self.entry_ns = None
+
+    def params(self) -> dict:
+        return {"trade_size": self.config.trade_size, "threshold": self.config.threshold, "hold_s": self.config.hold_s}
+
     def on_book_deltas(self, deltas):
         if not deltas.flags & F_LAST or self._busy():
             return
@@ -239,6 +250,15 @@ class ImbalanceTaker(RiskManagedStrategy):
             self.entry_ns = now
 
 
+def make_strategy(config, risk: RiskManager) -> FastStrategy:
+    """The fast strategy a config describes: ImbalanceTaker, or PassiveMaker (lab.maker)."""
+    from lab.maker import PassiveMaker, PassiveMakerConfig
+
+    if isinstance(config, PassiveMakerConfig):
+        return PassiveMaker(config, risk)
+    return ImbalanceTaker(config, risk)
+
+
 # ----------------------------------------------------------------------------- backtest on recorded data
 
 
@@ -258,7 +278,7 @@ def trip_stats(trips: list[float]) -> dict:
 
 def backtest(
     catalog_path: str,
-    config: ImbalanceTakerConfig,
+    config,
     *,
     max_loss: float = 100.0,
     max_position: float | None = None,
@@ -317,7 +337,7 @@ def backtest(
         engine.add_data(deltas)
         if trades:
             engine.add_data(trades)
-        strategy = ImbalanceTaker(config, risk)
+        strategy = make_strategy(config, risk)
         add_strategy(engine, strategy, risk)
         engine.run()
         account = engine.cache.account_for_venue(Venue(str(inst.id.venue)))
@@ -340,7 +360,7 @@ def backtest(
 
 
 def build_paper_node(
-    config: ImbalanceTakerConfig,
+    config,
     *,
     capital: float = 10_000.0,
     taker_bps=5.0,
@@ -401,6 +421,6 @@ def build_paper_node(
         .with_risk_engine_config(engine_config(risk.limits, [iid], live=True))
         .build()
     )
-    strategy = ImbalanceTaker(config, risk)
+    strategy = make_strategy(config, risk)
     add_strategy(node, strategy, risk)
     return node, strategy

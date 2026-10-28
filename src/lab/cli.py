@@ -170,9 +170,16 @@ def cmd_maker_study(cfg, a):
     except ValueError as e:
         raise SystemExit(str(e)) from e
     settings = MakerSettings(
-        every_ms=a.every_ms, latency_ms=a.latency_ms, horizons_s=tuple(a.horizons), maker_fee_bps=a.maker_bps
+        every_ms=a.every_ms,
+        latency_ms=a.latency_ms,
+        horizons_s=tuple(a.horizons),
+        maker_fee_bps=a.maker_bps,
+        improve_ticks=a.improve,
     )
-    fills, mids, table = study(str(catalog), iid, settings, start, end)
+    try:
+        fills, mids, table = study(str(catalog), iid, settings, start, end)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
     if not len(mids[0]):
         raise SystemExit(f"no order-book data for {iid} in {catalog} before its holdout")
     params = {
@@ -180,6 +187,7 @@ def cmd_maker_study(cfg, a):
         "latency_ms": a.latency_ms,
         "horizons_s": list(a.horizons),
         "maker_bps": a.maker_bps,
+        "improve": a.improve,
     }
     n = fast_research.register_trial(
         cfg.results_dir, "maker-study", iid, params, (start, end),
@@ -201,18 +209,39 @@ def cmd_maker_study(cfg, a):
 
 def _fast_config(cfg, a, *, report=None):
     from lab.fast import ImbalanceTakerConfig
+    from lab.maker import PassiveMakerConfig
     from lab.record import perpetual_ids
 
     try:
+        iid = str(perpetual_ids([a.symbol])[0])
+        if a.strategy == "maker":
+            return PassiveMakerConfig(
+                instrument_id=iid,
+                quote_size=a.size,
+                max_inventory=a.max_inventory,
+                improve_ticks=a.improve,
+                min_favour=a.min_favour,
+                max_hold_s=a.max_hold,
+                report=report,
+            )
         return ImbalanceTakerConfig(
-            instrument_id=str(perpetual_ids([a.symbol])[0]),
-            trade_size=a.size,
-            threshold=a.threshold,
-            hold_s=a.hold,
-            report=report,
+            instrument_id=iid, trade_size=a.size, threshold=a.threshold, hold_s=a.hold, report=report
         )
     except ValueError as e:
         raise SystemExit(str(e)) from e
+
+
+def _strategy_params(a) -> dict:
+    """The strategy's own settings, as they are fingerprinted in the trial log and the holdout ledger."""
+    if a.strategy == "maker":
+        return {
+            "strategy": "passive_maker", "size": a.size, "max_inventory": a.max_inventory, "improve": a.improve,
+            "min_favour": a.min_favour, "max_hold_s": a.max_hold,
+        }  # fmt: skip
+    return {"strategy": "imbalance_taker", "size": a.size, "threshold": a.threshold, "hold_s": a.hold}
+
+
+STRATEGY_NAMES = {"taker": "imbalance taker", "maker": "passive maker"}
 
 
 def cmd_fast_backtest(cfg, a):
@@ -225,7 +254,7 @@ def cmd_fast_backtest(cfg, a):
     config = _fast_config(cfg, a)
     iid = config.instrument_id
     params = {
-        "strategy": "imbalance_taker", "size": a.size, "threshold": a.threshold, "hold_s": a.hold,
+        **_strategy_params(a),
         "max_loss": a.max_loss, "max_position": a.max_position, "capital": a.capital, "taker_bps": a.fee_bps, "maker_bps": a.maker_bps,
         "latency_ms": a.latency_ms,
     }  # fmt: skip
@@ -260,7 +289,7 @@ def cmd_fast_backtest(cfg, a):
         cfg.results_dir, "fast-backtest", iid, params, (r["start_ns"], r["end_ns"]), result, holdout=a.holdout
     )
     first, last = (pd.Timestamp(r[k], tz="UTC") for k in ("start_ns", "end_ns"))
-    print(f"{iid} imbalance taker, {first:%Y-%m-%d %H:%M} .. {last:%Y-%m-%d %H:%M} UTC")
+    print(f"{iid} {STRATEGY_NAMES[a.strategy]}, {first:%Y-%m-%d %H:%M} .. {last:%Y-%m-%d %H:%M} UTC")
     print(
         f"  {'HOLDOUT test (recorded)' if a.holdout else 'research data'}; configurations tried on research data: {n}"
     )
@@ -304,7 +333,7 @@ def cmd_fast_paper(cfg, a):
     except ValueError as e:
         raise SystemExit(str(e)) from e
     print(
-        f"fast paper node ready: {a.symbol.upper()} imbalance taker on live Binance data, simulated fills "
+        f"fast paper node ready: {a.symbol.upper()} {STRATEGY_NAMES[a.strategy]} on live Binance data, simulated fills "
         f"(no exchange orders, no keys); `lab kill` stops it"
     )
     if a.check_only:
@@ -406,6 +435,7 @@ def build_parser() -> argparse.ArgumentParser:
     mk.add_argument("--latency-ms", type=int, default=50, help="from placing an order to it resting (default 50)")
     mk.add_argument("--horizons", type=float, nargs="+", default=[1.0, 5.0, 30.0, 60.0], help="seconds after fill")
     mk.add_argument("--maker-bps", type=float, default=2.0, help="maker fee per side in bps (default 2)")
+    mk.add_argument("--improve", type=int, default=0, help="quote this many ticks inside the spread (default 0: join)")
     mk.set_defaults(fn=cmd_maker_study)
 
     fast = sub.add_parser("fast", help="fast crypto strategy: backtest on recorded data, paper on live data")
@@ -416,9 +446,18 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         fp = fsub.add_parser(name, help=text)
         fp.add_argument("symbol", help="Binance USD-M perpetual, e.g. BTCUSDT")
-        fp.add_argument("--size", type=float, default=0.001, help="trade size in base units (default 0.001)")
-        fp.add_argument("--threshold", type=float, default=0.6, help="|book imbalance| to enter (default 0.6)")
-        fp.add_argument("--hold", type=float, default=5.0, help="seconds to hold (default 5)")
+        fp.add_argument(
+            "--strategy", choices=sorted(STRATEGY_NAMES), default="taker", help="imbalance taker or passive maker"
+        )
+        fp.add_argument("--size", type=float, default=0.001, help="trade / quote size in base units (default 0.001)")
+        fp.add_argument("--threshold", type=float, default=0.6, help="taker: |book imbalance| to enter (default 0.6)")
+        fp.add_argument("--hold", type=float, default=5.0, help="taker: seconds to hold (default 5)")
+        fp.add_argument("--max-inventory", type=float, help="maker: position cap, base units (default 3 x --size)")
+        fp.add_argument("--improve", type=int, default=0, help="maker: ticks inside the spread (default 0: join)")
+        fp.add_argument(
+            "--min-favour", type=float, default=-1.0, help="maker: quote a side only while side x imbalance >= this"
+        )
+        fp.add_argument("--max-hold", type=float, default=60.0, help="maker: exit inventory older than this, s (60)")
         fp.add_argument(
             "--max-loss", type=float, default=100.0, help="daily loss cap (quote): flatten, no new risk until 00:00 UTC"
         )

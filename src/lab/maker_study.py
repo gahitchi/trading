@@ -5,11 +5,13 @@ Replays recorded order-book deltas and trades (lab record) in receive-time order
 order of negligible size at the best bid and one at the best ask:
 
 - placed on the sampling clock (default every 100 ms) when that side has none, at the touch, at the back of the
-  queue (everything resting at that price when it is placed is ahead of it), live latency_ms later;
+  queue (everything resting at that price when it is placed is ahead of it), live latency_ms later; or, with
+  improve_ticks, that many ticks inside the spread, first in a queue of its own, when the spread is wide enough to
+  leave it short of the opposite touch;
 - the queue ahead shrinks with trades at that price and never exceeds what the book still shows there (cancels are
   assumed to come from ahead of it: optimistic);
 - filled by an aggressive trade through its price, or at its price once the queue ahead is used up;
-- cancelled, and replaced on the next tick, when the touch moves away from it.
+- cancelled, and replaced on the next tick, when the book shows a better price than its own.
 
 For each fill the markout is the move of the mid from the fill price to h seconds later, signed for the maker
 (positive = the fill was worth having), and net_bps is that minus the maker fee. at_fill_bps is the half spread a
@@ -43,6 +45,7 @@ class MakerSettings:
     latency_ms: int = 50
     horizons_s: tuple[float, ...] = (1.0, 5.0, 30.0, 60.0)
     maker_fee_bps: float = 2.0  # Binance USD-M base tier, approximate; set your own
+    improve_ticks: int = 0  # 0: join the touch; n: step n ticks inside the spread when it is wide enough
 
 
 @dataclass
@@ -53,15 +56,18 @@ class _Order:
     live_ns: int
     favour: float  # side x book imbalance when placed
     touch_mid: float  # the mid at the last book update with the order at the touch
+    floor: float  # the book's touch when it was placed: the order is still the touch while the book is at it
 
 
-def simulate_fills(deltas, trades, settings: MakerSettings):
+def simulate_fills(deltas, trades, settings: MakerSettings, tick: float | None = None):
     """(fills, mids): fills as a DataFrame of ts, side, price, mid, favour; mids as (ts, mid) arrays of every
-    complete book update. A fill's mid is the last one with the order still at the touch: the book can show a level
+    complete book update. tick: the instrument's price increment, needed with improve_ticks. A fill's mid is the last one with the order still at the touch: the book can show a level
     gone before the trades that emptied it arrive, and the mid by then is already past the order's price."""
     from nautilus_trader.model import AggressorSide, BookType, OrderBook
 
     fills, mid_ts, mid_px = [], [], []
+    if settings.improve_ticks and not (tick and tick > 0):
+        raise ValueError("improve_ticks needs the instrument's tick size")
     if not deltas:
         return pd.DataFrame(columns=["ts", "side", "price", "mid", "favour"]), (np.array([]), np.array([]))
     book = OrderBook(deltas[0].instrument_id, BookType.L2_MBP)
@@ -105,17 +111,22 @@ def simulate_fills(deltas, trades, settings: MakerSettings):
             if side * (levels[0][0] - o.price) > 0:
                 orders[side] = None  # the touch moved away: cancel, requote on the next tick
                 continue
-            if levels[0][0] == o.price:
+            if side * (levels[0][0] - o.floor) >= 0:
                 o.touch_mid = mid
             o.queue = min(o.queue, next((q for p, q in levels if p == o.price), 0.0))
         if ts < next_tick:
             continue
         next_tick = ts - ts % step + step
         imb = book_imbalance(bids, asks)
-        for side, levels in ((1, bids), (-1, asks)):
+        for side, levels, opposite in ((1, bids, asks[0][0]), (-1, asks, bids[0][0])):
             if orders[side] is None:
                 favour = side * imb.imbalance if imb else math.nan
-                orders[side] = _Order(side, levels[0][0], levels[0][1], ts + latency, favour, mid)
+                touch, price, queue = levels[0][0], levels[0][0], levels[0][1]
+                if settings.improve_ticks:
+                    inside = round(touch + side * settings.improve_ticks * tick, 12)
+                    if side * (opposite - inside) > 0:  # still short of the other side: a level of its own
+                        price, queue = inside, 0.0
+                orders[side] = _Order(side, price, queue, ts + latency, favour, mid, touch)
     return (
         pd.DataFrame(fills, columns=["ts", "side", "price", "mid", "favour"]),
         (np.array(mid_ts, dtype=np.int64), np.array(mid_px)),
@@ -169,7 +180,15 @@ def study(catalog_path: str, instrument_id: str, settings: MakerSettings, start=
     from nautilus_trader.persistence import ParquetDataCatalog
 
     catalog = ParquetDataCatalog(catalog_path)
+    tick = None
+    if settings.improve_ticks:
+        instruments = catalog.instruments(instrument_ids=[instrument_id])
+        if not instruments:
+            raise ValueError(
+                f"{instrument_id} has no instrument definition in {catalog_path}: its tick size is unknown"
+            )
+        tick = float(instruments[-1].price_increment)
     deltas = catalog.query_order_book_deltas([instrument_id], start, end)
     trades = catalog.query_trade_ticks([instrument_id], start, end)
-    fills, mids = simulate_fills(deltas, trades, settings)
+    fills, mids = simulate_fills(deltas, trades, settings, tick)
     return fills, mids, evaluate(fills, mids, settings)

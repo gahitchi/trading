@@ -42,8 +42,8 @@ def trade(ts, price, size, seller=True):
     return TradeTick(IID, Price(price, 2), Quantity(size, 3), side, TradeId(f"t{next(_seq)}"), ts, ts)
 
 
-def run(deltas, trades, **kw):
-    return simulate_fills(deltas, trades, MakerSettings(**kw))
+def run(deltas, trades, tick=0.1, **kw):
+    return simulate_fills(deltas, trades, MakerSettings(**kw), tick)
 
 
 def test_a_bid_fills_only_after_the_queue_ahead_of_it_trades():
@@ -113,6 +113,8 @@ def test_maker_study_command_respects_the_holdout_and_logs_the_trial(tmp_path, c
     study = ["--config", str(tmp_path / "lab.toml"), "maker-study", "BTCUSDT", "--catalog", path]
     assert lab_main(study) == 0
     assert "study settings tried: 1" in capsys.readouterr().out
+    assert lab_main([*study, "--improve", "1"]) == 0  # the tick size comes from the recorded instrument
+    assert "study settings tried: 2" in capsys.readouterr().out
     trial = json.loads((tmp_path / "results" / "fast_trials.jsonl").read_text().splitlines()[-1])
     assert trial["kind"] == "maker-study" and trial["window"][1] == deltas[-1].ts_init
     with pytest.raises(SystemExit, match="holdout"):
@@ -128,3 +130,20 @@ def test_the_spread_captured_is_measured_while_the_order_was_still_at_the_touch(
     assert fills["mid"][0] == pytest.approx(100.0)  # not 99.90, the mid after the level had gone
     table = evaluate(fills, mids, MakerSettings(horizons_s=(0.0,))).set_index("group")
     assert table.loc["all", "at_fill_bps"] > 0 > table.loc["all", "markout_bps"]
+
+
+def test_stepping_inside_a_wide_spread_takes_the_front_of_a_new_queue():
+    wide = snap(0, bid=99.95, ask=100.25)  # three ticks wide
+    fills, _ = run(wide, [trade(60 * MS, 100.05, 0.1), trade(60 * MS, 100.15, 0.1, seller=False)], improve_ticks=1)
+    assert sorted(fills["price"]) == [100.05, 100.15]  # one tick inside on each side, filled by the first print
+    assert fills["mid"].tolist() == [100.1, 100.1]
+    narrow = snap(0)  # one tick wide: no room inside, so the order joins the touch and its queue
+    fills, _ = run(narrow, [trade(60 * MS, 99.95, 1.0)], improve_ticks=1, tick=0.1)
+    assert fills.empty
+    deltas = wide + snap(55 * MS, bid=100.05, ask=100.25)  # someone else joins at its price: behind it
+    fills, _ = run(deltas, [trade(60 * MS, 100.05, 0.1)], improve_ticks=1)
+    assert list(fills["price"]) == [100.05]
+    deltas = wide + snap(55 * MS, bid=100.15, ask=100.25)  # someone steps ahead of it: cancel
+    assert run(deltas, [trade(60 * MS, 100.05, 5.0)], improve_ticks=1)[0].empty
+    with pytest.raises(ValueError, match="tick"):
+        simulate_fills(wide, [], MakerSettings(improve_ticks=1))
