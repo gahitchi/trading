@@ -5,11 +5,18 @@
 //! qualified live reconciliation, persistent reservations and kill services
 //! are prerequisites for promotion in Live Upgrade Part 3.
 mod auth;
+mod bootstrap;
 mod order;
 mod private;
+mod reconciliation;
 mod transport;
 
 pub use auth::{Authentication, SignedRequest, SigningMode};
+pub use bootstrap::{AccountSnapshot, RestOpenOrder, RestPosition, SignedAccountRest, parse_bootstrap};
+pub use reconciliation::{
+    AccountReconciler, ObservedBalance, ObservedPosition, ReconcileOutcome,
+    ReconciliationStatus,
+};
 pub use order::{ExchangeOrder, OrderKind, OrderSide, PrepareOrder};
 pub use private::{
     AccountBalance, AccountPosition, PrivateEvent, UserDataStreamManager, execution_report_ring,
