@@ -10,6 +10,7 @@ on:
       - chatgpt/f1-durable-economic-*
       - chatgpt/f1-source-binding-*
       - chatgpt/f1-order-reconciliation-*
+      - chatgpt/f1-roadmap-*
   workflow_dispatch:
 
 permissions:
