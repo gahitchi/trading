@@ -277,7 +277,7 @@ function renderPaper(p) {
   const denials = Object.entries(risk.denials || {}).map(([k, n]) => `${k} ${n}`).join(", ") || "none";
   const rows = r ? [
     ["Strategy", `${r.strategy} on ${r.instrument}`],
-    ["Parameters", `size ${r.params.trade_size}, threshold ${r.params.threshold}, hold ${r.params.hold_s} s`],
+    ["Parameters", Object.entries(r.params || {}).map(([k, v]) => `${k.replaceAll("_", " ")} ${v}`).join(", ")],
     ["Run started", when(r.started)],
     ["Daily loss cap", `${money(limits.max_daily_loss)} ${ccy}${risk.breach ? ` (reached, loss ${money(risk.breach.loss)})` : ""}`],
     ["Position / gross / order cap", `${money(limits.max_position_notional)} / ${money(limits.max_gross_notional)} / ${money(limits.max_order_notional)} ${ccy}`],
