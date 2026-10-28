@@ -143,3 +143,38 @@ Testnet `pu` gap, an invalid post-snapshot bridge, or an order-book
 state-machine error. Never disable continuity validation to hide this
 problem. Use the new resync details to localize the cause on Arch before
 claiming production-quality market-data acceptance.
+
+## 2026-10-28 Arch root-cause correction: Futures `pu` chain vs Spot `U`
+
+A subsequent Arch Testnet replay showed all public WebSocket streams connected,
+but the books repeatedly lost `Live` state despite **incoming `pu` exactly
+equaling the previous local `u`**. Example:
+
+```
+prior local u = 465705655761
+incoming U   = 465705656237
+incoming u   = 465705656825
+incoming pu  = 465705655761
+```
+
+The previous synchronizer incorrectly required both `pu == previous u`
+and `U <= previous u + 1` for *each live Futures batch*. The extra
+`U` restriction is the Spot depth-stream rule; Binance USD-M Futures
+instead specifies `pu == prior u` for subsequent live batches, and
+legitimately has jumps in `U` between published depth batches.
+
+The code now requires **strict equality of `pu` and previous `u`** for
+subsequent Futures updates and rejects mismatches. The **initial snapshot
+bridge** continues to require `U <= lastUpdateId <= u`. Stale/replayed
+events continue to be ignored; crossed order books and malformed batches
+fail closed. Regression tests include the real Arch sequence values and
+a deliberately false `pu`.
+
+The one-per-second global snapshot limiter remains as defense in depth.
+Before qualifying live trading, repeat the Arch read-only market-watch
+test and establish stable `live_books=3` with near-zero post-initialization
+resynchronizations. Existing snapshots and SPSC backpressure must still
+be verified under sustained load.
+
+Source: Binance USD-M Futures documentation, "How to manage a local order
+book correctly", last modified 2026-10-28.

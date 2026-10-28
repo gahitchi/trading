@@ -258,3 +258,37 @@ fn real_style_pu_discontinuity_invalidates_live_book_without_soft_acceptance() {
     let new_request = rx.try_recv().unwrap();
     assert!(new_request.request_id > req.request_id);
 }
+
+#[test]
+fn live_usdm_feed_retains_sync_when_u_skips_but_pu_matches() {
+    let t = table(BinanceEnvironment::Testnet);
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut books = LiveBookConsumer::new(&t, tx).unwrap();
+    books.on_frame(&LiveFrame::Reset { generation: 1 }).unwrap();
+    let initial = parse(
+        r#"{"stream":"btcusdt@depth@100ms","data":{
+            "e":"depthUpdate","E":1700000000000,"s":"BTCUSDT",
+            "U":100,"u":105,"pu":99,
+            "b":[["100","2"]],"a":[["101","2"]]
+        }}"#,
+        StreamGroup::PublicDepth,
+    );
+    assert_eq!(books.on_frame(&initial).unwrap(), Some(SyncOutcome::Buffered));
+    let snapshot_req = rx.try_recv().unwrap();
+    let snapshot = parse_depth_snapshot(
+        br#"{"lastUpdateId":100,"bids":[["100","1"]],"asks":[["101","1"]]}"#,
+        snapshot_req,
+    ).unwrap();
+    assert_eq!(books.on_frame(&snapshot).unwrap(), Some(SyncOutcome::Activated));
+    let next = parse(
+        r#"{"stream":"btcusdt@depth@100ms","data":{
+            "e":"depthUpdate","E":1700000000100,"s":"BTCUSDT",
+            "U":476,"u":825,"pu":105,
+            "b":[["100","3"]],"a":[["101","2"]]
+        }}"#,
+        StreamGroup::PublicDepth,
+    );
+    assert_eq!(books.on_frame(&next).unwrap(), Some(SyncOutcome::Applied));
+    assert_eq!(books.active_books(), 1);
+    assert!(rx.try_recv().is_err());
+}

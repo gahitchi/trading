@@ -496,10 +496,14 @@ impl DepthSynchronizer {
                 if final_id <= self.last_id {
                     return Continuity::Skip;
                 }
-                let Some(next) = self.last_id.checked_add(1) else {
-                    return Continuity::Gap;
-                };
-                if previous_final != Some(self.last_id) || first > next {
+                // Binance USD-M Futures chains *batches* through pu == prior u.
+                // U can jump by hundreds of exchange update IDs between
+                // published 100ms diff batches; that is not a missing batch.
+                // The U <= lastUpdateId <= u rule belongs to the FIRST
+                // snapshot-bridging batch only (the Validating branch).
+                // Applying the Spot-style U <= previous_u + 1 test here
+                // causes a false resynchronization on normal Futures feeds.
+                if previous_final != Some(self.last_id) {
                     return Continuity::Gap;
                 }
                 Continuity::Apply
@@ -851,6 +855,88 @@ mod tests {
             SyncOutcome::NeedsSnapshot
         );
         assert!(!sync.is_tradable());
+    }
+    #[test]
+    fn binance_live_allows_nonadjacent_u_range_when_pu_chains() {
+        // Reproduces actual Arch Testnet values: after the verified bridge,
+        // incoming U > previous u + 1, but pu matches previous u exactly.
+        // Futures carries sequence continuity via pu, unlike Spot.
+        let mut sync = DepthSynchronizer::new(
+            SequencePolicy::BinanceUsdM, 10, 12, 4,
+        ).unwrap();
+        sync.start_snapshot_fetch();
+        assert_eq!(
+            sync.install_snapshot(
+                SnapshotSequence::Binance { last_update_id: 465705655761 },
+                &[p("100", "2")],
+                &[p("101", "2")],
+            ).unwrap(),
+            SyncOutcome::AwaitingBridge
+        );
+        assert_eq!(
+            sync.on_depth_batch(
+                DepthSequence::Binance {
+                    first: 465705655760,
+                    final_id: 465705655761,
+                    previous_final: Some(465705655700),
+                },
+                &[],
+            ).unwrap(),
+            SyncOutcome::Activated
+        );
+        assert_eq!(
+            sync.on_depth_batch(
+                DepthSequence::Binance {
+                    first: 465705656237,
+                    final_id: 465705656825,
+                    previous_final: Some(465705655761),
+                },
+                &[d(Side::Bid, "100", "3")],
+            ).unwrap(),
+            SyncOutcome::Applied
+        );
+        assert!(sync.is_tradable());
+        assert_eq!(sync.last_update_id(), 465705656825);
+        assert_eq!(sync.book().bids()[0], p("100", "3"));
+    }
+    #[test]
+    fn binance_live_rejects_wrong_pu_even_when_u_is_adjacent() {
+        let mut sync = DepthSynchronizer::new(
+            SequencePolicy::BinanceUsdM, 10, 12, 4,
+        ).unwrap();
+        sync.start_snapshot_fetch();
+        assert_eq!(
+            sync.install_snapshot(
+                SnapshotSequence::Binance { last_update_id: 100 },
+                &[p("100", "2")],
+                &[p("101", "2")],
+            ).unwrap(),
+            SyncOutcome::AwaitingBridge
+        );
+        assert_eq!(
+            sync.on_depth_batch(
+                DepthSequence::Binance {
+                    first: 100,
+                    final_id: 101,
+                    previous_final: Some(99),
+                },
+                &[],
+            ).unwrap(),
+            SyncOutcome::Activated
+        );
+        assert_eq!(
+            sync.on_depth_batch(
+                DepthSequence::Binance {
+                    first: 102,
+                    final_id: 104,
+                    previous_final: Some(100),
+                },
+                &[],
+            ).unwrap(),
+            SyncOutcome::NeedsSnapshot
+        );
+        assert!(!sync.is_tradable());
+        assert_eq!(sync.last_update_id(), 0);
     }
     #[test]
     fn binance_futures_rejects_spot_style_snapshot_bridge() {
