@@ -1,7 +1,7 @@
 use crate::order::cancel_params;
 use crate::{Authentication, ExchangeOrder, ExecutionError, SignedRequest, SigningMode};
 use futures_util::{SinkExt, StreamExt};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use std::{
     fs::{File, OpenOptions},
     io::Write,
