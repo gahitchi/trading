@@ -1,0 +1,160 @@
+"""
+Hourly history for funding-carry research: funding settlements and hourly closes of Binance USD-M perpetuals,
+Binance spot and Bybit linear perpetuals, from the venues' public REST APIs (no keys).
+
+The recorder's catalog holds days of funding; carry needs years, which the exchanges serve for free. `fetch`
+downloads what is missing and appends it to one Parquet file per series under <data>/carry/; `load` reads it back.
+
+Each series is (ts, value), ts in UTC nanoseconds:
+  funding  ts: the settlement time, value: the rate paid by longs to shorts at it (fraction of notional)
+  close    ts: the end of the hour, value: the last trade price of the hour that ends there
+Klines still open are never stored.
+"""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import pandas as pd
+
+from lab.persistence import file_lock
+from lab.survey import get_json
+
+BINANCE_FAPI = "https://fapi.binance.com/fapi/v1"
+BINANCE_SPOT = "https://api.binance.com/api/v3"
+BYBIT_V5 = "https://api.bybit.com/v5/market"
+HOUR_MS = 3_600_000
+# (venue, market) -> what carry research reads from it
+SERIES = {
+    ("binance", "perp"): ("funding", "close"),
+    ("binance", "spot"): ("close",),
+    ("bybit", "perp"): ("funding", "close"),
+}
+
+
+def _ms(ts: pd.Timestamp) -> int:
+    return int(ts.value // 1_000_000)
+
+
+def path_of(root: Path, venue: str, market: str, kind: str, symbol: str) -> Path:
+    return Path(root) / f"{venue}-{market}-{kind}-{symbol}.parquet"
+
+
+def _binance_funding(symbol, start_ms, now_ms, get, pause):
+    rows = []
+    while start_ms < now_ms:
+        page = get(f"{BINANCE_FAPI}/fundingRate?symbol={symbol}&startTime={start_ms}&limit=1000")
+        rows += [(int(r["fundingTime"]), float(r["fundingRate"])) for r in page]
+        if len(page) < 1000:
+            break
+        start_ms = int(page[-1]["fundingTime"]) + 1
+        pause()
+    return rows
+
+
+def _binance_closes(url, limit, start_ms, now_ms, get, pause):
+    rows = []
+    while start_ms < now_ms:
+        page = get(f"{url}&interval=1h&startTime={start_ms}&limit={limit}")
+        # [open time, open, high, low, close, ...]; the hour ends at open + 1 h. The open kline is left out.
+        rows += [(int(k[0]) + HOUR_MS, float(k[4])) for k in page if int(k[0]) + HOUR_MS <= now_ms]
+        if len(page) < limit:
+            break
+        start_ms = int(page[-1][0]) + HOUR_MS
+        pause()
+    return rows
+
+
+def _bybit_list(get, url) -> list:
+    r = get(url)
+    if r.get("retCode"):  # Bybit answers errors (e.g. an unknown symbol) with HTTP 200
+        raise ValueError(f"bybit: {r.get('retMsg')}")
+    return r["result"]["list"]
+
+
+def _bybit_pages(url, key, start_ms, now_ms, get, pause, limit):
+    """Bybit pages newest first: walk backwards from now to start_ms."""
+    rows, end_ms = [], now_ms
+    while end_ms >= start_ms:
+        page = _bybit_list(get, f"{url}&startTime={start_ms}&endTime={end_ms}&limit={limit}")
+        rows += page
+        if len(page) < limit:
+            break
+        end_ms = min(key(r) for r in page) - 1
+        pause()
+    return rows
+
+
+def _bybit_funding(symbol, start_ms, now_ms, get, pause):
+    page = _bybit_pages(
+        f"{BYBIT_V5}/funding/history?category=linear&symbol={symbol}",
+        lambda r: int(r["fundingRateTimestamp"]),
+        start_ms,
+        now_ms,
+        get,
+        pause,
+        200,
+    )
+    return [(int(r["fundingRateTimestamp"]), float(r["fundingRate"])) for r in page]
+
+
+def _bybit_closes(symbol, start_ms, now_ms, get, pause):
+    # kline rows are [start, open, high, low, close, volume, turnover]; `start`/`end` name the window there
+    rows, end_ms = [], now_ms
+    while end_ms >= start_ms:
+        page = _bybit_list(
+            get,
+            f"{BYBIT_V5}/kline?category=linear&symbol={symbol}&interval=60&start={start_ms}&end={end_ms}&limit=1000",
+        )
+        rows += [(int(k[0]) + HOUR_MS, float(k[4])) for k in page if int(k[0]) + HOUR_MS <= now_ms]
+        if len(page) < 1000:
+            break
+        end_ms = min(int(k[0]) for k in page) - 1
+        pause()
+    return rows
+
+
+def download(venue, market, kind, symbol, start_ms, now_ms, get=get_json, pause=lambda: time.sleep(0.5)):
+    """[(ts_ms, value)] from start_ms (inclusive) up to now_ms."""
+    if (venue, market) == ("binance", "perp"):
+        if kind == "funding":
+            return _binance_funding(symbol, start_ms, now_ms, get, pause)
+        return _binance_closes(f"{BINANCE_FAPI}/klines?symbol={symbol}", 1500, start_ms, now_ms, get, pause)
+    if (venue, market) == ("binance", "spot"):
+        return _binance_closes(f"{BINANCE_SPOT}/klines?symbol={symbol}", 1000, start_ms, now_ms, get, pause)
+    if (venue, market) == ("bybit", "perp"):
+        if kind == "funding":
+            return _bybit_funding(symbol, start_ms, now_ms, get, pause)
+        return _bybit_closes(symbol, start_ms, now_ms, get, pause)
+    raise ValueError(f"unknown series: {venue} {market} {kind}")
+
+
+def load(root: Path, venue: str, market: str, kind: str, symbol: str) -> pd.Series:
+    """The cached series (float, indexed by UTC timestamp), empty if never fetched."""
+    p = path_of(root, venue, market, kind, symbol)
+    if not p.exists():
+        return pd.Series(dtype=float, index=pd.DatetimeIndex([], tz="UTC"), name=kind)
+    df = pd.read_parquet(p)
+    return pd.Series(df["value"].to_numpy(), index=pd.to_datetime(df["ts"], utc=True), name=kind)
+
+
+def update(root: Path, venue, market, kind, symbol, since: pd.Timestamp, now: pd.Timestamp, **io) -> tuple[int, int]:
+    """Downloads what is missing after the cache's last row (or from `since`) and stores the union.
+    Returns (new rows, total rows)."""
+    p = path_of(root, venue, market, kind, symbol)
+    with file_lock(p.with_name(p.name + ".lock")):
+        old = load(root, venue, market, kind, symbol)
+        start = old.index[-1] + pd.Timedelta(milliseconds=1) if len(old) else since
+        rows = download(venue, market, kind, symbol, _ms(start), _ms(now), **io)
+        new = pd.Series(
+            [v for _, v in rows], index=pd.to_datetime([t for t, _ in rows], unit="ms", utc=True), dtype=float
+        )
+        both = pd.concat([old, new]).sort_index()
+        both = both[~both.index.duplicated(keep="last")]
+        if len(new):
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_name(p.name + ".tmp")
+            pd.DataFrame({"ts": both.index, "value": both.to_numpy()}).to_parquet(tmp, index=False)
+            tmp.replace(p)
+        return len(both) - len(old), len(both)

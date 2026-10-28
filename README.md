@@ -33,6 +33,9 @@ pytest -n auto
 | `lab maker-study <symbol> [--venue] [--latency-ms] [--maker-bps]` | what do passive fills earn after the moves that follow them? |
 | `lab fast backtest / paper <symbol>` | the first fast strategy on recorded data, or live data with simulated fills |
 | `lab fast backtest <symbol> --holdout [--again REASON]`, `lab fast release <symbol> --reason` | the one-time holdout test; turning the holdout into research data |
+| `lab carry fetch [--symbols ...] [--since 2023-01-01]` | download or update hourly funding and closes (Binance spot and perpetual, Bybit perpetual) |
+| `lab carry study [--mode cash\|cross] [--lookback-h] [--entry-apr] [--exit-apr]` | does funding carry pay after costs? (holdout-guarded, logged) |
+| `lab carry study --holdout [--again REASON]`, `lab carry release --reason` | the one-time carry holdout test; turning it into research data |
 | `lab kill [--flatten]`, `lab resume` | kill switch: stop all new orders now (`results/KILL`), and clear it |
 
 ## Recording, research and paper trading
@@ -122,6 +125,31 @@ configuration on it once; a repeat needs `--again REASON`, and every holdout tes
 data and starts a new one; the boundary never moves back. Every run is logged in `results/fast_trials.jsonl`, and
 each report shows how many configurations have been tried on the research data: the more tried, the less a good
 result means.
+
+## Funding carry
+
+The microstructure studies found no edge after taker costs at seconds horizons, so the next question is a slower
+one: perpetual funding. `lab carry fetch` downloads years of hourly closes and funding settlements from the public
+REST APIs (Binance USD-M and spot, Bybit linear; no keys) into `data/carry/`, and later runs only add what is new.
+The default basket is ten liquid USDT pairs (BTC ETH SOL XRP BNB DOGE ADA LINK AVAX LTC). They were picked today,
+so the past is flattered by their survival.
+
+`lab carry study` backtests a delta-neutral trade per symbol with equal notional on each leg: `--mode cash` is long
+Binance spot and short the Binance perpetual while funding is positive, `--mode cross` shorts the perpetual on
+whichever of Binance and Bybit pays more funding and buys it on the other. At every funding time (00, 08, 16 UTC)
+it looks at the funding the trade would have earned over the last `--lookback-h` hours, annualized, opens above
+`--entry-apr` and closes below `--exit-apr`. A new position first earns the next settlement, and every change pays
+both legs' taker fees (5 bps perpetual, 10 bps spot) and `--slippage-bps`. It reports the portfolio's net return a
+year split into funding, basis and costs, Sharpe, a Newey-West t-statistic (positions last days, so daily returns
+are autocorrelated), drawdown, an always-in benchmark for `cash`, and each symbol's P&L. Not modelled: leg
+rebalancing, liquidation of the short perpetual in a rally, spot borrow, volume-tier fees.
+
+Carry has its own time holdout: the first study reserves the last 180 days fetched by then and everything fetched
+later (`results/carry_partition.json`). Research runs drop that data before computing anything; `--holdout` tests
+a finished configuration on it once. Every run goes into the trial log, and research runs print a deflated Sharpe
+ratio: the chance the edge is real given how many configurations have been tried on the same data (under 0.95,
+it isn't established).
+
 Binance and Bybit are not available in every country; check that they are in yours.
 
 
@@ -146,6 +174,8 @@ src/lab/survey.py         spreads vs maker fees across all perpetuals (live publ
 src/lab/maker_study.py    passive fills and their markouts on recorded data
 src/lab/fast.py           ImbalanceTaker strategy, backtest on recorded books, paper node
 src/lab/fast_research.py  forward holdout, holdout ledger, trial log
+src/lab/carry_data.py     hourly funding and closes from public REST history (Binance, Bybit)
+src/lab/carry_study.py    funding carry backtest after costs, time holdout, deflated Sharpe
 src/lab/monitor.py        read-only dashboard of the recorder and its data (assets in monitor_ui/)
 src/lab/risk_manager.py   pre-trade risk shared by every strategy
 src/lab/safety.py         kill switch
