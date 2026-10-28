@@ -170,7 +170,10 @@ mod tests {
             ("symbol".to_string(), "BTCUSDT".to_string()),
             ("timestamp".to_string(), "1700000000000".to_string()),
         ]);
-        assert_eq!(auth.signature(&p).unwrap().len(), 64);
+        assert_eq!(
+            auth.signature(&p).unwrap(),
+            "6244d11c958f45ac56733152cb3cb1831d23a2b3709b3a88b8b42a072aceb410"
+        );
         let mut m = Map::new();
         m.insert("symbol".into(), json!("BTCUSDT"));
         auth.sign_params(&mut m, 1700000000000).unwrap();
