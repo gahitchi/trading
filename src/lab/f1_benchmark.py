@@ -92,9 +92,7 @@ def measure_f1_replay(
         if restored != book or len(restored.events) != event_count:
             raise ValueError("F1 measured replay differs from its deterministic economic source")
         limits_passed = (
-            append_ms <= max_append_ms and replay_ms <= max_cold_replay_ms
-            if max_append_ms is not None
-            else None
+            append_ms <= max_append_ms and replay_ms <= max_cold_replay_ms if max_append_ms is not None else None
         )
         return F1ReplayMeasurement(
             event_count=event_count,
