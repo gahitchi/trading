@@ -718,6 +718,81 @@ def cmd_micro_study(cfg, a):
     return 0
 
 
+def _fast_config(cfg, a, *, kill_file=None):
+    from lab.fast import ImbalanceTakerConfig
+    from lab.record import perpetual_ids
+
+    try:
+        return ImbalanceTakerConfig(
+            instrument_id=str(perpetual_ids([a.symbol])[0]),
+            trade_size=a.size,
+            threshold=a.threshold,
+            hold_s=a.hold,
+            max_loss=a.max_loss,
+            kill_file=kill_file,
+        )
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+
+
+def cmd_fast_backtest(cfg, a):
+    from lab.fast import backtest
+
+    catalog = Path(a.catalog) if a.catalog else cfg.data_dir / "market" / "catalog"
+    if not catalog.exists():
+        raise SystemExit(f"no recorded market data at {catalog}; run `lab record` first")
+    start, end = (int(pd.Timestamp(x, tz="UTC").value) if x else None for x in (a.start, a.end))
+    try:
+        r = backtest(
+            str(catalog),
+            _fast_config(cfg, a),
+            start=start,
+            end=end,
+            capital=a.capital,
+            maker_bps=a.maker_bps,
+            taker_bps=a.fee_bps,
+            latency_ms=a.latency_ms,
+        )
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    first, last = (pd.Timestamp(r[k], tz="UTC") for k in ("start_ns", "end_ns"))
+    print(f"{r['instrument']} imbalance taker, {first:%Y-%m-%d %H:%M} .. {last:%Y-%m-%d %H:%M} UTC")
+    print(
+        f"  entries {r['entries']}, fills {r['fills']}, commissions {r['commissions']:.4f}, "
+        f"P&L after costs {r['pnl']:+.4f} (quote currency)"
+    )
+    if r["stopped"]:
+        print(f"  stopped: {r['stopped']}")
+    return 0
+
+
+def cmd_fast_paper(cfg, a):
+    from lab.fast import build_paper_node
+    from lab.paper import kill_path
+
+    node, _ = build_paper_node(
+        _fast_config(cfg, a, kill_file=str(kill_path(cfg))), capital=a.capital, taker_bps=a.fee_bps,
+        maker_bps=a.maker_bps,
+    )  # fmt: skip
+    print(
+        f"fast paper node ready: {a.symbol.upper()} imbalance taker on live Binance data, simulated fills "
+        f"(no exchange orders, no keys); `lab kill` stops it"
+    )
+    if a.check_only:
+        node.dispose()
+        print("check only: configuration is valid; not connecting.")
+        return 0
+    try:
+        node.run()
+    except KeyboardInterrupt:
+        print("stopping...")
+    except RuntimeError as e:
+        raise SystemExit(f"fast paper node stopped: {e}") from e
+    finally:
+        node.dispose()
+    return 0
+
+
 def cmd_runtime(cfg, a):
     from lab.runtime_ops import run
 
@@ -1215,6 +1290,30 @@ def build_parser() -> argparse.ArgumentParser:
     ms.add_argument("--fee-bps", type=float, default=5.0, help="taker fee per side in bps (default 5)")
     ms.add_argument("--bucket", type=float, default=100_000.0, help="flow bucket notional in USDT")
     ms.set_defaults(fn=cmd_micro_study)
+
+    fast = sub.add_parser("fast", help="fast crypto strategy: backtest on recorded data, paper on live data")
+    fsub = fast.add_subparsers(dest="sub", required=True)
+    for name, fn, text in (
+        ("backtest", cmd_fast_backtest, "replay a recording through the matching engine (fees, latency, queue)"),
+        ("paper", cmd_fast_paper, "live Binance data, simulated fills; paper only"),
+    ):
+        fp = fsub.add_parser(name, help=text)
+        fp.add_argument("symbol", help="Binance USD-M perpetual, e.g. BTCUSDT")
+        fp.add_argument("--size", type=float, default=0.001, help="trade size in base units (default 0.001)")
+        fp.add_argument("--threshold", type=float, default=0.6, help="|book imbalance| to enter (default 0.6)")
+        fp.add_argument("--hold", type=float, default=5.0, help="seconds to hold (default 5)")
+        fp.add_argument("--max-loss", type=float, default=100.0, help="stop after losing this much (quote)")
+        fp.add_argument("--capital", type=float, default=10_000.0, help="simulated account (USDT)")
+        fp.add_argument("--fee-bps", type=float, default=5.0, help="taker fee per side, bps (default 5)")
+        fp.add_argument("--maker-bps", type=float, default=2.0, help="maker fee per side, bps (default 2)")
+        fp.set_defaults(fn=fn)
+        if name == "backtest":
+            fp.add_argument("--catalog", help="catalog directory (default: <data>/market/catalog)")
+            fp.add_argument("--start", help="UTC start")
+            fp.add_argument("--end", help="UTC end")
+            fp.add_argument("--latency-ms", type=float, default=50.0, help="order latency (default 50 ms)")
+        else:
+            fp.add_argument("--check-only", action="store_true", help="validate the setup without connecting")
 
     runtime = sub.add_parser("runtime", help="cold backup, upgrade preflight and broker-attested code migration")
     runtime.add_argument("action", choices=["backup", "preflight", "upgrade", "enable-gold"])

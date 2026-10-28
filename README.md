@@ -114,6 +114,7 @@ Offline check on real prices: `cd examples/goog-offline && lab data sample && la
 | `lab data fetch / import / membership / sample / list [--speed]` | market data (daily or intraday) and the point-in-time universe |
 | `lab record [--symbols ...] [--check-only]` | record crypto order books, trades, mark prices and funding (public data, no keys) |
 | `lab micro-study <symbol> [--horizons] [--fee-bps]` | do order-book and trade-flow features predict moves beyond trading costs? |
+| `lab fast backtest / paper <symbol>` | the first fast strategy on recorded data, or live data with simulated fills |
 | `lab backtest [signals] [--period] [--set p=v] [--target-vol] [--speed]` | strategies vs buy-and-hold, HTML report |
 | `lab risk-profile` | the limits the selected profile really trades with |
 | `lab null-test`, `lab pbo`, `lab walk-forward` | noise floor, overfitting probability, walk-forward analysis |
@@ -275,6 +276,14 @@ ported from the Rust research crate): rank correlation with forward mid returns 
 mean forward move in each feature's top and bottom decile next to a taker round trip (2 x fee + median spread).
 A feature is only worth a strategy where that move exceeds the cost. It places no orders and models no queue
 position or latency.
+
+`lab fast backtest BTCUSDT` replays a recording through NautilusTrader's matching engine (L2 book, queue
+position, consumed liquidity, maker/taker fees, a fixed order latency) with the first fast strategy, an
+imbalance taker: when the 5-level book imbalance passes `--threshold`, it takes the opposite touch with an
+immediate-or-cancel limit order and exits the same way after `--hold` seconds. `lab fast paper BTCUSDT` runs the
+same code on live Binance data with NautilusTrader's sandbox execution: simulated fills against the live book, no
+exchange orders, no keys. Both stop at `--max-loss`, and paper stops on `lab kill`. The strategy is a platform
+test, not a validated edge.
 Binance is not available in every country; check that it is in yours.
 
 ### Optional London Gold PAPER strategy
