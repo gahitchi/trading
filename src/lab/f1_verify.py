@@ -29,6 +29,7 @@ from lab.order_observation import (
     parse_external_order_statement,
     reconcile_external_orders,
 )
+from lab.order_lifecycle import OrderLifecycleStore, reconcile_order_lifecycle
 
 
 def _decimal_text(value) -> str:
@@ -47,6 +48,11 @@ def run(argv: list[str] | None = None) -> int:
         type=Path,
         help="Independent complete order report, required if broker fills exist in the journal",
     )
+    parser.add_argument(
+        "--require-order-lifecycle",
+        action="store_true",
+        help="Also require original, replayed order ACK/fill/cancel state against the complete report",
+    )
     args = parser.parse_args(argv)
     try:
         with args.statement.open("rb") as handle:
@@ -58,6 +64,9 @@ def run(argv: list[str] | None = None) -> int:
         book = store.load()
         parity = reconcile_external_account(book, statement)
         order_parity = None
+        lifecycle_parity = None
+        if args.require_order_lifecycle and args.orders is None:
+            raise EngineFactError("order lifecycle parity requires a complete order report")
         if args.orders is not None:
             with args.orders.open("rb") as handle:
                 order_raw = handle.read(MAX_ORDER_REPORT_BYTES + 1)
@@ -69,6 +78,10 @@ def run(argv: list[str] | None = None) -> int:
             if any(type(fact) is BrokerFillFact for fact in book.events) and order_report.schema_version != 2:
                 raise EngineFactError("broker-fill parity requires a v2 complete execution receipt inventory")
             order_parity = reconcile_external_orders(book, order_report)
+            if args.require_order_lifecycle:
+                lifecycle_parity = reconcile_order_lifecycle(OrderLifecycleStore(store), order_report)
+                if lifecycle_parity.economic_head != book.evidence_head:
+                    raise EngineFactError("economic ledger advanced during read-only lifecycle verification")
         elif any(type(fact) is BrokerFillFact for fact in book.events):
             raise EngineFactError("broker fills require a separate complete order report")
     except (
@@ -82,7 +95,11 @@ def run(argv: list[str] | None = None) -> int:
         print(f"F1 verification refused: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 3
 
-    exact_match = parity.matches and (order_parity is None or order_parity.matches)
+    exact_match = (
+        parity.matches
+        and (order_parity is None or order_parity.matches)
+        and (lifecycle_parity is None or lifecycle_parity.matches)
+    )
     result = {
         "schema_version": 1,
         "status": "MATCH" if exact_match else "MISMATCH",
@@ -112,6 +129,24 @@ def run(argv: list[str] | None = None) -> int:
                 for delta in order_parity.order_deltas
             ]
             if order_parity
+            else None
+        ),
+        "order_lifecycle_checked": lifecycle_parity is not None,
+        "order_lifecycle_matches": lifecycle_parity.matches if lifecycle_parity else None,
+        "order_lifecycle_evidence_head": lifecycle_parity.order_head if lifecycle_parity else None,
+        "order_lifecycle_deltas": (
+            [
+                {
+                    "broker_order_id": item.broker_order_id,
+                    "recorded_status": item.recorded_status,
+                    "reported_status": item.reported_status,
+                    "requested_delta": _decimal_text(item.requested_delta),
+                    "executed_delta": _decimal_text(item.executed_delta),
+                    "remaining_delta": _decimal_text(item.remaining_delta),
+                }
+                for item in lifecycle_parity.order_deltas
+            ]
+            if lifecycle_parity
             else None
         ),
         "broker_source_authenticated": False,

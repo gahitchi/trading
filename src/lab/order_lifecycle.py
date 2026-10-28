@@ -462,3 +462,125 @@ class OrderLifecycleStore:
             verified = _replay(db, book)
             db.execute("COMMIT")
             return verified
+
+
+
+@dataclass(frozen=True, slots=True)
+class LifecycleOrderDelta:
+    broker_order_id: str
+    recorded_status: str | None
+    reported_status: str | None
+    requested_delta: Decimal
+    executed_delta: Decimal
+    remaining_delta: Decimal
+
+    @property
+    def matches(self) -> bool:
+        return (
+            self.recorded_status == self.reported_status
+            and self.requested_delta == 0
+            and self.executed_delta == 0
+            and self.remaining_delta == 0
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LifecycleReportParity:
+    account_id: str
+    report_source_sha256: str
+    economic_head: str
+    order_head: str
+    receipt_scope_checked: bool
+    order_deltas: tuple[LifecycleOrderDelta, ...]
+    broker_source_authenticated: bool = False
+    execution_authorized: bool = False
+
+    @property
+    def matches(self) -> bool:
+        return self.receipt_scope_checked and all(delta.matches for delta in self.order_deltas)
+
+
+def reconcile_order_lifecycle(
+    lifecycle: OrderLifecycleStore, report: object
+) -> LifecycleReportParity:
+    """Read-only order STATUS/quantity parity over one consistent SQLite view.
+
+    This compares two externally CLAIMED datasets, not issuer identity or
+    authenticated broker transaction finality. Non-final CANCEL_PENDING is
+    deliberately not equivalent to a final broker cancellation.
+    """
+    from lab.order_observation import (
+        ExternalOrderStatement,
+        reconcile_external_orders,
+    )
+
+    if type(lifecycle) is not OrderLifecycleStore or type(report) is not ExternalOrderStatement:
+        raise EconomicStoreError("complete independent order report and local custody required")
+    if report.schema_version != 2 or report.account_id != lifecycle.store.account_id:
+        raise EconomicStoreError("version 2 account-scoped receipt inventory required")
+    with lifecycle.store._connect() as db:
+        db.execute("BEGIN")
+        book = lifecycle.store._read_locked(db)
+        snapshot = _replay(db, book)
+        receipt_parity = reconcile_external_orders(book, report)
+        if not receipt_parity.matches or not receipt_parity.receipt_scope_checked:
+            raise EconomicStoreError("independent receipt inventory disagrees with the economic journal")
+        if any(state.last_timestamp_ns > report.as_of_ns for state in snapshot.states):
+            raise EconomicStoreError("external order report is older than local order-state evidence")
+        known = {state.broker_order_id: state for state in snapshot.states}
+        observed = {order.broker_order_id: order for order in report.orders}
+        differences = []
+        for order_id in sorted(set(known) | set(observed)):
+            local = known.get(order_id)
+            remote = observed.get(order_id)
+            if local is None:
+                assert remote is not None
+                differences.append(
+                    LifecycleOrderDelta(
+                        order_id,
+                        None,
+                        remote.status,
+                        remote.requested_quantity,
+                        remote.executed_quantity,
+                        remote.remaining_quantity,
+                    )
+                )
+            elif remote is None:
+                differences.append(
+                    LifecycleOrderDelta(
+                        order_id,
+                        local.status,
+                        None,
+                        -local.requested_quantity,
+                        -local.filled_quantity,
+                        -(local.requested_quantity - local.filled_quantity)
+                        if local.status not in ("CANCELED", "REJECTED")
+                        else Decimal(0),
+                    )
+                )
+            else:
+                local_remaining = (
+                    Decimal(0)
+                    if local.status in ("CANCELED", "REJECTED", "FILLED")
+                    else local.requested_quantity - local.filled_quantity
+                )
+                differences.append(
+                    LifecycleOrderDelta(
+                        order_id,
+                        local.status,
+                        remote.status,
+                        remote.requested_quantity - local.requested_quantity,
+                        remote.executed_quantity - local.filled_quantity,
+                        remote.remaining_quantity - local_remaining,
+                    )
+                )
+        result = LifecycleReportParity(
+            book.account_id,
+            report.source_sha256,
+            book.evidence_head,
+            snapshot.evidence_head,
+            True,
+            tuple(differences),
+        )
+        db.execute("COMMIT")
+        return result
