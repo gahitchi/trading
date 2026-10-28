@@ -102,7 +102,7 @@ impl ExchangeSocket {
         mode: ExchangeSocketMode,
         journal_path: &Path,
     ) -> Result<Self, ExecutionError> {
-        if environment == BinanceEnvironment::Mainnet && mode != ExchangeSocketMode::InspectionOnly
+        if environment != BinanceEnvironment::Testnet && mode != ExchangeSocketMode::InspectionOnly
         {
             return Err(ExecutionError::Disabled);
         }
