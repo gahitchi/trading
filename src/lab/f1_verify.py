@@ -21,6 +21,7 @@ from lab.account_observation import (
     parse_external_account_statement,
     reconcile_external_account,
 )
+from lab.cash_scope import MAX_POLICY_BYTES, parse_cash_account_policy, validate_cash_account_scope
 from lab.economic_ledger import EconomicLedgerError
 from lab.economic_store import EconomicEventStore, EconomicStoreError
 from lab.engine_events import BrokerFillFact, EngineFactError
@@ -53,6 +54,12 @@ def run(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also require original, replayed order ACK/fill/cancel state against the complete report",
     )
+    parser.add_argument("--cash-policy", type=Path, help="Explicit USD unleveraged cash-account instrument scope")
+    parser.add_argument(
+        "--require-cash-account-scope",
+        action="store_true",
+        help="Refuse verification unless a valid exact cash-account scope is supplied",
+    )
     args = parser.parse_args(argv)
     try:
         with args.statement.open("rb") as handle:
@@ -62,6 +69,16 @@ def run(argv: list[str] | None = None) -> int:
         )
         store = EconomicEventStore(args.journal, args.account, readonly=True)
         book = store.load()
+        cash_scope = None
+        if args.require_cash_account_scope and args.cash_policy is None:
+            raise EngineFactError("cash-account scope was required but not provided")
+        if args.cash_policy is not None:
+            with args.cash_policy.open("rb") as handle:
+                policy_raw = handle.read(MAX_POLICY_BYTES + 1)
+            cash_scope = validate_cash_account_scope(
+                book,
+                parse_cash_account_policy(policy_raw, expected_account_id=args.account),
+            )
         parity = reconcile_external_account(book, statement)
         order_parity = None
         lifecycle_parity = None
@@ -113,6 +130,9 @@ def run(argv: list[str] | None = None) -> int:
             {"symbol": symbol, "quantity_delta": _decimal_text(delta)} for symbol, delta in parity.position_deltas
         ],
         "independent_projection_matches": parity.internal_projection_matches,
+        "usd_cash_scope_checked": cash_scope is not None,
+        "usd_cash_scope_policy_sha256": cash_scope.policy_source_sha256 if cash_scope else None,
+        "usd_cash_scope_broker_authenticated": False,
         "order_parity_checked": order_parity is not None,
         "order_statement_sha256": order_parity.statement_sha256 if order_parity else None,
         "broker_fills_checked": order_parity.broker_fills_checked if order_parity else None,

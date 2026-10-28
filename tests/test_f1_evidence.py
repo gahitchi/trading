@@ -146,3 +146,45 @@ def test_manifest_rejects_noncanonical_source_revision(tmp_path, bad):
     store = EconomicEventStore(tmp_path / "head.sqlite", "SIM-001")
     with pytest.raises(EconomicStoreError):
         build_f1_local_evidence(store, declared_commit_sha=bad)
+
+
+
+def test_read_only_evidence_requires_original_scoped_cash_account_policy_when_requested(tmp_path):
+    from lab.cash_scope import parse_cash_account_policy
+
+    path = tmp_path / "cash-policy.sqlite"
+    store = EconomicEventStore(path, "SIM-001")
+    store.append_cash_record(cash(), source_namespace="broker")
+    raw = json.dumps(
+        {
+            "schema_version": 1,
+            "account_id": "SIM-001",
+            "record_id": "scope-one",
+            "account_type": "USD_UNLEVERAGED_CASH",
+            "currency": "USD",
+            "instruments": [],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    parsed = parse_cash_account_policy(raw, expected_account_id="SIM-001")
+    report = build_f1_local_evidence(
+        EconomicEventStore(path, "SIM-001", readonly=True),
+        declared_commit_sha=SHA,
+        cash_account_policy_raw=raw,
+    ).manifest
+    assert report["usd_cash_scope_checked"] is True
+    assert report["usd_cash_scope_locally_accepted"] is True
+    assert report["usd_cash_scope_policy_sha256"] == parsed.source_sha256
+    assert report["usd_cash_scope_broker_authenticated"] is False
+
+    policy = tmp_path / "account-policy.json"
+    policy.write_bytes(raw)
+    assert run([
+        "--journal", str(path), "--account", "SIM-001", "--commit", SHA,
+        "--require-cash-account-scope",
+    ]) == 3
+    assert run([
+        "--journal", str(path), "--account", "SIM-001", "--commit", SHA,
+        "--cash-policy", str(policy), "--require-cash-account-scope",
+    ]) == 0

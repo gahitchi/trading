@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from lab.account_projection import compare_projection
+from lab.cash_scope import MAX_POLICY_BYTES, parse_cash_account_policy, validate_cash_account_scope
 from lab.economic_store import MAX_ORDER_OBSERVATIONS, EconomicEventStore, EconomicStoreError
 from lab.engine_events import BrokerFillFact, EngineEconomicBook, _evidence_digest, _identity
 from lab.order_lifecycle import _replay, parse_broker_order_event
@@ -90,7 +91,12 @@ def _verify_archived_observations(db: sqlite3.Connection, book: EngineEconomicBo
     return len(rows), checked_fills
 
 
-def build_f1_local_evidence(store: EconomicEventStore, *, declared_commit_sha: str) -> F1LocalEvidence:
+def build_f1_local_evidence(
+    store: EconomicEventStore,
+    *,
+    declared_commit_sha: str,
+    cash_account_policy_raw: bytes | None = None,
+) -> F1LocalEvidence:
     """Produce one deterministic manifest from a single, read-only DB snapshot.
 
     The caller-declared commit is intentionally NOT verified against a Git
@@ -104,6 +110,12 @@ def build_f1_local_evidence(store: EconomicEventStore, *, declared_commit_sha: s
     with closing(store._connect()) as db:
         db.execute("BEGIN")
         book = store._read_locked(db)
+        cash_scope = None
+        if cash_account_policy_raw is not None:
+            cash_scope = validate_cash_account_scope(
+                book,
+                parse_cash_account_policy(cash_account_policy_raw, expected_account_id=book.account_id),
+            )
         parity = compare_projection(book)
         if not parity.matches:
             raise EconomicStoreError("independent rational projection disagrees with double-entry ledger")
@@ -142,6 +154,10 @@ def build_f1_local_evidence(store: EconomicEventStore, *, declared_commit_sha: s
             "source_inventory_sha256": receipt_sha256,
             "source_inventory_count": len(event_roots),
             "rational_projection_matches": True,
+            "usd_cash_scope_checked": cash_scope is not None,
+            "usd_cash_scope_policy_sha256": cash_scope.policy_source_sha256 if cash_scope else None,
+            "usd_cash_scope_locally_accepted": cash_scope is not None,
+            "usd_cash_scope_broker_authenticated": False,
             "broker_fill_count": len(all_fill_refs),
             "order_fill_receipt_count": len(tracked_fill_source_refs),
             "complete_local_fill_lifecycle_coverage": complete_lifecycle_coverage,
@@ -167,11 +183,24 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument("--journal", type=Path, required=True)
     parser.add_argument("--account", required=True)
     parser.add_argument("--commit", required=True, help="Full declared commit SHA, not cryptographically verified here")
+    parser.add_argument("--cash-policy", type=Path, help="Unverified but exact USD cash-account scope manifest")
+    parser.add_argument(
+        "--require-cash-account-scope",
+        action="store_true",
+        help="Refuse local F1 witness without a verified USD cash-account policy",
+    )
     args = parser.parse_args(argv)
     try:
+        if args.require_cash_account_scope and args.cash_policy is None:
+            raise EconomicStoreError("required exact USD cash-account policy was not supplied")
+        policy_raw = None
+        if args.cash_policy is not None:
+            with args.cash_policy.open("rb") as handle:
+                policy_raw = handle.read(MAX_POLICY_BYTES + 1)
         result = build_f1_local_evidence(
             EconomicEventStore(args.journal, args.account, readonly=True),
             declared_commit_sha=args.commit,
+            cash_account_policy_raw=policy_raw,
         )
     except (OSError, ValueError, sqlite3.DatabaseError) as exc:
         print(f"F1 local evidence refused: {type(exc).__name__}: {exc}", file=sys.stderr)
