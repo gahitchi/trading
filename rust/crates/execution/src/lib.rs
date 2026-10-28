@@ -86,6 +86,8 @@ impl std::error::Error for ExecutionError {}
 pub fn endpoint(env: BinanceEnvironment) -> &'static str {
     match env {
         BinanceEnvironment::Mainnet => "wss://ws-fapi.binance.com/ws-fapi/v1",
-        BinanceEnvironment::Testnet | BinanceEnvironment::Demo => "wss://testnet.binancefuture.com/ws-fapi/v1",
+        BinanceEnvironment::Testnet | BinanceEnvironment::Demo => {
+            "wss://testnet.binancefuture.com/ws-fapi/v1"
+        }
     }
 }

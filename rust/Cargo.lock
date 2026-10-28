@@ -1421,6 +1421,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "trading-protocol-lab"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "hex",
+ "hmac",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-tungstenite",
+ "trading-core-types",
+ "trading-execution",
+ "trading-market-data",
+]
+
+[[package]]
 name = "trading-risk-gate"
 version = "0.1.0"
 dependencies = [

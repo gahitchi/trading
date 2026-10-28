@@ -302,16 +302,19 @@ fn live_usdm_feed_retains_sync_when_u_skips_but_pu_matches() {
 
 #[test]
 fn demo_is_explicitly_distinct_from_legacy_testnet_and_mainnet() {
-    let e=BinanceEnvironment::Demo;
-    assert_eq!(e.rest(),"https://demo-fapi.binance.com");
-    assert_eq!(e.ws_public(),"wss://demo-fstream.binance.com");
-    assert_eq!(e.ws_market(),"wss://demo-fstream.binance.com");
-    let t=table(e);
+    let e = BinanceEnvironment::Demo;
+    assert_eq!(e.rest(), "https://demo-fapi.binance.com");
+    assert_eq!(e.ws_public(), "wss://demo-fstream.binance.com");
+    assert_eq!(e.ws_market(), "wss://demo-fstream.binance.com");
+    let t = table(e);
     assert_eq!(
-        build_stream_url(&t,StreamGroup::PublicDepth).unwrap(),
+        build_stream_url(&t, StreamGroup::PublicDepth).unwrap(),
         "wss://demo-fstream.binance.com/stream?streams=btcusdt@depth@100ms"
     );
-    assert!(build_stream_url(&t,StreamGroup::MarketRegular).unwrap()
-        .contains("btcusdt@aggTrade"));
-    assert_ne!(e.rest(),BinanceEnvironment::Testnet.rest());
+    assert!(
+        build_stream_url(&t, StreamGroup::MarketRegular)
+            .unwrap()
+            .contains("btcusdt@aggTrade")
+    );
+    assert_ne!(e.rest(), BinanceEnvironment::Testnet.rest());
 }
