@@ -146,11 +146,16 @@ def is_message(path: str) -> bool:
     return path.startswith(OUTBOX + "/") and path.endswith(".md") and len(PurePosixPath(path).parts) == 5
 
 
-def collect(include_worktree: bool = True, any_worktree_author: bool = False) -> dict[str, list[dict]]:
+def collect(
+    include_worktree: bool = True, any_worktree_author: bool = False, warnings: list[str] | None = None
+) -> dict[str, list[dict]]:
     """All messages from all branches, each read only from a branch its author owns. Keyed by thread.
 
     any_worktree_author: also take other agents' files present in the working tree (merged copies) at face
     value. Only for structural checks: authorship of such files is verified separately by `check --base`.
+    warnings: when given, a malformed message on another branch is skipped and reported here instead of
+    failing; messages are immutable, so only their author can supersede one. Files in this working tree are
+    always parsed strictly.
     """
     found: dict[str, dict] = {}
     refs = git("for-each-ref", "--format=%(refname:short)", "refs/remotes", "refs/heads").split()
@@ -161,7 +166,12 @@ def collect(include_worktree: bool = True, any_worktree_author: bool = False) ->
             continue
         for path in git("ls-tree", "-r", "--name-only", ref, "--", OUTBOX, check=False).splitlines():
             if is_message(path) and path_agent(path) in (owner, "gabriel") and path not in found:
-                found[path] = parse_message(git("show", f"{ref}:{path}"), path)
+                try:
+                    found[path] = parse_message(git("show", f"{ref}:{path}"), path)
+                except CollabError as e:
+                    if warnings is None:
+                        raise
+                    warnings.append(f"{ref}: {e}")
     if include_worktree:
         owner = owner_of(current_branch())
         base = root() / OUTBOX
@@ -172,7 +182,9 @@ def collect(include_worktree: bool = True, any_worktree_author: bool = False) ->
                 if is_message(path) and allowed and path not in found:
                     found[path] = parse_message(f.read_text(), path)
     threads: dict[str, list[dict]] = {}
-    for msg in found.values():
+    here = root()
+    for path, msg in found.items():
+        msg["local"] = (here / path).is_file()
         threads.setdefault(msg["thread"], []).append(msg)
     for msgs in threads.values():
         msgs.sort(key=lambda m: (m["at"], m["seq"], m["agent"]))
@@ -348,7 +360,7 @@ def merged_from_owner(path: str, author: str) -> bool:
 
 def cmd_check(a) -> int:
     """Validate this branch's outbox (format, thread openings, ownership) and, with --base, immutability."""
-    errors = []
+    errors, warnings = [], []
     branch = current_branch()
     owner = owner_of(branch)
     local = 0
@@ -362,7 +374,7 @@ def cmd_check(a) -> int:
             except CollabError as e:
                 errors.append(str(e))
     try:
-        threads = collect(any_worktree_author=True)
+        threads = collect(any_worktree_author=True, warnings=warnings)
     except CollabError as e:
         errors.append(str(e))
         threads = {}
@@ -381,7 +393,10 @@ def cmd_check(a) -> int:
             unseen.append(tid)
             continue
         if first["kind"] not in OPENING_KINDS or not first["title"]:
-            errors.append(f"{tid}: the first message must be one of {OPENING_KINDS} and carry a title")
+            # Strict for openings in this tree; another branch's opening can only be superseded by its author.
+            (errors if first["local"] else warnings).append(
+                f"{tid}: the first message must be one of {OPENING_KINDS} and carry a title"
+            )
         if PREFIX[first["agent"]] != tid[0]:
             errors.append(f"{tid}: opened by {first['agent']}, but the id prefix belongs to someone else")
     if a.base:
@@ -417,13 +432,15 @@ def cmd_check(a) -> int:
                         f"commit {sha[:8]} is signed 'Agent: {agent}' on {owner}'s branch {branch!r}, "
                         f"and no branch owned by {signer} contains it"
                     )
+    for w in warnings:
+        print(f"WARNING {w}")
     for e in errors:
         print(f"ERROR {e}")
     if unseen:
         print(f"note: opening not visible for {', '.join(unseen)} (the opener's branch is not fetched here)")
     print(
         f"branch {branch} (owner: {owner or 'none'}): {local} file(s) in this outbox tree, "
-        f"{len(threads)} thread(s) across branches, {len(errors)} error(s)"
+        f"{len(threads)} thread(s) across branches, {len(errors)} error(s), {len(warnings)} warning(s) on other branches"
     )
     return 1 if errors else 0
 
