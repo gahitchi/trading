@@ -12,15 +12,16 @@ mod reconciliation;
 mod transport;
 
 pub use auth::{Authentication, SignedRequest, SigningMode};
-pub use bootstrap::{AccountSnapshot, RestOpenOrder, RestPosition, SignedAccountRest, parse_bootstrap};
-pub use reconciliation::{
-    AccountReconciler, ObservedBalance, ObservedPosition, ReconcileOutcome,
-    ReconciliationStatus,
+pub use bootstrap::{
+    AccountSnapshot, RestOpenOrder, RestPosition, SignedAccountRest, parse_bootstrap,
 };
 pub use order::{ExchangeOrder, OrderKind, OrderSide, PrepareOrder};
 pub use private::{
     AccountBalance, AccountPosition, PrivateEvent, UserDataStreamManager, execution_report_ring,
     parse_private_event,
+};
+pub use reconciliation::{
+    AccountReconciler, ObservedBalance, ObservedPosition, ReconcileOutcome, ReconciliationStatus,
 };
 pub use transport::{ExchangeSocket, ExchangeSocketMode, OrderAck, OrderWireEvent};
 
