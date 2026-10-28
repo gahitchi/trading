@@ -160,3 +160,18 @@ def test_source_digest_cannot_be_reused_with_valid_but_mutated_valuation():
     )
     with pytest.raises(EngineFactError, match="original evidence bytes"):
         value_economic_book(book(), modified, max_mark_age_ns=0)
+
+
+
+def test_valuation_refuses_large_exact_inputs_whose_product_exceeds_supported_precision():
+    huge = "9" * 25
+    report = parse(
+        source(
+            marks=[
+                {"symbol": "SPY", "price": "120", "observed_at_ns": 10},
+                {"symbol": "QQQ", "price": huge, "observed_at_ns": 10},
+            ]
+        )
+    )
+    with pytest.raises(EngineFactError, match="bounded"):
+        value_economic_book(book(), report, max_mark_age_ns=0)

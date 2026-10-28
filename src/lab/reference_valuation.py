@@ -90,6 +90,13 @@ def _price(value: object) -> Decimal:
         raise EngineFactError("invalid or rounded reference mark") from exc
 
 
+def _bounded_result(value: Decimal) -> Decimal:
+    try:
+        return exact(value)
+    except EconomicLedgerError as exc:
+        raise EngineFactError("reference valuation amount exceeds exact bounded cash/position precision") from exc
+
+
 def parse_reference_mark_statement(
     raw: bytes, *, source_namespace: str, expected_account_id: str
 ) -> ReferenceMarkStatement:
@@ -193,19 +200,19 @@ def value_economic_book(
     unrealized_total = Decimal(0)
     for symbol in sorted(symbols):
         qty = book.ledger.position(symbol)
-        basis = _calc(
-            lambda symbol=symbol: sum((lot.basis for lot in book.ledger.lots if lot.symbol == symbol), Decimal(0))
+        basis = _bounded_result(
+            _calc(lambda symbol=symbol: sum((lot.basis for lot in book.ledger.lots if lot.symbol == symbol), Decimal(0)))
         )
-        marked = _calc(lambda qty=qty, symbol=symbol: qty * prices[symbol])
-        unrealized = _calc(lambda marked=marked, basis=basis: marked - basis)
-        signed_total = _calc(lambda marked=marked, signed_total=signed_total: signed_total + marked)
-        unrealized_total = _calc(
-            lambda unrealized=unrealized, unrealized_total=unrealized_total: unrealized_total + unrealized
+        marked = _bounded_result(_calc(lambda qty=qty, symbol=symbol: qty * prices[symbol]))
+        unrealized = _bounded_result(_calc(lambda marked=marked, basis=basis: marked - basis))
+        signed_total = _bounded_result(_calc(lambda marked=marked, signed_total=signed_total: signed_total + marked))
+        unrealized_total = _bounded_result(
+            _calc(lambda unrealized=unrealized, unrealized_total=unrealized_total: unrealized_total + unrealized)
         )
         positions.append(ValuedPosition(symbol, qty, basis, prices[symbol], marked, unrealized))
-    cash = book.ledger.balance("cash:USD")
-    realized = _calc(lambda: -book.ledger.balance("income:realized"))
-    net_equity = _calc(lambda: cash + signed_total)
+    cash = _bounded_result(book.ledger.balance("cash:USD"))
+    realized = _bounded_result(_calc(lambda: -book.ledger.balance("income:realized")))
+    net_equity = _bounded_result(_calc(lambda: cash + signed_total))
     # Independent rational check: do not reuse inventory journal arithmetic.
     rational_equity = Fraction(cash) + sum(
         (Fraction(item.quantity) * Fraction(item.reference_price) for item in positions), Fraction(0)
