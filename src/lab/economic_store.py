@@ -215,6 +215,15 @@ class EconomicEventStore:
                 "event_count INTEGER NOT NULL, evidence_head TEXT NOT NULL, "
                 "source_sha256 TEXT NOT NULL, source_bytes BLOB NOT NULL)"
             )
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS broker_order_events ("
+                "seq INTEGER PRIMARY KEY, event_id TEXT NOT NULL UNIQUE, "
+                "source_ref TEXT NOT NULL UNIQUE, broker_order_id TEXT NOT NULL, "
+                "source_namespace TEXT NOT NULL, source_sha256 TEXT NOT NULL, "
+                "source_bytes BLOB NOT NULL, fill_source_bytes BLOB, "
+                "pre_economic_head TEXT NOT NULL, post_economic_head TEXT NOT NULL, "
+                "order_chain TEXT NOT NULL)"
+            )
             row = db.execute("SELECT schema_version, account_id FROM identity WHERE singleton=1").fetchone()
             if row is None:
                 db.execute(
@@ -301,6 +310,11 @@ class EconomicEventStore:
         with closing(self._connect()) as db, db:
             db.execute("BEGIN IMMEDIATE")
             book = self._read_locked(db)
+            if type(fact) is BrokerFillFact and db.execute(
+                "SELECT 1 FROM broker_order_events WHERE broker_order_id=? LIMIT 1",
+                (fact.broker_order_id,),
+            ).fetchone() is not None:
+                raise EconomicStoreError("tracked broker fills require atomic order lifecycle custody")
             existing = db.execute(
                 "SELECT payload,source_bytes FROM economic_events WHERE event_id=?",
                 (fact.event_id,),
