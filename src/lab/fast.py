@@ -156,6 +156,14 @@ def fee_model(maker_bps: float, taker_bps: float):
     return MakerTakerFeeModel(Decimal(str(maker_bps)) / 10_000, Decimal(str(taker_bps)) / 10_000)
 
 
+def trip_stats(trips: list[float]) -> dict:
+    """Round trips, their mean P&L and its t-statistic (is the mean distinguishable from zero?)."""
+    n = len(trips)
+    mean = sum(trips) / n if n else 0.0
+    sd = (sum((t - mean) ** 2 for t in trips) / (n - 1)) ** 0.5 if n > 1 else 0.0
+    return {"round_trips": n, "mean_trip": mean, "t_stat": mean / (sd / n**0.5) if sd else 0.0}
+
+
 def backtest(
     catalog_path: str,
     config: ImbalanceTakerConfig,
@@ -212,6 +220,9 @@ def backtest(
         fills = [e for o in engine.cache.orders() for e in o.events() if type(e).__name__ == "OrderFilled"]
         commissions = sum(e.commission.as_double() for e in fills)
         equity = account.balance_total(quote).as_double() if account else capital
+        # One closed position per round trip; NETTING keeps earlier ones as snapshots. Net of commissions.
+        trips = [p.realized_pnl.as_double() for p in engine.cache.position_snapshots()]
+        trips += [p.realized_pnl.as_double() for p in engine.cache.positions() if p.is_closed]
         return {
             "instrument": iid,
             "start_ns": deltas[0].ts_init,
@@ -221,6 +232,7 @@ def backtest(
             "commissions": commissions,
             "pnl": equity - capital,
             "stopped": strategy.stopped_reason,
+            **trip_stats(trips),
         }
     finally:
         engine.dispose()

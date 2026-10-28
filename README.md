@@ -115,6 +115,7 @@ Offline check on real prices: `cd examples/goog-offline && lab data sample && la
 | `lab record [--symbols ...] [--check-only] [--status]` | record crypto order books, trades, mark prices and funding (public data, no keys) |
 | `lab micro-study <symbol> [--horizons] [--fee-bps]` | do order-book and trade-flow features predict moves beyond trading costs? |
 | `lab fast backtest / paper <symbol>` | the first fast strategy on recorded data, or live data with simulated fills |
+| `lab fast backtest <symbol> --holdout [--again REASON]`, `lab fast release <symbol> --reason` | the one-time holdout test; turning the holdout into research data |
 | `lab backtest [signals] [--period] [--set p=v] [--target-vol] [--speed]` | strategies vs buy-and-hold, HTML report |
 | `lab risk-profile` | the limits the selected profile really trades with |
 | `lab null-test`, `lab pbo`, `lab walk-forward` | noise floor, overfitting probability, walk-forward analysis |
@@ -284,7 +285,16 @@ imbalance taker: when the 5-level book imbalance passes `--threshold`, it takes 
 immediate-or-cancel limit order and exits the same way after `--hold` seconds. `lab fast paper BTCUSDT` runs the
 same code on live Binance data with NautilusTrader's sandbox execution: simulated fills against the live book, no
 exchange orders, no keys. Both stop at `--max-loss`, and paper stops on `lab kill`. The strategy is a platform
-test, not a validated edge.
+test, not a validated edge. The backtest reports round trips net of costs and the t-statistic of their mean.
+
+Recorded data has a forward holdout. The first `micro-study` or `fast backtest` on a symbol reserves everything
+recorded after that moment (`results/fast_partition.json`); research only sees data before it, and the recorder
+keeps filling the holdout with data nobody has looked at. `lab fast backtest <symbol> --holdout` tests a finished
+configuration on it once; a repeat needs `--again REASON`, and every holdout test is logged
+(`results/fast_holdout_ledger.jsonl`). `lab fast release <symbol> --reason ...` turns the holdout into research
+data and starts a new one; the boundary never moves back. Every run is logged in `results/fast_trials.jsonl`, and
+each report shows how many configurations have been tried on the research data: the more tried, the less a good
+result means.
 Binance is not available in every country; check that it is in yours.
 
 ### Optional London Gold PAPER strategy
