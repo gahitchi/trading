@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from lab.account_projection import compare_projection
-from lab.economic_store import EconomicEventStore, EconomicStoreError, MAX_ORDER_OBSERVATIONS
+from lab.economic_store import MAX_ORDER_OBSERVATIONS, EconomicEventStore, EconomicStoreError
 from lab.engine_events import BrokerFillFact, EngineEconomicBook, _evidence_digest, _identity
 from lab.order_lifecycle import _replay, parse_broker_order_event
 from lab.order_observation import parse_external_order_statement, reconcile_external_orders
