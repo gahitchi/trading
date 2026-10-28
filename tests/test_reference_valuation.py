@@ -162,7 +162,6 @@ def test_source_digest_cannot_be_reused_with_valid_but_mutated_valuation():
         value_economic_book(book(), modified, max_mark_age_ns=0)
 
 
-
 def test_valuation_refuses_large_exact_inputs_whose_product_exceeds_supported_precision():
     huge = "9" * 25
     report = parse(
