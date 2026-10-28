@@ -67,7 +67,6 @@ def fill(state, id_, when, side, qty, price="100"):
         )
     )
 
-
 def test_fully_funded_long_buy_sale_and_reverse_split_are_accepted():
     state = seeded()
     state = fill(state, "buy", 2, "BUY", "2")
@@ -80,7 +79,6 @@ def test_fully_funded_long_buy_sale_and_reverse_split_are_accepted():
     assert result.min_settled_cash_usd >= 0
     assert not result.broker_account_type_authenticated
 
-
 def test_closed_intraday_short_history_stays_refused_even_if_final_position_flat():
     state = seeded()
     state = fill(state, "short", 2, "SELL", "1")
@@ -88,7 +86,6 @@ def test_closed_intraday_short_history_stays_refused_even_if_final_position_flat
     assert state.ledger.position("SPY") == 0
     with pytest.raises(EngineFactError, match="short"):
         validate_cash_account_scope(state, policy())
-
 
 def test_cash_overdraft_in_any_historical_prefix_is_refused_after_later_deposit():
     state = EngineEconomicBook("SIM-001")
@@ -134,15 +131,12 @@ def test_policy_rejects_unsupported_broker_semantics(raw):
     with pytest.raises(EngineFactError):
         policy(raw)
 
-
 def test_unfunded_buy_never_autofunds_and_does_not_modify_ledger():
     state = fill(EngineEconomicBook("SIM-001"), "buy", 1, "BUY", "1")
     before = state
     with pytest.raises(EngineFactError):
         validate_cash_account_scope(state, policy())
     assert state == before
-
-
 
 def test_local_cash_scope_manifest_cannot_be_mutated_after_source_hash():
     from dataclasses import replace

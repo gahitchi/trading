@@ -52,7 +52,6 @@ def source(*, when=10, account="SIM-001", scope=True, currency="USD", marks=None
 def parse(raw):
     return parse_reference_mark_statement(raw, source_namespace="vendor", expected_account_id="SIM-001")
 
-
 def test_long_short_realized_and_unrealized_exact_without_economic_event():
     state = book()
     original = state.ledger
@@ -113,7 +112,6 @@ def test_invalid_or_incomplete_source_is_refused(raw):
         report = parse(raw)
         value_economic_book(book(), report, max_mark_age_ns=0)
 
-
 def test_explicit_freshness_bound_is_required_and_enforced():
     marks = [
         {"symbol": "SPY", "price": "120", "observed_at_ns": 8},
@@ -124,7 +122,6 @@ def test_explicit_freshness_bound_is_required_and_enforced():
         value_economic_book(book(), report, max_mark_age_ns=1)
     assert value_economic_book(book(), report, max_mark_age_ns=2).complete_valuations_checked
 
-
 def test_no_position_allows_complete_empty_marks_without_inventing_profit():
     state = EngineEconomicBook("SIM-001")
     report = parse(source(marks=[]))
@@ -134,7 +131,6 @@ def test_no_position_allows_complete_empty_marks_without_inventing_profit():
     assert value.realized_profit_usd == 0
     assert value.unrealized_profit_usd == 0
 
-
 def test_untrusted_mutated_typed_mark_rejected():
     from dataclasses import replace
 
@@ -143,13 +139,10 @@ def test_untrusted_mutated_typed_mark_rejected():
     with pytest.raises((EngineFactError, ValueError)):
         value_economic_book(book(), changed, max_mark_age_ns=0)
 
-
 def test_realized_profit_matches_original_fifo_journal_not_reference_marks():
     ledger = EconomicLedger().post_fill("open", "SPY", "BUY", "2", "100", commission="1")
     ledger = ledger.post_fill("close", "SPY", "SELL", "2", "130", commission="1")
     assert ledger.balance("income:realized") == Decimal("-60")
-
-
 
 def test_source_digest_cannot_be_reused_with_valid_but_mutated_valuation():
     from dataclasses import replace
