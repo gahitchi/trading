@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from lab.persistence import read_json
+from lab.safety import read_kill_switch
 
 NS = 1_000_000_000
 HEARTBEAT_MAX_AGE_S = 120  # the recorder writes every 10 s; the compose healthcheck allows the same 120 s
@@ -43,6 +44,9 @@ DISK_FAIL_DAYS = 1
 HISTORY_S = 1800  # event-rate history kept for the dashboard
 RATE_WINDOW_S = 60
 CATALOG_TTL_S = 30  # the catalog only changes at promotion; rescanning it on every request is waste
+PAPER_MAX_AGE_S = 30  # `lab fast paper` rewrites its report every 5 s
+DAY_LOSS_WARN = 0.8  # share of the daily loss cap used
+RISK_EVENTS = 20  # latest risk-audit entries shown
 
 # "2025-10-20T22-40-00-001000000Z_2025-10-20T22-40-00-049000000Z_63736a17c5458205.parquet"
 _FILE = re.compile(r"(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-(\d{9})Z_(\d{4}-\d\d-\d\d)T(\d\d)-(\d\d)-(\d\d)-(\d{9})Z")
@@ -181,6 +185,31 @@ class Rates:
         return out
 
 
+def _tail_jsonl(path: Path, n: int, max_bytes: int = 65536) -> list[dict]:
+    """The last n JSON lines of an append-only log, newest first, with ts_ns as an ISO time."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            lines = f.read().decode(errors="replace").splitlines()[1 if size > max_bytes else 0 :]
+    except OSError:
+        return []
+    out = []
+    for line in reversed(lines):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict):
+            if isinstance(entry.get("ts_ns"), int):
+                entry["at"] = _iso(entry.pop("ts_ns"))
+            out.append(entry)
+        if len(out) == n:
+            break
+    return out
+
+
 def _check(name: str, state: str, detail: str) -> dict:
     return {"name": name, "state": state, "detail": detail}
 
@@ -197,8 +226,11 @@ class Monitor:
     """Builds the status of one recorder output directory (lab.record's <out>), where one recorder per venue
     writes <out>/heartbeats/<venue>.json and all of them share <out>/catalog."""
 
-    def __init__(self, out: Path, *, catalog_ttl_s: int = CATALOG_TTL_S):
+    def __init__(self, out: Path, *, results: Path | None = None, catalog_ttl_s: int = CATALOG_TTL_S):
+        """results: the lab's results directory, for the paper-trading report, the risk audit and the kill
+        switch (None: recorders only)."""
         self.out = Path(out)
+        self.results = Path(results) if results else None
         self.catalog = Catalog(self.out / "catalog")
         self.rates: dict[str, Rates] = {}
         self.ttl_ns = catalog_ttl_s * NS
@@ -362,6 +394,48 @@ class Monitor:
             "catalog": {**total, "by_type": by_type, "first": _iso(oldest), "last": _iso(newest)},
             "stream": _stream(self.out, now_ns),
             "disk": {"free": usage.free, "total": usage.total, "bytes_per_day": per_day, "runway_days": runway},
+            "paper": self._paper(now_ns) if self.results else None,
+        }
+
+    def _paper(self, now_ns: int) -> dict:
+        """`lab fast paper`'s report, the risk manager's latest audit entries and the kill switch. Its status is
+        "none" (never run here), "stopped" or "running"; checks flag a stop, a reducing or halted risk manager,
+        the kill switch and a day's loss near its cap."""
+        fast = self.results / "fast"
+        try:
+            report = read_json(fast / "paper.json")
+            report = report if isinstance(report, dict) else None
+        except (OSError, ValueError):
+            report = None
+        at = _parse_iso(report.get("at")) if report else None
+        age = (now_ns - at) / NS if at else None
+        running = bool(report and report.get("running")) and age is not None and age <= PAPER_MAX_AGE_S
+        kill = read_kill_switch(self.results / "KILL")
+
+        checks = []
+        if report:
+            checks.append(
+                _check("paper", "ok", f"report {_age(age or 0)} ago")
+                if running
+                else _check("paper", "warn", f"not running; last report {report.get('at')}")
+            )
+            risk = report.get("risk") or {}
+            state = risk.get("state")
+            level = {"ACTIVE": "ok", "REDUCING": "warn"}.get(state, "fail")
+            checks.append(_check("risk", level, f"{state}{': ' + risk['reason'] if risk.get('reason') else ''}"))
+            cap = (risk.get("limits") or {}).get("max_daily_loss")
+            loss = -report["day_pnl"] if isinstance(report.get("day_pnl"), int | float) else None
+            if cap and loss is not None and loss >= DAY_LOSS_WARN * cap:
+                checks.append(_check("daily loss", "warn", f"{loss:.2f} of the {cap:.2f} cap"))
+        if kill:
+            checks.append(_check("kill switch", "fail", f"{kill['mode']}: {kill.get('reason', '')}"))
+        return {
+            "status": "running" if running else "stopped" if report else "none",
+            "report_age_s": age,
+            "report": report,
+            "kill": kill,
+            "checks": checks,
+            "events": _tail_jsonl(fast / "risk-audit.jsonl", RISK_EVENTS),
         }
 
 
@@ -429,10 +503,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply(200, (UI / name).read_bytes(), kind)
 
 
-def serve(out: Path, host: str = "127.0.0.1", port: int = 8766):
+def serve(out: Path, host: str = "127.0.0.1", port: int = 8766, *, results: Path | None = None):
     if host == "0.0.0.0" and not Path("/.dockerenv").exists():
         raise ValueError("listening on all interfaces is reserved for the loopback-published Docker service")
-    server = MonitorServer((host, port), Monitor(out))
+    server = MonitorServer((host, port), Monitor(out, results=results))
     print(f"market-data monitor for {out}: http://127.0.0.1:{server.server_address[1]}", flush=True)
     try:
         server.serve_forever()

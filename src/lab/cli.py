@@ -52,7 +52,7 @@ def cmd_monitor(cfg, a):
     from lab.monitor import serve
 
     try:
-        serve(Path(a.out) if a.out else cfg.data_dir / "market", a.host, a.port)
+        serve(Path(a.out) if a.out else cfg.data_dir / "market", a.host, a.port, results=cfg.results_dir)
     except ValueError as e:
         raise SystemExit(str(e)) from e
     return 0
@@ -116,7 +116,7 @@ def cmd_micro_study(cfg, a):
     return 0
 
 
-def _fast_config(cfg, a):
+def _fast_config(cfg, a, *, report=None):
     from lab.fast import ImbalanceTakerConfig
     from lab.record import perpetual_ids
 
@@ -126,6 +126,7 @@ def _fast_config(cfg, a):
             trade_size=a.size,
             threshold=a.threshold,
             hold_s=a.hold,
+            report=report,
         )
     except ValueError as e:
         raise SystemExit(str(e)) from e
@@ -212,7 +213,8 @@ def cmd_fast_paper(cfg, a):
     risk_dir = cfg.results_dir / "fast"
     try:
         node, _ = build_paper_node(
-            _fast_config(cfg, a), capital=a.capital, taker_bps=a.fee_bps, maker_bps=a.maker_bps,
+            _fast_config(cfg, a, report=str(risk_dir / "paper.json")),
+            capital=a.capital, taker_bps=a.fee_bps, maker_bps=a.maker_bps,
             max_loss=a.max_loss, max_position=a.max_position, kill_file=str(cfg.kill_path),
             state_path=str(risk_dir / "risk-state.json"), audit_path=str(risk_dir / "risk-audit.jsonl"),
         )  # fmt: skip

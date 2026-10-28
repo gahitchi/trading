@@ -17,12 +17,15 @@ client, which fills simulated orders against the live book. No exchange executio
 
 from __future__ import annotations
 
+from collections import deque
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from nautilus_trader.model import BookType, InstrumentId, OrderSide, TimeInForce
 from nautilus_trader.trading import StrategyConfig
 
 from lab.micro import IMBALANCE_LEVELS, book_imbalance
+from lab.persistence import atomic_json
 from lab.risk_manager import RiskLimits, RiskManagedStrategy, RiskManager, TradingState, add_strategy, engine_config
 
 F_LAST = 128
@@ -36,9 +39,13 @@ class ImbalanceTakerConfig(StrategyConfig):
         trade_size: float,
         threshold: float = 0.6,
         hold_s: float = 5.0,
+        report: str | None = None,
+        report_s: float = 5.0,
         **_kwargs,
     ):
-        """trade_size in base units (e.g. 0.01 BTC). Loss and position limits live in the risk manager."""
+        """trade_size in base units (e.g. 0.01 BTC). Loss and position limits live in the risk manager.
+        report: a JSON file rewritten every report_s seconds with the run's equity, position, trades and risk
+        state, for `lab monitor`."""
         super().__init__()
         if not 0 < threshold <= 1:
             raise ValueError("threshold must be in (0, 1]")
@@ -48,6 +55,25 @@ class ImbalanceTakerConfig(StrategyConfig):
         self.trade_size = trade_size
         self.threshold = threshold
         self.hold_s = hold_s
+        self.report = report
+        self.report_s = report_s
+
+
+EQUITY_EVERY_NS = 60_000_000_000  # one equity sample a minute in the report
+EQUITY_KEEP = 1440  # a day of them
+
+
+def _iso(ns: int) -> str:
+    return datetime.fromtimestamp(ns / 1e9, UTC).isoformat(timespec="seconds")
+
+
+def session_stats(cache) -> dict:
+    """Fills, commissions and round trips (closed positions, net of commissions) in a cache."""
+    fills = [e for o in cache.orders() for e in o.events() if type(e).__name__ == "OrderFilled"]
+    # One closed position per round trip; NETTING keeps earlier ones as snapshots.
+    trips = [p.realized_pnl.as_double() for p in cache.position_snapshots()]
+    trips += [p.realized_pnl.as_double() for p in cache.positions() if p.is_closed]
+    return {"fills": len(fills), "commissions": sum(e.commission.as_double() for e in fills), **trip_stats(trips)}
 
 
 def fast_risk(
@@ -82,13 +108,73 @@ class ImbalanceTaker(RiskManagedStrategy):
         self.stopped_reason = None
         self.entries = 0  # filled entries; a rejected or unfilled IOC entry is not a trade
         self.entry_orders = set()
+        self.started_ns = None
+        self.start_equity = None
+        self.equity_curve = deque(maxlen=EQUITY_KEEP)
 
     def on_start(self):
         self.subscribe_book_deltas(self.iid, BookType.L2_MBP, managed=True)
+        if self.config.report:
+            self.started_ns = self.clock.timestamp_ns()
+            self.clock.set_timer("report", timedelta(seconds=self.config.report_s), callback=self._on_report)
 
     def on_stop(self):
         self.cancel_all_orders(self.iid)
         self._close()
+        if self.config.report:
+            self._write_report(running=False)
+
+    def _on_report(self, _event):
+        self._write_report(running=True)
+
+    def _write_report(self, *, running: bool):
+        try:
+            atomic_json(self.config.report, self.report(running=running))
+        except Exception as e:  # a report must never stop trading or the risk checks
+            self.log.warning(f"report not written: {type(e).__name__}: {e}")
+
+    def report(self, *, running: bool = True) -> dict:
+        """The run so far: equity against the run's start, the open position, trades and the risk manager."""
+        now = self.clock.timestamp_ns()
+        equity = self._equity_or_none()
+        if equity is not None:
+            if self.start_equity is None:
+                self.start_equity = equity
+            if not self.equity_curve or now - self.equity_curve[-1][0] >= EQUITY_EVERY_NS:
+                self.equity_curve.append((now, equity))
+        position = None
+        for p in self.cache.positions_open(instrument_id=self.iid):
+            price = self._reference_price(self.iid)
+            position = {
+                "net": float(p.signed_qty),
+                "avg_px": float(p.avg_px_open),
+                "mark": float(price) if price is not None else None,
+                "unrealized": p.unrealized_pnl(price).as_double() if price is not None else None,
+            }
+        risk = self.risk.snapshot()
+        return {
+            "at": _iso(now),
+            "started": _iso(self.started_ns) if self.started_ns is not None else None,
+            "running": running,
+            "strategy": type(self).__name__,
+            "instrument": str(self.iid),
+            "params": {
+                "trade_size": self.config.trade_size,
+                "threshold": self.config.threshold,
+                "hold_s": self.config.hold_s,
+            },
+            "equity": equity,
+            "start_equity": self.start_equity,
+            "pnl": equity - self.start_equity if equity is not None and self.start_equity is not None else None,
+            "day_pnl": equity - risk["start_equity"]
+            if equity is not None and risk["start_equity"] is not None
+            else None,
+            "position": position,
+            "entries": self.entries,
+            **session_stats(self.cache),
+            "risk": risk,
+            "equity_curve": [[_iso(t), e] for t, e in self.equity_curve],
+        }
 
     def _close(self):
         """Exit the whole position at the touch; an IOC that misses is retried on the next book update."""
@@ -108,6 +194,8 @@ class ImbalanceTaker(RiskManagedStrategy):
             self.iid, side, inst.make_qty(qty), price, time_in_force=TimeInForce.IOC, reduce_only=reduce_only
         )
         if entry:
+            if self.start_equity is None:  # the run's P&L counts from before its first trade
+                self.start_equity = self._equity_or_none()
             self.entry_orders.add(str(order.client_order_id))  # before submitting: a fill can arrive at once
         if not self.submit_order(order):  # refused by the risk manager
             self.entry_orders.discard(str(order.client_order_id))
@@ -233,23 +321,16 @@ def backtest(
         add_strategy(engine, strategy, risk)
         engine.run()
         account = engine.cache.account_for_venue(Venue(str(inst.id.venue)))
-        fills = [e for o in engine.cache.orders() for e in o.events() if type(e).__name__ == "OrderFilled"]
-        commissions = sum(e.commission.as_double() for e in fills)
         equity = account.balance_total(quote).as_double() if account else capital
-        # One closed position per round trip; NETTING keeps earlier ones as snapshots. Net of commissions.
-        trips = [p.realized_pnl.as_double() for p in engine.cache.position_snapshots()]
-        trips += [p.realized_pnl.as_double() for p in engine.cache.positions() if p.is_closed]
         return {
             "instrument": iid,
             "start_ns": deltas[0].ts_init,
             "end_ns": deltas[-1].ts_init,
             "entries": strategy.entries,
-            "fills": len(fills),
-            "commissions": commissions,
             "pnl": equity - capital,
             "stopped": strategy.stopped_reason,
             "risk_denials": dict(risk.denials),
-            **trip_stats(trips),
+            **session_stats(engine.cache),
         }
     finally:
         engine.dispose()

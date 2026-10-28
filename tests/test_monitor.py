@@ -11,7 +11,9 @@ import pytest
 from nautilus_trader.model import CryptoPerpetual
 
 from lab.monitor import NS, Monitor, MonitorServer, Rates, file_span, gaps
+from lab.persistence import append_json
 from lab.record import heartbeat_path
+from lab.safety import set_kill_switch
 from tests.test_record import T0, market_events, perpetual, record
 
 MIN = 60 * NS
@@ -172,6 +174,56 @@ def test_an_outage_between_files_shows_as_a_gap(tmp_path):
 
     assert len(c["gaps"]) == 1 and c["gaps"][0]["seconds"] == pytest.approx(600, abs=1)
     assert 0 < c["coverage_pct"] < 1
+
+
+def paper_report(results, at_ns, *, running=True, state="ACTIVE", reason="", day_pnl=-5.0):
+    (results / "fast").mkdir(parents=True, exist_ok=True)
+    report = {
+        "at": iso(at_ns), "running": running, "equity": 9995.0, "pnl": -5.0, "day_pnl": day_pnl,
+        "risk": {"state": state, "reason": reason, "limits": {"max_daily_loss": 100.0}, "denials": {}},
+    }  # fmt: skip
+    (results / "fast" / "paper.json").write_text(json.dumps(report))
+
+
+def test_paper_trading_is_reported_beside_the_recorders(tmp_path):
+    results = tmp_path / "results"
+    paper_report(results, T0)
+    s = Monitor(tmp_path, results=results).status(T0 + 5 * NS)
+    assert s["paper"]["status"] == "running" and s["paper"]["report"]["equity"] == 9995.0
+    assert {c["name"]: c["state"] for c in s["paper"]["checks"]} == {"paper": "ok", "risk": "ok"}
+    assert s["status"] == "down"  # the recorders' status is their own: none runs here
+
+
+def test_paper_checks_flag_what_an_operator_must_act_on(tmp_path):
+    results = tmp_path / "results"
+    paper_report(results, T0, state="REDUCING", reason="daily loss 85.00 USDT reached the cap", day_pnl=-85.0)
+    set_kill_switch(results / "KILL", "halt", "operator test")
+    p = Monitor(tmp_path, results=results).status(T0 + 2 * MIN)["paper"]
+    assert p["status"] == "stopped"  # no report for two minutes
+    checks = {c["name"]: (c["state"], c["detail"]) for c in p["checks"]}
+    assert checks["paper"][0] == "warn"
+    assert checks["risk"] == ("warn", "REDUCING: daily loss 85.00 USDT reached the cap")
+    assert checks["daily loss"] == ("warn", "85.00 of the 100.00 cap")
+    assert checks["kill switch"] == ("fail", "halt: operator test") and p["kill"]["mode"] == "halt"
+
+
+def test_no_paper_run_yet_and_no_results_directory(tmp_path):
+    assert Monitor(tmp_path, results=tmp_path / "results").status(T0)["paper"] == {
+        "status": "none", "report_age_s": None, "report": None, "kill": None, "checks": [], "events": []
+    }  # fmt: skip
+    assert Monitor(tmp_path).status(T0)["paper"] is None
+
+
+def test_risk_events_are_the_latest_audit_entries_newest_first(tmp_path):
+    audit = tmp_path / "results" / "fast" / "risk-audit.jsonl"
+    audit.parent.mkdir(parents=True)
+    for i in range(30):
+        append_json(audit, {"ts_ns": T0 + i * NS, "kind": "denied", "reason": f"position_limit: {i}"})
+    with audit.open("a") as f:
+        f.write("{torn line")  # a write cut short is skipped, not fatal
+    events = Monitor(tmp_path, results=tmp_path / "results").status(T0)["paper"]["events"]
+    assert len(events) == 20 and events[0]["reason"] == "position_limit: 29"
+    assert events[0]["at"] == iso(T0 + 29 * NS)
 
 
 @pytest.fixture

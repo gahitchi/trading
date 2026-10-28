@@ -165,12 +165,133 @@ function render(s) {
   $("updated").textContent = `Updated ${when(s.now).slice(11)}`;
 }
 
+function money(v, signed = false) {
+  if (v == null) return "–";
+  const text = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(v));
+  return `${v < 0 ? "−" : signed && v > 0 ? "+" : ""}${text}`;
+}
+
+function signed(node, v) {
+  node.textContent = money(v, true);
+  node.className = v > 0 ? "pos" : v < 0 ? "neg" : "";
+}
+
+function equityChart(box, points) {
+  const w = Math.max(box.clientWidth, 280), h = 160, left = 64, right = 8, top = 10, bottom = 22;
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("class", "chart");
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("role", "img");
+  if (points.length < 2) {
+    svg.setAttribute("aria-label", "no equity history yet");
+    const t = document.createElementNS(SVG, "text");
+    t.setAttribute("x", left);
+    t.setAttribute("y", h / 2);
+    t.textContent = "The curve starts after two minutes of paper trading.";
+    svg.append(t);
+    return box.replaceChildren(svg);
+  }
+  const vals = points.map((p) => p[1]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
+  const x = (i) => left + (i * (w - left - right)) / (points.length - 1);
+  const y = (v) => top + ((hi - v) * (h - top - bottom)) / (hi - lo);
+  const add = (tag, attrs, text) => {
+    const n = document.createElementNS(SVG, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (text != null) n.textContent = text;
+    svg.append(n);
+    return n;
+  };
+  add("line", { class: "base", x1: left, x2: w - right, y1: h - bottom, y2: h - bottom });
+  add("text", { x: left - 6, y: y(hi) + 4, "text-anchor": "end" }, money(hi));
+  add("text", { x: left - 6, y: y(lo) + 4, "text-anchor": "end" }, money(lo));
+  add("text", { x: left, y: h - 6 }, when(points[0][0]).slice(5, 16));
+  add("text", { x: w - right, y: h - 6, "text-anchor": "end" }, when(points[points.length - 1][0]).slice(5, 16));
+  add("path", { d: points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p[1]).toFixed(1)}`).join("") });
+  const cross = add("line", { class: "cross", y1: top, y2: h - bottom });
+  const dot = add("circle", { r: 4 });
+  cross.style.display = dot.style.display = "none";
+  svg.setAttribute("aria-label", `equity from ${money(vals[0])} to ${money(vals[vals.length - 1])}`);
+  const tip = $("tip");
+  svg.addEventListener("pointermove", (e) => {
+    const box2 = svg.getBoundingClientRect();
+    const px = ((e.clientX - box2.left) / box2.width) * w;
+    const k = Math.min(points.length - 1, Math.max(0, Math.round(((px - left) * (points.length - 1)) / (w - left - right))));
+    cross.setAttribute("x1", x(k));
+    cross.setAttribute("x2", x(k));
+    dot.setAttribute("cx", x(k));
+    dot.setAttribute("cy", y(points[k][1]));
+    cross.style.display = dot.style.display = "";
+    tip.textContent = `${when(points[k][0]).slice(0, 16)}  ${money(points[k][1])}`;
+    tip.style.left = `${e.clientX + 12}px`;
+    tip.style.top = `${e.clientY - 30}px`;
+    tip.hidden = false;
+  });
+  svg.addEventListener("pointerleave", () => {
+    cross.style.display = dot.style.display = "none";
+    tip.hidden = true;
+  });
+  box.replaceChildren(svg);
+}
+
+const PAPER = { running: "Paper trading", stopped: "Paper trading stopped", none: "Not run yet" };
+
+function event(e) {
+  if (e.kind === "denied") return `${e.side} ${e.quantity} ${e.instrument}: ${e.reason}`;
+  if (e.kind === "state") return `${e.from} → ${e.to}${e.reason ? `: ${e.reason}` : ""}`;
+  if (e.kind === "day_start") return `${e.day}, start equity ${money(e.start_equity)}`;
+  return Object.entries(e).filter(([k]) => !["kind", "at"].includes(k)).map(([k, v]) => `${k}=${v}`).join(", ");
+}
+
+function renderPaper(p) {
+  $("paper").hidden = !p;
+  if (!p) return;
+  $("paper-status").dataset.status = p.status === "running" ? (p.checks.some((c) => c.state !== "ok") ? "degraded" : "ok") : p.status === "stopped" ? "down" : "unknown";
+  $("paper-label").textContent = PAPER[p.status];
+  $("paper-checks").replaceChildren(
+    ...p.checks.map((c) => el("li", {}, el("span", { class: `badge ${c.state}` }, c.state), el("b", {}, c.name), el("span", {}, c.detail))),
+  );
+  $("kill").hidden = !p.kill;
+  if (p.kill) $("kill").textContent = `Kill switch set (${p.kill.mode}): ${p.kill.reason || "no reason given"}. Clear it with lab resume.`;
+  const r = p.report;
+  const risk = (r && r.risk) || {};
+  const limits = risk.limits || {};
+  const ccy = limits.currency || "USDT";
+  $("p-ccy").textContent = ccy;
+  $("p-state").textContent = risk.state || "–";
+  $("p-equity").textContent = r ? money(r.equity) : "–";
+  signed($("p-pnl"), r ? r.pnl : null);
+  $("p-day").textContent = r && r.day_pnl != null && limits.max_daily_loss
+    ? `${money(r.day_pnl, true)} / −${money(limits.max_daily_loss)}` : "–";
+  const pos = r && r.position;
+  $("p-position").textContent = pos ? `${pos.net > 0 ? "long" : "short"} ${Math.abs(pos.net)} @ ${money(pos.avg_px)}` : r ? "flat" : "–";
+  $("p-position").title = pos && pos.unrealized != null ? `unrealized ${money(pos.unrealized, true)} ${ccy}` : "";
+  $("p-trips").textContent = r ? `${int.format(r.round_trips)} · t ${r.t_stat.toFixed(2)}` : "–";
+  $("p-trips").title = r ? `mean ${money(r.mean_trip, true)} ${ccy} per round trip, ${int.format(r.fills)} fills, ${money(r.commissions)} ${ccy} fees` : "";
+  equityChart($("p-curve"), (r && r.equity_curve) || []);
+  const denials = Object.entries(risk.denials || {}).map(([k, n]) => `${k} ${n}`).join(", ") || "none";
+  const rows = r ? [
+    ["Strategy", `${r.strategy} on ${r.instrument}`],
+    ["Parameters", `size ${r.params.trade_size}, threshold ${r.params.threshold}, hold ${r.params.hold_s} s`],
+    ["Run started", when(r.started)],
+    ["Daily loss cap", `${money(limits.max_daily_loss)} ${ccy}${risk.breach ? ` (reached, loss ${money(risk.breach.loss)})` : ""}`],
+    ["Position / gross / order cap", `${money(limits.max_position_notional)} / ${money(limits.max_gross_notional)} / ${money(limits.max_order_notional)} ${ccy}`],
+    ["Live orders / submit rate", `${limits.max_live_orders} / ${limits.max_order_submit_rate}`],
+    ["Orders denied by risk", denials],
+  ] : [["", "No report yet. Start paper trading with lab fast paper BTCUSDT."]];
+  $("p-limits").replaceChildren(...rows.map(([k, v]) => el("tr", {}, el("th", { scope: "row" }, k), el("td", {}, v))));
+  if (!p.events.length) emptyRow($("p-events"), 3, "No risk events yet.");
+  else $("p-events").replaceChildren(...p.events.map((e) => el("tr", {}, el("td", {}, when(e.at).slice(0, 19)), el("td", {}, e.kind), el("td", { class: "gaps" }, event(e)))));
+}
+
 async function poll() {
   try {
     const res = await fetch("/api/status", { cache: "no-store" });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || res.statusText);
     render(body);
+    renderPaper(body.paper);
     $("notice").hidden = true;
   } catch (e) {
     $("notice").textContent = `Monitor unreachable or failing: ${e.message}. Retrying.`;

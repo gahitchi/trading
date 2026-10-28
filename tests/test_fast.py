@@ -1,5 +1,6 @@
 """The first fast strategy: same code in a backtest on recorded data and on the paper (sandbox) node."""
 
+import json
 import random
 
 import pytest
@@ -126,6 +127,35 @@ def test_kill_switch_stops_new_orders(market, tmp_path):
     assert r["stopped"] == "kill switch (halt): operator test"
     assert r["entries"] == 0  # the risk manager reads the kill file before the first order
     assert r["risk_denials"].get("halted", 0) > 0
+
+
+def test_the_run_report_matches_the_run(market, tmp_path):
+    path, *_ = market
+    report = tmp_path / "paper.json"
+    r = backtest(path, cfg(report=str(report)), taker_bps=5, maker_bps=2, latency_ms=0)
+
+    rep = json.loads(report.read_text())
+    assert rep["running"] is False  # the final report, written at stop
+    assert rep["started"] == "1970-01-01T00:00:00+00:00" and rep["instrument"] == IID
+    assert rep["pnl"] == pytest.approx(r["pnl"])  # from before the first trade, net of fees
+    assert {k: rep[k] for k in ("entries", "fills", "round_trips")} == {
+        k: r[k] for k in ("entries", "fills", "round_trips")
+    }
+    assert rep["commissions"] == pytest.approx(r["commissions"])
+    assert rep["position"] is None
+    assert rep["risk"]["state"] == "ACTIVE" and rep["risk"]["limits"]["max_daily_loss"] == 100.0
+    assert rep["risk"]["start_equity"] == 10_000.0 and rep["day_pnl"] == pytest.approx(r["pnl"])
+    assert len(rep["equity_curve"]) == 5  # one sample a minute over the five-minute recording
+
+
+def test_the_report_shows_a_kill_switch_halt(market, tmp_path):
+    path, *_ = market
+    kill, report = tmp_path / "KILL", tmp_path / "paper.json"
+    set_kill_switch(kill, "halt", "operator test")
+    backtest(path, cfg(report=str(report)), kill_file=str(kill), taker_bps=0, maker_bps=0, latency_ms=0)
+    risk = json.loads(report.read_text())["risk"]
+    assert risk["state"] == "HALTED" and risk["reason"] == "kill switch (halt): operator test"
+    assert risk["denials"]["halted"] > 0
 
 
 def test_position_limit_is_enforced_by_the_risk_manager(market):
