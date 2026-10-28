@@ -332,6 +332,193 @@ impl ExchangeSocket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{OrderKind, OrderSide, PrepareOrder};
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    use std::{collections::BTreeMap, path::PathBuf, sync::atomic::{AtomicU64, Ordering}};
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::accept_async;
+    use trading_core_types::{FixedPrice, FixedQty, InstrumentSpec};
+
+    static NEXT_FIXTURE_ID: AtomicU64 = AtomicU64::new(1);
+
+    fn journal_path() -> PathBuf {
+        let n=NEXT_FIXTURE_ID.fetch_add(1,Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "trading-rust-local-protocol-{}-{n}.journal", std::process::id()
+        ))
+    }
+    fn prepared_order(client_id:u64) -> ExchangeOrder {
+        let spec=InstrumentSpec {
+            tick_size:10_000_000, step_size:100_000,
+            min_notional:500_000_000,
+            min_price:10_000_000, max_price:100_000_000_000_000,
+            min_qty:100_000,max_qty:10_000_000_000,
+            market_step_size:100_000,market_min_qty:100_000,
+            market_max_qty:10_000_000_000,
+        };
+        PrepareOrder {
+            client_id,symbol_id:0,side:OrderSide::Sell,
+            kind:OrderKind::IocLimit,
+            quantity:FixedQty(2_000_000),
+            limit:Some(FixedPrice(5_000_010_000_000)),
+        }.prepare("BTCUSDT",spec).unwrap()
+    }
+    fn verify_fixture_signature(frame:&Value) {
+        let params=frame["params"].as_object().expect("params object");
+        let signature=hex::decode(params["signature"].as_str().expect("signature"))
+            .expect("hex HMAC");
+        let mut sorted=BTreeMap::<String,String>::new();
+        for (key,value) in params {
+            if key=="signature" {continue;}
+            let val=if let Some(s)=value.as_str() {
+                s.to_owned()
+            } else {value.to_string()};
+            sorted.insert(key.clone(),val);
+        }
+        let canonical=sorted.into_iter()
+            .map(|(k,v)|format!("{k}={v}")).collect::<Vec<_>>().join("&");
+        let mut mac=Hmac::<Sha256>::new_from_slice(b"not-a-real-exchange-secret")
+            .unwrap();
+        mac.update(canonical.as_bytes());
+        mac.verify_slice(&signature).expect("production signed request correctly");
+        assert_eq!(params["apiKey"],"TEST_ONLY_LOCAL_KEY");
+        assert_eq!(params["recvWindow"],5000);
+        assert!(params["timestamp"].as_u64().is_some_and(|v|v>1_700_000_000_000));
+    }
+    #[derive(Clone,Copy)]
+    enum FixtureReply { AckThenCancel, Uncertain, WrongId, RejectedThenAccepted, Disconnect }
+    /// The production ExchangeSocket::place / ::cancel code is exercised
+    /// through a truly local WS socket. No localhost override is added to
+    /// the production library API and no real exchange endpoint is involved.
+    async fn fixture(reply:FixtureReply)->(ExchangeSocket,PathBuf,tokio::task::JoinHandle<()>) {
+        let server=TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address=server.local_addr().unwrap();
+        assert!(address.ip().is_loopback());
+        let task=tokio::spawn(async move {
+            let (connection,peer)=server.accept().await.unwrap();
+            assert!(peer.ip().is_loopback());
+            let mut ws=accept_async(connection).await.unwrap();
+            let amount=if matches!(reply,FixtureReply::AckThenCancel|FixtureReply::RejectedThenAccepted) {2}else{1};
+            for index in 0..amount {
+                let msg=timeout(Duration::from_secs(3),ws.next()).await
+                    .unwrap().unwrap().unwrap();
+                let Message::Text(raw)=msg else {panic!("not JSON text")};
+                let frame:Value=serde_json::from_str(raw.as_str()).unwrap();
+                verify_fixture_signature(&frame);
+                let id=frame["id"].as_u64().unwrap();
+                let method=frame["method"].as_str().unwrap();
+                assert_eq!(frame["params"]["symbol"],"BTCUSDT");
+                if method=="order.place" {
+                    assert_eq!(frame["params"]["quantity"],"0.02");
+                    assert_eq!(frame["params"]["price"],"50000.1");
+                    assert_eq!(frame["params"]["timeInForce"],"IOC");
+                }else {
+                    assert_eq!(method,"order.cancel");
+                    assert_eq!(frame["params"]["origClientOrderId"],"tl-42");
+                }
+                if matches!(reply,FixtureReply::Disconnect) {break;}
+                let response=match reply {
+                    FixtureReply::Uncertain=>serde_json::json!({
+                        "id":id,"status":503,"error":{"code":-1007,"msg":"test-only timeout"}
+                    }),
+                    FixtureReply::WrongId=>serde_json::json!({
+                        "id":id+1,"status":200,"result":{
+                            "symbol":"BTCUSDT","clientOrderId":"tl-42","orderId":9101
+                        }
+                    }),
+                    FixtureReply::RejectedThenAccepted if index==0=>serde_json::json!({
+                        "id":id,"status":400,"error":{"code":-1121,"msg":"test-only rejection"}
+                    }),
+                    _=>{
+                        let cid=frame["params"].get("newClientOrderId")
+                            .or_else(||frame["params"].get("origClientOrderId"))
+                            .unwrap().as_str().unwrap();
+                        serde_json::json!({"id":id,"status":200,"result":{
+                            "symbol":"BTCUSDT","clientOrderId":cid,"orderId":9101
+                        }})
+                    }
+                };
+                ws.send(Message::Text(response.to_string().into())).await.unwrap();
+            }
+        });
+        let url=format!("ws://{address}");
+        let (socket,_) = timeout(Duration::from_secs(3),connect_async(url.as_str()))
+            .await.unwrap().unwrap();
+        let path=journal_path();
+        let journal=IntentJournal::create(&path).unwrap();
+        let client=ExchangeSocket{
+            socket,
+            authentication:Authentication::fixture_hmac(),
+            mode:ExchangeSocketMode::TestnetSupervised,
+            environment:BinanceEnvironment::Testnet,
+            journal,
+            next_id:2,
+            auth_session:false,
+            poisoned:false,
+        };
+        (client,path,task)
+    }
+    async fn finish(task:tokio::task::JoinHandle<()>,path:PathBuf) {
+        timeout(Duration::from_secs(4),task).await.unwrap().unwrap();
+        std::fs::remove_file(path).unwrap();
+    }
+    #[tokio::test]
+    async fn real_place_and_cancel_methods_send_signed_loopback_requests_and_fsync_journal() {
+        let (mut client,path,task)=fixture(FixtureReply::AckThenCancel).await;
+        assert_eq!(client.place(prepared_order(42)).await.unwrap(),
+            OrderWireEvent::Accepted{id:2,exchange_order_id:Some(9101)});
+        assert_eq!(client.cancel("BTCUSDT",42).await.unwrap(),
+            OrderWireEvent::Accepted{id:3,exchange_order_id:Some(9101)});
+        let journal=std::fs::read_to_string(&path).unwrap();
+        assert!(journal.starts_with("TRADING-LAB-UNRESOLVED-EXCHANGE-INTENTS-V1\n"));
+        assert!(journal.ends_with("2|place|42\n3|cancel|42\n"));
+        // An unresolved intent file can never be reused for a new session.
+        assert!(IntentJournal::create(&path).is_err());
+        drop(client);
+        finish(task,path).await;
+    }
+    #[tokio::test]
+    async fn real_place_latches_ambiguous_exchange_timeout_and_refuses_resend() {
+        let (mut client,path,task)=fixture(FixtureReply::Uncertain).await;
+        assert!(client.place(prepared_order(42)).await.is_err());
+        assert!(client.poisoned);
+        assert!(matches!(client.place(prepared_order(43)).await,Err(ExecutionError::Disabled)));
+        let journal=std::fs::read_to_string(&path).unwrap();
+        assert!(journal.ends_with("2|place|42\n"));
+        assert!(!journal.contains("3|place|43"));
+        drop(client);
+        finish(task,path).await;
+    }
+    #[tokio::test]
+    async fn real_place_rejects_wrong_response_correlation_and_latches_socket() {
+        let (mut client,path,task)=fixture(FixtureReply::WrongId).await;
+        assert!(client.place(prepared_order(42)).await.is_err());
+        assert!(client.poisoned);
+        drop(client);
+        finish(task,path).await;
+    }
+    #[tokio::test]
+    async fn definite_rejection_does_not_poison_next_signed_request() {
+        let (mut client,path,task)=fixture(FixtureReply::RejectedThenAccepted).await;
+        assert_eq!(client.place(prepared_order(42)).await.unwrap(),
+            OrderWireEvent::Rejected{id:2,code:-1121});
+        assert!(!client.poisoned);
+        assert_eq!(client.place(prepared_order(43)).await.unwrap(),
+            OrderWireEvent::Accepted{id:3,exchange_order_id:Some(9101)});
+        drop(client);
+        finish(task,path).await;
+    }
+    #[tokio::test]
+    async fn broken_connection_is_uncertain_and_stops_further_requests() {
+        let (mut client,path,task)=fixture(FixtureReply::Disconnect).await;
+        assert!(client.place(prepared_order(42)).await.is_err());
+        assert!(client.poisoned);
+        assert!(matches!(client.cancel("BTCUSDT",42).await,Err(ExecutionError::Disabled)));
+        drop(client);
+        finish(task,path).await;
+    }
+
     #[test]
     fn mainnet_mode_is_sealed_and_order_ack_is_not_fill() {
         assert_eq!(

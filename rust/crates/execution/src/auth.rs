@@ -73,6 +73,15 @@ impl Authentication {
         };
         Ok(Self { key, secret })
     }
+    /// Local-only synthetic key; this constructor does not exist in released
+    /// production builds. The network fixture binds to 127.0.0.1 only.
+    #[cfg(test)]
+    pub(crate) fn fixture_hmac() -> Self {
+        Self {
+            key: "TEST_ONLY_LOCAL_KEY".into(),
+            secret: Secret::Hmac(b"not-a-real-exchange-secret".to_vec()),
+        }
+    }
     pub fn mode(&self) -> SigningMode {
         match &self.secret {
             Secret::Hmac(_) => SigningMode::HmacSha256,

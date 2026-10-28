@@ -65,3 +65,28 @@ This is a protocol validation milestone, not production order readiness.
 The local test fixture still does **not** call the full production
 \`ExchangeSocket::place\` networking path; that requires further isolated
 socket injection and durable journal recovery verification.
+
+
+## Production socket integration — localhost-only unit harness
+
+The \`trading-execution\` crate now runs the **actual production
+\`ExchangeSocket::place\` and \`ExchangeSocket::cancel\` methods** through
+real loopback WebSockets inside \`#[cfg(test)]\`. The synthetic
+authentication fixture constructor exists only in unit-test builds. It
+never changes the production host-selection code or its Mainnet/Demo
+order-submission gates.
+
+The isolated fixture validates the HMAC on each request independently,
+requires exactly specified order fields, and checks the crash-fence
+intent journal actually persists **before** order acknowledgement.
+It also proves that a second session refuses an existing journal.
+Scenarios cover successful place+cancel, unambiguous rejection followed
+by safe continued operation, uncertain exchange timeout (permanent
+socket quarantine and no resend), mismatched request ID, and abrupt
+disconnect. The local fixture is the only origin of synthetic responses.
+
+This proves the production **request path** can execute on Termux and
+Linux in an isolated test. It does not yet establish external
+authenticated Binance account availability, wallet settlement, full
+strategy/risk integration, or crash-time order-history backfill. The
+new tests intentionally avoid an API URL override in production builds.
