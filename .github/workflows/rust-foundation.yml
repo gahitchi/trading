@@ -14,7 +14,7 @@ on:
       - '.github/workflows/rust-foundation.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
@@ -27,22 +27,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: One-time lock and formatter
-        if: github.event_name == 'push' && github.ref == 'refs/heads/chatgpt/live-upgrade-market-data-20261027'
-        run: |
-          cargo fmt --all
-          cargo generate-lockfile
-          git add Cargo.lock crates/
-          if ! git diff --cached --quiet; then
-            git config user.name 'ChatGPT Rust formatter'
-            git config user.email 'github-actions[bot]@users.noreply.github.com'
-            git commit -m "Format zero-budget local protocol lab and lock dependencies" -m "Agent: chatgpt"
-            git push origin "HEAD:${GITHUB_REF#refs/heads/}"
-          fi
       - name: Format
         run: cargo fmt --all -- --check
       - name: Tests
         run: cargo test --workspace --locked --all-targets
+      - name: Local protocol lab smoke (no credentials or external network)
+        run: cargo run --locked -p trading-protocol-lab --bin protocol-lab
       - name: Clippy
         run: cargo clippy --workspace --locked --all-targets -- -D warnings
       - name: Release build
