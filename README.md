@@ -29,6 +29,8 @@ pytest -n auto
 | `lab record [--venue binance\|bybit] [--symbols ...] [--check-only] [--status]` | record crypto order books, trades, mark prices and funding (public data, no keys) |
 | `lab monitor [--port 8766]` | read-only dashboard of the recorder's health and the recorded data |
 | `lab micro-study <symbol> [--venue] [--leader] [--horizons] [--fee-bps]` | do order-book and trade-flow features predict moves beyond trading costs? |
+| `lab survey [--venue] [--maker-bps]` | which perpetuals quote a spread wider than a maker round trip? (live public quotes) |
+| `lab maker-study <symbol> [--venue] [--latency-ms] [--maker-bps]` | what do passive fills earn after the moves that follow them? |
 | `lab fast backtest / paper <symbol>` | the first fast strategy on recorded data, or live data with simulated fills |
 | `lab fast backtest <symbol> --holdout [--again REASON]`, `lab fast release <symbol> --reason` | the one-time holdout test; turning the holdout into research data |
 | `lab kill [--flatten]`, `lab resume` | kill switch: stop all new orders now (`results/KILL`), and clear it |
@@ -99,6 +101,15 @@ each order's notional (default `--capital`), and `lab kill` stops them. Paper ke
 in `results/fast/`, so a restart doesn't clear a daily-loss stop. The strategy is a platform
 test, not a validated edge. The backtest reports round trips net of costs and the t-statistic of their mean.
 
+On BTC, ETH and SOL the predictable moves are a few bps against a 10 bps taker round trip, so the maker side is the
+next question. `lab survey` samples every USDT perpetual's best bid and ask (30 snapshots, 10 s apart) and lists those
+whose median spread leaves room over a maker round trip, with their 24 h turnover and the `.env` line that records
+them. `lab maker-study SOLUSDT` then replays a recording with one hypothetical resting order at each touch: placed at
+the back of the queue, live after `--latency-ms`, filled by trades through its price or once the queue ahead has
+traded, cancelled when the touch moves away. It reports the half spread each fill captured and the maker-signed move
+of the mid 1 to 60 s later, net of the maker fee, split by whether the book imbalance favoured the order. Cancels are
+assumed to come from ahead in the queue, which flatters fill rates.
+
 Recorded data has a forward holdout. The first `micro-study` or `fast backtest` on a symbol reserves everything
 recorded after that moment (`results/fast_partition.json`); research only sees data before it, and the recorder
 keeps filling the holdout with data nobody has looked at. `lab fast backtest <symbol> --holdout` tests a finished
@@ -127,6 +138,8 @@ that cannot be valued is denied. Every state change and denial goes to an option
 src/lab/record.py         market-data recorder (Binance USD-M, Bybit linear)
 src/lab/micro.py          order-book and trade-flow features (OFI, imbalance, microprice, flow, Hawkes, lead-lag, absorption)
 src/lab/micro_study.py    do the features predict moves beyond costs?
+src/lab/survey.py         spreads vs maker fees across all perpetuals (live public quotes)
+src/lab/maker_study.py    passive fills and their markouts on recorded data
 src/lab/fast.py           ImbalanceTaker strategy, backtest on recorded books, paper node
 src/lab/fast_research.py  forward holdout, holdout ledger, trial log
 src/lab/monitor.py        read-only dashboard of the recorder and its data (assets in monitor_ui/)
