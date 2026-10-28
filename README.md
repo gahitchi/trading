@@ -284,7 +284,10 @@ position, consumed liquidity, maker/taker fees, a fixed order latency) with the 
 imbalance taker: when the 5-level book imbalance passes `--threshold`, it takes the opposite touch with an
 immediate-or-cancel limit order and exits the same way after `--hold` seconds. `lab fast paper BTCUSDT` runs the
 same code on live Binance data with NautilusTrader's sandbox execution: simulated fills against the live book, no
-exchange orders, no keys. Both stop at `--max-loss`, and paper stops on `lab kill`. The strategy is a platform
+exchange orders, no keys. Both trade through the pre-trade risk manager (`lab.risk_manager`, see Safety):
+`--max-loss` is the daily loss cap (flatten, no new risk until 00:00 UTC), `--max-position` caps the position and
+each order's notional (default `--capital`), and `lab kill` stops them. Paper keeps the risk state and an audit log
+in `results/fast/`, so a restart doesn't clear a daily-loss stop. The strategy is a platform
 test, not a validated edge. The backtest reports round trips net of costs and the t-statistic of their mean.
 
 Recorded data has a forward holdout. The first `micro-study` or `fast backtest` on a symbol reserves everything

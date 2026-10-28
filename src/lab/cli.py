@@ -737,7 +737,7 @@ def cmd_micro_study(cfg, a):
     return 0
 
 
-def _fast_config(cfg, a, *, kill_file=None):
+def _fast_config(cfg, a):
     from lab.fast import ImbalanceTakerConfig
     from lab.record import perpetual_ids
 
@@ -747,8 +747,6 @@ def _fast_config(cfg, a, *, kill_file=None):
             trade_size=a.size,
             threshold=a.threshold,
             hold_s=a.hold,
-            max_loss=a.max_loss,
-            kill_file=kill_file,
         )
     except ValueError as e:
         raise SystemExit(str(e)) from e
@@ -765,7 +763,7 @@ def cmd_fast_backtest(cfg, a):
     iid = config.instrument_id
     params = {
         "strategy": "imbalance_taker", "size": a.size, "threshold": a.threshold, "hold_s": a.hold,
-        "max_loss": a.max_loss, "capital": a.capital, "taker_bps": a.fee_bps, "maker_bps": a.maker_bps,
+        "max_loss": a.max_loss, "max_position": a.max_position, "capital": a.capital, "taker_bps": a.fee_bps, "maker_bps": a.maker_bps,
         "latency_ms": a.latency_ms,
     }  # fmt: skip
     try:
@@ -781,6 +779,8 @@ def cmd_fast_backtest(cfg, a):
         r = backtest(
             str(catalog),
             config,
+            max_loss=a.max_loss,
+            max_position=a.max_position,
             start=start,
             end=end,
             capital=a.capital,
@@ -831,10 +831,15 @@ def cmd_fast_paper(cfg, a):
     from lab.fast import build_paper_node
     from lab.paper import kill_path
 
-    node, _ = build_paper_node(
-        _fast_config(cfg, a, kill_file=str(kill_path(cfg))), capital=a.capital, taker_bps=a.fee_bps,
-        maker_bps=a.maker_bps,
-    )  # fmt: skip
+    risk_dir = cfg.results_dir / "fast"
+    try:
+        node, _ = build_paper_node(
+            _fast_config(cfg, a), capital=a.capital, taker_bps=a.fee_bps, maker_bps=a.maker_bps,
+            max_loss=a.max_loss, max_position=a.max_position, kill_file=str(kill_path(cfg)),
+            state_path=str(risk_dir / "risk-state.json"), audit_path=str(risk_dir / "risk-audit.jsonl"),
+        )  # fmt: skip
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
     print(
         f"fast paper node ready: {a.symbol.upper()} imbalance taker on live Binance data, simulated fills "
         f"(no exchange orders, no keys); `lab kill` stops it"
@@ -1364,7 +1369,10 @@ def build_parser() -> argparse.ArgumentParser:
         fp.add_argument("--size", type=float, default=0.001, help="trade size in base units (default 0.001)")
         fp.add_argument("--threshold", type=float, default=0.6, help="|book imbalance| to enter (default 0.6)")
         fp.add_argument("--hold", type=float, default=5.0, help="seconds to hold (default 5)")
-        fp.add_argument("--max-loss", type=float, default=100.0, help="stop after losing this much (quote)")
+        fp.add_argument(
+            "--max-loss", type=float, default=100.0, help="daily loss cap (quote): flatten, no new risk until 00:00 UTC"
+        )
+        fp.add_argument("--max-position", type=float, help="position and order notional cap (default: --capital)")
         fp.add_argument("--capital", type=float, default=10_000.0, help="simulated account (USDT)")
         fp.add_argument("--fee-bps", type=float, default=5.0, help="taker fee per side, bps (default 5)")
         fp.add_argument("--maker-bps", type=float, default=2.0, help="maker fee per side, bps (default 2)")
