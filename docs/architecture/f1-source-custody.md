@@ -187,3 +187,38 @@ A same-identity retry additionally rebuilds the originally recorded economic
 prefix and verifies its saved head and complete individual execution receipt
 inventory. A privileged actor cannot turn a previously corrupt snapshot into
 an accepted retry by supplying a substituted local metadata head.
+
+
+## F1.4 transactionally linked broker order lifecycle (Python development candidate)
+
+The broker-neutral OrderLifecycleStore uses original bounded broker-CLAIMED
+BROKER_ORDER_EVENT records with explicit account, broker order, source record,
+event ID, instrument, direction, requested/cumulative/remaining exact quantities,
+source time, and (for fills) source receipt ID and SHA-256. This is a local
+trust-boundary contract, not broker authentication. ACCEPTED, FILL,
+CANCEL_REQUESTED, CANCELED, and REJECTED are the only currently accepted
+transitions. Pending cancellation may still receive further independently
+reported fills; full fills and confirmed cancellations become terminal.
+A late contradictory fill is explicitly refused for manual reconciliation,
+not silently dropped or automatically booked.
+
+Every FILL transition and its source-bound BrokerFillFact are appended
+inside the same SQLite BEGIN IMMEDIATE / COMMIT transaction, under
+one explicit expected economic-head fence. A failing insert rolls back
+both event rows and the economic ledger change. Duplicate event identity
+with byte-identical original evidence is an idempotent retry; conflicting
+reuse fails. Direct EconomicEventStore.append_broker_fill_record is
+refused for an order already under lifecycle custody. Read-only restart
+replays every original order event, checks individual fill source/record/digest,
+reconstructs monotonic economic head transitions, and exposes any unresolved
+orders without any ability to resubmit them.
+
+The local evidence-chain SHA-256 is unkeyed and does not prove broker
+source or resist whole-database rewriting. New financial fills are refused
+if order events are missing or incongruent for tracked orders. This is not
+an authenticated order-stream transport, continuous broker reconciliation,
+live venue session manager or executable control plane. Source completeness
+and partial reports remain unproven; account corrections and compensating
+economic entries need separate contracts. The lifecycle is intentionally
+isolated from the legacy Nautilus execution agent, operator risk controls
+and real-money order routing. F1 and F6 qualification remain BLOCKED.
