@@ -146,22 +146,26 @@ def is_message(path: str) -> bool:
     return path.startswith(OUTBOX + "/") and path.endswith(".md") and len(PurePosixPath(path).parts) == 5
 
 
-def collect(include_worktree: bool = True, any_worktree_author: bool = False) -> dict[str, list[dict]]:
+def collect(
+    include_worktree: bool = True, any_worktree_author: bool = False, include_refs: bool = True
+) -> dict[str, list[dict]]:
     """All messages from all branches, each read only from a branch its author owns. Keyed by thread.
 
     any_worktree_author: also take other agents' files present in the working tree (merged copies) at face
     value. Only for structural checks: authorship of such files is verified separately by `check --base`.
+    include_refs: merge messages from local and remote branches; checks disable this for reproducibility.
     """
     found: dict[str, dict] = {}
-    refs = git("for-each-ref", "--format=%(refname:short)", "refs/remotes", "refs/heads").split()
-    for ref in refs:
-        branch = ref.split("/", 1)[1] if ref.startswith("origin/") else ref
-        owner = owner_of(branch)
-        if owner is None:
-            continue
-        for path in git("ls-tree", "-r", "--name-only", ref, "--", OUTBOX, check=False).splitlines():
-            if is_message(path) and path_agent(path) in (owner, "gabriel") and path not in found:
-                found[path] = parse_message(git("show", f"{ref}:{path}"), path)
+    if include_refs:
+        refs = git("for-each-ref", "--format=%(refname:short)", "refs/remotes", "refs/heads").split()
+        for ref in refs:
+            branch = ref.split("/", 1)[1] if ref.startswith("origin/") else ref
+            owner = owner_of(branch)
+            if owner is None:
+                continue
+            for path in git("ls-tree", "-r", "--name-only", ref, "--", OUTBOX, check=False).splitlines():
+                if is_message(path) and path_agent(path) in (owner, "gabriel") and path not in found:
+                    found[path] = parse_message(git("show", f"{ref}:{path}"), path)
     if include_worktree:
         owner = owner_of(current_branch())
         base = root() / OUTBOX
@@ -362,22 +366,19 @@ def cmd_check(a) -> int:
             except CollabError as e:
                 errors.append(str(e))
     try:
-        threads = collect(any_worktree_author=True)
+        # Validation must depend only on the checked-out commit. Reading moving branch refs here made an
+        # already-green commit fail later when an unrelated branch published a malformed message.
+        threads = collect(any_worktree_author=True, include_refs=False)
     except CollabError as e:
         errors.append(str(e))
         threads = {}
     # A shallow checkout of one branch cannot see threads the other agent opened on its own branch: there,
     # the visible messages start with a reply. That is an incomplete view, not an invalid thread.
-    visible = {
-        owner_of(r.split("/", 1)[1] if r.startswith("origin/") else r)
-        for r in git("for-each-ref", "--format=%(refname:short)", "refs/remotes", "refs/heads").split()
-    }
-    visible.add(owner)
     unseen = []
     for tid, msgs in threads.items():
         first = msgs[0]
         opener = next((agent for agent, prefix in PREFIX.items() if prefix == tid[0]), None)
-        if opener not in visible and opener != first["agent"]:
+        if opener != first["agent"]:
             unseen.append(tid)
             continue
         if first["kind"] not in OPENING_KINDS or not first["title"]:
@@ -423,7 +424,7 @@ def cmd_check(a) -> int:
         print(f"note: opening not visible for {', '.join(unseen)} (the opener's branch is not fetched here)")
     print(
         f"branch {branch} (owner: {owner or 'none'}): {local} file(s) in this outbox tree, "
-        f"{len(threads)} thread(s) across branches, {len(errors)} error(s)"
+        f"{len(threads)} thread(s) in checkout, {len(errors)} error(s)"
     )
     return 1 if errors else 0
 

@@ -167,6 +167,21 @@ def test_repository_conversations_are_valid():
     assert load_tool().main(["check"]) == 0
 
 
+def test_check_ignores_malformed_messages_on_unrelated_branches(repo):
+    tool, root = repo
+    git(root, "checkout", "-qb", "chatgpt/bad-message")
+    bad = root / "collab/outbox/chatgpt/G001/20261022T150000Z-proposal.md"
+    bad.parent.mkdir(parents=True)
+    bad.write_text(
+        "---\nagent: chatgpt\nthread: G001\nkind: proposal\n"
+        "at: 2026-10-22T15:00:00.123Z\ntitle: malformed\n---\n\nmessage\n"
+    )
+    commit(root, "malformed message")
+    git(root, "checkout", "-q", "main")
+
+    assert tool.main(["check"]) == 0
+
+
 def test_commits_signed_by_the_other_agent_are_rejected(repo):
     tool, root = repo
     base = git(root, "rev-parse", "HEAD").strip()
