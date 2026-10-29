@@ -130,6 +130,14 @@ attempts, changed identified input/code content or mixed provenance block compar
 the attempt directory with the JSONL log; see the [trial evidence policy](docs/trial-evidence.md). This implements
 the evidence prerequisite of A8b, not its statistical qualification.
 
+Fast and carry runs also log the pre-registered [daily dependence diagnostics](docs/daily-inference.md): daily-mean
+HAC uncertainty and a joint circular-block bootstrap across comparable research configurations. They require
+120 interior consecutive UTC dates after discarding the first/last dates; short or incompatible evidence is
+explicitly unavailable. Account-equity returns and carry's per-leg-notional series remain separate. Joint reports
+in `results/inference/` identify their method settings and research-history snapshot. They are unqualified
+diagnostics, not deflated Sharpe or probabilities of an edge: the fixed null check observed 16/200 (8%) flags at
+a nominal 5% threshold, exactly its pre-registered ceiling. See the [validation record](docs/daily-inference-validation.md).
+
 `--strategy maker` runs the passive counterpart (`lab.maker.PassiveMaker`) through the same backtest, paper node,
 risk manager, holdout and trial log. It keeps one post-only quote of `--size` on each side, at the touch or
 `--improve` ticks inside the spread when it is wide enough; cancels and requotes when the wanted price changes;

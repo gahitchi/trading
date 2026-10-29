@@ -141,6 +141,7 @@ class TrialEvaluation:
     window: tuple
     result: dict | None = None
     inputs: InputEvidence = field(default_factory=InputEvidence)
+    attempt_id: str | None = None
 
 
 def _validate(row, *, attempt=False):
@@ -296,7 +297,7 @@ def trial_run(results_dir: Path, kind: str, instrument: str, params: dict, windo
     _validate(entry, attempt=True)
     path = Path(results_dir) / ATTEMPTS / f"{entry['attempt_id']}.json"
     atomic_json(path, entry)
-    evaluation = TrialEvaluation(window=tuple(requested))
+    evaluation = TrialEvaluation(window=tuple(requested), attempt_id=entry["attempt_id"])
     try:
         yield evaluation
         if not isinstance(evaluation.result, dict):

@@ -470,3 +470,18 @@ def test_cli_counts_the_automatic_always_in_comparison_as_research(tmp_path, cap
     rows = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
     assert len(rows) == 2, "the automatically evaluated comparison is also a configuration tried"
     assert {r["params"]["entry_apr"] for r in rows} == {10.0, -1e9}
+
+
+def test_carry_summary_logs_the_daily_notional_series_used_for_inference():
+    index = pd.date_range(T0, periods=24 * 125, freq="h")
+    daily = np.random.default_rng(2026).normal(0.0002, 0.001, size=125)
+    hourly = np.repeat(daily / 24, 24)
+    pnl = {
+        "BTCUSDT": pd.DataFrame({"net": hourly, "basis": hourly, "funding": 0.0, "cost": 0.0, "w": 1.0}, index=index)
+    }
+    summary = cs.summary(pnl)
+    series = summary["return_stats"]
+    assert series["basis"] == "daily-net-notional-v1" and series["days"] == 125
+    assert list(series["daily_returns"].values()) == pytest.approx(daily)
+    assert summary["daily_inference"]["available"] and summary["daily_inference"]["days"] == 123
+    assert summary["daily_inference"]["mean"] == pytest.approx(daily[1:-1].mean())

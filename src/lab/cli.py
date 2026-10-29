@@ -263,7 +263,29 @@ def _strategy_params(a) -> dict:
 STRATEGY_NAMES = {"taker": "imbalance taker", "maker": "passive maker"}
 
 
+def _print_dependence_diagnostics(cfg, kind, instrument, params, trial_id, daily, *, holdout):
+    from lab.daily_inference import research_inference
+    from lab.persistence import atomic_json
+
+    if daily["available"]:
+        print(f"  daily HAC t {daily['t']:+.2f}, SE {daily['se']:.6g}, {daily['days']} interior UTC dates (diagnostic)")
+    else:
+        print(f"  daily HAC unavailable: {daily['reason']}")
+    if not holdout:
+        report = research_inference(cfg.results_dir, kind, instrument, fast_research.fingerprint(params))
+        atomic_json(cfg.results_dir / "inference" / f"{trial_id}.json", report)
+        if report["available"]:
+            print(
+                f"  joint block p {report['p_joint']:.4f}, {report['configurations']} configurations, "
+                "7/14/28-day sensitivity (unqualified diagnostic; not a probability of an edge)"
+            )
+        else:
+            print(f"  joint block diagnostic unavailable: {report['reason']}")
+    print("  dependence diagnostics are unqualified; no gate pass implied")
+
+
 def cmd_fast_backtest(cfg, a):
+    from lab.daily_inference import daily_inference
     from lab.fast import EXECUTION_MODEL, backtest
     from lab.study_time import MAX_BOOK_GAP_NS
 
@@ -328,6 +350,7 @@ def cmd_fast_backtest(cfg, a):
                     "return_stats",
                 )
             }
+            result["daily_inference"] = daily_inference(r["return_stats"])
             trial.result, trial.window = result, (r["start_ns"], r["end_ns"])
             if attempt is not None:
                 attempt.result = result
@@ -363,8 +386,11 @@ def cmd_fast_backtest(cfg, a):
         else:
             print(f"  deflated Sharpe {score:.3f} (IID diagnostic, {n} research configurations)")
         print(
-            "  daily net equity returns; trial correlation and serial dependence are not adjusted: no gate pass implied"
+            "  IID deflated Sharpe above does not adjust trial correlation or serial dependence: no gate pass implied"
         )
+    _print_dependence_diagnostics(
+        cfg, "fast-backtest", iid, params, trial.attempt_id, result["daily_inference"], holdout=a.holdout
+    )
     if r["stopped"]:
         print(f"  stopped: {r['stopped']}")
     return 0
@@ -497,14 +523,19 @@ def cmd_carry_study(cfg, a):
                     f"no carry data for {' '.join(symbols)} {'after' if a.holdout else 'before'} {b:%Y-%m-%d}"
                 )
             st = cs.summary(pnl, settings.top)
-            result = nullable_numbers({k: st[k] for k in ("days", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")})
+            result = nullable_numbers(
+                {
+                    k: st[k]
+                    for k in ("days", "apr", "sharpe", "sr_daily", "t_nw", "max_dd", "return_stats", "daily_inference")
+                }
+            )
             first, last = min(v.index[0] for v in pnl.values()), max(v.index[-1] for v in pnl.values())
             trial.result, trial.window = result, (int(first.value), int(last.value))
-        return pnl, missing, st, result
+        return pnl, missing, st, result, trial.attempt_id
 
     try:
         with evaluation as attempt:
-            pnl, missing, st, result = evaluate(s)
+            pnl, missing, st, result, trial_id = evaluate(s)
             if attempt is not None:
                 attempt.result = result
         base = None
@@ -523,7 +554,7 @@ def cmd_carry_study(cfg, a):
     print(f"carry {a.mode}: {trade}, {who}, {st['start']} .. {st['end']} UTC")
     if a.holdout:
         psr = cs.probabilistic_sharpe(st["sr_daily"], st["days"], st["skew"], st["kurt"])
-        print(f"  HOLDOUT test from {b:%Y-%m-%d} (recorded); P(Sharpe > 0) {psr:.2f}")
+        print(f"  HOLDOUT test from {b:%Y-%m-%d} (recorded); P(Sharpe > 0) {psr:.2f} (IID diagnostic)")
     else:
         print(f"  research data only (holdout from {b:%Y-%m-%d}); configurations tried: {n}")
         try:
@@ -535,6 +566,9 @@ def cmd_carry_study(cfg, a):
             print(f"  deflated Sharpe unavailable: {e}")
         else:
             print(f"  deflated Sharpe {dsr:.2f} (IID diagnostic after {n} tries; dependence is not adjusted)")
+    _print_dependence_diagnostics(
+        cfg, "carry-study", key, params, trial_id, result["daily_inference"], holdout=a.holdout
+    )
     if missing:
         print(
             f"  no data, left out: {' '.join(missing[:20])}"

@@ -76,8 +76,9 @@ window timestamps match. Carry also refuses missing trial statistics or differen
 those configurations. Holdout attempts never tune research diagnostics.
 
 Legacy-only IID diagnostics retain their provisional mathematical behavior; their provenance is unverified,
-and they cannot pass a trading gate. A8b remains open: register and validate the treatment of serial dependence,
-correlated trials, candidate selection and unavailable outcomes before inspecting candidate results. A future
+and they cannot pass a trading gate. [A8b2](daily-inference.md) now registers initial daily dependence diagnostics;
+its [limited validation](daily-inference-validation.md) leaves them unqualified. A8b still needs stronger
+independent calibration, candidate selection and unavailable-outcome treatment before candidate qualification. A future
 cohort or recovery rule must account for the preserved history; erasing it or simply taking the latest
 successful result is not a qualification method. No profitability threshold is changed by A8b1.
 

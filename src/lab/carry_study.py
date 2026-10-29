@@ -291,6 +291,8 @@ def expected_max_sharpe(trial_srs: list[float]) -> float:
 def summary(pnl: dict[str, pd.DataFrame], slots: int = 0) -> dict:
     """Portfolio statistics on daily net returns. Each symbol with data has an equal share of the notional (a
     symbol requested without data is left out, not counted as idle notional), or with `slots`, each slot has."""
+    from lab.daily_inference import CARRY_BASIS, daily_inference
+
     if not pnl:
         return {"days": 0}
     n_share = slots or len(pnl)
@@ -306,6 +308,11 @@ def summary(pnl: dict[str, pd.DataFrame], slots: int = 0) -> dict:
     years = n / 365 if n else math.nan
     skew = float(pd.Series(x).skew()) if n > 2 else 0.0
     kurt = float(pd.Series(x).kurt()) + 3 if n > 3 else 3.0
+    return_stats = {
+        "basis": CARRY_BASIS,
+        "days": n,
+        "daily_returns": {str(day.date()): float(value) for day, value in daily.items()},
+    }
     return {
         "start": str(daily.index[0].date()),
         "end": str(daily.index[-1].date()),
@@ -318,6 +325,8 @@ def summary(pnl: dict[str, pd.DataFrame], slots: int = 0) -> dict:
         "max_dd": dd * 100,
         "skew": skew,
         "kurt": kurt,
+        "return_stats": return_stats,
+        "daily_inference": daily_inference(return_stats),
         "funding_apr": part["funding"] / years * 100,
         "basis_apr": part["basis"] / years * 100,
         "cost_apr": part["cost"] / years * 100,
