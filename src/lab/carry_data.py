@@ -27,7 +27,9 @@ BINANCE_FAPI = "https://fapi.binance.com/fapi/v1"
 BINANCE_SPOT = "https://api.binance.com/api/v3"
 BYBIT_V5 = "https://api.bybit.com/v5/market"
 HOUR_MS = 3_600_000
-TRIES = 6  # waits of 2, 4, ... 32 s between them: rate limits and timeouts pass, a dead network does not
+# Waits of 2, 4, ... 64 s, then 120 s: about 10 minutes in all, so rate limits, timeouts and a DNS or Wi-Fi blip pass.
+TRIES = 10
+MAX_WAIT_S = 120
 BYBIT_RATE_LIMITED = {10006, 10018}
 VENUES = ("binance", "bybit")
 # (venue, market) -> what carry research reads from it
@@ -59,7 +61,7 @@ def patient(get, sleep=time.sleep, tries=TRIES):
             except (URLError, TimeoutError):
                 if k == tries - 1:
                     raise
-            sleep(2 ** (k + 1))
+            sleep(min(2 ** (k + 1), MAX_WAIT_S))
         raise AssertionError("unreachable")
 
     return call

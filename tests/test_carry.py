@@ -259,7 +259,7 @@ def test_the_portfolio_shares_notional_among_the_symbols_with_data(tmp_path):
 
 
 def test_fetching_waits_out_rate_limits_and_timeouts_but_not_answers():
-    from urllib.error import HTTPError
+    from urllib.error import HTTPError, URLError
 
     answers = iter([{"retCode": 10006, "retMsg": "Too many visits"}, TimeoutError(), {"retCode": 0, "ok": 1}])
 
@@ -278,6 +278,14 @@ def test_fetching_waits_out_rate_limits_and_timeouts_but_not_answers():
 
     with pytest.raises(cd.RateLimited):
         cd.patient(limited, waits.append, tries=3)("u")
+
+    def offline(url):  # what a lost DNS resolver looks like
+        raise URLError("[Errno -3] Temporary failure in name resolution")
+
+    waits.clear()
+    with pytest.raises(URLError):
+        cd.patient(offline, waits.append)("u")
+    assert waits == [2, 4, 8, 16, 32, 64, 120, 120, 120] and sum(waits) > 8 * 60  # outlasts a blip of minutes
 
     def unknown(url):
         raise HTTPError(url, 400, "Invalid symbol", {}, None)
