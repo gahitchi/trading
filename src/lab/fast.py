@@ -18,6 +18,8 @@ client, which fills simulated orders against the live book. No exchange executio
 
 from __future__ import annotations
 
+import math
+from bisect import bisect_right
 from collections import deque
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -29,8 +31,14 @@ from lab.fast_research import DAY_NS, equity_return_stats
 from lab.micro import IMBALANCE_LEVELS, book_imbalance
 from lab.persistence import atomic_json
 from lab.risk_manager import RiskLimits, RiskManagedStrategy, RiskManager, TradingState, add_strategy, engine_config
+from lab.study_time import MAX_BOOK_GAP_NS
 
 F_LAST = 128
+EXECUTION_MODEL = "observed-flat-gap-v1"
+
+
+class ReplayUnavailable(ValueError):
+    """The recording cannot establish a performance result for this execution model."""
 
 
 class ImbalanceTakerConfig(StrategyConfig):
@@ -116,6 +124,7 @@ class FastStrategy(RiskManagedStrategy):
         self.start_equity = None
         self.equity_curve = deque(maxlen=EQUITY_KEEP)
         self.daily_equity = None  # enabled by the backtest; no extra per-book valuation in paper trading
+        self.replay = False  # replay results stop at the last observed event, before shutdown execution
 
     def on_start(self):
         self._sample_equity()
@@ -125,6 +134,8 @@ class FastStrategy(RiskManagedStrategy):
             self.clock.set_timer("report", timedelta(seconds=self.config.report_s), callback=self._on_report)
 
     def on_stop(self):
+        if self.replay:
+            return  # no closes, cancels or fills against a cached book after the recording ends
         self.cancel_all_orders(self.iid)
         self._close()
         if self.config.report:
@@ -287,6 +298,47 @@ def trip_stats(trips: list[float]) -> dict:
     return {"round_trips": n, "mean_trip": mean, "t_stat": mean / (sd / n**0.5) if sd else 0.0}
 
 
+def _replay_batches(deltas, trades):
+    """Observed book segments, with fresh snapshots after holes and no stale-book trade matching.
+
+    Validate before running the strategy. A gap is not an opportunity to preemptively flatten: the caller
+    checks the actual position and pending orders only after replaying the preceding observed segment.
+    """
+    from nautilus_trader.model import BookAction, OrderBook
+
+    deltas = sorted(deltas, key=lambda d: d.ts_init)
+    batches, complete_times = [], []
+    book = OrderBook(deltas[0].instrument_id, BookType.L2_MBP)
+    current, last_complete = [], None
+    for d in deltas:
+        if last_complete is not None and d.ts_init - last_complete > MAX_BOOK_GAP_NS:
+            if not current[-1].flags & F_LAST:
+                raise ReplayUnavailable("incomplete book batch before recording gap")
+            if d.action != BookAction.CLEAR:
+                raise ReplayUnavailable(f"recording gap at {d.ts_init}: resumption requires a fresh book snapshot")
+            batches.append((current, []))
+            current, last_complete = [], None
+            book = OrderBook(d.instrument_id, BookType.L2_MBP)
+        current.append(d)
+        book.apply_delta(d)
+        if d.flags & F_LAST:
+            bid, ask = book.best_bid_price(), book.best_ask_price()
+            if bid is None or ask is None or float(bid) >= float(ask):
+                raise ReplayUnavailable(f"unusable complete book at {d.ts_init}; replay requires two uncrossed sides")
+            last_complete = d.ts_init
+            complete_times.append(last_complete)
+    if not current[-1].flags & F_LAST:
+        raise ReplayUnavailable("recording ends with an incomplete book batch")
+    batches.append((current, []))
+    starts = [ds[0].ts_init for ds, _ in batches]
+    for t in sorted(trades, key=lambda t: t.ts_init):
+        pos = bisect_right(complete_times, t.ts_init) - 1
+        if pos < 0 or t.ts_init - complete_times[pos] > MAX_BOOK_GAP_NS:
+            raise ReplayUnavailable(f"trade at {t.ts_init} has no fresh book; execution is unknown")
+        batches[bisect_right(starts, t.ts_init) - 1][1].append(t)
+    return batches
+
+
 def backtest(
     catalog_path: str,
     config,
@@ -300,16 +352,22 @@ def backtest(
     maker_bps: float = 2.0,
     taker_bps: float = 5.0,
     latency_ms: float = 50.0,
+    cancel_latency_ms: float | None = None,
 ) -> dict:
     """Replays recorded order-book deltas and trades through NautilusTrader's matching engine (L2 book, queue
     position, consumed liquidity) with a fixed order latency, through the same risk manager as paper trading (its
-    daily loss cap is max_loss; see fast_risk). Returns the run's summary."""
+    daily loss cap is max_loss; see fast_risk). Gaps require flat inventory and no outstanding orders.
+    Results are marked at the last observed event, without shutdown fills. Cancellation latency defaults
+    to submission latency; both are inbound only, with instantaneous acknowledgments."""
     from nautilus_trader.backtest import BacktestEngine, BacktestEngineConfig
     from nautilus_trader.common import LoggerConfig, LogLevel
     from nautilus_trader.execution import StaticLatencyModel
     from nautilus_trader.model import AccountType, Money, OmsType, Venue
     from nautilus_trader.persistence import ParquetDataCatalog
 
+    cancel_latency_ms = latency_ms if cancel_latency_ms is None else cancel_latency_ms
+    if any(not math.isfinite(v) or v < 0 for v in (latency_ms, cancel_latency_ms)):
+        raise ValueError("order latency must be finite and nonnegative")
     catalog = ParquetDataCatalog(catalog_path)
     iid = config.instrument_id
     instruments = catalog.instruments(instrument_ids=[iid])
@@ -320,6 +378,7 @@ def backtest(
     trades = catalog.query_trade_ticks([iid], start, end)
     if not deltas:
         raise ValueError(f"no order-book data for {iid} in that period")
+    batches = _replay_batches(deltas, trades)
     quote = inst.quote_currency
     venue = str(inst.id.venue)
     risk = fast_risk(
@@ -340,27 +399,58 @@ def backtest(
             default_leverage=Decimal(1),
             book_type=BookType.L2_MBP,
             fee_model=fee_model(maker_bps, taker_bps),
-            latency_model=StaticLatencyModel(base_latency_nanos=int(latency_ms * 1e6)),
+            latency_model=StaticLatencyModel(
+                insert_latency_nanos=int(latency_ms * 1e6),
+                update_latency_nanos=int(latency_ms * 1e6),
+                cancel_latency_nanos=int(cancel_latency_ms * 1e6),
+            ),
             queue_position=True,
             liquidity_consumption=True,
         )
         engine.add_instrument(inst)
-        engine.add_data(deltas)
-        if trades:
-            engine.add_data(trades)
         strategy = make_strategy(config, risk)
         strategy.daily_equity = {}
+        strategy.replay = True
         add_strategy(engine, strategy, risk)
-        engine.run()
+        for index, (book_data, trade_data) in enumerate(batches):
+            if index:
+                unknown = []
+                if engine.cache.positions_open():
+                    unknown.append("open inventory")
+                if strategy._live_orders():
+                    unknown.append("outstanding orders")
+                if unknown:
+                    raise ReplayUnavailable(
+                        f"recording gap before {book_data[0].ts_init}: {' and '.join(unknown)}; "
+                        "execution and valuation during the missing interval are unknown; no performance result"
+                    )
+                engine.clear_data()
+            engine.add_data(book_data)
+            if trade_data:
+                engine.add_data(trade_data)
+            engine.run(streaming=True)  # pause before shutdown can advance clocks or settle trailing orders
         strategy._sample_equity()  # final mark, including any position still open at the recording's end
         account = engine.cache.account_for_venue(Venue(str(inst.id.venue)))
-        equity = account.balance_total(quote).as_double() if account else capital
+        cash = account.balance_total(quote).as_double() if account else None
+        equity = strategy._equity_or_none()
+        if cash is None or equity is None or not math.isfinite(equity):
+            raise ReplayUnavailable("terminal equity cannot be valued; no performance result")
+        if config.report:
+            strategy._write_report(running=False)
         return {
             "instrument": iid,
             "start_ns": deltas[0].ts_init,
-            "end_ns": deltas[-1].ts_init,
+            "end_ns": max(deltas[-1].ts_init, trades[-1].ts_init if trades else 0),
+            "recording_segments": len(batches),
             "entries": strategy.entries,
             "pnl": equity - capital,
+            "cash_pnl": cash - capital,
+            "unrealized_pnl": equity - cash,
+            "terminal": {
+                "net_qty": float(strategy.portfolio.net_position(strategy.iid)),
+                "outstanding_orders": len(strategy._live_orders()),
+                "valuation_ns": deltas[-1].ts_init,
+            },
             "stopped": strategy.stopped_reason,
             "risk_denials": dict(risk.denials),
             "return_stats": equity_return_stats(strategy.daily_equity, capital),

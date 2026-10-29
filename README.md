@@ -108,7 +108,15 @@ exchange orders, no keys. Both trade through the pre-trade risk manager (`lab.ri
 `--max-loss` is the daily loss cap (flatten, no new risk until 00:00 UTC), `--max-position` caps the position and
 each order's notional (default `--capital`), and `lab kill` stops them. Paper keeps the risk state and an audit log
 in `results/fast/`, so a restart doesn't clear a daily-loss stop. The strategy is a platform
-test, not a validated edge. The backtest reports round trips net of costs and the t-statistic of their mean.
+test, not a validated edge. The backtest reports closed round trips net of costs and the descriptive t-statistic
+of their mean. It stops at the last observed event, preserves terminal inventory and outstanding orders, and
+reports total marked P&L as cash P&L plus unrealized P&L; there is no shutdown liquidation against a cached book.
+Recording holes greater than one second can be crossed only while already flat with no outstanding orders and
+with a fresh snapshot on resumption. Otherwise the evaluation is unavailable and the CLI logs the attempted
+configuration, including failed holdout use. See the [execution replay policy](docs/execution-replay.md).
+`--latency-ms` delays inbound submissions; `--cancel-latency-ms` independently stresses cancellation, defaulting
+to the same delay. A stale quote can fill before its cancellation arrives. Acknowledgments remain instantaneous;
+these fixed delays do not model home-network jitter or qualify real execution performance.
 Research backtests also log daily net equity returns, including unrealized P&L, and print an IID deflated-Sharpe
 diagnostic over the instrument's logged fast research configurations. It is unavailable when trial histories lack
 daily returns, recorded windows differ, fewer than two comparable configurations exist, or fewer than four days

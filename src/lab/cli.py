@@ -258,7 +258,8 @@ STRATEGY_NAMES = {"taker": "imbalance taker", "maker": "passive maker"}
 
 
 def cmd_fast_backtest(cfg, a):
-    from lab.fast import backtest
+    from lab.fast import EXECUTION_MODEL, ReplayUnavailable, backtest
+    from lab.study_time import MAX_BOOK_GAP_NS
 
     catalog = Path(a.catalog) if a.catalog else cfg.data_dir / "market" / "catalog"
     if not catalog.exists():
@@ -270,6 +271,9 @@ def cmd_fast_backtest(cfg, a):
         **_strategy_params(a),
         "max_loss": a.max_loss, "max_position": a.max_position, "capital": a.capital, "taker_bps": a.fee_bps, "maker_bps": a.maker_bps,
         "latency_ms": a.latency_ms,
+        "cancel_latency_ms": a.latency_ms if a.cancel_latency_ms is None else a.cancel_latency_ms,
+        "execution_model": EXECUTION_MODEL,
+        "max_book_gap_ms": MAX_BOOK_GAP_NS // 1_000_000,
     }  # fmt: skip
     try:
         if a.holdout:
@@ -284,20 +288,46 @@ def cmd_fast_backtest(cfg, a):
             start, end = fast_research.research_window(cfg.results_dir, str(catalog), iid, start, end)
             evaluation = nullcontext(None)
         with evaluation as attempt:
-            r = backtest(
-                str(catalog),
-                config,
-                max_loss=a.max_loss,
-                max_position=a.max_position,
-                start=start,
-                end=end,
-                capital=a.capital,
-                maker_bps=a.maker_bps,
-                taker_bps=a.fee_bps,
-                latency_ms=a.latency_ms,
-            )
+            try:
+                r = backtest(
+                    str(catalog),
+                    config,
+                    max_loss=a.max_loss,
+                    max_position=a.max_position,
+                    start=start,
+                    end=end,
+                    capital=a.capital,
+                    maker_bps=a.maker_bps,
+                    taker_bps=a.fee_bps,
+                    latency_ms=a.latency_ms,
+                    cancel_latency_ms=a.cancel_latency_ms,
+                )
+            except ReplayUnavailable as e:
+                fast_research.register_trial(
+                    cfg.results_dir,
+                    "fast-backtest",
+                    iid,
+                    params,
+                    (start, end),
+                    {"status": "unavailable", "error": str(e)},
+                    holdout=a.holdout,
+                )
+                raise  # the holdout context also retains the failed attempt
             result = {
-                k: r[k] for k in ("entries", "pnl", "commissions", "round_trips", "mean_trip", "t_stat", "stopped")
+                k: r[k]
+                for k in (
+                    "entries",
+                    "pnl",
+                    "cash_pnl",
+                    "unrealized_pnl",
+                    "terminal",
+                    "recording_segments",
+                    "commissions",
+                    "round_trips",
+                    "mean_trip",
+                    "t_stat",
+                    "stopped",
+                )
             }
             result["return_stats"] = r["return_stats"]
             if attempt is not None:
@@ -316,7 +346,15 @@ def cmd_fast_backtest(cfg, a):
     )
     print(
         f"  entries {r['entries']}, fills {r['fills']}, commissions {r['commissions']:.4f}, "
-        f"P&L after costs {r['pnl']:+.4f} (quote currency)"
+        f"marked P&L after costs {r['pnl']:+.4f} (quote currency)"
+    )
+    print(
+        f"  inbound latency: submit {a.latency_ms:g} ms, cancel {params['cancel_latency_ms']:g} ms; "
+        "instantaneous acknowledgments"
+    )
+    print(
+        f"  terminal inventory {r['terminal']['net_qty']:+g}, outstanding orders {r['terminal']['outstanding_orders']}; "
+        f"unrealized P&L {r['unrealized_pnl']:+.4f}; no shutdown liquidation"
     )
     print(f"  round trips {r['round_trips']}, mean {r['mean_trip']:+.5f} each, t-stat {r['t_stat']:+.2f}")
     if not a.holdout:
@@ -654,6 +692,11 @@ def build_parser() -> argparse.ArgumentParser:
             fp.add_argument("--start", help="UTC start")
             fp.add_argument("--end", help="UTC end")
             fp.add_argument("--latency-ms", type=float, default=50.0, help="order latency (default 50 ms)")
+            fp.add_argument(
+                "--cancel-latency-ms",
+                type=float,
+                help="inbound cancel latency (default: --latency-ms); stress separately",
+            )
             fp.add_argument("--holdout", action="store_true", help="the one-time test on the reserved holdout data")
             fp.add_argument("--again", metavar="REASON", help="repeat a holdout test; the reason is recorded")
         else:

@@ -434,6 +434,10 @@ def test_cli_prints_a_diagnostic_only_after_comparable_daily_research_trials(tmp
         return {
             "entries": 5,
             "pnl": equity[-1] - 100,
+            "cash_pnl": equity[-1] - 100,
+            "unrealized_pnl": 0,
+            "terminal": {"net_qty": 0, "outstanding_orders": 0, "valuation_ns": 5 * fr.DAY_NS},
+            "recording_segments": 1,
             "commissions": 0.5,
             "round_trips": 5,
             "mean_trip": 0.2,
@@ -461,8 +465,11 @@ def test_cli_prints_a_diagnostic_only_after_comparable_daily_research_trials(tmp
 def test_backtest_reports_round_trips_net_of_costs(recording):
     path, *_ = recording
     r = backtest(path, cfg(), taker_bps=5, maker_bps=2, latency_ms=0)
-    assert r["round_trips"] == r["entries"]
-    assert r["mean_trip"] * r["round_trips"] == pytest.approx(r["pnl"], abs=1e-6)
+    assert r["round_trips"] == r["entries"] - 1  # the last entry is still open at the recording's end
+    assert abs(r["terminal"]["net_qty"]) == pytest.approx(0.01)
+    # Closed trips exclude the terminal position's entry commission and unrealized mark.
+    assert r["mean_trip"] * r["round_trips"] == pytest.approx(r["cash_pnl"] + 0.005, abs=0.001)
+    assert r["pnl"] == pytest.approx(r["cash_pnl"] + r["unrealized_pnl"])
     assert r["t_stat"] < 0  # 5 bp a side is more than the planted edge
 
 
