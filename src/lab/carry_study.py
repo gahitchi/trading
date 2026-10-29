@@ -37,7 +37,6 @@ warms up on the data before). The boundary only moves later (`lab carry release`
 
 from __future__ import annotations
 
-import json
 import math
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -357,6 +356,8 @@ def run(
     boundary: pd.Timestamp,
     holdout: bool = False,
     end: pd.Timestamp | None = None,
+    *,
+    evidence=None,
 ) -> tuple[dict[str, pd.DataFrame], list[str]]:
     """Hourly P&L per symbol on research data (before the boundary) or, with holdout, on the data from it on.
     Also returns the symbols left out for lack of data."""
@@ -367,6 +368,9 @@ def run(
             lg = truncate(lg, end + pd.Timedelta(nanoseconds=1))
         if lg is not None and not holdout:
             lg = truncate(lg, boundary)
+        if evidence is not None:
+            for name in ("long", "short", "funding", "turnover"):
+                evidence.series(f"{sym}/{name}", getattr(lg, name) if lg is not None else None)
         h = hourly(lg) if lg is not None and len(lg.long) and len(lg.short) else None
         if h is None:
             missing.append(sym)
@@ -446,19 +450,27 @@ def release(results_dir: Path, root: Path, reason: str) -> tuple[pd.Timestamp, p
 
 
 def trial_sharpes(results_dir: Path, kind: str, instrument: str) -> list[float]:
-    """The latest daily Sharpe of every distinct configuration tried on the research data."""
-    path = Path(results_dir) / "fast_trials.jsonl"
-    if not path.exists():
-        return []
-    latest = {}
-    for line in path.read_text().splitlines():
-        if not line.strip():
-            continue
-        r = json.loads(line)
+    """Provisional daily Sharpes; incomplete trials or incomparable windows cannot be silently dropped."""
+    from lab.trials import history, incomparable_provenance
+
+    latest, selected = {}, []
+    windows = set()
+    for r in history(results_dir):
         if r["kind"] == kind and r["instrument"] == instrument and not r["holdout"]:
+            if r.get("status") in ("reserved", "failed") or r["result"].get("status") == "unavailable":
+                raise ValueError("incomplete or unavailable research attempts remain in the trial history")
             sr = r["result"].get("sr_daily")
-            if sr is not None and math.isfinite(sr):
-                latest[r["fingerprint"]] = sr
+            if sr is None or not math.isfinite(sr):
+                raise ValueError("missing daily Sharpe statistics in the research trial history")
+            windows.add(tuple(r["window"]))
+            selected.append(r)
+            latest[r["fingerprint"]] = sr
+    if reason := incomparable_provenance(selected):
+        raise ValueError(reason)
+    if len(windows) > 1:
+        raise ValueError("research windows differ")
+    if len(latest) < 2:
+        raise ValueError("at least two research configurations are required")
     return list(latest.values())
 
 

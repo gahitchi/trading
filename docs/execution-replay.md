@@ -24,7 +24,8 @@ advancing through the missing interval. Only then does the lab inspect the actua
 There is no anticipation of a future outage, forced close before it, free cancellation, inventory reset,
 fill interpolation, or reset to starting capital. Rejected evaluations return no performance result. The CLI
 logs these model rejections as unavailable attempts; holdout reservations remain consumed after rejection.
-Recording every other kind of research failure, including process crashes, remains part of A8b.
+The [trial evidence protocol](trial-evidence.md) now also reserves general study attempts before work and retains
+failures and process interruptions. Statistical qualification remains A8b.
 
 This deliberately means a continuously quoting maker will often be unavailable on gappy recordings. Genuine
 risk across an unobserved interval cannot be recovered from the available feed. Do not trim a window or drop

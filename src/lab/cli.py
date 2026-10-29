@@ -11,6 +11,7 @@ import pandas as pd
 
 from lab import fast_research
 from lab.config import ConfigError, load_config
+from lab.trials import count_configurations, trial_run
 
 
 def cmd_record(cfg, a):
@@ -99,10 +100,6 @@ def cmd_micro_study(cfg, a):
         hawkes_baseline_per_s=a.hawkes_mu,
         lead_lag_max_interval_s=a.lead_lag_interval,
     )
-    samples, table = study(str(catalog), iid, settings, start, end, leader)
-    if samples.empty:
-        raise SystemExit(f"no order-book data for {iid} in {catalog} before its holdout")
-    first, last = (pd.Timestamp(samples["ts"].iloc[i], tz="UTC") for i in (0, -1))
     params = {
         "every_ms": a.every_ms,
         "horizons_s": list(a.horizons),
@@ -113,10 +110,16 @@ def cmd_micro_study(cfg, a):
         "lead_lag_interval": a.lead_lag_interval,
         "max_book_gap_ms": MAX_BOOK_GAP_NS // 1_000_000,
     }
-    n = fast_research.register_trial(
-        cfg.results_dir, "micro-study", iid, params, (start, end),
-        {"ic": {f"{r.feature}@{r.horizon_s:g}s": r.ic for r in table.itertuples() if r.ic == r.ic}},
-    )  # fmt: skip
+    try:
+        with trial_run(cfg.results_dir, "micro-study", iid, params, (start, end)) as trial:
+            samples, table = study(str(catalog), iid, settings, start, end, leader, evidence=trial.inputs)
+            if samples.empty:
+                raise ValueError(f"no order-book data for {iid} in {catalog} before its holdout")
+            trial.result = {"ic": {f"{r.feature}@{r.horizon_s:g}s": r.ic for r in table.itertuples() if r.ic == r.ic}}
+        n = count_configurations(cfg.results_dir, "micro-study", iid)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    first, last = (pd.Timestamp(samples["ts"].iloc[i], tz="UTC") for i in (0, -1))
     print(f"{iid}: {len(samples):,} samples every {a.every_ms} ms, {first:%Y-%m-%d %H:%M} .. {last:%Y-%m-%d %H:%M} UTC")
     print(
         f"research data only (holdout from {pd.Timestamp(end + 1, tz='UTC'):%Y-%m-%d %H:%M} UTC); study settings tried: {n}"
@@ -181,12 +184,6 @@ def cmd_maker_study(cfg, a):
         maker_fee_bps=a.maker_bps,
         improve_ticks=a.improve,
     )
-    try:
-        fills, mids, table = study(str(catalog), iid, settings, start, end)
-    except ValueError as e:
-        raise SystemExit(str(e)) from e
-    if not len(mids[0]):
-        raise SystemExit(f"no order-book data for {iid} in {catalog} before its holdout")
     params = {
         "every_ms": a.every_ms,
         "latency_ms": a.latency_ms,
@@ -199,11 +196,20 @@ def cmd_maker_study(cfg, a):
         "minimum_inference_days": MIN_INFERENCE_DAYS,
         "midnight_rule": "same-utc-day",
     }
-    n = fast_research.register_trial(
-        cfg.results_dir, "maker-study", iid, params, (start, end),
-        {"net_bps": {f"{r.group}@{r.horizon_s:g}s": r.net_bps for r in table.itertuples() if r.net_bps == r.net_bps},
-         "uncertainty_report": nullable_numbers(table.to_dict("records"))},
-    )  # fmt: skip
+    try:
+        with trial_run(cfg.results_dir, "maker-study", iid, params, (start, end)) as trial:
+            fills, mids, table = study(str(catalog), iid, settings, start, end, evidence=trial.inputs)
+            if not len(mids[0]):
+                raise ValueError(f"no order-book data for {iid} in {catalog} before its holdout")
+            trial.result = {
+                "net_bps": {
+                    f"{r.group}@{r.horizon_s:g}s": r.net_bps for r in table.itertuples() if r.net_bps == r.net_bps
+                },
+                "uncertainty_report": nullable_numbers(table.to_dict("records")),
+            }
+        n = count_configurations(cfg.results_dir, "maker-study", iid)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
     first, last = (pd.Timestamp(mids[0][i], tz="UTC") for i in (0, -1))
     print(f"{iid}: {len(fills):,} passive fills, {first:%Y-%m-%d %H:%M} .. {last:%Y-%m-%d %H:%M} UTC")
     print(
@@ -258,7 +264,7 @@ STRATEGY_NAMES = {"taker": "imbalance taker", "maker": "passive maker"}
 
 
 def cmd_fast_backtest(cfg, a):
-    from lab.fast import EXECUTION_MODEL, ReplayUnavailable, backtest
+    from lab.fast import EXECUTION_MODEL, backtest
     from lab.study_time import MAX_BOOK_GAP_NS
 
     catalog = Path(a.catalog) if a.catalog else cfg.data_dir / "market" / "catalog"
@@ -287,32 +293,24 @@ def cmd_fast_backtest(cfg, a):
                 raise SystemExit("--again only applies with --holdout")
             start, end = fast_research.research_window(cfg.results_dir, str(catalog), iid, start, end)
             evaluation = nullcontext(None)
-        with evaluation as attempt:
-            try:
-                r = backtest(
-                    str(catalog),
-                    config,
-                    max_loss=a.max_loss,
-                    max_position=a.max_position,
-                    start=start,
-                    end=end,
-                    capital=a.capital,
-                    maker_bps=a.maker_bps,
-                    taker_bps=a.fee_bps,
-                    latency_ms=a.latency_ms,
-                    cancel_latency_ms=a.cancel_latency_ms,
-                )
-            except ReplayUnavailable as e:
-                fast_research.register_trial(
-                    cfg.results_dir,
-                    "fast-backtest",
-                    iid,
-                    params,
-                    (start, end),
-                    {"status": "unavailable", "error": str(e)},
-                    holdout=a.holdout,
-                )
-                raise  # the holdout context also retains the failed attempt
+        with (
+            evaluation as attempt,
+            trial_run(cfg.results_dir, "fast-backtest", iid, params, (start, end), holdout=a.holdout) as trial,
+        ):
+            r = backtest(
+                str(catalog),
+                config,
+                max_loss=a.max_loss,
+                max_position=a.max_position,
+                start=start,
+                end=end,
+                capital=a.capital,
+                maker_bps=a.maker_bps,
+                taker_bps=a.fee_bps,
+                latency_ms=a.latency_ms,
+                cancel_latency_ms=a.cancel_latency_ms,
+                evidence=trial.inputs,
+            )
             result = {
                 k: r[k]
                 for k in (
@@ -327,14 +325,13 @@ def cmd_fast_backtest(cfg, a):
                     "mean_trip",
                     "t_stat",
                     "stopped",
+                    "return_stats",
                 )
             }
-            result["return_stats"] = r["return_stats"]
+            trial.result, trial.window = result, (r["start_ns"], r["end_ns"])
             if attempt is not None:
                 attempt.result = result
-            n = fast_research.register_trial(
-                cfg.results_dir, "fast-backtest", iid, params, (r["start_ns"], r["end_ns"]), result, holdout=a.holdout
-            )
+        n = count_configurations(cfg.results_dir, "fast-backtest", iid)
     except ValueError as e:
         raise SystemExit(str(e)) from e
     first, last = (pd.Timestamp(r[k], tz="UTC") for k in ("start_ns", "end_ns"))
@@ -488,27 +485,33 @@ def cmd_carry_study(cfg, a):
             end, evaluation = None, nullcontext(None)
     except ValueError as e:
         raise SystemExit(str(e)) from e
-    try:
-        with evaluation as attempt:
-            pnl, missing = cs.run(root, symbols, s, b, holdout=a.holdout, end=end)
+
+    def evaluate(settings):
+        requested = (int(b.value), int(end.value)) if a.holdout else (None, int(b.value) - 1)
+        with trial_run(
+            cfg.results_dir, "carry-study", key, cs.params_of(settings, symbols), requested, holdout=a.holdout
+        ) as trial:
+            pnl, missing = cs.run(root, symbols, settings, b, holdout=a.holdout, end=end, evidence=trial.inputs)
             if not pnl:
                 raise ValueError(
                     f"no carry data for {' '.join(symbols)} {'after' if a.holdout else 'before'} {b:%Y-%m-%d}"
                 )
-            st = cs.summary(pnl, s.top)
+            st = cs.summary(pnl, settings.top)
             result = nullable_numbers({k: st[k] for k in ("days", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")})
+            first, last = min(v.index[0] for v in pnl.values()), max(v.index[-1] for v in pnl.values())
+            trial.result, trial.window = result, (int(first.value), int(last.value))
+        return pnl, missing, st, result
+
+    try:
+        with evaluation as attempt:
+            pnl, missing, st, result = evaluate(s)
             if attempt is not None:
                 attempt.result = result
-            first, last = min(v.index[0] for v in pnl.values()), max(v.index[-1] for v in pnl.values())
-            n = fast_research.register_trial(
-                cfg.results_dir,
-                "carry-study",
-                key,
-                params,
-                (int(first.value), int(last.value)),
-                result,
-                holdout=a.holdout,
-            )
+        base = None
+        if a.mode == "cash" and not a.holdout and not s.top:
+            always = cs.CarrySettings(**{**cs.asdict(s), "entry_apr": -1e9, "exit_apr": -1e9})
+            base = evaluate(always)[2]
+        n = count_configurations(cfg.results_dir, "carry-study", key)
     except ValueError as e:
         raise SystemExit(str(e)) from e
     trade = {"cash": "long Binance spot / short Binance perpetual", "cross": "short the higher-funding perpetual, long the other (Binance vs Bybit)"}[a.mode]  # fmt: skip
@@ -522,12 +525,16 @@ def cmd_carry_study(cfg, a):
         psr = cs.probabilistic_sharpe(st["sr_daily"], st["days"], st["skew"], st["kurt"])
         print(f"  HOLDOUT test from {b:%Y-%m-%d} (recorded); P(Sharpe > 0) {psr:.2f}")
     else:
-        srs = cs.trial_sharpes(cfg.results_dir, "carry-study", key)
-        dsr = cs.probabilistic_sharpe(st["sr_daily"], st["days"], st["skew"], st["kurt"], cs.expected_max_sharpe(srs))
-        print(
-            f"  research data only (holdout from {b:%Y-%m-%d}); configurations tried: {n}; "
-            f"deflated Sharpe {dsr:.2f} (IID diagnostic after {n} tries; dependence is not adjusted)"
-        )
+        print(f"  research data only (holdout from {b:%Y-%m-%d}); configurations tried: {n}")
+        try:
+            srs = cs.trial_sharpes(cfg.results_dir, "carry-study", key)
+            dsr = cs.probabilistic_sharpe(
+                st["sr_daily"], st["days"], st["skew"], st["kurt"], cs.expected_max_sharpe(srs)
+            )
+        except ValueError as e:
+            print(f"  deflated Sharpe unavailable: {e}")
+        else:
+            print(f"  deflated Sharpe {dsr:.2f} (IID diagnostic after {n} tries; dependence is not adjusted)")
     if missing:
         print(
             f"  no data, left out: {' '.join(missing[:20])}"
@@ -538,9 +545,7 @@ def cmd_carry_study(cfg, a):
         f"costs -{st['cost_apr']:.2f}), vol {st['vol']:.2f}%, Sharpe {st['sharpe']:+.2f}, "
         f"t (Newey-West) {st['t_nw']:+.2f}, max drawdown {st['max_dd']:.2f}%, in market {st['in_market']:.0f}%"
     )
-    if a.mode == "cash" and not a.holdout and not s.top:
-        always = cs.CarrySettings(**{**cs.asdict(s), "entry_apr": -1e9, "exit_apr": -1e9})
-        base = cs.summary(cs.run(root, symbols, always, b)[0])
+    if base is not None:
         print(f"  always in the trade, for comparison: net {base['apr']:+.2f}% a year, Sharpe {base['sharpe']:+.2f}")
     table = cs.per_symbol(pnl)
     if s.top:  # a universe: the symbols that were held, best and worst

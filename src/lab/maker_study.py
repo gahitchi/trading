@@ -239,7 +239,7 @@ def evaluate(fills: pd.DataFrame, mids, settings: MakerSettings) -> pd.DataFrame
     return pd.DataFrame(out, columns=COLUMNS)
 
 
-def study(catalog_path: str, instrument_id: str, settings: MakerSettings, start=None, end=None):
+def study(catalog_path: str, instrument_id: str, settings: MakerSettings, start=None, end=None, *, evidence=None):
     from nautilus_trader.persistence import ParquetDataCatalog
 
     catalog = ParquetDataCatalog(catalog_path)
@@ -251,7 +251,12 @@ def study(catalog_path: str, instrument_id: str, settings: MakerSettings, start=
                 f"{instrument_id} has no instrument definition in {catalog_path}: its tick size is unknown"
             )
         tick = float(instruments[-1].price_increment)
+        if evidence is not None:
+            evidence.objects("instrument", [instruments[-1]])
     deltas = catalog.query_order_book_deltas([instrument_id], start, end)
     trades = catalog.query_trade_ticks([instrument_id], start, end)
+    if evidence is not None:
+        evidence.objects("book", deltas)
+        evidence.objects("trades", trades)
     fills, mids = simulate_fills(deltas, trades, settings, tick)
     return fills, mids, evaluate(fills, mids, settings)

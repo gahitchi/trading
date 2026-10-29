@@ -9,14 +9,16 @@ an interrupted evaluation, needs a logged reason. Moving the
 boundary later (`lab fast release`) turns holdout data into research data and needs a logged reason too. It
 never moves earlier: data research has seen can't become a holdout again.
 
-Every research and holdout run is appended to the trial log, so a result can be read against how many
-configurations were tried on the same data.
+CLI evaluations are reserved by lab.trials before work, including failed and interrupted attempts; completed
+and failed outcomes are mirrored into the trial log. A result can be read against how many configurations
+were tried, without silently dropping evaluations that never published a result.
 
 State, under the lab's results directory:
   fast_partition.json        the boundary per instrument, and its history
   fast_holdout_ledger.jsonl  every holdout run
   fast_holdout_attempts.json atomic reservations and outcomes, including interrupted attempts
-  fast_trials.jsonl          every research and holdout run
+  research_attempts/         authoritative CLI attempt lifecycle and code/input provenance
+  fast_trials.jsonl          mirrored terminal outcomes and legacy completed runs
 """
 
 from __future__ import annotations
@@ -161,15 +163,17 @@ def fast_deflated_sharpe(
     serial dependence still require separate qualification before this statistic can support a gate.
     """
     from lab.carry_study import expected_max_sharpe, probabilistic_sharpe
+    from lab.trials import history, incomparable_provenance
 
-    path = Path(results_dir) / TRIALS
-    latest = {}
-    for line in path.read_text().splitlines() if path.exists() else ():
-        if not line.strip():
-            continue
-        trial = json.loads(line)
+    latest, selected = {}, []
+    for trial in history(results_dir):
         if trial["kind"] == "fast-backtest" and trial["instrument"] == instrument_id and not trial["holdout"]:
+            if trial.get("status") in ("reserved", "failed") or trial["result"].get("status") == "unavailable":
+                return None, "incomplete or unavailable research attempts remain in the trial history"
+            selected.append(trial)
             latest[trial["fingerprint"]] = trial
+    if reason := incomparable_provenance(selected):
+        return None, reason
     srs = []
     for trial in latest.values():
         if tuple(trial["window"]) != tuple(window):
@@ -339,8 +343,9 @@ def holdout_run(
 def register_trial(
     results_dir: Path, kind: str, instrument_id: str, params: dict, window: tuple, result: dict, *, holdout=False
 ) -> int:
-    """Logs a run and returns how many distinct configurations of this kind have been tried on the instrument's
-    research data (the holdout runs are counted, and shown, separately in the log)."""
+    """Legacy completed-result writer. CLI evaluations reserve with lab.trials.trial_run before data access."""
+    from lab.trials import count_configurations
+
     path = Path(results_dir) / TRIALS
     fp = fingerprint(params)
     append_json(
@@ -356,10 +361,7 @@ def register_trial(
             "result": result,
         },
     )
-    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    return len(
-        {r["fingerprint"] for r in rows if r["kind"] == kind and r["instrument"] == instrument_id and not r["holdout"]}
-    )
+    return count_configurations(results_dir, kind, instrument_id)
 
 
 def release(results_dir: Path, catalog_path: str, instrument_id: str, reason: str) -> tuple[int, int]:

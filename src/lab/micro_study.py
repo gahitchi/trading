@@ -195,12 +195,25 @@ def evaluate(samples: pd.DataFrame, settings: StudySettings) -> pd.DataFrame:
     return pd.DataFrame(out, columns=["feature", "horizon_s", "n", "ic", "top_bps", "bottom_bps", "cost_bps"])
 
 
-def study(catalog_path: str, instrument_id: str, settings: StudySettings, start=None, end=None, leader_id=None):
+def study(
+    catalog_path: str,
+    instrument_id: str,
+    settings: StudySettings,
+    start=None,
+    end=None,
+    leader_id=None,
+    *,
+    evidence=None,
+):
     from nautilus_trader.persistence import ParquetDataCatalog
 
     catalog = ParquetDataCatalog(catalog_path)
     deltas = catalog.query_order_book_deltas([instrument_id], start, end)
     trades = catalog.query_trade_ticks([instrument_id], start, end)
     leader = catalog.query_order_book_deltas([leader_id], start, end) if leader_id else ()
+    if evidence is not None:
+        evidence.objects("book", deltas)
+        evidence.objects("trades", trades)
+        evidence.objects("leader", leader)
     samples = sample_features(deltas, trades, settings, leader)
     return samples, evaluate(samples, settings)

@@ -353,6 +353,7 @@ def backtest(
     taker_bps: float = 5.0,
     latency_ms: float = 50.0,
     cancel_latency_ms: float | None = None,
+    evidence=None,
 ) -> dict:
     """Replays recorded order-book deltas and trades through NautilusTrader's matching engine (L2 book, queue
     position, consumed liquidity) with a fixed order latency, through the same risk manager as paper trading (its
@@ -374,8 +375,13 @@ def backtest(
     if not instruments:
         raise ValueError(f"{iid} is not in {catalog_path}; record it first")
     inst = instruments[-1]
+    if evidence is not None:
+        evidence.objects("instrument", [inst])
     deltas = catalog.query_order_book_deltas([iid], start, end)
     trades = catalog.query_trade_ticks([iid], start, end)
+    if evidence is not None:
+        evidence.objects("book", deltas)
+        evidence.objects("trades", trades)
     if not deltas:
         raise ValueError(f"no order-book data for {iid} in that period")
     batches = _replay_batches(deltas, trades)

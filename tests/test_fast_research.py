@@ -430,6 +430,11 @@ def test_cli_prints_a_diagnostic_only_after_comparable_daily_research_trials(tmp
     monkeypatch.setattr(fr, "research_window", lambda *_args: (0, 5 * fr.DAY_NS))
 
     def backtest(_catalog, config, **_kwargs):
+        import pandas as pd
+
+        _kwargs["evidence"].series(
+            "synthetic-market", pd.Series([1.0, 2.0], index=pd.date_range("2026-01-01", periods=2, tz="UTC"))
+        )
         equity = [101, 100, 102, 101, 103] if config.threshold == 0.6 else [100, 99, 101, 100, 102]
         return {
             "entries": 5,

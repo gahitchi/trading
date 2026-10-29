@@ -310,10 +310,10 @@ def test_cli_research_counts_trials_and_meets_the_holdout_once(tmp_path, capsys)
 
     assert lab_main(run) == 0
     out = capsys.readouterr().out
-    assert "configurations tried: 1" in out and "no data, left out: XYZUSDT" in out
+    assert "configurations tried: 2" in out and "no data, left out: XYZUSDT" in out
     assert "always in the trade" in out and "BTCUSDT" in out
     assert lab_main([*run, "--entry-apr", "20"]) == 0
-    assert "configurations tried: 2" in capsys.readouterr().out
+    assert "configurations tried: 3" in capsys.readouterr().out
     assert lab_main([*run, "--mode", "cross"]) == 0
     assert "configurations tried: 1" in capsys.readouterr().out  # counted per trade
     assert lab_main([*run, "--holdout"]) == 0
@@ -323,7 +323,7 @@ def test_cli_research_counts_trials_and_meets_the_holdout_once(tmp_path, capsys)
     assert lab_main([*run, "--holdout", "--again", "reading the report"]) == 0
     assert "HOLDOUT REUSE (reason recorded): reading the report" in capsys.readouterr().out
     trials = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
-    assert [t["holdout"] for t in trials] == [False, False, False, True, True]
+    assert [t["holdout"] for t in trials] == [False, False, False, False, False, True, True]
     assert all(t["kind"] == "carry-study" and "sr_daily" in t["result"] for t in trials)
 
 
@@ -346,7 +346,9 @@ def test_cli_rejects_an_unvalued_position_without_logging_a_successful_trial(tmp
     write(root, "binance", "perp", "close", "BTCUSDT", short.drop(short.index[96:117]))
     with pytest.raises(SystemExit, match="BTCUSDT: cannot value held carry position"):
         lab_main(["--config", str(tmp_path / "lab.toml"), "carry", "study", "--symbols", "BTCUSDT"])
-    assert not (tmp_path / "results" / fr.TRIALS).exists()
+    trial = json.loads((tmp_path / "results" / fr.TRIALS).read_text())
+    assert trial["status"] == "failed" and trial["result"]["status"] == "unavailable"
+    assert "cannot value held carry position" in trial["result"]["error"]
     assert not (tmp_path / "results" / fr.LEDGER).exists()
 
 
@@ -458,3 +460,13 @@ def test_cli_top_k_on_a_universe(tmp_path, capsys):
     assert lab_main(run) == 0
     trials = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
     assert "top" not in trials[-1]["params"]  # defaults keep the fingerprints of earlier trials
+
+
+def test_cli_counts_the_automatic_always_in_comparison_as_research(tmp_path, capsys):
+    (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
+    market(tmp_path / "data" / "carry", days=400)
+    assert lab_main(["--config", str(tmp_path / "lab.toml"), "carry", "study", "--symbols", "BTCUSDT"]) == 0
+    assert "always in the trade" in capsys.readouterr().out
+    rows = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
+    assert len(rows) == 2, "the automatically evaluated comparison is also a configuration tried"
+    assert {r["params"]["entry_apr"] for r in rows} == {10.0, -1e9}

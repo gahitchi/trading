@@ -123,6 +123,13 @@ daily returns, recorded windows differ, fewer than two comparable configurations
 support finite return moments. Holdout results are excluded. Trial correlation and serial dependence still need
 qualification before the diagnostic can support a gate; a short run cannot establish an edge.
 
+All study commands reserve attempts in `results/research_attempts/` before evaluation, retaining failures and
+process interruptions alongside the existing trial log. Each attempt records source/runtime identity and content
+hashes of the actual guarded inputs. The automatic carry comparison is also a counted configuration. Incomplete
+attempts, changed identified input/code content or mixed provenance block comparable-trial diagnostics. Keep
+the attempt directory with the JSONL log; see the [trial evidence policy](docs/trial-evidence.md). This implements
+the evidence prerequisite of A8b, not its statistical qualification.
+
 `--strategy maker` runs the passive counterpart (`lab.maker.PassiveMaker`) through the same backtest, paper node,
 risk manager, holdout and trial log. It keeps one post-only quote of `--size` on each side, at the touch or
 `--improve` ticks inside the spread when it is wide enough; cancels and requotes when the wanted price changes;
@@ -203,8 +210,8 @@ Carry has its own time holdout: the first study reserves the last 180 days fetch
 later (`results/carry_partition.json`). Research runs drop that data before computing anything; `--holdout` tests
 a finished configuration on it once, using the same atomic reservation and frozen upper time boundary as fast
 backtests. Changing carry mode or the symbol basket also requires a reuse reason after an attempt, including a
-failed or interrupted one. Every completed run goes into the trial log, and research runs print a deflated Sharpe
-ratio as an IID research diagnostic. Trial correlation and serial dependence need separate qualification before
+failed or interrupted one. Every evaluation is reserved before work and its outcome mirrored into the trial log;
+research runs print an IID deflated-Sharpe diagnostic or an explicit unavailable reason. Trial correlation and serial dependence need separate qualification before
 that statistic can support a gate; its value alone does not establish an edge.
 
 Binance and Bybit are not available in every country; check that they are in yours.
