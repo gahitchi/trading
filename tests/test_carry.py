@@ -28,7 +28,8 @@ def test_binance_pages_forward_and_skips_the_open_kline():
     def get(url):
         seen.append(url)
         start = int(url.split("startTime=")[1].split("&")[0])
-        return [[t, "0", "0", "0", str(t // H), "0", t + H - 1, "5e6"] for t in range(start, now, H)][:2]
+        end = int(url.split("endTime=")[1].split("&")[0])
+        return [[t, "0", "0", "0", str(t // H), "0", t + H - 1, "5e6"] for t in range(start, end + 1, H)][:2]
 
     t0 = int(T0.value // 1_000_000)
     klines = cd._binance_closes(f"{cd.BINANCE_FAPI}/klines?symbol=X", 2, t0, now, get, lambda: None)
@@ -66,7 +67,7 @@ def test_update_appends_only_what_is_new(tmp_path):
         cd.download = cd_download
     s = cd.load(tmp_path, "binance", "perp", "close", "X")
     assert s.index.is_unique and s.index[-1] == T0 + pd.Timedelta(hours=15)
-    assert calls[1] == int(T0.value // 1_000_000) + 10 * H + 1  # resumes after the last cached row
+    assert calls[1] == int(T0.value // 1_000_000) + 10 * H  # next candle opens exactly at the last cached close
     turnover = cd.load(tmp_path, "binance", "perp", "turnover", "X")
     assert len(turnover) == 15 and (turnover == 1e6).all()  # from the same klines
     cd.path_of(tmp_path, "binance", "perp", "turnover", "X").unlink()  # a cache from before turnover was kept

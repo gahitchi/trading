@@ -499,6 +499,7 @@ def cmd_carry_fetch(cfg, a):
     from urllib.error import HTTPError, URLError
 
     from lab import carry_data
+    from lab.persistence import atomic_json
 
     root = cfg.data_dir / "carry"
     since, now = pd.Timestamp(a.since, tz="UTC"), pd.Timestamp.now(tz="UTC")
@@ -511,6 +512,7 @@ def cmd_carry_fetch(cfg, a):
         print(f"{len(symbols)} USDT pairs trade as both a Binance perpetual and spot pair today")
     else:
         symbols = [s.upper() for s in a.symbols]
+    incomplete = False
     for sym in symbols:
         for (venue, market), kinds in carry_data.SERIES.items():
             if venue not in venues:
@@ -521,12 +523,29 @@ def cmd_carry_fetch(cfg, a):
                     added, total = carry_data.update(root, venue, market, kind, sym, since, now)
                 except (HTTPError, ValueError) as e:  # e.g. no spot market for the symbol
                     print(f"{name:34} not available ({e}): skipped")
+                    incomplete = True
                     continue
                 except (URLError, TimeoutError) as e:
                     raise SystemExit(f"could not reach {venue}: {e}") from e
                 print(f"{name:34} +{added:,} rows, {total:,} cached")
-    print(f"cached in {root}; next: lab carry study")
-    return 0
+                if not total:
+                    print("  no cached rows: history availability is unverified")
+                    incomplete = True
+                if kind == "close":
+                    report = carry_data.close_coverage(root, venue, market, sym, since, now)
+                    path = carry_data.path_of(root, venue, market, "coverage", sym).with_suffix(".json")
+                    atomic_json(path, report)
+                    gaps = sum(s["missing_hours"] for s in report["series"].values())
+                    print(f"  hourly coverage {report['state']}: {gaps:,} missing column-hours; details: {path}")
+                    if report["leading_unverified_hours"]:
+                        print(
+                            f"  {report['leading_unverified_hours']:,} leading hours have unverified availability (possibly before listing)"
+                        )
+                    incomplete |= report["state"] != "continuous-observed-window"
+    print(f"cached in {root}; funding settlement schedule coverage is unverified")
+    if incomplete:
+        print("fetch incomplete: unavailable series or hourly gaps remain; rerun to retry")
+    return 1 if incomplete else 0
 
 
 def cmd_carry_study(cfg, a):

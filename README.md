@@ -199,7 +199,13 @@ result means.
 
 The microstructure studies found no edge after taker costs at seconds horizons, so the next question is a slower
 one: perpetual funding. `lab carry fetch` downloads years of hourly closes and funding settlements from the public
-REST APIs (Binance USD-M and spot, Bybit linear; no keys) into `data/carry/`, and later runs only add what is new.
+REST APIs (Binance USD-M and spot, Bybit linear; no keys) into `data/carry/`. Later runs append funding events
+and repair missing hourly close/turnover intervals, including old internal holes. Native candle requests use
+opening timestamps; cached candle rows use hour ends. The [history integrity policy](docs/carry-history.md)
+documents that contract, response validation and recovery when a close/turnover pair was saved unevenly.
+Each close update saves a `*-coverage-*.json` snapshot with exact hourly gaps and unverified leading history.
+Fetch exits nonzero when a series is unavailable/empty or hourly gaps remain; other completed series stay cached.
+Funding settlement schedule coverage remains explicitly unverified, even when candle history is continuous.
 The default basket is ten liquid USDT pairs (BTC ETH SOL XRP BNB DOGE ADA LINK AVAX LTC). They were picked today,
 so the past is flattered by their survival.
 
@@ -215,8 +221,8 @@ rebalancing, liquidation of the short perpetual in a rally, spot borrow, volume-
 
 On the majors the cash trade earns about what cash does, so the next place to look is the whole market, where
 the highest funding is on small altcoins. `lab carry fetch --all` downloads every pair that trades today as both a
-Binance perpetual and a Binance spot pair (Binance only; this takes hours, and an interrupted run resumes where it
-stopped). `lab carry study --all --top 10 --min-turnover 20` then lets the symbols compete for 10 equal slots: at each
+Binance perpetual and a Binance spot pair (Binance only; this takes hours, and an interrupted run retains
+completed series but may repeat the download interrupted before saving). `lab carry study --all --top 10 --min-turnover 20` then lets the symbols compete for 10 equal slots: at each
 funding time it closes positions whose funding fell below `--exit-apr` and fills free slots with the highest funding
 above `--entry-apr` among perpetuals that traded at least 20 M USDT a day over the last 30 days, all known at that
 time. Today's list misses pairs delisted since, which flatters the result; thin altcoins also cost more to trade
