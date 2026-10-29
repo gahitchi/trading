@@ -266,6 +266,41 @@ def test_release_moves_the_boundary_later_only(tmp_path):
     assert [e["reason"] for e in part["history"]] == ["first carry study", "strategy frozen, holdout spent"]
 
 
+def test_carry_holdout_uses_a_frozen_upper_data_boundary(tmp_path):
+    market(tmp_path, days=400)
+    s = cs.CarrySettings(lookback_h=24, entry_apr=5.0)
+    start, end = T0 + pd.Timedelta(days=220), T0 + pd.Timedelta(days=300)
+    before, _ = cs.run(tmp_path, ["BTCUSDT"], s, start, holdout=True, end=end)
+    rate = cd.load(tmp_path, "binance", "perp", "funding", "BTCUSDT")
+    rate.loc[rate.index > end] = -0.1
+    write(tmp_path, "binance", "perp", "funding", "BTCUSDT", rate)
+    after, _ = cs.run(tmp_path, ["BTCUSDT"], s, start, holdout=True, end=end)
+    assert before["BTCUSDT"].index[-1] == end
+    pd.testing.assert_frame_equal(before["BTCUSDT"], after["BTCUSDT"])
+
+
+def test_carry_cli_reserves_before_evaluation_and_mode_change_cannot_bypass_failure(tmp_path, monkeypatch):
+    (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
+    market(tmp_path / "data" / "carry", days=400)
+    calls = []
+
+    def fail(*_args, **kw):
+        calls.append(kw)
+        state = fr.read_json(tmp_path / "results" / fr.HOLDOUT_STATE)
+        assert state["attempts"][-1]["status"] == "reserved"
+        assert state["attempts"][-1]["holdout_end"] == int(kw["end"].value)
+        raise RuntimeError("injected carry failure")
+
+    monkeypatch.setattr(cs, "run", fail)
+    run = ["--config", str(tmp_path / "lab.toml"), "carry", "study", "--symbols", "BTCUSDT", "--holdout"]
+    with pytest.raises(RuntimeError, match="injected"):
+        lab_main(run)
+    with pytest.raises(SystemExit, match="--again"):
+        lab_main([*run, "--mode", "cross"])
+    assert len(calls) == 1
+    assert fr.read_json(tmp_path / "results" / fr.HOLDOUT_STATE)["attempts"][0]["status"] == "failed"
+
+
 def test_cli_research_counts_trials_and_meets_the_holdout_once(tmp_path, capsys):
     (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
     root = tmp_path / "data" / "carry"
@@ -286,6 +321,7 @@ def test_cli_research_counts_trials_and_meets_the_holdout_once(tmp_path, capsys)
     with pytest.raises(SystemExit, match="--again"):
         lab_main([*run, "--holdout"])
     assert lab_main([*run, "--holdout", "--again", "reading the report"]) == 0
+    assert "HOLDOUT REUSE (reason recorded): reading the report" in capsys.readouterr().out
     trials = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
     assert [t["holdout"] for t in trials] == [False, False, False, True, True]
     assert all(t["kind"] == "carry-study" and "sr_daily" in t["result"] for t in trials)

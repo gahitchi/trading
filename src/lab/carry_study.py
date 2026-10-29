@@ -48,7 +48,7 @@ import numpy as np
 import pandas as pd
 
 from lab import carry_data
-from lab.fast_research import HoldoutGuard
+from lab.fast_research import HOLDOUT_LOCK, HoldoutGuard
 from lab.persistence import atomic_json, file_lock, read_json
 
 MODES = ("cash", "cross")
@@ -351,13 +351,20 @@ def per_symbol(pnl: dict[str, pd.DataFrame]) -> pd.DataFrame:
 
 
 def run(
-    root: Path, symbols: list[str], s: CarrySettings, boundary: pd.Timestamp, holdout: bool = False
+    root: Path,
+    symbols: list[str],
+    s: CarrySettings,
+    boundary: pd.Timestamp,
+    holdout: bool = False,
+    end: pd.Timestamp | None = None,
 ) -> tuple[dict[str, pd.DataFrame], list[str]]:
     """Hourly P&L per symbol on research data (before the boundary) or, with holdout, on the data from it on.
     Also returns the symbols left out for lack of data."""
     hs, missing = {}, []
     for sym in symbols:
         lg = legs(root, s.mode, sym)
+        if lg is not None and end is not None:
+            lg = truncate(lg, end + pd.Timedelta(nanoseconds=1))
         if lg is not None and not holdout:
             lg = truncate(lg, boundary)
         h = hourly(lg) if lg is not None and len(lg.long) and len(lg.short) else None
@@ -421,20 +428,21 @@ def release(results_dir: Path, root: Path, reason: str) -> tuple[pd.Timestamp, p
     from here on is the new holdout. Returns (old, new)."""
     if not reason.strip():
         raise ValueError("a reason is required: it is recorded with the new boundary")
-    old = boundary(results_dir, root)
-    last = _last_cached(root)
-    new = (last + pd.Timedelta(hours=1)).floor("h") if last is not None else old
-    if new <= old:
-        raise HoldoutGuard(f"nothing has been fetched since the holdout began ({old})")
-    path = Path(results_dir) / PARTITION
-    with file_lock(path.with_name(path.name + ".lock")):
-        part = read_json(path)
-        if pd.Timestamp(part["holdout_start"]) != old:
-            raise HoldoutGuard("the boundary changed while releasing; run it again")
-        part["holdout_start"] = new.isoformat()
-        part["history"].append({"at": _now(), "holdout_start": new.isoformat(), "reason": reason})
-        atomic_json(path, part)
-    return old, new
+    with file_lock(Path(results_dir) / HOLDOUT_LOCK):
+        old = boundary(results_dir, root)
+        last = _last_cached(root)
+        new = (last + pd.Timedelta(hours=1)).floor("h") if last is not None else old
+        if new <= old:
+            raise HoldoutGuard(f"nothing has been fetched since the holdout began ({old})")
+        path = Path(results_dir) / PARTITION
+        with file_lock(path.with_name(path.name + ".lock")):
+            part = read_json(path)
+            if pd.Timestamp(part["holdout_start"]) != old:
+                raise HoldoutGuard("the boundary changed while releasing; run it again")
+            part["holdout_start"] = new.isoformat()
+            part["history"].append({"at": _now(), "holdout_start": new.isoformat(), "reason": reason})
+            atomic_json(path, part)
+        return old, new
 
 
 def trial_sharpes(results_dir: Path, kind: str, instrument: str) -> list[float]:

@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 
-def read_json(path):
+def parse_json(raw):
     def invalid(value):
         raise ValueError(f"nonfinite JSON number: {value}")
 
@@ -29,9 +29,11 @@ def read_json(path):
             result[key] = value
         return result
 
-    return json.loads(
-        Path(path).read_text(), parse_constant=invalid, parse_float=finite_float, object_pairs_hook=unique_object
-    )
+    return json.loads(raw, parse_constant=invalid, parse_float=finite_float, object_pairs_hook=unique_object)
+
+
+def read_json(path):
+    return parse_json(Path(path).read_text())
 
 
 def atomic_json(path, value):

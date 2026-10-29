@@ -3,6 +3,11 @@ every run counted."""
 
 import json
 import math
+import multiprocessing
+import os
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
+from threading import Event
 
 import numpy as np
 import pytest
@@ -63,12 +68,269 @@ def test_a_configuration_meets_the_holdout_once(recording):
     more()
     b = fr.boundary(results, path, IID)
     params = {"threshold": 0.6}
-    fr.check_holdout(results, IID, params, b)
-    fr.record_holdout(results, IID, params, b, {"pnl": 1.0})
+    with fr.holdout_run(results, IID, params, b, holdout_end=b + 10) as attempt:
+        attempt.result = {"pnl": 1.0}
     with pytest.raises(fr.HoldoutGuard, match="--again"):
         fr.check_holdout(results, IID, params, b)
     fr.check_holdout(results, IID, params, b, again="fixed a fee bug")  # allowed, and recorded by the caller
-    fr.check_holdout(results, IID, {"threshold": 0.7}, b)  # another configuration is another test
+    with pytest.raises(fr.HoldoutGuard, match="--again"):
+        fr.check_holdout(results, IID, {"threshold": 0.7}, b)  # changing the configuration is holdout reuse too
+
+
+def _holdout_partition(results):
+    fr.atomic_json(results / fr.PARTITION, {"version": 1, "instruments": {IID: {"holdout_start": 100}}})
+
+
+def _compete_for_holdout(results, barrier, outcomes):
+    barrier.wait(timeout=15)
+    try:
+        with fr.holdout_run(results, IID, {"threshold": 0.6}, 100, holdout_end=200) as attempt:
+            attempt.result = {"pnl": 1.0}
+        outcomes.put("completed")
+    except fr.HoldoutGuard:
+        outcomes.put("denied")
+
+
+def _die_during_holdout(results):
+    with fr.holdout_run(results, IID, {"threshold": 0.6}, 100, holdout_end=200):
+        os._exit(23)  # no context-manager cleanup; the kernel releases the lock
+
+
+def test_two_processes_cannot_claim_the_same_holdout(tmp_path):
+    assert hasattr(fr, "holdout_run")
+    _holdout_partition(tmp_path)
+    ctx = multiprocessing.get_context("spawn")
+    barrier, outcomes = ctx.Barrier(2), ctx.Queue()
+    processes = [ctx.Process(target=_compete_for_holdout, args=(tmp_path, barrier, outcomes)) for _ in range(2)]
+    try:
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join(timeout=20)
+            assert process.exitcode == 0
+        assert sorted(outcomes.get(timeout=5) for _ in processes) == ["completed", "denied"]
+        state = fr.read_json(tmp_path / fr.HOLDOUT_STATE)
+        assert [a["status"] for a in state["attempts"]] == ["completed"]
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=5)
+        outcomes.close()
+
+
+def test_a_process_exit_leaves_the_holdout_used_even_for_different_parameters(tmp_path):
+    assert hasattr(fr, "holdout_run")
+    _holdout_partition(tmp_path)
+    process = multiprocessing.get_context("spawn").Process(target=_die_during_holdout, args=(tmp_path,))
+    process.start()
+    try:
+        process.join(timeout=20)
+        assert process.exitcode == 23
+        state = fr.read_json(tmp_path / fr.HOLDOUT_STATE)
+        assert state["attempts"][0]["status"] == "reserved"
+        with (
+            pytest.raises(fr.HoldoutGuard, match="--again"),
+            fr.holdout_run(tmp_path, IID, {"threshold": 0.7}, 100, holdout_end=200),
+        ):
+            pytest.fail("the interrupted holdout was silently reused")
+        with fr.holdout_run(
+            tmp_path, IID, {"threshold": 0.7}, 100, holdout_end=200, again="retry after crash"
+        ) as attempt:
+            assert attempt.reused
+            attempt.result = {"pnl": -1.0}
+        state = fr.read_json(tmp_path / fr.HOLDOUT_STATE)
+        assert [a["status"] for a in state["attempts"]] == ["reserved", "completed"]
+        assert state["attempts"][1]["again"] == "retry after crash"
+    finally:
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=5)
+
+
+def test_holdout_failure_is_persisted_and_cannot_be_silently_retried(tmp_path):
+    _holdout_partition(tmp_path)
+    with (
+        pytest.raises(RuntimeError, match="interrupted"),
+        fr.holdout_run(tmp_path, IID, {"threshold": 0.6}, 100, holdout_end=200),
+    ):
+        state = fr.read_json(tmp_path / fr.HOLDOUT_STATE)
+        assert state["attempts"][0]["status"] == "reserved"
+        raise RuntimeError("interrupted")
+    state = fr.read_json(tmp_path / fr.HOLDOUT_STATE)
+    assert state["attempts"][0]["status"] == "failed"
+    with (
+        pytest.raises(fr.HoldoutGuard, match="--again"),
+        fr.holdout_run(tmp_path, IID, {"threshold": 0.6}, 100, holdout_end=200),
+    ):
+        pytest.fail("a failed attempt must remain used")
+
+
+def test_legacy_holdout_results_also_freeze_new_configurations(tmp_path):
+    _holdout_partition(tmp_path)
+    fr.append_json(
+        tmp_path / fr.LEDGER,
+        {
+            "at": "2026-10-29",
+            "instrument": IID,
+            "fingerprint": fr.fingerprint({"threshold": 0.6}),
+            "params": {"threshold": 0.6},
+            "holdout_start": 100,
+            "again": "",
+            "result": {"pnl": 1},
+        },
+    )
+    with pytest.raises(fr.HoldoutGuard, match="--again"):
+        fr.check_holdout(tmp_path, IID, {"threshold": 0.7}, 100)
+
+
+def test_holdout_reservation_rejects_a_boundary_changed_since_configuration(tmp_path):
+    _holdout_partition(tmp_path)
+    with (
+        pytest.raises(fr.HoldoutGuard, match="boundary changed"),
+        fr.holdout_run(tmp_path, IID, {}, 99, holdout_end=200),
+    ):
+        pytest.fail("stale boundary allowed")
+
+
+def test_corrupt_holdout_state_blocks_access(tmp_path):
+    _holdout_partition(tmp_path)
+    (tmp_path / fr.HOLDOUT_STATE).write_text("{")
+    with pytest.raises(fr.HoldoutGuard, match="unreadable"), fr.holdout_run(tmp_path, IID, {}, 100, holdout_end=200):
+        pytest.fail("corrupt state allowed")
+
+
+@pytest.mark.parametrize(
+    "raw", ['{"instrument":"X","instrument":"Y"}', '{"holdout_start":NaN}', '{"holdout_start":"100"}']
+)
+def test_corrupt_legacy_holdout_ledger_cannot_be_ignored(tmp_path, raw):
+    _holdout_partition(tmp_path)
+    (tmp_path / fr.LEDGER).write_text(raw + "\n")
+    with pytest.raises(fr.HoldoutGuard, match="unreadable"), fr.holdout_run(tmp_path, IID, {}, 100, holdout_end=200):
+        pytest.fail("invalid legacy data allowed")
+
+
+def test_reservation_write_failure_prevents_holdout_access(tmp_path, monkeypatch):
+    _holdout_partition(tmp_path)
+
+    def no_space(*_args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(fr, "atomic_json", no_space)
+    with pytest.raises(OSError, match="disk full"), fr.holdout_run(tmp_path, IID, {}, 100, holdout_end=200):
+        pytest.fail("data access began without a durable reservation")
+
+
+def test_configuration_is_frozen_before_the_evaluator_can_mutate_its_input(tmp_path):
+    _holdout_partition(tmp_path)
+    params = {"thresholds": [0.6]}
+    with fr.holdout_run(tmp_path, IID, params, 100, holdout_end=200) as attempt:
+        assert not attempt.reused
+        params["thresholds"][0] = 0.9
+        attempt.result = {"pnl": -1}
+    entry = fr.read_json(tmp_path / fr.HOLDOUT_STATE)["attempts"][0]
+    assert entry["params"] == {"thresholds": [0.6]}
+    assert entry["fingerprint"] == fr.fingerprint({"thresholds": [0.6]})
+    assert not entry["reused"]
+
+
+def test_completion_write_failure_leaves_the_durable_reservation(tmp_path, monkeypatch):
+    _holdout_partition(tmp_path)
+    with pytest.raises(OSError, match="disk full"), fr.holdout_run(tmp_path, IID, {}, 100, holdout_end=200) as attempt:
+        attempt.result = {"pnl": 1}
+
+        def no_space(*_args):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(fr, "atomic_json", no_space)
+    assert fr.read_json(tmp_path / fr.HOLDOUT_STATE)["attempts"][0]["status"] == "reserved"
+    with pytest.raises(fr.HoldoutGuard, match="--again"):
+        fr.check_holdout(tmp_path, IID, {}, 100)
+
+
+def test_holdout_release_waits_until_the_evaluation_finishes(recording):
+    path, results, _, more = recording
+    start = fr.boundary(results, path, IID)
+    more()
+    end = fr.last_recorded(path, IID)
+    started = Event()
+
+    def release():
+        started.set()
+        return fr.release(results, path, IID, "evaluation finished")
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with fr.holdout_run(results, IID, {}, start, holdout_end=end) as attempt:
+            future = pool.submit(release)
+            assert started.wait(timeout=5)
+            with pytest.raises(FutureTimeout):
+                future.result(timeout=0.1)
+            attempt.result = {"pnl": 1}
+        assert future.result(timeout=10) == (start, end + 1)
+
+
+def test_fast_cli_reserves_before_evaluation_and_records_failure(recording, tmp_path, monkeypatch):
+    from lab import fast
+
+    path, results, _, more = recording
+    fr.boundary(results, path, IID)
+    more()
+    (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
+    calls = []
+
+    def fail(*_args, **kw):
+        calls.append(kw)
+        state = fr.read_json(results / fr.HOLDOUT_STATE)
+        assert state["attempts"][-1]["status"] == "reserved"
+        assert state["attempts"][-1]["holdout_end"] == kw["end"]
+        raise RuntimeError("injected evaluator failure")
+
+    monkeypatch.setattr(fast, "backtest", fail)
+    run = ["--config", str(tmp_path / "lab.toml"), "fast", "backtest", "BTCUSDT", "--catalog", path, "--holdout"]
+    with pytest.raises(RuntimeError, match="injected"):
+        lab_main(run)
+    with pytest.raises(SystemExit, match="--again"):
+        lab_main([*run, "--threshold", "0.7"])
+    assert len(calls) == 1
+    assert fr.read_json(results / fr.HOLDOUT_STATE)["attempts"][0]["status"] == "failed"
+
+
+def test_fast_holdout_end_does_not_move_when_the_recorder_appends_data(recording, tmp_path, monkeypatch):
+    from lab import fast
+
+    path, results, _, more = recording
+    fr.boundary(results, path, IID)
+    more()
+    frozen_end = fr.last_recorded(path, IID)
+    (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
+    evaluate = fast.backtest
+
+    def append_then_evaluate(*args, **kw):
+        extra, *_ = tilted_market(10)
+        extra = [
+            OrderBookDelta(
+                d.instrument_id,
+                d.action,
+                d.order,
+                d.flags,
+                d.sequence,
+                d.ts_event + 400_000_000_000,
+                d.ts_init + 400_000_000_000,
+            )
+            for d in extra
+        ]
+        ParquetDataCatalog(path).write_order_book_deltas(extra)
+        assert fr.last_recorded(path, IID) > frozen_end
+        assert kw["end"] == frozen_end
+        result = evaluate(*args, **kw)
+        assert result["end_ns"] <= frozen_end
+        return result
+
+    monkeypatch.setattr(fast, "backtest", append_then_evaluate)
+    run = ["--config", str(tmp_path / "lab.toml"), "fast", "backtest", "BTCUSDT", "--catalog", path, "--holdout"]
+    assert lab_main(run) == 0
+    attempt = fr.read_json(results / fr.HOLDOUT_STATE)["attempts"][0]
+    assert attempt["holdout_end"] == frozen_end and attempt["status"] == "completed"
 
 
 def test_release_moves_the_boundary_forward_with_a_reason(recording):
@@ -220,6 +482,7 @@ def test_cli_research_then_one_holdout_test(recording, tmp_path, capsys):
     with pytest.raises(SystemExit, match="--again"):
         lab_main([*run, "--holdout"])
     assert lab_main([*run, "--holdout", "--again", "checking the report"]) == 0
+    assert "HOLDOUT REUSE (reason recorded): checking the report" in capsys.readouterr().out
     with pytest.raises(SystemExit, match="holdout"):
         lab_main([*run, "--start", "2000-01-01", "--end", "2100-01-01"])
     ledger = (tmp_path / "results" / fr.LEDGER).read_text().splitlines()

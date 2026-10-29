@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 import pandas as pd
@@ -267,33 +268,40 @@ def cmd_fast_backtest(cfg, a):
             if a.start or a.end:
                 raise SystemExit("--holdout runs on the whole holdout; --start/--end don't apply")
             start = fast_research.boundary(cfg.results_dir, str(catalog), iid)
-            fast_research.check_holdout(cfg.results_dir, iid, params, start, a.again or "")
+            end = fast_research.last_recorded(str(catalog), iid)
+            evaluation = fast_research.holdout_run(cfg.results_dir, iid, params, start, a.again or "", holdout_end=end)
         else:
             if a.again:
                 raise SystemExit("--again only applies with --holdout")
             start, end = fast_research.research_window(cfg.results_dir, str(catalog), iid, start, end)
-        r = backtest(
-            str(catalog),
-            config,
-            max_loss=a.max_loss,
-            max_position=a.max_position,
-            start=start,
-            end=end,
-            capital=a.capital,
-            maker_bps=a.maker_bps,
-            taker_bps=a.fee_bps,
-            latency_ms=a.latency_ms,
-        )
+            evaluation = nullcontext(None)
+        with evaluation as attempt:
+            r = backtest(
+                str(catalog),
+                config,
+                max_loss=a.max_loss,
+                max_position=a.max_position,
+                start=start,
+                end=end,
+                capital=a.capital,
+                maker_bps=a.maker_bps,
+                taker_bps=a.fee_bps,
+                latency_ms=a.latency_ms,
+            )
+            result = {
+                k: r[k] for k in ("entries", "pnl", "commissions", "round_trips", "mean_trip", "t_stat", "stopped")
+            }
+            result["return_stats"] = r["return_stats"]
+            if attempt is not None:
+                attempt.result = result
+            n = fast_research.register_trial(
+                cfg.results_dir, "fast-backtest", iid, params, (r["start_ns"], r["end_ns"]), result, holdout=a.holdout
+            )
     except ValueError as e:
         raise SystemExit(str(e)) from e
-    result = {k: r[k] for k in ("entries", "pnl", "commissions", "round_trips", "mean_trip", "t_stat", "stopped")}
-    result["return_stats"] = r["return_stats"]
-    if a.holdout:
-        fast_research.record_holdout(cfg.results_dir, iid, params, start, result, a.again or "")
-    n = fast_research.register_trial(
-        cfg.results_dir, "fast-backtest", iid, params, (r["start_ns"], r["end_ns"]), result, holdout=a.holdout
-    )
     first, last = (pd.Timestamp(r[k], tz="UTC") for k in ("start_ns", "end_ns"))
+    if attempt is not None and attempt.reused:
+        print(f"HOLDOUT REUSE (reason recorded): {a.again}")
     print(f"{iid} {STRATEGY_NAMES[a.strategy]}, {first:%Y-%m-%d %H:%M} .. {last:%Y-%m-%d %H:%M} UTC")
     print(
         f"  {'HOLDOUT test (recorded)' if a.holdout else 'research data'}; configurations tried on research data: {n}"
@@ -418,26 +426,48 @@ def cmd_carry_study(cfg, a):
         params = cs.params_of(s, symbols)
         key = f"carry-{a.mode}"
         if a.holdout:
-            fast_research.check_holdout(cfg.results_dir, key, params, int(b.value), a.again or "")
+            end = cs._last_cached(root)
+            evaluation = fast_research.holdout_run(
+                cfg.results_dir,
+                key,
+                params,
+                int(b.value),
+                a.again or "",
+                holdout_end=int(end.value) if end is not None else None,
+                partition=cs.PARTITION,
+            )
         elif a.again:
             raise SystemExit("--again only applies with --holdout")
+        else:
+            end, evaluation = None, nullcontext(None)
     except ValueError as e:
         raise SystemExit(str(e)) from e
     try:
-        pnl, missing = cs.run(root, symbols, s, b, holdout=a.holdout)
+        with evaluation as attempt:
+            pnl, missing = cs.run(root, symbols, s, b, holdout=a.holdout, end=end)
+            if not pnl:
+                raise ValueError(
+                    f"no carry data for {' '.join(symbols)} {'after' if a.holdout else 'before'} {b:%Y-%m-%d}"
+                )
+            st = cs.summary(pnl, s.top)
+            result = nullable_numbers({k: st[k] for k in ("days", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")})
+            if attempt is not None:
+                attempt.result = result
+            first, last = min(v.index[0] for v in pnl.values()), max(v.index[-1] for v in pnl.values())
+            n = fast_research.register_trial(
+                cfg.results_dir,
+                "carry-study",
+                key,
+                params,
+                (int(first.value), int(last.value)),
+                result,
+                holdout=a.holdout,
+            )
     except ValueError as e:
         raise SystemExit(str(e)) from e
-    if not pnl:
-        raise SystemExit(f"no carry data for {' '.join(symbols)} {'after' if a.holdout else 'before'} {b:%Y-%m-%d}")
-    st = cs.summary(pnl, s.top)
-    result = nullable_numbers({k: st[k] for k in ("days", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")})
-    if a.holdout:
-        fast_research.record_holdout(cfg.results_dir, key, params, int(b.value), result, a.again or "")
-    first, last = min(v.index[0] for v in pnl.values()), max(v.index[-1] for v in pnl.values())
-    n = fast_research.register_trial(
-        cfg.results_dir, "carry-study", key, params, (int(first.value), int(last.value)), result, holdout=a.holdout
-    )
     trade = {"cash": "long Binance spot / short Binance perpetual", "cross": "short the higher-funding perpetual, long the other (Binance vs Bybit)"}[a.mode]  # fmt: skip
+    if attempt is not None and attempt.reused:
+        print(f"HOLDOUT REUSE (reason recorded): {a.again}")
     who = f"top {s.top} of {len(pnl)} symbol(s) by funding" if s.top else f"{len(pnl)} symbol(s)"
     if s.min_turnover_m:
         who += f", perpetual turnover >= {s.min_turnover_m:g} M USDT a day"

@@ -260,6 +260,7 @@ data they judge has been looked at, with the reason in the commit message.
 |---|---|---|
 | A4 | Implemented on `chatgpt/codex-maintenance` in `9c8e558`. | Five synthetic outage regressions failed before the fix; full suite: 143 passed on Python 3.13.16, lint and formatting passed. No real-data edge claimed. |
 | A8 | Daily net equity and IID diagnostic implemented on this branch; statistical qualification remains A8b. | Full suite: 152 passed on Python 3.13.16, lint and formatting passed. Tests include UTC midnight, invalid/missing observations, trial-history compatibility, holdout exclusion, and the original paper's numerical example. A1-A3/A5 require real recordings, which are absent from this checkout. |
+| A9a | Atomic holdout reservations implemented for fast and carry evaluations on this branch. | Full suite: 169 passed on Python 3.13.16, lint and formatting passed. Regression coverage includes competing processes, forced exit without cleanup, write failures, configuration/mode changes, frozen data cutoffs, legacy/corrupt evidence, and releases waiting for active evaluations. Holdout profitability and A6b/A7a/A8b qualification remain open. |
 
 Methodology basis: Bailey and López de Prado, [The Deflated Sharpe Ratio (2014)](https://www.davidhbailey.com/dhbpapers/deflated-sharpe.pdf),
 especially its discussion of selection bias and independent trials. The branch adds A6b/A7a/A8b/A9a before

@@ -3,8 +3,9 @@ Research discipline for recorded market data (lab record): a forward holdout and
 
 The holdout is prospective. The first research run on an instrument reserves everything recorded after the
 last event in the catalog at that moment; research (micro-study, fast backtest) only ever sees data before
-that boundary, and the recorder keeps adding unseen data behind it. A strategy configuration may be tested
-on the holdout once per boundary (`lab fast backtest --holdout`); a repeat needs a logged reason. Moving the
+that boundary, and the recorder keeps adding unseen data behind it. A frozen strategy configuration may be tested
+on the holdout once per boundary (`lab fast backtest --holdout`); every reuse, including changed parameters or
+an interrupted evaluation, needs a logged reason. Moving the
 boundary later (`lab fast release`) turns holdout data into research data and needs a logged reason too. It
 never moves earlier: data research has seen can't become a holdout again.
 
@@ -14,6 +15,7 @@ configurations were tried on the same data.
 State, under the lab's results directory:
   fast_partition.json        the boundary per instrument, and its history
   fast_holdout_ledger.jsonl  every holdout run
+  fast_holdout_attempts.json atomic reservations and outcomes, including interrupted attempts
   fast_trials.jsonl          every research and holdout run
 """
 
@@ -22,13 +24,18 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
-from lab.persistence import append_json, atomic_json, file_lock, read_json
+from lab.persistence import append_json, atomic_json, file_lock, parse_json, read_json
 
 PARTITION = "fast_partition.json"
 LEDGER = "fast_holdout_ledger.jsonl"
+HOLDOUT_STATE = "fast_holdout_attempts.json"
+HOLDOUT_LOCK = "fast_holdout_evaluation.lock"
 TRIALS = "fast_trials.jsonl"
 DAY_NS = 86_400_000_000_000
 RETURN_BASIS = "daily-net-equity-v1"
@@ -187,39 +194,146 @@ def _ledger(results_dir: Path) -> list[dict]:
     path = Path(results_dir) / LEDGER
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    try:
+        rows = [parse_json(line) for line in path.read_text().splitlines() if line.strip()]
+        if any(
+            not isinstance(r, dict)
+            or not {"instrument", "holdout_start", "fingerprint", "at"} <= r.keys()
+            or not isinstance(r["instrument"], str)
+            or type(r["holdout_start"]) is not int
+            or not isinstance(r["fingerprint"], str)
+            or not isinstance(r["at"], str)
+            for r in rows
+        ):
+            raise ValueError("invalid holdout ledger entry")
+        return rows
+    except (OSError, ValueError, TypeError) as e:
+        raise HoldoutGuard(f"unreadable holdout ledger {path}; restore it before evaluating: {e}") from e
 
 
-def check_holdout(results_dir: Path, instrument_id: str, params: dict, holdout_start: int, again: str = "") -> None:
-    """A configuration is tested on a given holdout once; a repeat needs a reason, which is recorded."""
-    fp = fingerprint(params)
+def _holdout_state(results_dir: Path) -> dict:
+    path = Path(results_dir) / HOLDOUT_STATE
+    if not path.exists():
+        return {"version": 1, "attempts": []}
+    try:
+        state = read_json(path)
+        if state["version"] != 1 or not isinstance(state["attempts"], list):
+            raise ValueError("unknown holdout state format")
+        ids = set()
+        for entry in state["attempts"]:
+            if (
+                not isinstance(entry["instrument"], str)
+                or not isinstance(entry["at"], str)
+                or not isinstance(entry["again"], str)
+                or type(entry["holdout_start"]) is not int
+                or type(entry["holdout_end"]) is not int
+                or entry["holdout_end"] < entry["holdout_start"]
+                or entry["status"] not in ("reserved", "failed", "completed")
+                or not isinstance(entry["params"], dict)
+                or entry["fingerprint"] != fingerprint(entry["params"])
+                or not isinstance(entry["attempt_id"], str)
+                or entry["attempt_id"] in ids
+                or (entry["status"] == "completed" and not isinstance(entry["result"], dict))
+            ):
+                raise ValueError("invalid holdout attempt")
+            ids.add(entry["attempt_id"])
+        return state
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        raise HoldoutGuard(f"unreadable holdout state {path}; restore it before evaluating: {e}") from e
+
+
+def _holdout_scope(instrument: str) -> str:
+    return "carry" if instrument.startswith("carry-") else instrument
+
+
+def check_holdout(results_dir: Path, instrument_id: str, params: dict, holdout_start: int, again: str = "") -> bool:
+    """Read-only preflight, not a reservation. A new configuration on used data is also holdout reuse."""
     seen = [
         e
-        for e in _ledger(results_dir)
-        if e["instrument"] == instrument_id and e["fingerprint"] == fp and e["holdout_start"] == holdout_start
+        for e in [*_ledger(results_dir), *_holdout_state(results_dir)["attempts"]]
+        if _holdout_scope(e["instrument"]) == _holdout_scope(instrument_id) and e["holdout_start"] == holdout_start
     ]
     if seen and not again.strip():
         raise HoldoutGuard(
-            f"this configuration was already tested on the {instrument_id} holdout from {_iso(holdout_start)} "
+            f"the {instrument_id} holdout from {_iso(holdout_start)} was already reserved or evaluated "
             f"({seen[0]['at']}); repeat only with --again REASON"
         )
+    return bool(seen)
 
 
-def record_holdout(
-    results_dir: Path, instrument_id: str, params: dict, holdout_start: int, result: dict, again: str = ""
-) -> None:
-    append_json(
-        Path(results_dir) / LEDGER,
-        {
+@dataclass
+class HoldoutEvaluation:
+    result: dict | None = None
+    reused: bool = False
+
+
+@contextmanager
+def holdout_run(
+    results_dir: Path,
+    instrument_id: str,
+    params: dict,
+    holdout_start: int,
+    again: str = "",
+    *,
+    holdout_end: int,
+    partition: str = PARTITION,
+):
+    """Serialize evaluations and releases, and fsync the frozen attempt before the caller can read holdout data.
+
+    A killed process leaves a reserved attempt, which still consumes the holdout. A repeat requires --again,
+    even for different parameters or carry mode. The atomic state is authoritative if the JSONL append fails.
+    """
+    if type(holdout_end) is not int or holdout_end < holdout_start:
+        raise HoldoutGuard("no data in the frozen holdout window")
+    frozen_params = json.loads(json.dumps(params, allow_nan=False))
+    with file_lock(Path(results_dir) / HOLDOUT_LOCK):
+        try:
+            raw = read_json(Path(results_dir) / partition)
+            if partition == PARTITION:
+                actual = int(raw["instruments"][instrument_id]["holdout_start"])
+            elif partition == "carry_partition.json":
+                import pandas as pd
+
+                actual = int(pd.Timestamp(raw["holdout_start"]).value)
+            else:
+                raise ValueError("unknown holdout partition")
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            raise HoldoutGuard(f"unreadable holdout partition: {e}") from e
+        if actual != holdout_start:
+            raise HoldoutGuard("holdout boundary changed before reservation; run the command again")
+        reused = check_holdout(results_dir, instrument_id, frozen_params, holdout_start, again)
+        state = _holdout_state(results_dir)
+        entry = {
+            "attempt_id": uuid4().hex,
             "at": _now(),
             "instrument": instrument_id,
-            "fingerprint": fingerprint(params),
+            "fingerprint": fingerprint(frozen_params),
+            "params": frozen_params,
             "holdout_start": holdout_start,
-            "params": params,
-            "result": result,
+            "holdout_end": holdout_end,
             "again": again,
-        },
-    )
+            "status": "reserved",
+            "reused": reused,
+        }
+        state["attempts"].append(entry)
+        atomic_json(Path(results_dir) / HOLDOUT_STATE, state)
+        evaluation = HoldoutEvaluation(reused=reused)
+        try:
+            yield evaluation
+            if not isinstance(evaluation.result, dict):
+                raise HoldoutGuard("holdout evaluation ended without a result")
+        except BaseException as e:
+            entry.update(status="failed", finished_at=_now(), error=type(e).__name__)
+            try:
+                atomic_json(Path(results_dir) / HOLDOUT_STATE, state)
+                append_json(Path(results_dir) / LEDGER, entry)
+            except OSError:
+                pass  # the fsynced reservation still blocks silent reuse; preserve the caller's exception
+            raise
+        else:
+            entry.update(status="completed", finished_at=_now(), result=evaluation.result)
+            atomic_json(Path(results_dir) / HOLDOUT_STATE, state)
+            append_json(Path(results_dir) / LEDGER, entry)
 
 
 def register_trial(
@@ -253,17 +367,18 @@ def release(results_dir: Path, catalog_path: str, instrument_id: str, reason: st
     starts. Returns (old, new) boundaries."""
     if not reason.strip():
         raise ValueError("a reason is required: it is recorded with the new boundary")
-    path = Path(results_dir) / PARTITION
-    old = boundary(results_dir, catalog_path, instrument_id)
-    last = last_recorded(catalog_path, instrument_id)
-    if last is None or last + 1 <= old:
-        raise HoldoutGuard(f"nothing has been recorded for {instrument_id} since the holdout began ({_iso(old)})")
-    with file_lock(path.with_name(path.name + ".lock")):
-        part = _read_partition(path)
-        entry = part["instruments"][instrument_id]
-        if int(entry["holdout_start"]) != old:
-            raise HoldoutGuard("the boundary changed while releasing; run it again")
-        entry["holdout_start"] = last + 1
-        entry["history"].append({"at": _now(), "holdout_start": last + 1, "reason": reason})
-        atomic_json(path, part)
-    return old, last + 1
+    with file_lock(Path(results_dir) / HOLDOUT_LOCK):
+        path = Path(results_dir) / PARTITION
+        old = boundary(results_dir, catalog_path, instrument_id)
+        last = last_recorded(catalog_path, instrument_id)
+        if last is None or last + 1 <= old:
+            raise HoldoutGuard(f"nothing has been recorded for {instrument_id} since the holdout began ({_iso(old)})")
+        with file_lock(path.with_name(path.name + ".lock")):
+            part = _read_partition(path)
+            entry = part["instruments"][instrument_id]
+            if int(entry["holdout_start"]) != old:
+                raise HoldoutGuard("the boundary changed while releasing; run it again")
+            entry["holdout_start"] = last + 1
+            entry["history"].append({"at": _now(), "holdout_start": last + 1, "reason": reason})
+            atomic_json(path, part)
+        return old, last + 1

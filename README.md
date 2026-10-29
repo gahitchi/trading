@@ -140,8 +140,13 @@ excluding downtime. The one-second gap policy is included in each study's config
 Recorded data has a forward holdout. The first `micro-study` or `fast backtest` on a symbol reserves everything
 recorded after that moment (`results/fast_partition.json`); research only sees data before it, and the recorder
 keeps filling the holdout with data nobody has looked at. `lab fast backtest <symbol> --holdout` tests a finished
-configuration on it once; a repeat needs `--again REASON`, and every holdout test is logged
-(`results/fast_holdout_ledger.jsonl`). `lab fast release <symbol> --reason ...` turns the holdout into research
+configuration on it once. Before the evaluator reads it, an atomic reservation freezes the parameters and upper
+time boundary in `results/fast_holdout_attempts.json`; completion or failure is also written to
+`results/fast_holdout_ledger.jsonl`. A process killed during evaluation leaves a reserved attempt with an unknown
+outcome, which still counts as using the holdout. Every repeat, including a different configuration, needs
+`--again REASON` and is labelled `HOLDOUT REUSE`. Concurrent evaluations and holdout releases are serialized.
+Keep the attempt state, ledger and partition files together; removing state is not a fresh test.
+`lab fast release <symbol> --reason ...` turns the holdout into research
 data and starts a new one; the boundary never moves back. Every run is logged in `results/fast_trials.jsonl`, and
 each report shows how many configurations have been tried on the research data: the more tried, the less a good
 result means.
@@ -180,7 +185,9 @@ and the study stops with an error. Repair incomplete history before using the re
 
 Carry has its own time holdout: the first study reserves the last 180 days fetched by then and everything fetched
 later (`results/carry_partition.json`). Research runs drop that data before computing anything; `--holdout` tests
-a finished configuration on it once. Every run goes into the trial log, and research runs print a deflated Sharpe
+a finished configuration on it once, using the same atomic reservation and frozen upper time boundary as fast
+backtests. Changing carry mode or the symbol basket also requires a reuse reason after an attempt, including a
+failed or interrupted one. Every completed run goes into the trial log, and research runs print a deflated Sharpe
 ratio as an IID research diagnostic. Trial correlation and serial dependence need separate qualification before
 that statistic can support a gate; its value alone does not establish an edge.
 
