@@ -10,6 +10,8 @@ exchange orders or needs API keys.
 The old US-stock / Interactive Brokers system was removed on 2026-10-28. It is kept in the
 `archive/us-stock-ibkr` tag.
 
+Where the project is going and what comes next: [ROADMAP.md](ROADMAP.md).
+
 ## Install
 
 Python 3.13 or 3.14 (NautilusTrader 2.0 requires it), Linux or macOS, with [uv](https://docs.astral.sh/uv/)
