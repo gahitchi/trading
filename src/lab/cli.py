@@ -407,7 +407,10 @@ def cmd_carry_study(cfg, a):
             raise SystemExit("--again only applies with --holdout")
     except ValueError as e:
         raise SystemExit(str(e)) from e
-    pnl, missing = cs.run(root, symbols, s, b, holdout=a.holdout)
+    try:
+        pnl, missing = cs.run(root, symbols, s, b, holdout=a.holdout)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
     if not pnl:
         raise SystemExit(f"no carry data for {' '.join(symbols)} {'after' if a.holdout else 'before'} {b:%Y-%m-%d}")
     st = cs.summary(pnl, s.top)

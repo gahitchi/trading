@@ -170,6 +170,50 @@ def test_a_decision_never_sees_later_funding_or_prices():
     assert (after[after.index > cut + pd.Timedelta(hours=8)] == 0).all()  # it does react once the data arrives
 
 
+@pytest.mark.parametrize("eval_from", [None, T0 + pd.Timedelta(hours=24)])
+def test_a_held_position_with_a_long_price_gap_cannot_report_a_valid_return(eval_from):
+    lg = flat_legs()
+    gap = lg.long.index[48:69]
+    short = lg.short.drop(gap)
+    short.loc[short.index > gap[-1]] = 120.0  # the short rallies while its prices are unavailable
+    h = cs.hourly(cs.Legs(lg.long, short, lg.funding))
+    with pytest.raises(ValueError, match="cannot value held carry position"):
+        cs.backtest(h, cs.CarrySettings(lookback_h=24, entry_apr=5.0), eval_from=eval_from)
+
+
+def test_price_gaps_while_flat_do_not_invalidate_later_trading():
+    lg = flat_legs()
+    gap = lg.long.index[2:12]  # before the first entry
+    h = cs.hourly(cs.Legs(lg.long.drop(gap), lg.short, lg.funding))
+    r = cs.backtest(h, cs.CarrySettings(lookback_h=24, entry_apr=5.0))
+    assert np.isfinite(r["net"]).all()
+    assert (r.loc[gap, "w"] == 0).all()
+    assert r["funding"].sum() > 0
+
+
+def test_a_short_price_gap_preserves_the_return_when_prices_resume():
+    lg = flat_legs()
+    gap = lg.short.index[48:50]
+    short = lg.short.drop(gap)
+    short.loc[short.index > gap[-1]] = 120.0
+    h = cs.hourly(cs.Legs(lg.long, short, lg.funding))
+    r = cs.backtest(h, cs.CarrySettings(lookback_h=24, entry_apr=5.0))
+    assert r["basis"].sum() == pytest.approx(-0.2)
+
+
+def test_holdout_does_not_value_a_price_gap_in_the_research_period():
+    lg = flat_legs()
+    gap = lg.short.index[48:69]
+    h = cs.hourly(cs.Legs(lg.long, lg.short.drop(gap), lg.funding))
+    start = lg.long.index[96]
+    s = cs.CarrySettings(lookback_h=24, entry_apr=5.0)
+    r = cs.backtest(h, s, eval_from=start)
+    assert np.isfinite(r["net"]).all()
+    assert r.index[0] == start
+    assert r.iloc[0]["funding"] == r.iloc[0]["basis"] == 0
+    assert r.iloc[0]["cost"] == pytest.approx(s.cost)
+
+
 # --- statistics -----------------------------------------------------------------------------------------------
 
 
@@ -258,6 +302,18 @@ def test_the_portfolio_shares_notional_among_the_symbols_with_data(tmp_path):
     assert st["apr"] * st["days"] / 365 == pytest.approx(alone["net_bps"] / 100)
 
 
+def test_cli_rejects_an_unvalued_position_without_logging_a_successful_trial(tmp_path):
+    (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
+    root = tmp_path / "data" / "carry"
+    market(root, days=400)
+    short = cd.load(root, "binance", "perp", "close", "BTCUSDT")
+    write(root, "binance", "perp", "close", "BTCUSDT", short.drop(short.index[96:117]))
+    with pytest.raises(SystemExit, match="BTCUSDT: cannot value held carry position"):
+        lab_main(["--config", str(tmp_path / "lab.toml"), "carry", "study", "--symbols", "BTCUSDT"])
+    assert not (tmp_path / "results" / fr.TRIALS).exists()
+    assert not (tmp_path / "results" / fr.LEDGER).exists()
+
+
 def test_fetching_waits_out_rate_limits_and_timeouts_but_not_answers():
     from urllib.error import HTTPError, URLError
 
@@ -332,6 +388,24 @@ def test_slot_choices_never_see_later_data():
     for sym in "AB":
         pd.testing.assert_series_equal(base[sym][base[sym].index <= cut], after[sym][after[sym].index <= cut])
     assert after["A"].iloc[-1] == 1 and base["A"].iloc[-1] == 0  # A takes the slot once B's funding turns
+
+
+def test_top_k_waits_for_prices_to_exit_but_does_not_require_entry_liquidity():
+    idx = pd.date_range(T0, periods=3, freq="8h")
+    h = pd.DataFrame(
+        {"funding": [0.01, -0.01, -0.01], "tradable": [True, False, True], "turnover_d": [1e9, 0.0, 0.0]},
+        index=idx,
+    )
+    s = cs.CarrySettings(top=1, lookback_h=1, entry_apr=1, min_turnover_m=5)
+    assert cs.top_positions({"X": h}, s)["X"].tolist() == [1.0, 1.0, 0.0]
+
+
+def test_top_k_cannot_recycle_a_held_slot_when_its_price_history_ends():
+    idx = pd.date_range(T0, periods=4, freq="8h")
+    h = pd.DataFrame({"funding": 0.01, "tradable": True, "turnover_d": 1e9}, index=idx)
+    s = cs.CarrySettings(top=1, lookback_h=1, entry_apr=1)
+    with pytest.raises(ValueError, match="price history ended for held carry position X"):
+        cs.top_positions({"X": h.iloc[:2], "Y": h.assign(funding=0.005)}, s)
 
 
 def test_cli_top_k_on_a_universe(tmp_path, capsys):

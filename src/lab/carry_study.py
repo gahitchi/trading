@@ -55,7 +55,7 @@ MODES = ("cash", "cross")
 HOURS_PER_YEAR = 24 * 365
 HOLDOUT_DAYS = 180
 PARTITION = "carry_partition.json"
-FILL_GAP_H = 3  # a price missing for up to this many hours carries forward; longer gaps stop the trade
+FILL_GAP_H = 3  # prices carry forward this far; a held position beyond it invalidates the study
 EULER_GAMMA = 0.5772156649015329
 # Liquid USDT pairs with a Binance spot market and a Bybit perpetual. Chosen today: they survived, which flatters
 # the past. Pass --symbols for others (the recorded ones without spot only work in `cross`).
@@ -148,8 +148,8 @@ def hourly(lg: Legs) -> pd.DataFrame | None:
         turnover = pd.Series(np.nan, index=grid)
     return pd.DataFrame(
         {
-            "r_long": rets[0].fillna(0.0),
-            "r_short": rets[1].fillna(0.0),
+            "r_long": rets[0],
+            "r_short": rets[1],
             "funding": funding,
             "tradable": closes[0].notna() & closes[1].notna() & rets[0].notna() & rets[1].notna(),
             "turnover_d": turnover,
@@ -196,6 +196,7 @@ def top_positions(hs: dict[str, pd.DataFrame], s: CarrySettings) -> dict[str, pd
         grid = grid.union(h.index)
     on_grid = [h.reindex(grid) for h in hs.values()]
     x = np.column_stack([signal(h, s) for h in on_grid])
+    tradable = np.column_stack([h["tradable"].fillna(False).to_numpy(dtype=bool) for h in on_grid])
     ok = np.column_stack(
         [
             h["tradable"].fillna(False).to_numpy(dtype=bool) & liquid(h, s) & ~np.isnan(sig)
@@ -207,10 +208,12 @@ def top_positions(hs: dict[str, pd.DataFrame], s: CarrySettings) -> dict[str, pd
     w = np.zeros((len(grid), len(syms)))
     held = np.zeros(len(syms), dtype=bool)
     for i in range(len(grid)):
+        ended = np.flatnonzero(held & (ends < grid[i]))
+        if len(ended):
+            raise ValueError(f"price history ended for held carry position {syms[ended[0]]} at {grid[i]}")
         if decide[i]:
             row = x[i]
-            held &= ~(row < s.exit_apr)  # a NaN signal (no price at T) keeps the position: it can't trade
-            held &= ends >= grid[i]  # a symbol whose history has ended frees its slot
+            held &= ~(tradable[i] & (row < s.exit_apr))  # exits need prices, but not the entry liquidity filter
             free = s.top - int(held.sum())
             if free > 0:
                 cand = np.flatnonzero(ok[i] & ~held & (row > s.entry_apr))
@@ -226,20 +229,26 @@ def backtest(
     unless given). With eval_from, only hours from it on, as if the trade started flat just before it."""
     w = positions(h, s) if w is None else w
     prev = w.shift(1, fill_value=0.0)
+    if eval_from is not None:
+        w = w[w.index >= eval_from]
+        prev = prev.reindex(w.index).copy()
+        h = h.reindex(w.index)
+        if len(prev):
+            prev.iloc[0] = 0.0  # evaluation starts flat; no earlier exposure or settlement is earned
+    invalid = (prev != 0) & ~np.isfinite(h[["r_long", "r_short"]]).all(axis=1)
+    if invalid.any():
+        first = invalid.index[invalid][0]
+        raise ValueError(
+            f"cannot value held carry position at {first}: leg prices exceed the {FILL_GAP_H}-hour carry-forward limit"
+        )
     out = pd.DataFrame(
         {
             "w": w,
-            "basis": prev * (h["r_long"] - h["r_short"]),
+            "basis": (prev * (h["r_long"] - h["r_short"])).where(prev != 0, 0.0),
             "funding": prev * h["funding"],
             "cost": (w - prev).abs() * s.cost,
         }
     )
-    if eval_from is not None:
-        out = out[out.index >= eval_from].copy()
-        if len(out):
-            first = out.index[0]
-            out.loc[first, ["basis", "funding"]] = 0.0  # earned before eval_from
-            out.loc[first, "cost"] = abs(out.loc[first, "w"]) * s.cost
     out["net"] = out["basis"] + out["funding"] - out["cost"]
     return out
 
@@ -359,7 +368,10 @@ def run(
     ws = top_positions(hs, s) if s.top and hs else {}
     pnl = {}
     for sym, h in hs.items():
-        r = backtest(h, s, boundary if holdout else None, ws.get(sym))
+        try:
+            r = backtest(h, s, boundary if holdout else None, ws.get(sym))
+        except ValueError as e:
+            raise ValueError(f"{sym}: {e}") from e
         if r.empty:
             missing.append(sym)
         else:

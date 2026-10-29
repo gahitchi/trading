@@ -161,6 +161,11 @@ above `--entry-apr` among perpetuals that traded at least 20 M USDT a day over t
 time. Today's list misses pairs delisted since, which flatters the result; thin altcoins also cost more to trade
 than the majors, so raise `--slippage-bps`.
 
+Carry studies carry missing prices forward for at most three hours. If an open position cannot be valued beyond
+that limit, the study stops with an error rather than reporting a return. Top-K positions can exit only when both
+legs have usable prices; a held symbol whose price history ends before the portfolio's does not free its slot,
+and the study stops with an error. Repair incomplete history before using the results.
+
 Carry has its own time holdout: the first study reserves the last 180 days fetched by then and everything fetched
 later (`results/carry_partition.json`). Research runs drop that data before computing anything; `--holdout` tests
 a finished configuration on it once. Every run goes into the trial log, and research runs print a deflated Sharpe
