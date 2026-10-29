@@ -70,6 +70,43 @@ def cmd_monitor(cfg, a):
     return 0
 
 
+def cmd_research_register(cfg, a):
+    from lab.persistence import read_json
+    from lab.research_family import register_family
+
+    try:
+        family = register_family(cfg.results_dir, read_json(a.plan))
+    except (OSError, ValueError) as e:
+        raise SystemExit(str(e)) from e
+    print(f"research family {family['family_id']} registered: {family['plan']['name']}")
+    print(f"  {len(family['plan']['members'])} planned evaluations; plan SHA-256 {family['plan_sha256']}")
+    if family["prior_history"]:
+        print(
+            "  earlier research evidence retained: registration is retrospective and cannot establish prospective coverage"
+        )
+    print("  all further research attempts are linked, including unplanned evaluations; no inference gate is qualified")
+    return 0
+
+
+def cmd_research_report(cfg, a):
+    from lab.research_family import REPORT, family_report
+
+    try:
+        report = family_report(cfg.results_dir)
+    except (OSError, ValueError) as e:
+        raise SystemExit(str(e)) from e
+    print(
+        f"research family {report['family_id']}: {report['research_entries']} entries, {report['configurations']} configurations"
+    )
+    if report["prospective_coverage_complete"]:
+        print("  prospective plan coverage complete (evidence only)")
+    for reason in report["reasons"]:
+        print(f"  blocked: {reason}")
+    print(f"  {report['limitation']}")
+    print(f"  report: {cfg.results_dir / REPORT}; qualified=false")
+    return 0 if report["prospective_coverage_complete"] else 1
+
+
 def cmd_micro_study(cfg, a):
     from lab.micro_study import StudySettings, study
     from lab.record import perpetual_ids
@@ -274,6 +311,7 @@ def _print_dependence_diagnostics(cfg, kind, instrument, params, trial_id, daily
         print(f"  daily HAC unavailable: {daily['reason']}")
     if not holdout:
         report = research_inference(cfg.results_dir, kind, instrument, fast_research.fingerprint(params))
+        report["selection_scope"] = {"kind": kind, "instrument": instrument, "whole_search_adjusted": False}
         if report["method"] == "daily-hac-joint-block-v1":
             report["independent_validation"] = {
                 "protocol": PROTOCOL,
@@ -291,6 +329,9 @@ def _print_dependence_diagnostics(cfg, kind, instrument, params, trial_id, daily
             print(f"  joint block diagnostic unavailable: {report['reason']}")
         if "independent_validation" in report:
             print("  independent validation failed the registered bounds; joint p-values cannot qualify a gate")
+        print(
+            "  joint diagnostic covers this study/instrument only; use `lab research report` for whole-search coverage"
+        )
     print("  dependence diagnostics are unqualified; no gate pass implied")
 
 
@@ -667,6 +708,15 @@ def build_parser() -> argparse.ArgumentParser:
     mon.add_argument("--port", type=int, default=8766)
     mon.add_argument("--host", choices=["127.0.0.1", "0.0.0.0"], default="127.0.0.1")
     mon.set_defaults(fn=cmd_monitor)
+
+    research = sub.add_parser("research", help="register a search plan and audit every research attempt")
+    rsub = research.add_subparsers(dest="sub", required=True)
+    reg = rsub.add_parser("register", help="freeze one plan and retain all earlier evidence (no replacement)")
+    reg.add_argument("--plan", required=True, help="JSON plan: name, rationale and exact evaluation members")
+    reg.set_defaults(fn=cmd_research_register)
+    rsub.add_parser("report", help="audit prospective coverage across every study and instrument").set_defaults(
+        fn=cmd_research_report
+    )
 
     ms = sub.add_parser("micro-study", help="do order-book and trade-flow features predict moves beyond costs?")
     ms.add_argument("symbol", help="a recorded perpetual, e.g. BTCUSDT")

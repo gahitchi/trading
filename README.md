@@ -30,6 +30,7 @@ pytest -n auto
 |---|---|
 | `lab record [--venue binance\|bybit] [--symbols ...] [--check-only] [--status]` | record crypto order books, trades, mark prices and funding (public data, no keys) |
 | `lab monitor [--port 8766]` | read-only dashboard of the recorder's health and the recorded data |
+| `lab research register --plan plan.json`, `lab research report` | freeze a search plan and audit every research attempt across symbols and study kinds (coverage only, never a statistical gate) |
 | `lab micro-study <symbol> [--venue] [--leader] [--horizons] [--fee-bps]` | do order-book and trade-flow features predict moves beyond trading costs? |
 | `lab survey [--venue] [--maker-bps]` | which perpetuals quote a spread wider than a maker round trip? (live public quotes) |
 | `lab maker-study <symbol> [--venue] [--latency-ms] [--maker-bps]` | what do passive fills earn after the moves that follow them? |
@@ -129,6 +130,13 @@ hashes of the actual guarded inputs. The automatic carry comparison is also a co
 attempts, changed identified input/code content or mixed provenance block comparable-trial diagnostics. Keep
 the attempt directory with the JSONL log; see the [trial evidence policy](docs/trial-evidence.md). This implements
 the evidence prerequisite of A8b, not its statistical qualification.
+
+`lab research register --plan plan.json` freezes a [prospective search plan](docs/research-family.md), and
+`lab research report` audits all research kinds and instruments in the configured results directory. Every
+subsequent research attempt is linked before evaluation, including unexpected settings and automatic
+comparisons. Earlier history is retained and labelled retrospective; failures cannot be cleared by retries.
+Coverage is separate from statistical inference: the existing daily joint diagnostic explicitly remains scoped
+to one study/instrument and does not adjust for selecting across the whole search. No gate is qualified.
 
 Fast and carry runs also log the pre-registered [daily dependence diagnostics](docs/daily-inference.md): daily-mean
 HAC uncertainty and a joint circular-block bootstrap across comparable research configurations. They require

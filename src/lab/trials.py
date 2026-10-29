@@ -207,6 +207,13 @@ def _validate(row, *, attempt=False):
             if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
                 raise ValueError("invalid input content digest")
             names.add(stream["name"])
+    if "family_id" in row or "family_plan_sha256" in row:
+        for name, size in (("family_id", 32), ("family_plan_sha256", 64)):
+            value = row.get(name)
+            if not isinstance(value, str) or len(value) != size or any(c not in "0123456789abcdef" for c in value):
+                raise ValueError("invalid prospective research family link")
+        if row["holdout"] or "attempt_id" not in row:
+            raise ValueError("only identified research attempts may link to a family")
     return row
 
 
@@ -276,7 +283,8 @@ def incomparable_provenance(rows: list[dict]) -> str:
 @contextmanager
 def trial_run(results_dir: Path, kind: str, instrument: str, params: dict, window: tuple, *, holdout=False):
     """Reserve before data access; preserve exceptions, hard exits and publication failures as attempts."""
-    history(results_dir)  # don't add evidence to a corrupt history
+    from lab.research_family import LOCK, bind_family
+
     params, requested = _frozen(params), _frozen(window)
     entry = {
         "version": 1,
@@ -294,9 +302,13 @@ def trial_run(results_dir: Path, kind: str, instrument: str, params: dict, windo
         "code": code_provenance(),
         "inputs": InputEvidence().snapshot(),
     }
-    _validate(entry, attempt=True)
     path = Path(results_dir) / ATTEMPTS / f"{entry['attempt_id']}.json"
-    atomic_json(path, entry)
+    # Registration and reservation are serialized, but long-running evaluators remain independent.
+    with file_lock(Path(results_dir) / LOCK):
+        rows = history(results_dir)  # don't add evidence to a corrupt history
+        bind_family(results_dir, entry, rows)
+        _validate(entry, attempt=True)
+        atomic_json(path, entry)
     evaluation = TrialEvaluation(window=tuple(requested), attempt_id=entry["attempt_id"])
     try:
         yield evaluation

@@ -77,10 +77,13 @@ those configurations. Holdout attempts never tune research diagnostics.
 
 Legacy-only IID diagnostics retain their provisional mathematical behavior; their provenance is unverified,
 and they cannot pass a trading gate. [A8b2](daily-inference.md) now registers initial daily dependence diagnostics;
-its [limited validation](daily-inference-validation.md) leaves them unqualified. A8b still needs stronger
-independent calibration, candidate selection and unavailable-outcome treatment before candidate qualification. A future
-cohort or recovery rule must account for the preserved history; erasing it or simply taking the latest
-successful result is not a qualification method. No profitability threshold is changed by A8b1.
+its [independent validation failed](validation/daily-v1-independent/README.md). A8b4 adds a
+[prospective search plan and whole-directory coverage audit](research-family.md), retaining all prior research
+and automatically linking subsequent attempts across instruments and study kinds. The audit cannot qualify
+inference: the existing joint diagnostic still covers only one kind/instrument. A8b still needs a new
+pre-registered method, fresh independent validation, full-family inference, Sharpe qualification and a justified
+unavailable-outcome/recovery policy. Any recovery rule must account for preserved history; erasing it or taking
+only the latest successful result is not a qualification method. No profitability threshold is changed.
 
 The tests cover forced process exit, concurrent attempts, reservation/outcome/append failures, strict history
 parsing, retained failed retries, all four CLI reservation paths, exact content changes and holdout exclusion.
