@@ -447,6 +447,13 @@ def cmd_carry_study(cfg, a):
         always = cs.CarrySettings(**{**cs.asdict(s), "entry_apr": -1e9, "exit_apr": -1e9})
         base = cs.summary(cs.run(root, symbols, always, b)[0])
         print(f"  always in the trade, for comparison: net {base['apr']:+.2f}% a year, Sharpe {base['sharpe']:+.2f}")
+    if len(pnl) > 2:  # one symbol can carry a portfolio: a squeeze, a delisting, a bad print
+        best = max(pnl, key=lambda k: pnl[k]["net"].sum())
+        rest = cs.summary({k: v for k, v in pnl.items() if k != best}, s.top)
+        print(
+            f"  without the best symbol ({best}{', its slot left empty' if s.top else ''}): net {rest['apr']:+.2f}% a"
+            f" year (basis {rest['basis_apr']:+.2f}), vol {rest['vol']:.2f}%, Sharpe {rest['sharpe']:+.2f}"
+        )
     table = cs.per_symbol(pnl)
     if s.top:  # a universe: the symbols that were held, best and worst
         table = table[table["trades"] > 0].sort_values("net_bps", ascending=False)

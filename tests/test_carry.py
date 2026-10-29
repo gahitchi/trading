@@ -343,6 +343,7 @@ def test_cli_top_k_on_a_universe(tmp_path, capsys):
     assert lab_main([*run, "--top", "2", "--min-turnover", "5"]) == 0
     out = capsys.readouterr().out
     assert "top 2 of 3 symbol(s)" in out and "always in the trade" not in out
+    assert "without the best symbol (S2USDT, its slot left empty)" in out  # the highest funding earns most
     trials = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
     assert trials[-1]["params"]["top"] == 2 and trials[-1]["params"]["min_turnover_m"] == 5.0
     assert lab_main(run) == 0
