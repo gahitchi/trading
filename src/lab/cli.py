@@ -265,6 +265,7 @@ STRATEGY_NAMES = {"taker": "imbalance taker", "maker": "passive maker"}
 
 def _print_dependence_diagnostics(cfg, kind, instrument, params, trial_id, daily, *, holdout):
     from lab.daily_inference import research_inference
+    from lab.inference_validation import FROZEN_METHOD_SHA256, PROTOCOL
     from lab.persistence import atomic_json
 
     if daily["available"]:
@@ -273,6 +274,13 @@ def _print_dependence_diagnostics(cfg, kind, instrument, params, trial_id, daily
         print(f"  daily HAC unavailable: {daily['reason']}")
     if not holdout:
         report = research_inference(cfg.results_dir, kind, instrument, fast_research.fingerprint(params))
+        if report["method"] == "daily-hac-joint-block-v1":
+            report["independent_validation"] = {
+                "protocol": PROTOCOL,
+                "method_source_sha256": FROZEN_METHOD_SHA256,
+                "status": "failed-registered-primary-bounds",
+                "primary_requirement_met": False,
+            }
         atomic_json(cfg.results_dir / "inference" / f"{trial_id}.json", report)
         if report["available"]:
             print(
@@ -281,6 +289,8 @@ def _print_dependence_diagnostics(cfg, kind, instrument, params, trial_id, daily
             )
         else:
             print(f"  joint block diagnostic unavailable: {report['reason']}")
+        if "independent_validation" in report:
+            print("  independent validation failed the registered bounds; joint p-values cannot qualify a gate")
     print("  dependence diagnostics are unqualified; no gate pass implied")
 
 

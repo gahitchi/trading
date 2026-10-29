@@ -4,6 +4,10 @@ Protocol: [daily-inference.md](daily-inference.md), published on the dedicated b
 `3e45e7127579efb62d85a08e700bd56532faef0f` before implementation or synthetic calibration.
 No real candidate data or holdout was inspected.
 
+Subsequent [independent validation](validation/daily-v1-independent/README.md) ran 6,000 simulations at production
+settings and **failed** its registered primary requirement. The frozen method remains unqualified; CLI reports
+now disclose that failure. The original outcome below remains intact as development evidence.
+
 ## Fixed dependent-null outcome
 
 The exact registered calibration generated **16/200 (8%)** replications with any joint p <= 0.05.

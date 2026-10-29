@@ -10,3 +10,6 @@ data/
 results/
 
 # uv.lock is tracked for reproducible development and CI.
+
+# Operational locks for archived/resumable synthetic validation.
+/docs/validation/**/*.lock

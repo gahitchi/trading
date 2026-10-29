@@ -222,3 +222,33 @@ def test_a_high_error_rate_cannot_meet_the_registered_bound(tmp_path, small_plan
     assert report["registered_parameters"] and report["complete"]
     assert report["primary_requirement_met"] is False and report["qualified"] is False
     assert all(c["upper_bound"] > 0.08 for c in report["cases"])
+
+
+def test_archived_independent_failure_and_every_outcome_are_retained():
+    import hashlib
+
+    from tests.conftest import REPO
+
+    root = REPO / "docs" / "validation" / "daily-v1-independent"
+    manifest = iv.read_json(root / "manifest.json")
+    summary = iv.read_json(root / "summary.json")
+    assert manifest["code"]["git_commit"] == "e880b431bdf26e3025a59dca193d3b6706f664bb"
+    assert manifest["execution"]["method_sha256"] == iv.FROZEN_METHOD_SHA256
+    assert (
+        manifest["execution"]["protocol_sha256"]
+        == hashlib.sha256((REPO / "docs" / "independent-inference-validation.md").read_bytes()).hexdigest()
+    )
+    assert summary["complete"] and summary["registered_parameters"]
+    assert summary["primary_requirement_met"] is False and summary["qualified"] is False
+    expected = {"iid_minimum": 48, "ar05": 93, "ar08": 135, "ar05_t5": 79, "ar_negative": 20, "variance_shift": 67}
+    assert {c["case"]: c["events"] for c in summary["cases"]} == expected
+    for case in summary["cases"]:
+        path = root / f"{case['case']}.json"
+        row = iv.read_json(path)
+        assert len(row["minimum_p"]) == 1000
+        assert row["outcomes_sha256"] == iv._digest(row["minimum_p"])
+        assert sum(p <= 0.05 for p in row["minimum_p"]) == case["events"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == case["checkpoint_sha256"]
+        assert iv.binomial_upper(case["events"], 1000, 0.01 if case["primary"] else 0.05) == pytest.approx(
+            case["upper_bound"]
+        )

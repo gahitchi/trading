@@ -193,6 +193,8 @@ def test_cli_carry_saves_auditable_unqualified_family_report(tmp_path, capsys):
     assert r["available"] and not r["qualified"] and r["configurations"] == 2
     assert len(r["attempt_ids"]) == 2 and r["history_sha256"]
     assert r["resamples"] == 1999 and r["block_days"] == [7, 14, 28]
+    assert r["independent_validation"]["primary_requirement_met"] is False
+    assert "independent validation failed" in out
     rows = trials.history(tmp_path / "results")
     assert all(row["result"]["return_stats"]["basis"] == di.CARRY_BASIS for row in rows)
     assert all(row["result"]["daily_inference"]["available"] for row in rows)

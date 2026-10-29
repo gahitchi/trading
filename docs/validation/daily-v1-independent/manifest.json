@@ -1,0 +1,145 @@
+{
+ "version": 1,
+ "identity": "54977d4c2252c517b7b6421f31aea537c0ddf2598ee77057eda9770b2daf1b27",
+ "execution": {
+  "protocol": "daily-v1-independent-null-v1",
+  "protocol_commit": "66129e942753db17fc6d9c7de5633ff87c842b86",
+  "protocol_sha256": "abefdc79e6ad3e2495f660a8af433f2869d7f770340f2d91d5e7233c17289f6a",
+  "method_sha256": "048c8136891340f2a92b8a50eecb8bff7e118e3cf815ec3c0ac1c57d6d2aa94d",
+  "source": {
+   "source_sha256": "bc0537659a5881cf4202c53264061336c7edd554b267d459134d8a973f050105",
+   "python": "3.13.16 (main, Oct 14 2026, 01:04:01) [Clang 23.1.3 ]",
+   "implementation": "CPython",
+   "dependencies": {
+    "nautilus_trader": "2.0.0rc7",
+    "numpy": "2.5.4",
+    "pandas": "3.1.0",
+    "pyarrow": "26.0.0"
+   },
+   "project_files": {
+    "pyproject.toml": "4d799a1e0cb794073df67a5d54c90e4ead36a104fb67099bedf315a359c67c2e",
+    "uv.lock": "1b16dd3589a8112fb65012751e694e9fe282e6ccd7bfd477045d0ff9a6516693"
+   }
+  },
+  "repetitions": 1000,
+  "resamples": 1999,
+  "master_seed": 20261030,
+  "burn_in": 512,
+  "threshold": 0.05,
+  "cases": [
+   {
+    "id": 0,
+    "name": "iid_minimum",
+    "n": 120,
+    "phi": 0.0,
+    "distribution": "gaussian",
+    "primary": true,
+    "variance_shift": false
+   },
+   {
+    "id": 1,
+    "name": "ar05",
+    "n": 240,
+    "phi": 0.5,
+    "distribution": "gaussian",
+    "primary": true,
+    "variance_shift": false
+   },
+   {
+    "id": 2,
+    "name": "ar08",
+    "n": 240,
+    "phi": 0.8,
+    "distribution": "gaussian",
+    "primary": true,
+    "variance_shift": false
+   },
+   {
+    "id": 3,
+    "name": "ar05_t5",
+    "n": 240,
+    "phi": 0.5,
+    "distribution": "t5",
+    "primary": true,
+    "variance_shift": false
+   },
+   {
+    "id": 4,
+    "name": "ar_negative",
+    "n": 240,
+    "phi": -0.5,
+    "distribution": "gaussian",
+    "primary": true,
+    "variance_shift": false
+   },
+   {
+    "id": 5,
+    "name": "variance_shift",
+    "n": 240,
+    "phi": 0.5,
+    "distribution": "gaussian",
+    "primary": false,
+    "variance_shift": true
+   }
+  ],
+  "bootstrap_seed": 20261029,
+  "block_days": [
+   7,
+   14,
+   28
+  ],
+  "hac_lags": [
+   7,
+   14,
+   28
+  ]
+ },
+ "code": {
+  "source_sha256": "bc0537659a5881cf4202c53264061336c7edd554b267d459134d8a973f050105",
+  "sources": {
+   "__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "carry_data.py": "d68ef4202c260170bcac29652713384a5b6e6eeed9d8a35673a699746985ac5a",
+   "carry_study.py": "a07d0f5b7aeac8cb8d9a39a21bb1601d5b3a44687b6318ce7c4257a87221ea96",
+   "cli.py": "cd86d1961be0a2e581b6fbe255f2eb663c1fa36bec394dbc3a13593b7548dbfd",
+   "config.py": "1af85842ecc44e011a5126c9296e40f324a9d6399ee112db67d27ad2d2239673",
+   "daily_inference.py": "048c8136891340f2a92b8a50eecb8bff7e118e3cf815ec3c0ac1c57d6d2aa94d",
+   "fast.py": "d0873c2a35eab3d9cc2270cf92b0cf276c7fd55cf8712b736426d5fbee7a1221",
+   "fast_research.py": "553a5a48c95f92b97a357a8be8c19b795681a42cb851c163616cda313fc7410d",
+   "inference_validation.py": "ddd1bbcfb51341c00a70b52b7171946026e68bf9c8200af9c3d8f9271385344f",
+   "maker.py": "f95fb7a1ea81b468c5b4c4bdc84d73ad76ca2f01b9b584cd094351cebf5be92d",
+   "maker_study.py": "70374e7d69a7e0ac72a4c34aed58c95b275afc276a13a9dd6b3d0a619fe160f9",
+   "micro.py": "523dc3877934b72c2051cbe72bb5efae2c83c850cb36daae4a1f7aed5f136554",
+   "micro_study.py": "f2bdb08f8c0f31895fe00a9277e1a1cca74f3cc11e3e10277c8c1acdf574a925",
+   "monitor.py": "cda944bd94fb548045eac152c11c41b784015ffe936ffb62adf4dba86390b0aa",
+   "notify.py": "7f3d36e992adefb35f808f4eff5e0bc64c89fb61302067eccbef0740ff428cb7",
+   "persistence.py": "dad3c305b5ae8b578a791dfc06e42331f5f51cb04cf22ffe7038df596649b9cb",
+   "record.py": "3e4c48bb436d14feb422c5590b2080ec1622598ca385d995485fa1aa8862f8cf",
+   "risk_manager.py": "e9344b370cc7311d3f2b419bc0e8367544ad4450c9cf6649c3035071af27783f",
+   "safety.py": "6155dcc4d0142de04fd1c9c91d3ca3ae29c15127e42fafce6f405eaa7cc274ea",
+   "study_time.py": "8d56725ec1f47038ffc62700c036257cabc93fb789b39a940c3196b29a86c898",
+   "survey.py": "071d3e53d5f4f6433cfa05e4e3146392b2dc9b20cbd62be7f908b4d22a163804",
+   "trials.py": "6758d7ff7615270f43adbd2d5fb45822853419ce665741a6abbbc30048e82606"
+  },
+  "git_commit": "e880b431bdf26e3025a59dca193d3b6706f664bb",
+  "git_dirty": true,
+  "python": "3.13.16 (main, Oct 14 2026, 01:04:01) [Clang 23.1.3 ]",
+  "implementation": "CPython",
+  "dependencies": {
+   "nautilus_trader": "2.0.0rc7",
+   "numpy": "2.5.4",
+   "pandas": "3.1.0",
+   "pyarrow": "26.0.0"
+  },
+  "project_files": {
+   "pyproject.toml": "4d799a1e0cb794073df67a5d54c90e4ead36a104fb67099bedf315a359c67c2e",
+   "uv.lock": "1b16dd3589a8112fb65012751e694e9fe282e6ccd7bfd477045d0ff9a6516693"
+  }
+ },
+ "runs": [
+  {
+   "at": "2026-10-29T20:03:05.102979+00:00",
+   "status": "completed",
+   "finished_at": "2026-10-29T20:04:04.446257+00:00"
+  }
+ ]
+}

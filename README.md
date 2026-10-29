@@ -136,7 +136,12 @@ HAC uncertainty and a joint circular-block bootstrap across comparable research 
 explicitly unavailable. Account-equity returns and carry's per-leg-notional series remain separate. Joint reports
 in `results/inference/` identify their method settings and research-history snapshot. They are unqualified
 diagnostics, not deflated Sharpe or probabilities of an edge: the fixed null check observed 16/200 (8%) flags at
-a nominal 5% threshold, exactly its pre-registered ceiling. See the [validation record](docs/daily-inference-validation.md).
+a nominal 5% threshold, exactly its pre-registered ceiling. A subsequent [independent production-setting
+validation](docs/validation/daily-v1-independent/README.md) completed 6,000 simulations and failed its registered
+primary requirement; observed rates reached 13.5% under stronger persistence. CLI reports now explicitly retain
+that failure. The unchanged v1 diagnostic cannot qualify a trading gate. See the earlier
+[validation record](docs/daily-inference-validation.md) and the independent suite's
+[pre-registration](docs/independent-inference-validation.md).
 
 `--strategy maker` runs the passive counterpart (`lab.maker.PassiveMaker`) through the same backtest, paper node,
 risk manager, holdout and trial log. It keeps one post-only quote of `--size` on each side, at the touch or

@@ -1,0 +1,85 @@
+{
+ "version": 1,
+ "identity": "54977d4c2252c517b7b6421f31aea537c0ddf2598ee77057eda9770b2daf1b27",
+ "protocol": "daily-v1-independent-null-v1",
+ "qualified": false,
+ "complete": true,
+ "registered_parameters": true,
+ "cases": [
+  {
+   "case": "iid_minimum",
+   "primary": true,
+   "completed": 1000,
+   "complete": true,
+   "events": 48,
+   "rate": 0.048,
+   "upper_bound": 0.06610913753841556,
+   "bound_confidence": 0.99,
+   "meets_bound": false,
+   "checkpoint_sha256": "a54db57b38efccfdb00b0f853b2817f8e563f46c268f89633642afb9b9f36096"
+  },
+  {
+   "case": "ar05",
+   "primary": true,
+   "completed": 1000,
+   "complete": true,
+   "events": 93,
+   "rate": 0.093,
+   "upper_bound": 0.11651525359189263,
+   "bound_confidence": 0.99,
+   "meets_bound": false,
+   "checkpoint_sha256": "32473200b7542141774b64f8888d3da300fb10c5f575832bae10bcd1e36e3095"
+  },
+  {
+   "case": "ar08",
+   "primary": true,
+   "completed": 1000,
+   "complete": true,
+   "events": 135,
+   "rate": 0.135,
+   "upper_bound": 0.1620946358034221,
+   "bound_confidence": 0.99,
+   "meets_bound": false,
+   "checkpoint_sha256": "928212431c1860d15f94fcc3d333fe4d6f530288edb2cec78d8886a382f10110"
+  },
+  {
+   "case": "ar05_t5",
+   "primary": true,
+   "completed": 1000,
+   "complete": true,
+   "events": 79,
+   "rate": 0.079,
+   "upper_bound": 0.1010612123745055,
+   "bound_confidence": 0.99,
+   "meets_bound": false,
+   "checkpoint_sha256": "ee3bd7eee86bf06d6a1f3d8eba238ff8325790033559cc191de0f3aa9fa55fc4"
+  },
+  {
+   "case": "ar_negative",
+   "primary": true,
+   "completed": 1000,
+   "complete": true,
+   "events": 20,
+   "rate": 0.02,
+   "upper_bound": 0.03288615444920424,
+   "bound_confidence": 0.99,
+   "meets_bound": true,
+   "checkpoint_sha256": "42582a97abb65e6adff02744497e67728d7e765bc0bf6ea63dc66a6b31664d48"
+  },
+  {
+   "case": "variance_shift",
+   "primary": false,
+   "completed": 1000,
+   "complete": true,
+   "events": 67,
+   "rate": 0.067,
+   "upper_bound": 0.08148078686152814,
+   "bound_confidence": 0.95,
+   "meets_bound": false,
+   "checkpoint_sha256": "d9650b19bec980ace0acc9e637a7d54f9753372194b42920e1bb04ea2aa321d5"
+  }
+ ],
+ "primary_requirement_met": false,
+ "simultaneous_primary_confidence": 0.95,
+ "scope": "fixed synthetic laws only; no trading gate or universal error-control qualification"
+}
