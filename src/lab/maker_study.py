@@ -34,6 +34,7 @@ import pandas as pd
 
 from lab.micro import IMBALANCE_LEVELS, book_imbalance
 from lab.micro_study import F_LAST, _levels
+from lab.study_time import MAX_BOOK_GAP_NS, future_mids, recorded_hours
 
 FAVOUR = 0.33
 COLUMNS = ["group", "horizon_s", "fills", "fills_per_h", "at_fill_bps", "markout_bps", "net_bps", "t"]
@@ -74,6 +75,7 @@ def simulate_fills(deltas, trades, settings: MakerSettings, tick: float | None =
     orders: dict[int, _Order | None] = {1: None, -1: None}
     step, latency = settings.every_ms * 1_000_000, settings.latency_ms * 1_000_000
     next_tick, mid = 0, math.nan
+    last_book_ns = None
     events = heapq.merge(
         ((d.ts_init, 1, d) for d in sorted(deltas, key=lambda d: d.ts_init)),
         ((t.ts_init, 0, t) for t in sorted(trades, key=lambda t: t.ts_init)),
@@ -81,6 +83,9 @@ def simulate_fills(deltas, trades, settings: MakerSettings, tick: float | None =
     )
     for ts, is_book, ev in events:
         if not is_book:
+            if last_book_ns is None or ts - last_book_ns > MAX_BOOK_GAP_NS:
+                orders = {1: None, -1: None}
+                continue
             hit = 1 if ev.aggressor_side == AggressorSide.SELL else -1  # sellers hit bids, buyers lift asks
             o = orders[hit]
             if o is None:
@@ -95,12 +100,17 @@ def simulate_fills(deltas, trades, settings: MakerSettings, tick: float | None =
                 fills.append((ts, hit, o.price, o.touch_mid, o.favour))
                 orders[hit] = None
             continue
+        if last_book_ns is not None and ts - last_book_ns > MAX_BOOK_GAP_NS:
+            orders = {1: None, -1: None}
+            book = OrderBook(ev.instrument_id, BookType.L2_MBP)
+            last_book_ns = None
         book.apply_delta(ev)
         if not ev.flags & F_LAST:
             continue
         bids, asks = _levels(book.bids(IMBALANCE_LEVELS)), _levels(book.asks(IMBALANCE_LEVELS))
         if not bids or not asks or bids[0][0] >= asks[0][0]:
             continue
+        last_book_ns = ts
         mid = (bids[0][0] + asks[0][0]) / 2
         mid_ts.append(ts)
         mid_px.append(mid)
@@ -134,21 +144,19 @@ def simulate_fills(deltas, trades, settings: MakerSettings, tick: float | None =
 
 
 def markouts(fills: pd.DataFrame, mids, horizon_s: float) -> pd.Series:
-    """Maker-signed bps from the fill price to the last mid at or before fill + horizon; NaN past the data."""
+    """Maker-signed bps within one recorded segment; NaN in a hole or past the data."""
     ts, px = mids
     if fills.empty:
         return pd.Series(dtype=float)
-    target = fills["ts"].to_numpy() + int(horizon_s * 1e9)
-    idx = np.searchsorted(ts, target, side="right") - 1
-    out = fills["side"].to_numpy() * (px[idx] / fills["price"].to_numpy() - 1) * 10_000
-    out[target > ts[-1]] = np.nan
+    future = future_mids(ts, px, fills["ts"].to_numpy(), horizon_s)
+    out = fills["side"].to_numpy() * (future / fills["price"].to_numpy() - 1) * 10_000
     return pd.Series(out, index=fills.index)
 
 
 def evaluate(fills: pd.DataFrame, mids, settings: MakerSettings) -> pd.DataFrame:
     if fills.empty or len(mids[0]) < 2:
         return pd.DataFrame(columns=COLUMNS)
-    hours = (mids[0][-1] - mids[0][0]) / 3.6e12
+    hours = recorded_hours(mids[0])
     at_fill = fills["side"] * (fills["mid"] / fills["price"] - 1) * 10_000
     group = pd.Series("neutral", index=fills.index)
     group[fills["favour"] > FAVOUR] = "favours"

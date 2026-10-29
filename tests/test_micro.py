@@ -104,6 +104,34 @@ def test_forward_returns_use_the_last_sample_inside_the_horizon():
     assert np.isnan(fwd[2]) and np.isnan(fwd[3])  # horizon runs past the data
 
 
+def test_forward_returns_do_not_use_stale_prices_or_cross_a_ten_minute_hole():
+    samples = pd.DataFrame(
+        {"ts": np.array([0, 1, 2, 602, 603, 604]) * 1000 * MS, "mid": [100, 101, 102, 200, 201, 202]}
+    )
+    one = forward_returns_bps(samples, 1.0)
+    assert one.iloc[0] == pytest.approx(100.0)
+    assert np.isnan(one.iloc[2])  # the requested second is unobserved, not a zero return
+    assert one.iloc[3] == pytest.approx(50.0)  # research resumes in the next session
+    assert forward_returns_bps(samples, 603.0).iloc[:2].isna().all()  # both endpoints exist, with a hole between
+
+
+def test_features_start_fresh_after_a_ten_minute_hole():
+    deltas, trades = synthetic_market(100)
+    restart = 610_000 * MS
+    resumed = snapshot_deltas(IID, 200, restart, 2000.0)
+    samples = sample_features(deltas + resumed, trades, StudySettings(flow_bucket_notional=100.0))
+    last = samples.iloc[-1]
+    assert last["ts"] == restart
+    assert last[["flow_signed", "hawkes_skew", "absorption", "lead_lag_bps"]].isna().all()
+
+
+def test_a_slow_sampling_clock_does_not_invent_a_recorder_hole():
+    deltas, trades = synthetic_market(100)
+    samples = sample_features(deltas, trades, StudySettings(every_ms=2000))
+    assert len(samples) == 5
+    assert forward_returns_bps(samples, 2.0).iloc[:-1].notna().all()
+
+
 def synthetic_market(steps=3000, seed=7):
     """Every 100 ms a fresh book whose size imbalance predicts the next second's move; trades are noise."""
     rng = random.Random(seed)

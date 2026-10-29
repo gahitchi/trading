@@ -88,6 +88,33 @@ def test_markouts_are_signed_for_the_maker_and_net_of_the_fee():
     assert table.loc["all", "fills_per_h"] == pytest.approx(2 / (2 / 3600))
 
 
+def test_markouts_do_not_use_stale_prices_or_cross_a_ten_minute_hole():
+    mids = (np.array([0, 1, 2, 602, 603, 604]) * 1000 * MS, np.array([100, 101, 102, 200, 201, 202]))
+    fills = pd.DataFrame({"ts": np.array([1, 2, 602]) * 1000 * MS, "side": 1, "price": [100, 101, 200]})
+    one = markouts(fills, mids, 1.0)
+    assert one.iloc[0] == pytest.approx(200.0)
+    assert np.isnan(one.iloc[1])
+    assert one.iloc[2] == pytest.approx(50.0)
+    assert markouts(fills.iloc[:1], mids, 602.0).isna().all()
+
+
+def test_resting_orders_do_not_survive_a_ten_minute_hole():
+    restart = 600_000 * MS
+    fills, _ = run(
+        snap(0) + snap(restart + 100 * MS),
+        [trade(restart, 99.95, 3.0), trade(restart + 160 * MS, 99.95, 3.0)],
+    )
+    assert fills["ts"].tolist() == [restart + 160 * MS]
+
+
+def test_fill_rate_uses_recorded_time_instead_of_time_the_recorder_was_off():
+    mids = (np.array([0, 1, 601, 602]) * 1000 * MS, np.array([100.0] * 4))
+    fills = pd.DataFrame({"ts": np.array([0, 601]) * 1000 * MS, "side": 1, "price": 99.95, "mid": 100.0, "favour": 0.0})
+    table = evaluate(fills, mids, MakerSettings(horizons_s=(1.0,))).set_index("group")
+    assert table.loc["all", "fills"] == 2
+    assert table.loc["all", "fills_per_h"] == pytest.approx(3600.0)  # two fills in two recorded seconds
+
+
 def test_adverse_selection_shows_in_the_markout():
     """Every 200 ms a seller sweeps the bid and the market drops a tick: fills at the bid lose afterwards."""
     deltas, trades, bid = [], [], 100.0

@@ -32,6 +32,7 @@ from lab.micro import (
     MultiLevelOfi,
     book_imbalance,
 )
+from lab.study_time import MAX_BOOK_GAP_NS, future_mids
 
 F_LAST = 128
 FEATURES = ("ofi_z", "imbalance", "micro_bps", "flow_signed", "hawkes_skew", "absorption", "lead_lag_bps")
@@ -58,7 +59,7 @@ def sample_features(deltas, trades, settings: StudySettings, leader_deltas=()) -
     from nautilus_trader.model import AggressorSide, BookAction, BookType, OrderBook
 
     if not deltas:
-        return pd.DataFrame(columns=["ts", "mid", "spread_bps", *FEATURES])
+        return pd.DataFrame(columns=["ts", "mid", "spread_bps", *FEATURES, "segment"])
     book = OrderBook(deltas[0].instrument_id, BookType.L2_MBP)
     leader_book = OrderBook(leader_deltas[0].instrument_id, BookType.L2_MBP) if leader_deltas else None
     ofi, flow = MultiLevelOfi(), FlowToxicity(settings.flow_bucket_notional)
@@ -67,6 +68,8 @@ def sample_features(deltas, trades, settings: StudySettings, leader_deltas=()) -
     step = settings.every_ms * 1_000_000
     next_tick = 0
     ofi_z = flow_signed = absorption_net = np.nan
+    last_book_ns = last_leader_ns = None
+    segment = 0
     rows = []
     # Stable sorts keep a batch's deltas in their recorded order.
     events = heapq.merge(
@@ -77,6 +80,8 @@ def sample_features(deltas, trades, settings: StudySettings, leader_deltas=()) -
     )
     for ts, kind, ev in events:
         if kind == TRADE:
+            if last_book_ns is None or ts - last_book_ns > MAX_BOOK_GAP_NS:
+                continue  # no fresh book against which this trade could be observed
             buy = ev.aggressor_side == AggressorSide.BUY
             f = flow.observe(float(ev.price) * float(ev.size), buy)
             flow_signed = f.signed if f else np.nan
@@ -84,12 +89,25 @@ def sample_features(deltas, trades, settings: StudySettings, leader_deltas=()) -
             absorption.trade(float(ev.size), buy)
             continue
         if kind == LEADER_BOOK:
+            if last_leader_ns is not None and ts - last_leader_ns > MAX_BOOK_GAP_NS:
+                leader_book = OrderBook(ev.instrument_id, BookType.L2_MBP)
+                lead_lag.reset()
+                last_leader_ns = None
             leader_book.apply_delta(ev)
             if ev.flags & F_LAST:
                 mid = _mid(leader_book)
                 if mid is not None:
+                    last_leader_ns = ts
                     lead_lag.observe(True, ts, mid)
             continue
+        if last_book_ns is not None and ts - last_book_ns > MAX_BOOK_GAP_NS:
+            book = OrderBook(ev.instrument_id, BookType.L2_MBP)
+            ofi, flow = MultiLevelOfi(), FlowToxicity(settings.flow_bucket_notional)
+            hawkes, absorption = HawkesIntensity(settings.hawkes_baseline_per_s), Absorption()
+            lead_lag.reset()
+            ofi_z = flow_signed = absorption_net = np.nan
+            last_book_ns = None
+            segment += 1
         if ev.action == BookAction.CLEAR:
             ofi.reset()  # rebuilt from a snapshot: level-to-level changes across it are not order flow
             ofi_z = np.nan
@@ -101,6 +119,7 @@ def sample_features(deltas, trades, settings: StudySettings, leader_deltas=()) -
         if snap is not None:
             ofi_z = snap.z
         if bids and asks and bids[0][0] < asks[0][0]:
+            last_book_ns = ts
             a = absorption.update(ts, bids[0][0], asks[0][0])
             absorption_net = a.net if a else np.nan
             if leader_book is not None:
@@ -113,7 +132,8 @@ def sample_features(deltas, trades, settings: StudySettings, leader_deltas=()) -
             continue
         spread_bps = (asks[0][0] - bids[0][0]) / imb.mid * 10_000
         h = hawkes.snapshot(ts)
-        lag = lead_lag.gap_bps(ts) if lead_lag.gap_ns is not None else np.nan
+        leader_fresh = last_leader_ns is not None and ts - last_leader_ns <= MAX_BOOK_GAP_NS
+        lag = lead_lag.gap_bps(ts) if leader_fresh and lead_lag.gap_ns is not None else np.nan
         rows.append(
             (
                 ts,
@@ -126,9 +146,10 @@ def sample_features(deltas, trades, settings: StudySettings, leader_deltas=()) -
                 h.skew if h else np.nan,
                 absorption_net,
                 lag,
+                segment,
             )
         )
-    return pd.DataFrame(rows, columns=["ts", "mid", "spread_bps", *FEATURES])
+    return pd.DataFrame(rows, columns=["ts", "mid", "spread_bps", *FEATURES, "segment"])
 
 
 def _mid(book) -> float | None:
@@ -139,13 +160,11 @@ def _mid(book) -> float | None:
 
 
 def forward_returns_bps(samples: pd.DataFrame, horizon_s: float) -> pd.Series:
-    """Mid return from each sample to the last sample at or before ts + horizon; NaN past the end of the data."""
+    """Mid return within one recorded segment; NaN inside a hole or past the end of the data."""
     ts = samples["ts"].to_numpy()
     mid = samples["mid"].to_numpy()
-    target = ts + int(horizon_s * 1e9)
-    idx = np.searchsorted(ts, target, side="right") - 1
-    fwd = (mid[idx] / mid - 1) * 10_000
-    fwd[target > ts[-1]] = np.nan
+    future = future_mids(ts, mid, ts, horizon_s, samples.get("segment"))
+    fwd = (future / mid - 1) * 10_000
     return pd.Series(fwd, index=samples.index)
 
 

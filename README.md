@@ -127,6 +127,11 @@ its own). It reports the half spread each fill captured and the maker-signed mov
 of the mid 1 to 60 s later, net of the maker fee, split by whether the book imbalance favoured the order. Cancels are
 assumed to come from ahead in the queue, which flatters fill rates.
 
+`micro-study` and `maker-study` split recordings wherever complete book updates are more than one second apart.
+Returns and markouts into or across those holes are excluded, features warm up again after a restart, and maker
+orders are discarded while the book is stale. Maker fills per hour use time within the recorded segments,
+excluding downtime. The one-second gap policy is included in each study's configuration fingerprint.
+
 Recorded data has a forward holdout. The first `micro-study` or `fast backtest` on a symbol reserves everything
 recorded after that moment (`results/fast_partition.json`); research only sees data before it, and the recorder
 keeps filling the holdout with data nobody has looked at. `lab fast backtest <symbol> --holdout` tests a finished

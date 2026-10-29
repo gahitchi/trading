@@ -71,6 +71,7 @@ def cmd_monitor(cfg, a):
 def cmd_micro_study(cfg, a):
     from lab.micro_study import StudySettings, study
     from lab.record import perpetual_ids
+    from lab.study_time import MAX_BOOK_GAP_NS
 
     catalog = Path(a.catalog) if a.catalog else cfg.data_dir / "market" / "catalog"
     if not catalog.exists():
@@ -109,6 +110,7 @@ def cmd_micro_study(cfg, a):
         "hawkes_mu": a.hawkes_mu,
         "leader": leader,
         "lead_lag_interval": a.lead_lag_interval,
+        "max_book_gap_ms": MAX_BOOK_GAP_NS // 1_000_000,
     }
     n = fast_research.register_trial(
         cfg.results_dir, "micro-study", iid, params, (start, end),
@@ -156,6 +158,7 @@ def cmd_survey(cfg, a):
 def cmd_maker_study(cfg, a):
     from lab.maker_study import MakerSettings, study
     from lab.record import perpetual_ids
+    from lab.study_time import MAX_BOOK_GAP_NS
 
     catalog = Path(a.catalog) if a.catalog else cfg.data_dir / "market" / "catalog"
     if not catalog.exists():
@@ -188,6 +191,7 @@ def cmd_maker_study(cfg, a):
         "horizons_s": list(a.horizons),
         "maker_bps": a.maker_bps,
         "improve": a.improve,
+        "max_book_gap_ms": MAX_BOOK_GAP_NS // 1_000_000,
     }
     n = fast_research.register_trial(
         cfg.results_dir, "maker-study", iid, params, (start, end),
