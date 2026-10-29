@@ -109,6 +109,11 @@ exchange orders, no keys. Both trade through the pre-trade risk manager (`lab.ri
 each order's notional (default `--capital`), and `lab kill` stops them. Paper keeps the risk state and an audit log
 in `results/fast/`, so a restart doesn't clear a daily-loss stop. The strategy is a platform
 test, not a validated edge. The backtest reports round trips net of costs and the t-statistic of their mean.
+Research backtests also log daily net equity returns, including unrealized P&L, and print an IID deflated-Sharpe
+diagnostic over the instrument's logged fast research configurations. It is unavailable when trial histories lack
+daily returns, recorded windows differ, fewer than two comparable configurations exist, or fewer than four days
+support finite return moments. Holdout results are excluded. Trial correlation and serial dependence still need
+qualification before the diagnostic can support a gate; a short run cannot establish an edge.
 
 `--strategy maker` runs the passive counterpart (`lab.maker.PassiveMaker`) through the same backtest, paper node,
 risk manager, holdout and trial log. It keeps one post-only quote of `--size` on each side, at the touch or
@@ -176,8 +181,8 @@ and the study stops with an error. Repair incomplete history before using the re
 Carry has its own time holdout: the first study reserves the last 180 days fetched by then and everything fetched
 later (`results/carry_partition.json`). Research runs drop that data before computing anything; `--holdout` tests
 a finished configuration on it once. Every run goes into the trial log, and research runs print a deflated Sharpe
-ratio: the chance the edge is real given how many configurations have been tried on the same data (under 0.95,
-it isn't established).
+ratio as an IID research diagnostic. Trial correlation and serial dependence need separate qualification before
+that statistic can support a gate; its value alone does not establish an edge.
 
 Binance and Bybit are not available in every country; check that they are in yours.
 

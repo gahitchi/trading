@@ -2,7 +2,9 @@
 every run counted."""
 
 import json
+import math
 
+import numpy as np
 import pytest
 from nautilus_trader.model import CryptoPerpetual, Currency, InstrumentId, OrderBookDelta, Price, Quantity, Symbol
 from nautilus_trader.persistence import ParquetDataCatalog
@@ -94,6 +96,106 @@ def test_trials_count_distinct_configurations_on_research_data(tmp_path):
     assert fr.register_trial(tmp_path, "micro-study", IID, {"every_ms": 100}, (0, 1), {}) == 1
 
 
+def test_daily_equity_statistics_match_hand_calculated_net_returns():
+    returns = np.array([0.01, -0.01, 0.02, -0.005])
+    equity = 100 * np.cumprod(1 + returns)
+    stats = fr.equity_return_stats(dict(enumerate(equity)), 100.0)
+    assert list(stats["daily_returns"].values()) == pytest.approx(returns)
+    assert stats["days"] == 4
+    assert stats["sr_daily"] == pytest.approx(returns.mean() / returns.std(ddof=1))
+    assert stats["sharpe"] == pytest.approx(stats["sr_daily"] * math.sqrt(365))
+    assert fr.equity_return_stats({0: 100.0, 1: 100.0}, 100.0)["sr_daily"] is None
+
+
+@pytest.mark.parametrize("bad", [None, math.nan, math.inf])
+def test_missing_equity_does_not_become_a_zero_return_or_a_sharpe_estimate(bad):
+    stats = fr.equity_return_stats({0: 101.0, 1: bad, 2: 102.0, 3: 104.0}, 100.0)
+    assert list(stats["daily_returns"].values())[1:3] == [None, None]
+    assert stats["sr_daily"] is stats["sharpe"] is None
+    json.dumps(stats, allow_nan=False)
+
+
+def test_a_missing_calendar_day_is_not_annualized_as_one_daily_return():
+    stats = fr.equity_return_stats({0: 101.0, 2: 104.0, 3: 105.0, 4: 106.0}, 100.0)
+    assert stats["daily_returns"]["1970-01-03"] is None
+    assert "1970-01-02" not in stats["daily_returns"]
+    assert stats["sr_daily"] is None
+
+
+def test_shared_deflated_sharpe_math_matches_the_original_paper_example():
+    from lab.carry_study import expected_max_sharpe, probabilistic_sharpe
+
+    # Bailey & Lopez de Prado (2014), "A Numerical Example": N=100, variance=0.002, T=1250.
+    trials = np.arange(100, dtype=float)
+    trials = (trials - trials.mean()) / trials.std(ddof=1) * math.sqrt(0.002)
+    benchmark = expected_max_sharpe(trials.tolist())
+    assert benchmark == pytest.approx(0.1132, abs=5e-5)
+    assert probabilistic_sharpe(2.5 / math.sqrt(250), 1250, -3.0, 10.0, benchmark) == pytest.approx(0.9004, abs=5e-5)
+
+
+def test_deflated_fast_sharpe_needs_complete_comparable_research_trials(tmp_path):
+    from lab.carry_study import expected_max_sharpe, probabilistic_sharpe
+
+    def trial(params, equities, *, holdout=False, window=(0, 10)):
+        stats = fr.equity_return_stats(dict(enumerate(equities)), 100.0)
+        fr.register_trial(tmp_path, "fast-backtest", IID, params, window, {"return_stats": stats}, holdout=holdout)
+        return stats
+
+    a = trial({"threshold": 0.6}, [101, 100, 102, 101, 103])
+    score, reason = fr.fast_deflated_sharpe(tmp_path, IID, (0, 10), a)
+    assert score is None and "two" in reason
+    b = trial({"threshold": 0.7}, [100, 99, 101, 100, 102])
+    score, reason = fr.fast_deflated_sharpe(tmp_path, IID, (0, 10), b)
+    benchmark = expected_max_sharpe([a["sr_daily"], b["sr_daily"]])
+    assert score == pytest.approx(probabilistic_sharpe(b["sr_daily"], 5, b["skew"], b["kurt"], benchmark))
+    assert reason == ""
+    trial({"threshold": 0.8}, [100, 100, 100, 100, 100], holdout=True)
+    assert fr.fast_deflated_sharpe(tmp_path, IID, (0, 10), b)[0] == score  # holdout never tunes research
+    fr.register_trial(tmp_path, "fast-backtest", IID, {"threshold": 0.9}, (0, 10), {"pnl": 1})
+    score, reason = fr.fast_deflated_sharpe(tmp_path, IID, (0, 10), b)
+    assert score is None and "missing" in reason  # don't silently drop old trials that lack daily returns
+    trial({"threshold": 0.9}, [100, 99, 98, 99, 101], window=(0, 11))
+    score, reason = fr.fast_deflated_sharpe(tmp_path, IID, (0, 10), b)
+    assert score is None and "window" in reason
+
+
+def test_cli_prints_a_diagnostic_only_after_comparable_daily_research_trials(tmp_path, capsys, monkeypatch):
+    from lab import fast
+
+    (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    monkeypatch.setattr(fr, "research_window", lambda *_args: (0, 5 * fr.DAY_NS))
+
+    def backtest(_catalog, config, **_kwargs):
+        equity = [101, 100, 102, 101, 103] if config.threshold == 0.6 else [100, 99, 101, 100, 102]
+        return {
+            "entries": 5,
+            "pnl": equity[-1] - 100,
+            "commissions": 0.5,
+            "round_trips": 5,
+            "mean_trip": 0.2,
+            "t_stat": 1.0,
+            "stopped": None,
+            "fills": 10,
+            "start_ns": 0,
+            "end_ns": 5 * fr.DAY_NS,
+            "return_stats": fr.equity_return_stats(dict(enumerate(equity)), 100.0),
+        }
+
+    monkeypatch.setattr(fast, "backtest", backtest)
+    cmd = ["--config", str(tmp_path / "lab.toml"), "fast", "backtest", "BTCUSDT", "--catalog", str(catalog)]
+    assert lab_main(cmd) == 0
+    assert "deflated Sharpe unavailable" in capsys.readouterr().out
+    assert lab_main([*cmd, "--threshold", "0.7"]) == 0
+    out = capsys.readouterr().out
+    assert "deflated Sharpe unavailable" not in out
+    assert "IID diagnostic, 2 research configurations" in out
+    assert "no gate pass implied" in out
+    trials = [json.loads(line) for line in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
+    assert all(len(t["result"]["return_stats"]["daily_returns"]) == 5 for t in trials)
+
+
 def test_backtest_reports_round_trips_net_of_costs(recording):
     path, *_ = recording
     r = backtest(path, cfg(), taker_bps=5, maker_bps=2, latency_ms=0)
@@ -111,6 +213,7 @@ def test_cli_research_then_one_holdout_test(recording, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "research data; configurations tried on research data: 1" in out
     assert "round trips" in out
+    assert "deflated Sharpe unavailable" in out
     more()
     assert lab_main([*run, "--holdout"]) == 0
     assert "HOLDOUT test" in capsys.readouterr().out

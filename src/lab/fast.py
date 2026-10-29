@@ -25,6 +25,7 @@ from decimal import Decimal
 from nautilus_trader.model import BookType, InstrumentId, OrderSide, TimeInForce
 from nautilus_trader.trading import StrategyConfig
 
+from lab.fast_research import DAY_NS, equity_return_stats
 from lab.micro import IMBALANCE_LEVELS, book_imbalance
 from lab.persistence import atomic_json
 from lab.risk_manager import RiskLimits, RiskManagedStrategy, RiskManager, TradingState, add_strategy, engine_config
@@ -114,8 +115,10 @@ class FastStrategy(RiskManagedStrategy):
         self.started_ns = None
         self.start_equity = None
         self.equity_curve = deque(maxlen=EQUITY_KEEP)
+        self.daily_equity = None  # enabled by the backtest; no extra per-book valuation in paper trading
 
     def on_start(self):
+        self._sample_equity()
         self.subscribe_book_deltas(self.iid, BookType.L2_MBP, managed=True)
         if self.config.report:
             self.started_ns = self.clock.timestamp_ns()
@@ -129,6 +132,10 @@ class FastStrategy(RiskManagedStrategy):
 
     def params(self) -> dict:
         raise NotImplementedError
+
+    def _sample_equity(self):
+        if self.daily_equity is not None:
+            self.daily_equity[self.clock.timestamp_ns() // DAY_NS] = self._equity_or_none()
 
     def _on_report(self, _event):
         self._write_report(running=True)
@@ -209,6 +216,7 @@ class FastStrategy(RiskManagedStrategy):
         if coid in self.entry_orders:
             self.entry_orders.discard(coid)  # count an entry once, on its first fill
             self.entries += 1
+        self._sample_equity()
 
     def _busy(self) -> bool:
         return bool(self.cache.orders_open(instrument_id=self.iid, strategy_id=self.strategy_id))
@@ -223,7 +231,10 @@ class ImbalanceTaker(FastStrategy):
         return {"trade_size": self.config.trade_size, "threshold": self.config.threshold, "hold_s": self.config.hold_s}
 
     def on_book_deltas(self, deltas):
-        if not deltas.flags & F_LAST or self._busy():
+        if not deltas.flags & F_LAST:
+            return
+        self._sample_equity()
+        if self._busy():
             return
         book = self.cache.order_book(self.iid)
         if book is None:
@@ -338,8 +349,10 @@ def backtest(
         if trades:
             engine.add_data(trades)
         strategy = make_strategy(config, risk)
+        strategy.daily_equity = {}
         add_strategy(engine, strategy, risk)
         engine.run()
+        strategy._sample_equity()  # final mark, including any position still open at the recording's end
         account = engine.cache.account_for_venue(Venue(str(inst.id.venue)))
         equity = account.balance_total(quote).as_double() if account else capital
         return {
@@ -350,6 +363,7 @@ def backtest(
             "pnl": equity - capital,
             "stopped": strategy.stopped_reason,
             "risk_denials": dict(risk.denials),
+            "return_stats": equity_return_stats(strategy.daily_equity, capital),
             **session_stats(engine.cache),
         }
     finally:

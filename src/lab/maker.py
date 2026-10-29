@@ -119,6 +119,7 @@ class PassiveMaker(FastStrategy):
     def on_book_deltas(self, deltas):
         if not deltas.flags & F_LAST:
             return
+        self._sample_equity()
         book = self.cache.order_book(self.iid)
         if book is None:
             return

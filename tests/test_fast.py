@@ -19,6 +19,7 @@ from nautilus_trader.model import (
 from nautilus_trader.persistence import ParquetDataCatalog
 
 from lab.fast import ImbalanceTaker, ImbalanceTakerConfig, backtest, build_paper_node
+from lab.fast_research import DAY_NS
 from lab.risk_manager import RiskManagedStrategy, TradingState
 from lab.safety import set_kill_switch
 
@@ -99,6 +100,9 @@ def test_backtest_trades_exactly_as_the_rules_say_on_the_recorded_book(market):
     assert r["entries"] in (n, n + 1)  # one more may open in the last second and close at the end
     assert r["pnl"] == pytest.approx(pnl, abs=0.01)
     assert pnl > 0  # the planted edge beats one tick of spread...
+    assert r["return_stats"]["days"] == 1
+    assert r["return_stats"]["daily_returns"]["1970-01-01"] == pytest.approx(r["pnl"] / 10_000)
+    assert r["return_stats"]["sr_daily"] is None  # a five-minute run is not several independent days
 
 
 def test_fees_and_latency_are_charged(market):
@@ -110,6 +114,24 @@ def test_fees_and_latency_are_charged(market):
     assert taxed["pnl"] < 0  # ...but not 5 bp a side
     slow = backtest(path, cfg(), taker_bps=0, maker_bps=0, latency_ms=50)
     assert slow["entries"] > 0 and slow["pnl"] != free["pnl"]
+
+
+def test_daily_net_equity_continues_across_utc_midnight(tmp_path):
+    from tests.test_fast_research import catalog_with
+
+    data, *_ = tilted_market(40)
+    offset = DAY_NS - 2000 * MS
+    data = [
+        OrderBookDelta(d.instrument_id, d.action, d.order, d.flags, d.sequence, d.ts_event + offset, d.ts_init + offset)
+        for d in data
+    ]
+    path = catalog_with(tmp_path / "catalog", data)
+    r = backtest(path, cfg(), latency_ms=0, taker_bps=5)
+    stats = r["return_stats"]
+    assert list(stats["daily_returns"]) == ["1970-01-01", "1970-01-02"]
+    a, b = stats["daily_returns"].values()
+    assert (1 + a) * (1 + b) == pytest.approx(1 + r["pnl"] / 10_000)
+    assert stats["skew"] is stats["kurt"] is None
 
 
 def test_loss_limit_flattens_and_stops(market):

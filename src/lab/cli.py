@@ -287,6 +287,7 @@ def cmd_fast_backtest(cfg, a):
     except ValueError as e:
         raise SystemExit(str(e)) from e
     result = {k: r[k] for k in ("entries", "pnl", "commissions", "round_trips", "mean_trip", "t_stat", "stopped")}
+    result["return_stats"] = r["return_stats"]
     if a.holdout:
         fast_research.record_holdout(cfg.results_dir, iid, params, start, result, a.again or "")
     n = fast_research.register_trial(
@@ -302,6 +303,17 @@ def cmd_fast_backtest(cfg, a):
         f"P&L after costs {r['pnl']:+.4f} (quote currency)"
     )
     print(f"  round trips {r['round_trips']}, mean {r['mean_trip']:+.5f} each, t-stat {r['t_stat']:+.2f}")
+    if not a.holdout:
+        score, reason = fast_research.fast_deflated_sharpe(
+            cfg.results_dir, iid, (r["start_ns"], r["end_ns"]), r["return_stats"]
+        )
+        if score is None:
+            print(f"  deflated Sharpe unavailable: {reason}")
+        else:
+            print(f"  deflated Sharpe {score:.3f} (IID diagnostic, {n} research configurations)")
+        print(
+            "  daily net equity returns; trial correlation and serial dependence are not adjusted: no gate pass implied"
+        )
     if r["stopped"]:
         print(f"  stopped: {r['stopped']}")
     return 0
@@ -438,7 +450,7 @@ def cmd_carry_study(cfg, a):
         dsr = cs.probabilistic_sharpe(st["sr_daily"], st["days"], st["skew"], st["kurt"], cs.expected_max_sharpe(srs))
         print(
             f"  research data only (holdout from {b:%Y-%m-%d}); configurations tried: {n}; "
-            f"deflated Sharpe {dsr:.2f} (the chance the edge is real, after {n} tries)"
+            f"deflated Sharpe {dsr:.2f} (IID diagnostic after {n} tries; dependence is not adjusted)"
         )
     if missing:
         print(
@@ -464,8 +476,8 @@ def cmd_carry_study(cfg, a):
     share = f"1/{s.top} of the notional per slot" if s.top else "equal notional per symbol"
     print(
         f"Returns per unit of notional per leg, {share}, after taker fees and slippage on both"
-        " legs. The deflated Sharpe discounts the best of the configurations tried; under 0.95 the edge is not"
-        " established."
+        " legs. Deflated Sharpe is a research diagnostic; trial correlation and serial dependence need separate"
+        " qualification before any gate can pass."
     )
     return 0
 

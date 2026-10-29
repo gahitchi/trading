@@ -3,6 +3,10 @@
 The step-by-step plan for trading-lab: what the software does today, what gets built next and in which order, and
 the measured thresholds that decide whether the project moves on. Updated 2026-10-29.
 
+This copy is maintained on `chatgpt/codex-maintenance`. Its implementation evidence is listed at the end;
+branch work does not change the completion markers inherited from `main`, and no empirical gate has passed
+merely because its supporting code is implemented.
+
 ## 1. Goal
 
 An automated, independent trading system with institutional-grade research and risk discipline, able to trade
@@ -19,7 +23,7 @@ run and tested at any hour.
 | No money spent | Free public data only (exchange websockets, `data.binance.vision`-style REST history). No paid feeds, no VPS, no co-location. Interactive Brokers is out for now: minute data is behind a paywall. |
 | Paper only | Nothing places exchange orders or holds API keys until Gabriel decides otherwise (`AGENTS.md`). Execution is NautilusTrader's sandbox: live data, simulated fills. |
 | The PC is not always on | Recordings have holes and paper runs are sessions of hours, not weeks. Every study must accept gappy data; every track record must add up across sessions. |
-| Home latency | Orders from home reach Binance or Bybit in tens to hundreds of milliseconds. Every study and backtest is run at 50, 150 and 300 ms (`--latency-ms`). An edge that only exists below 50 ms is noted and parked for Phase 4. |
+| Home latency | Execution studies and backtests are run at 50, 150 and 300 ms (`--latency-ms`). `micro-study` is a signal screen without execution and cannot qualify latency performance. An edge that only exists below 50 ms is noted and parked for Phase 4. |
 
 ## 3. How the software fits together today
 
@@ -102,12 +106,16 @@ measures whether what is left is positive at home latency.
 | A1 | Find perpetuals whose spread leaves room over a maker round trip. Run at 3 different times of day (Asia, Europe, US hours) on both venues. | `lab survey --venue binance --samples 60`, same with `--venue bybit` | Up to 5 symbols chosen with median spread − 2 × maker fee ≥ 1 bp in all 3 runs and turnover ≥ 20 M USDT/day; list written in this file. |
 | A2 | Record the A1 symbols next to BTC, ETH, SOL. | `LAB_RECORD_SYMBOLS`, `LAB_RECORD_BYBIT_SYMBOLS`, `docker compose up -d` | Monitor shows each symbol live. |
 | A3 | Accumulate data. Holes are fine; the monitor's coverage table is the count. | `lab record --status`, `lab monitor` | ≥ 72 recorded hours per symbol before the research boundary, spread over ≥ 7 calendar days (mix of hours and weekdays). |
-| A4 | Check that the studies never compute a return or a markout across a recorder hole (a mid before the hole and a mid after it is not a 30 s move). Add a test with a synthetic hole; fix if it fails. | `lab.micro_study`, `lab.maker_study`, `tests/` | Test with a 10-minute hole passes: no sample straddles it. |
+| A4 | Split studies at recorder holes; exclude stale or cross-hole targets, reset feature warmup and simulated resting orders, and measure fills per recorded hour. The implemented conservative boundary is > 1 s without a usable complete book; include it in the trial fingerprint. | `lab.micro_study`, `lab.maker_study`, `lab.study_time`, `tests/` | Synthetic 10-minute holes never create returns, markouts or stale fills; research resumes afterwards. Slow sampling alone is not a recorder hole. |
 | A5 | Maker study grid per symbol: latency 50 / 150 / 300 ms × `--improve 0 / 1`. 6 configurations per symbol, all counted in the trial log. | `lab maker-study SYMBOL --latency-ms L --improve I` | Table of `net_bps`, `t`, `fills_per_h` per horizon and imbalance group, pasted into §4. |
-| A6 | Research gate for a symbol (on research data only). | — | At 150 ms: `net_bps` > 0 at the 30 s and 60 s horizons with t ≥ 3, ≥ 10 fills/h; and the "neutral + in favour" groups positive on their own (the strategy can skip "against" with `--min-favour`). |
+| A6 | Research gate for a symbol (on research data only), after A6b qualifies the uncertainty estimate. | — | At 150 ms: `net_bps` > 0 at the 30 s and 60 s horizons with adjusted t ≥ 3, ≥ 10 fills/recorded hour; and the "neutral + in favour" groups positive on their own (the strategy can skip "against" with `--min-favour`). |
+| A6b | Account for overlapping markouts and dependence before using a maker study's t-statistic as evidence. Pre-register a non-overlapping sampling or block/HAC procedure and its settings before examining the candidate's result. | `lab.maker_study`, `tests/` | Synthetic dependent samples cannot inflate the independent sample count; report effective observations and uncertainty. The current naive t is descriptive only. |
 | A7 | Turn the best A6 configuration into strategy settings and backtest it with inventory, partial fills and the risk manager. | `lab fast backtest SYMBOL --strategy maker --improve I --max-inventory Q --max-hold S --latency-ms 150` | Net P&L per round trip > 0 after fees with t ≥ 2; max drawdown < 2% of `--capital`; result in the trial log. |
 | A7b | `lab fast` backtests and paper-trades Binance only. If the A6 winner is a Bybit symbol, add Bybit to `lab fast` (instrument mapping, fee model, sandbox venue) first. | `lab.fast` | `lab fast backtest SYMBOL --venue bybit` runs on the Bybit recordings; tests cover it. |
-| A8 | Add the deflated Sharpe to `lab fast backtest`, as `lab carry study` already prints, from the trial log's fast entries. | `lab.fast_research`, `lab.cli` | Each fast research run prints a deflated Sharpe; tests cover it. |
+| A7a | Validate the execution model on gappy recordings and at home latency before accepting A7. A4 protects descriptive studies, not the matching engine. | `lab.fast`, `lab.maker`, `tests/` | Explicit handling of outstanding orders, inventory and unknown valuation at disconnects; no free close or silent loss removal; submission and cancellation latency assumptions documented and stressed. |
+| A8 | Add daily net equity returns (including fees and unrealized P&L) and a trial-adjusted Sharpe diagnostic to `lab fast backtest`. | `lab.fast`, `lab.fast_research`, `lab.cli` | Each research run logs the return series and prints a diagnostic or an explicit unavailable reason. Missing trial statistics, different data windows, or too few observations cannot silently produce a score. Tests cover it. |
+| A8b | Qualify statistical inference for fast and carry research: use comparable return frequencies and data, account for serial dependence, and disclose the treatment of correlated trials. Preserve every attempted configuration, including unsuccessful ones. | `lab.fast_research`, `lab.carry_study`, `tests/` | The pre-registered method has numerical and synthetic dependence checks, data/code provenance, and a complete trial history. The current IID diagnostic is not by itself a gate pass or a probability that a strategy will make money. |
+| A9a | Reserve holdout evaluations atomically before reading held-out data, against a frozen configuration and data boundary. Keep failed/interrupted attempts and require a reason for repeats. | `lab.fast_research`, `lab.cli`, `tests/` | Two concurrent processes cannot both claim the same evaluation; a crash cannot erase its use; choosing another configuration after seeing a result is recorded as holdout reuse. |
 | A9 | One-time holdout test of the frozen A7 configuration. | `lab fast backtest SYMBOL --strategy maker ... --holdout` | Holdout P&L > 0 after fees, t ≥ 2, deflated Sharpe of the research result ≥ 0.95. A fail is written in §4 and the symbol is dropped; `lab fast release` only with a logged reason. |
 
 Track A fails if no symbol passes A6. Then the maker studies move to the Bybit fee schedule, to wider-spread
@@ -117,11 +125,11 @@ symbols from a fresh survey, and to longer quote lifetimes. Each attempt is a co
 
 | Step | Do | Command / module | Done when |
 |---|---|---|---|
-| B1 | Download every Binance perpetual that also has a spot pair. Takes hours and resumes after interruption, so it suits a PC that is switched off. | `lab carry fetch --all` | `data/carry/` covers 2023-01 to today for every pair; failures retried. |
+| B1 | Download every Binance perpetual that also has a spot pair. Takes hours and resumes after interruption, so it suits a PC that is switched off. | `lab carry fetch --all` | Each pair covers its available history from the later of listing or 2023-01 through the latest closed hour; gaps and unavailable history are explicit, and transient failures retried. |
 | B2 | The pre-registered run, exactly as registered. | `lab carry study --all --top 10 --min-turnover 20 --slippage-bps 5` | Result in §4: return/yr split into funding, basis and costs; Sharpe; Newey-West t; drawdown; deflated Sharpe. |
 | B3 | Stress the costs: slippage 10 and 20 bps; turnover floor 50 M. Counted trials. | same, with `--slippage-bps`, `--min-turnover` | Return still > 10%/yr at 10 bps slippage (twice what the majors earn), otherwise the track stops. |
-| B4 | Model what the backtest leaves out, in order of risk: liquidation of the short perpetual in a rally (margin needed per leg), leg drift and rebalancing, delisted pairs (survivorship). | `lab.carry_study` | Each effect is in the report as a cost line; survivorship estimated from pairs delisted since 2023 where the data still exists. |
-| B5 | Holdout test of the frozen configuration. | `lab carry study ... --holdout` | Holdout return > 10%/yr after all costs, t ≥ 2, deflated Sharpe ≥ 0.95. |
+| B4 | Model what the backtest leaves out, in order of risk: liquidation of the short perpetual in a rally (margin needed per leg), leg drift and rebalancing, delisted pairs (survivorship). | `lab.carry_study` | Report collateral requirements, liquidation events and losses, rebalancing costs, and survivorship sensitivity separately. Liquidation is a solvency constraint, not just a fee line. Delisted history is included where it exists; unavailable data remain a limitation. |
+| B5 | Holdout test of the frozen configuration, after A8b and A9a qualification. | `lab carry study ... --holdout` | Holdout return > 10%/yr after all costs, adjusted t ≥ 2, qualified deflated Sharpe ≥ 0.95. |
 
 Carry suits the constraints well: decisions happen only at 00, 08 and 16 UTC, so a PC that is on for a few hours a
 day can run it. It is a slow strategy, not a fast one; it earns its place as the first paper candidate if Track A
@@ -140,8 +148,8 @@ fails, and later as a cash-like base return under the fast strategies.
 
 One strategy configuration with all of:
 
-1. Research result with deflated Sharpe ≥ 0.95 over every configuration in the trial log for that data.
-2. One-time holdout pass: net P&L > 0 after fees and slippage, t ≥ 2.
+1. Research result with deflated Sharpe ≥ 0.95 over every configuration in the trial log for that data, qualified under A8b. An unavailable or provisional IID score cannot pass.
+2. One-time holdout pass reserved under A9a: net P&L > 0 after fees and slippage, dependence-adjusted t ≥ 2.
 3. Still positive at 150 ms latency (fast strategies) or at 10 bps slippage (carry).
 
 ---
@@ -245,3 +253,15 @@ Longer-horizon trading where an AI proposes trades or strategy settings.
 Change a marker only with evidence on `main`: the PR, the command that was run and its output. Every study verdict
 goes into §4 with its numbers, including the negative ones. Thresholds in the gates are changed only before the
 data they judge has been looked at, with the reason in the commit message.
+
+## Implementation evidence on this branch (not main acceptance)
+
+| Step | Implementation | Evidence / still open |
+|---|---|---|
+| A4 | Implemented on `chatgpt/codex-maintenance` in `9c8e558`. | Five synthetic outage regressions failed before the fix; full suite: 143 passed on Python 3.13.16, lint and formatting passed. No real-data edge claimed. |
+| A8 | Daily net equity and IID diagnostic implemented on this branch; statistical qualification remains A8b. | Full suite: 152 passed on Python 3.13.16, lint and formatting passed. Tests include UTC midnight, invalid/missing observations, trial-history compatibility, holdout exclusion, and the original paper's numerical example. A1-A3/A5 require real recordings, which are absent from this checkout. |
+
+Methodology basis: Bailey and López de Prado, [The Deflated Sharpe Ratio (2014)](https://www.davidhbailey.com/dhbpapers/deflated-sharpe.pdf),
+especially its discussion of selection bias and independent trials. The branch adds A6b/A7a/A8b/A9a before
+examining candidate results, preserving the numerical profitability thresholds while clarifying what evidence
+is sufficient to use them. A displayed statistic is an input to qualification, not automatic authorization.

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,6 +30,8 @@ from lab.persistence import append_json, atomic_json, file_lock, read_json
 PARTITION = "fast_partition.json"
 LEDGER = "fast_holdout_ledger.jsonl"
 TRIALS = "fast_trials.jsonl"
+DAY_NS = 86_400_000_000_000
+RETURN_BASIS = "daily-net-equity-v1"
 
 
 class HoldoutGuard(ValueError):
@@ -97,6 +100,87 @@ def research_window(
 
 def fingerprint(params: dict) -> str:
     return hashlib.sha256(json.dumps(params, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def equity_return_stats(daily_equity: dict, capital: float) -> dict:
+    """Daily net equity returns, including unrealized P&L. Absent/invalid observations never become zero returns.
+
+    Keys are UTC epoch days observed in the recording; days without recorded books are not manufactured.
+    """
+    import pandas as pd
+
+    returns, previous, previous_day = {}, capital, None
+    for day, equity in sorted(daily_equity.items()):
+        date = datetime.fromtimestamp(day * 86_400, UTC).date().isoformat()
+        valid = (
+            equity is not None
+            and previous is not None
+            and math.isfinite(equity)
+            and math.isfinite(previous)
+            and previous > 0
+            and (previous_day is None or day == previous_day + 1)
+        )
+        value = equity / previous - 1 if valid else None
+        returns[date] = value if value is not None and math.isfinite(value) else None
+        previous = equity if equity is not None and math.isfinite(equity) else None
+        previous_day = day
+    result = {
+        "basis": RETURN_BASIS, "days": len(returns), "daily_returns": returns,
+        "sr_daily": None, "sharpe": None, "skew": None, "kurt": None,
+    }  # fmt: skip
+    x = pd.Series(returns, dtype=float)
+    if len(x) < 2 or x.isna().any():
+        return result
+    sd = float(x.std())
+    if not math.isfinite(sd) or sd <= 0:
+        return result
+    sr = float(x.mean() / sd)
+    if not math.isfinite(sr):
+        return result
+    result.update(sr_daily=sr, sharpe=sr * math.sqrt(365))
+    if len(x) >= 4:
+        skew, kurt = float(x.skew()), float(x.kurt()) + 3
+        result.update(skew=skew if math.isfinite(skew) else None, kurt=kurt if math.isfinite(kurt) else None)
+    return result
+
+
+def fast_deflated_sharpe(
+    results_dir: Path, instrument_id: str, window: tuple, current: dict
+) -> tuple[float | None, str]:
+    """IID diagnostic using every logged fast research configuration for this instrument, never the holdout.
+
+    No selection of only the trials with favourable or available statistics: incompatible windows, old logs
+    without daily equity, and too little data make the diagnostic unavailable. Correlation between trials and
+    serial dependence still require separate qualification before this statistic can support a gate.
+    """
+    from lab.carry_study import expected_max_sharpe, probabilistic_sharpe
+
+    path = Path(results_dir) / TRIALS
+    latest = {}
+    for line in path.read_text().splitlines() if path.exists() else ():
+        if not line.strip():
+            continue
+        trial = json.loads(line)
+        if trial["kind"] == "fast-backtest" and trial["instrument"] == instrument_id and not trial["holdout"]:
+            latest[trial["fingerprint"]] = trial
+    srs = []
+    for trial in latest.values():
+        if tuple(trial["window"]) != tuple(window):
+            return None, "research windows differ; rerun configurations on the same recorded window"
+        stats = trial["result"].get("return_stats", {})
+        sr = stats.get("sr_daily")
+        if stats.get("basis") != RETURN_BASIS or sr is None or not math.isfinite(sr):
+            return None, "missing daily equity statistics in the research trial history"
+        if stats.get("daily_returns", {}).keys() != current.get("daily_returns", {}).keys():
+            return None, "research observation days differ"
+        srs.append(sr)
+    if len(srs) < 2:
+        return None, "at least two research configurations with daily equity statistics are required"
+    values = [current.get(k) for k in ("sr_daily", "skew", "kurt")]
+    if current.get("days", 0) < 4 or any(v is None or not math.isfinite(v) for v in values):
+        return None, "at least four days with finite return moments are required"
+    score = probabilistic_sharpe(values[0], current["days"], values[1], values[2], expected_max_sharpe(srs))
+    return (score, "") if math.isfinite(score) else (None, "undefined Sharpe uncertainty")
 
 
 def _ledger(results_dir: Path) -> list[dict]:
