@@ -128,14 +128,18 @@ def test_adverse_selection_shows_in_the_markout():
     assert table.loc["all", "fills"] > 250
     assert table.loc["all", "at_fill_bps"] > 0 > table.loc["all", "markout_bps"]
     assert table.loc["all", "net_bps"] < table.loc["all", "markout_bps"]
-    assert math.isfinite(table.loc["all", "t"])
+    assert math.isfinite(table.loc["all", "t_naive"])
+    assert math.isnan(table.loc["all", "t"])  # one minute cannot supply thirty day clusters
 
 
 def test_maker_study_command_respects_the_holdout_and_logs_the_trial(tmp_path, capsys):
+    from nautilus_trader.persistence import ParquetDataCatalog
+
     from tests.test_fast_research import catalog_with
 
     deltas = [d for i in range(50) for d in snap(i * 100 * MS)]
     path = catalog_with(tmp_path / "catalog", deltas)
+    ParquetDataCatalog(path).write_trade_ticks([trade(i * 100 * MS + 60 * MS, 99.95, 3.0) for i in range(49)])
     (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
     study = ["--config", str(tmp_path / "lab.toml"), "maker-study", "BTCUSDT", "--catalog", path]
     assert lab_main(study) == 0
@@ -144,6 +148,12 @@ def test_maker_study_command_respects_the_holdout_and_logs_the_trial(tmp_path, c
     assert "study settings tried: 2" in capsys.readouterr().out
     trial = json.loads((tmp_path / "results" / "fast_trials.jsonl").read_text().splitlines()[-1])
     assert trial["kind"] == "maker-study" and trial["window"][1] == deltas[-1].ts_init
+    assert trial["params"]["inference_method"] == "utc-day-cluster-hac7-v1"
+    assert trial["params"]["inference_lags"] == 7
+    assert trial["params"]["minimum_inference_days"] == 30
+    assert trial["params"]["midnight_rule"] == "same-utc-day"
+    assert len(trial["result"]["uncertainty_report"]) == 16  # four groups at four horizons
+    assert all(row["t"] is None for row in trial["result"]["uncertainty_report"])
     with pytest.raises(SystemExit, match="holdout"):
         lab_main([*study, "--end", "2100-01-01"])
 

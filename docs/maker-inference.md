@@ -14,6 +14,7 @@ day clusters. Display the inference sample's count and mean separately from the 
 
 Apply the same rule independently to the all/favours/neutral/against groups. No group, day or observation is
 selected by its profit, and input order does not affect the estimate.
+An unknown imbalance belongs to the overall sample only; it cannot count as neutral-group evidence.
 
 ## Fixed estimator: utc-day-cluster-hac7-v1
 

@@ -32,12 +32,19 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from lab.fast_research import DAY_NS
 from lab.micro import IMBALANCE_LEVELS, book_imbalance
 from lab.micro_study import F_LAST, _levels
 from lab.study_time import MAX_BOOK_GAP_NS, future_mids, recorded_hours
 
 FAVOUR = 0.33
-COLUMNS = ["group", "horizon_s", "fills", "fills_per_h", "at_fill_bps", "markout_bps", "net_bps", "t"]
+INFERENCE_METHOD = "utc-day-cluster-hac7-v1"
+INFERENCE_LAGS = 7
+MIN_INFERENCE_DAYS = 30
+COLUMNS = [
+    "group", "horizon_s", "fills", "fills_per_h", "at_fill_bps", "markout_bps", "net_bps",
+    "n_infer", "inference_days", "effective_days", "inference_net_bps", "se_bps", "t", "t_naive",
+]  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -153,33 +160,81 @@ def markouts(fills: pd.DataFrame, mids, horizon_s: float) -> pd.Series:
     return pd.Series(out, index=fills.index)
 
 
+def day_inference(ts, net, horizon_s: float) -> dict:
+    """Pre-registered UTC-day cluster/Bartlett HAC estimate; see docs/maker-inference.md.
+
+    Within-day fills may be arbitrarily dependent. Midnight-crossing windows are excluded. Calendar lags are
+    not compressed across missing dates; negative covariance cannot improve on day clustering alone.
+    """
+    ts, net = np.asarray(ts), np.asarray(net, dtype=float)
+    if ts.ndim != 1 or net.ndim != 1 or len(ts) != len(net) or not np.isfinite(net).all():
+        raise ValueError("inference needs matching timestamps and finite net markouts")
+    if len(ts) and ts.dtype.kind not in "iu":
+        raise ValueError("inference timestamps must be integer UTC nanoseconds")
+    if not math.isfinite(horizon_s) or horizon_s < 0:
+        raise ValueError("horizon must be finite and nonnegative")
+    day = ts // DAY_NS
+    keep = day == (ts + int(horizon_s * 1e9)) // DAY_NS
+    day, net = day[keep], net[keep]
+    n = len(net)
+    days, inverse, counts = np.unique(day, return_inverse=True, return_counts=True)
+    g = len(days)
+    mean = float(net.mean()) if n else math.nan
+    stats = {
+        "n_infer": n, "inference_days": g, "effective_days": 0.0,
+        "inference_net_bps": mean, "se_bps": math.nan, "t": math.nan,
+    }  # fmt: skip
+    if not n:
+        return stats
+    scores = np.bincount(inverse, weights=net - mean)
+    v0 = float(scores @ scores)
+    variance = v0
+    by_day = {int(day): float(score) for day, score in zip(days, scores, strict=True)}
+    for lag in range(1, INFERENCE_LAGS + 1):
+        covariance = sum(score * by_day.get(day - lag, 0.0) for day, score in by_day.items())
+        variance += 2 * (1 - lag / (INFERENCE_LAGS + 1)) * covariance
+    variance = max(v0, float(variance))
+    kish_days = n**2 / float(counts.astype(float) @ counts)
+    stats["effective_days"] = kish_days * (v0 / variance if variance > 0 else 1.0)
+    if g > 1:
+        se = math.sqrt(g / (g - 1) * variance) / n
+        stats["se_bps"] = se
+        if g >= MIN_INFERENCE_DAYS and se > np.finfo(float).eps * max(1.0, abs(mean)):
+            stats["t"] = mean / se
+    return stats
+
+
 def evaluate(fills: pd.DataFrame, mids, settings: MakerSettings) -> pd.DataFrame:
     if fills.empty or len(mids[0]) < 2:
         return pd.DataFrame(columns=COLUMNS)
     hours = recorded_hours(mids[0])
     at_fill = fills["side"] * (fills["mid"] / fills["price"] - 1) * 10_000
-    group = pd.Series("neutral", index=fills.index)
-    group[fills["favour"] > FAVOUR] = "favours"
-    group[fills["favour"] < -FAVOUR] = "against"
+    group = pd.Series("unknown", index=fills.index)
+    known = np.isfinite(fills["favour"])
+    group[known] = "neutral"
+    group[known & (fills["favour"] > FAVOUR)] = "favours"
+    group[known & (fills["favour"] < -FAVOUR)] = "against"
     out = []
     for h in settings.horizons_s:
         m = markouts(fills, mids, h)
         for name in ("all", "favours", "neutral", "against"):
-            sel = m.notna() & (group == name if name != "all" else True)
+            sel = np.isfinite(m) & (group == name if name != "all" else True)
             n = int(sel.sum())
             net = m[sel] - settings.maker_fee_bps
             se = net.std() / math.sqrt(n) if n > 1 else math.nan
+            uncertainty = day_inference(fills.loc[sel, "ts"].to_numpy(), net.to_numpy(), h)
             out.append(
-                (
-                    name,
-                    h,
-                    n,
-                    n / hours if hours > 0 else math.nan,
-                    at_fill[sel].mean() if n else math.nan,
-                    m[sel].mean() if n else math.nan,
-                    net.mean() if n else math.nan,
-                    net.mean() / se if se and se > 0 else math.nan,
-                )
+                {
+                    "group": name,
+                    "horizon_s": h,
+                    "fills": n,
+                    "fills_per_h": n / hours if hours > 0 else math.nan,
+                    "at_fill_bps": at_fill[sel].mean() if n else math.nan,
+                    "markout_bps": m[sel].mean() if n else math.nan,
+                    "net_bps": net.mean() if n else math.nan,
+                    **uncertainty,
+                    "t_naive": net.mean() / se if se and se > 0 else math.nan,
+                }
             )
     return pd.DataFrame(out, columns=COLUMNS)
 

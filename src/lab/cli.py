@@ -157,7 +157,8 @@ def cmd_survey(cfg, a):
 
 
 def cmd_maker_study(cfg, a):
-    from lab.maker_study import MakerSettings, study
+    from lab.maker_study import INFERENCE_LAGS, INFERENCE_METHOD, MIN_INFERENCE_DAYS, MakerSettings, study
+    from lab.persistence import nullable_numbers
     from lab.record import perpetual_ids
     from lab.study_time import MAX_BOOK_GAP_NS
 
@@ -193,10 +194,15 @@ def cmd_maker_study(cfg, a):
         "maker_bps": a.maker_bps,
         "improve": a.improve,
         "max_book_gap_ms": MAX_BOOK_GAP_NS // 1_000_000,
+        "inference_method": INFERENCE_METHOD,
+        "inference_lags": INFERENCE_LAGS,
+        "minimum_inference_days": MIN_INFERENCE_DAYS,
+        "midnight_rule": "same-utc-day",
     }
     n = fast_research.register_trial(
         cfg.results_dir, "maker-study", iid, params, (start, end),
-        {"net_bps": {f"{r.group}@{r.horizon_s:g}s": r.net_bps for r in table.itertuples() if r.net_bps == r.net_bps}},
+        {"net_bps": {f"{r.group}@{r.horizon_s:g}s": r.net_bps for r in table.itertuples() if r.net_bps == r.net_bps},
+         "uncertainty_report": nullable_numbers(table.to_dict("records"))},
     )  # fmt: skip
     first, last = (pd.Timestamp(mids[0][i], tz="UTC") for i in (0, -1))
     print(f"{iid}: {len(fills):,} passive fills, {first:%Y-%m-%d %H:%M} .. {last:%Y-%m-%d %H:%M} UTC")
@@ -206,8 +212,10 @@ def cmd_maker_study(cfg, a):
     print(table.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
     print(
         "at_fill: half spread captured against the mid. markout: the maker's gain h seconds later, net: after the"
-        f" {a.maker_bps:g} bps maker fee, t: net over its standard error (fills overlap in time, so it overstates)."
-        " group: book imbalance when the order was placed, in its favour, neutral or against."
+        f" {a.maker_bps:g} bps maker fee. t: {INFERENCE_METHOD}, requires {MIN_INFERENCE_DAYS} eligible UTC days;"
+        " inference_net_bps and se_bps use same-day windows; t_naive is descriptive only."
+        " effective_days measures concentration/dependence, not a count of independent days."
+        " group: book imbalance when the order was placed, in its favour, neutral or against; unknowns enter all only."
     )
     return 0
 

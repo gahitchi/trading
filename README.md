@@ -132,6 +132,14 @@ its own). It reports the half spread each fill captured and the maker-signed mov
 of the mid 1 to 60 s later, net of the maker fee, split by whether the book imbalance favoured the order. Cancels are
 assumed to come from ahead in the queue, which flatters fill rates.
 
+Maker uncertainty follows the pre-registered [inference protocol](docs/maker-inference.md): `t` uses UTC-day
+clusters with a fixed seven-calendar-day Bartlett adjustment, while `t_naive` remains descriptive. The inference
+sample excludes windows crossing UTC midnight; `n_infer`, `inference_days`, `effective_days`,
+`inference_net_bps` and `se_bps` show what supports the adjusted result. Fewer than 30 eligible days leave `t`
+unavailable. The seven-day recording target supports screening first. These diagnostics still require candidate
+dependence and sensitivity checks before statistical qualification; neither the day count nor `t` alone passes
+a trading gate. Method settings and the uncertainty table are saved in the trial log.
+
 `micro-study` and `maker-study` split recordings wherever complete book updates are more than one second apart.
 Returns and markouts into or across those holes are excluded, features warm up again after a restart, and maker
 orders are discarded while the book is stale. Maker fills per hour use time within the recorded segments,
