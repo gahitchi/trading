@@ -217,8 +217,8 @@ so the past is flattered by their survival.
 [hourly perpetual mark OHLC](docs/carry-mark-history.md) for the pending solvency model. It validates native
 pages and OHLC bounds, repairs requested gaps, publishes coherent atomic snapshots and saves coverage/error
 reports. `--until` fixes a historical cutoff; future cutoffs are rejected. Auxiliary marks do not move the
-current study's holdout boundaries or replace its declared funding/collateral close proxies. Exact-event
-funding marks, historical margin rules and liquidation execution still need implementation and evidence.
+current study's holdout boundaries. Exact-event funding marks, historical margin rules and liquidation
+execution still need implementation and evidence.
 
 `lab carry study` estimates paired-leg P&L per symbol with equal INITIAL notional on each leg: `--mode cash` is long
 Binance spot and short the Binance perpetual while funding is positive, `--mode cross` shorts the perpetual on
@@ -235,6 +235,11 @@ Optional [collateral scenarios](docs/carry-collateral-scenarios.md) take all fou
 before each decision and after its trades, retain losses across re-entry, require fully funded spot inventory,
 and report first breaches and ex-post budget boundaries. No venue defaults or transfers are assumed; any path
 after exhaustion is counterfactual. This is an unqualified stress diagnostic, not a liquidation simulator.
+`--collateral-valuation mark-ohlc` enables [guarded historical mark checks](docs/carry-mark-collateral.md)
+with the same explicit budgets/fractions. It values perpetual equity at mark closes and reports an adverse
+high/low plus gross funding-debit stress interval for previously held quantities. It keeps execution prices,
+signals and unfunded P&L unchanged; funding cash flows retain the trade-close proxy. Missing exposed marks
+fail the counted evaluation. Intrahour ordering remains hypothetical, and no liquidation event is invented.
 It reports the portfolio's estimated normalized P&L a
 year split into funding, basis and costs, Sharpe, a Newey-West t-statistic (positions last days, so daily returns
 are autocorrelated), drawdown, an always-in benchmark for `cash`, and each symbol's P&L. Not modelled: actual venue

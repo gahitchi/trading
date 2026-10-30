@@ -103,8 +103,9 @@ and survivorship sensitivity. A funded strategy simulator must stop or explicitl
 this diagnostic does neither and cannot qualify B4, B5 or the Phase 1 exit gate.
 
 The subsequent [B4c mark-history downloader](carry-mark-history.md) stores separate hourly perpetual mark
-OHLC as an input prerequisite. This B4b diagnostic still uses its declared trade-close proxy: mark ingestion
-alone does not integrate causal mark valuation, recover exact funding-event marks or establish margin tiers.
+OHLC. The [B4d mark-valuation option](carry-mark-collateral.md) consumes bounded OHLC for optional mark-close
+and adverse-interval checks. This default B4b diagnostic retains its declared trade-close proxy; neither
+diagnostic recovers exact funding-event marks, historical margin tiers or liquidation execution.
 
 Primary references for the distinction: Bybit's [maintenance margin description](https://www.bybit.com/en/help-center/article/Maintenance-Margin-USDT-Contract)
 uses mark-based position value and tier deductions, and its [liquidation process](https://www.bybit.com/en/help-center/article/UTA-Trading-Rules-Liquidation-Process)

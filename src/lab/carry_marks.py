@@ -10,6 +10,7 @@ import time
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from lab import carry_data as cd
@@ -66,8 +67,13 @@ def _validate(frame):
         raise ValueError("invalid mark history: expected finite positive prices with low <= open/close <= high")
 
 
-def load(root, venue, symbol):
+def load(root, venue, symbol, *, start=None, end=None):
     """One coherent file descriptor for OHLC and identity. Missing files remain empty, never trade-price fallback."""
+    for bound in (start, end):
+        if bound is not None and (pd.isna(bound) or bound.tzinfo is None):
+            raise ValueError("mark history bounds must be timezone-aware")
+    if start is not None and end is not None and start > end:
+        raise ValueError("mark history requires start <= end")
     path = path_of(root, venue, symbol)
     if not path.exists():
         return _empty()
@@ -82,6 +88,10 @@ def load(root, venue, symbol):
     # Pandas schema metadata can otherwise silently localize a physically naive Arrow timestamp.
     if not pa.types.is_timestamp(ts_type) or ts_type.tz != "UTC":
         raise ValueError("invalid mark history: physical timestamps must be UTC")
+    # Filter before value conversion/validation. Unseen future OHLC cannot affect a bounded evaluator.
+    for bound, compare in ((start, pc.greater_equal), (end, pc.less)):
+        if bound is not None:
+            table = table.filter(compare(table["ts"], pa.scalar(bound, type=pa.timestamp("ns", tz="UTC"))))
     frame = table.to_pandas()
     if list(frame.columns) != ["ts", *COLUMNS]:
         raise ValueError("invalid mark history schema")

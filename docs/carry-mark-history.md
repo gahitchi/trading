@@ -71,11 +71,12 @@ symbols still run; completed data remain. Empty answers, gaps, invalid caches an
 Listing availability, funding-event marks and liquidation qualification are always explicitly unverified.
 These reports are derived snapshots, not independent proof that the API retains every historical observation.
 
-The current study consumes trade closes, turnover and funding. Auxiliary marks therefore cannot choose its
+The study window is anchored to trade closes, turnover and funding. Auxiliary marks therefore cannot choose its
 first holdout boundary, extend a holdout cutoff or determine a release boundary. Two regressions failed before
 restricting discovery: newer marks moved the inferred end of strategy data, and mark-only history initialized
-a holdout partition. An explicit source allowlist fixes both. Fetching creates no strategy trial. Future mark
-integration must truncate under reserved evaluation windows and hash bounded OHLC in input provenance.
+a holdout partition. An explicit source allowlist fixes both. Fetching creates no strategy trial. The subsequent
+[B4d optional mark diagnostic](carry-mark-collateral.md) truncates under reserved evaluation windows and hashes
+bounded OHLC in input provenance; the default remains the separate trade-close diagnostic.
 
 ## Verification and remaining work
 
@@ -88,7 +89,7 @@ The 2026-10-30 live BTCUSDT smoke request for 2026-10-29 00:00–02:00 UTC could
 Binance returned HTTP 451 and Bybit returned a non-JSON response. No live candles or empirical strategy result
 were accepted. Full-universe/history coverage has not been downloaded or verified here.
 
-Next B4 work remains: consume bounded mark evidence causally, establish historical margin tiers and initial
+Bounded mark consumption is now implemented in B4d. Remaining B4 work includes historical margin tiers and initial
 margin admission, close-fee reserves and liquidation execution/losses, exact-event funding valuation,
 transfers/financing, rebalancing and survivorship. A full OHLC grid alone cannot qualify B4. A8b inference
 remains unqualified after its archived failed independent validation. Phase 1 continues; Phase 2 has not started.

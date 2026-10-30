@@ -82,6 +82,7 @@ class CarrySettings:
     collateral_short: float | None = None
     maintenance_long: float | None = None  # explicit scenario fractions, not exchange parameters
     maintenance_short: float | None = None
+    collateral_valuation: str = "trade-close"  # optional diagnostic; never changes strategy P&L or funding valuation
 
     def __post_init__(self):
         if self.mode not in MODES:
@@ -95,6 +96,10 @@ class CarrySettings:
         if any(not math.isfinite(v) or v < 0 for v in (self.perp_fee_bps, self.spot_fee_bps, self.slippage_bps)):
             raise ValueError("carry taker fees and slippage must be finite and nonnegative")
         scenario = (self.collateral_long, self.collateral_short, self.maintenance_long, self.maintenance_short)
+        if self.collateral_valuation not in ("trade-close", "mark-ohlc"):
+            raise ValueError("collateral_valuation must be trade-close or mark-ohlc")
+        if self.collateral_valuation == "mark-ohlc" and self.collateral_long is None:
+            raise ValueError("mark collateral valuation requires all four collateral/maintenance assumptions")
         if any(v is not None for v in scenario):
             if any(v is None or not math.isfinite(v) or v < 0 for v in scenario):
                 raise ValueError("all four collateral/maintenance assumptions must be finite and nonnegative")
@@ -210,6 +215,13 @@ def hourly(lg: Legs) -> pd.DataFrame | None:
     for series in rates:
         carry_data._valid_cache(series, "funding")
     # Hour T contains settlements in (T-1h, T]. Do not reveal a delayed event before its timestamp.
+    # Retain gross debit components too: opposite-sign settlements in an hour cannot cancel away margin risk.
+    positive = [
+        series.clip(lower=0).groupby(series.index.ceil("h")).sum().reindex(grid, fill_value=0.0) for series in rates
+    ]
+    negative = [
+        series.clip(upper=0).groupby(series.index.ceil("h")).sum().reindex(grid, fill_value=0.0) for series in rates
+    ]
     rates = [series.groupby(series.index.ceil("h")).sum().reindex(grid, fill_value=0.0) for series in rates]
     times = grid.as_unit("ns").asi8
     queried = np.zeros(len(grid), dtype=bool)
@@ -231,6 +243,10 @@ def hourly(lg: Legs) -> pd.DataFrame | None:
             "price_short": marks[1],
             "rate_long": rates[0],
             "rate_short": rates[1],
+            "rate_positive_long": positive[0].where(queried),
+            "rate_positive_short": positive[1].where(queried),
+            "rate_negative_long": negative[0].where(queried),
+            "rate_negative_short": negative[1].where(queried),
             "funding": funding,
             "funding_queried": queried,
             "tradable": closes[0].notna() & closes[1].notna() & rets[0].notna() & rets[1].notna(),
@@ -357,6 +373,8 @@ def backtest(
         out[f"notional_{name}"] = (qty * price).where(qty != 0, 0.0)
         out[f"basis_{name}"] = (previous * price.diff()).where(previous != 0, 0.0)
         out[f"funding_{name}"] = (-previous * price * rate).where(previous != 0, 0.0)
+        debit_rate = h[f"rate_positive_{name}"].where(previous > 0, h[f"rate_negative_{name}"])
+        out[f"funding_debit_{name}"] = (-previous * price * debit_rate).where(previous != 0, 0.0)
         out[f"turnover_{name}"] = (traded * price).where(traded != 0, 0.0)
         out[f"cost_{name}"] = out[f"turnover_{name}"] * fee / 10_000
     for name in ("basis", "funding", "cost"):
@@ -566,6 +584,24 @@ def run(
         if r.empty:
             missing.append(sym)
         else:
+            if s.collateral_valuation == "mark-ohlc":
+                from lab import carry_marks
+
+                for leg, venue in (("long", "bybit"), ("short", "binance")):
+                    if s.mode == "cash" and leg == "long":
+                        continue
+                    marks = carry_marks.load(
+                        root, venue, sym, start=r.index[0], end=r.index[-1] + pd.Timedelta(nanoseconds=1)
+                    )
+                    for column in carry_marks.COLUMNS:
+                        if evidence is not None:
+                            evidence.series(f"{sym}/mark_{leg}/{column}", marks[column])
+                        r[f"mark_{column}_{leg}"] = marks[column].reindex(r.index)
+                r.attrs["mark_model"] = carry_marks.MODEL
+                from lab.carry_collateral import collateral_path, mark_interval_path
+
+                path = collateral_path(r, s)  # missing marks cannot leave a successfully evaluated research path
+                mark_interval_path(r, s, path)
             pnl[sym] = r
     return pnl, missing
 
@@ -576,7 +612,7 @@ def _now() -> str:
 
 def _last_cached(root: Path) -> pd.Timestamp | None:
     last = None
-    # Auxiliary mark history is not consumed by this study and must not move its holdout boundaries/cutoffs.
+    # Anchor evaluation windows to primary trade/funding inputs; auxiliary marks cannot extend them.
     for (venue, market), kinds in carry_data.SERIES.items():
         for kind in (*kinds, "turnover"):
             for p in Path(root).glob(f"{venue}-{market}-{kind}-*.parquet"):
@@ -658,7 +694,7 @@ def trial_sharpes(results_dir: Path, kind: str, instrument: str) -> list[float]:
 
 
 def params_of(s: CarrySettings, symbols: list[str]) -> dict:
-    from lab.carry_collateral import MODEL as COLLATERAL_MODEL
+    from lab.carry_collateral import model_of
 
     p = {
         **asdict(s),
@@ -666,7 +702,7 @@ def params_of(s: CarrySettings, symbols: list[str]) -> dict:
         "funding_policy": FUNDING_POLICY,
         "leg_model": LEG_MODEL,
         "funding_valuation": FUNDING_VALUATION,
-        "collateral_model": COLLATERAL_MODEL,
+        "collateral_model": model_of(s),
     }
     for k in ("top", "min_turnover_m"):  # omit these defaults; always fingerprint the funding policy
         if p[k] == CarrySettings.__dataclass_fields__[k].default:

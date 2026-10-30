@@ -610,7 +610,7 @@ def cmd_carry_fetch_marks(cfg, a):
             if report["leading_unverified_hours"]:
                 print(f"  {report['leading_unverified_hours']:,} leading hours have unverified availability")
             incomplete |= not report["complete_requested_window"]
-    print("Hourly mark candles cached separately from traded prices; studies still use their declared close proxies.")
+    print("Hourly mark candles cached separately; studies use declared valuation settings (trade-close by default).")
     print("Exact funding-event marks, historical margin tiers and liquidation modelling remain unqualified.")
     return 1 if incomplete else 0
 
@@ -629,6 +629,7 @@ def cmd_carry_study(cfg, a):
             top=a.top, min_turnover_m=a.min_turnover,
             collateral_long=a.collateral_long, collateral_short=a.collateral_short,
             maintenance_long=a.maintenance_long, maintenance_short=a.maintenance_short,
+            collateral_valuation=a.collateral_valuation,
         )  # fmt: skip
         b = cs.boundary(cfg.results_dir, root)
         params = cs.params_of(s, symbols)
@@ -706,7 +707,9 @@ def cmd_carry_study(cfg, a):
     print("  venue collateral/liquidation and rebalancing policy are unmodelled; economics remain unqualified")
     scenario = st["collateral_scenario"]
     if scenario["configured"]:
-        print("  collateral scenario: separate fixed leg budgets, hourly close proxies, explicit maintenance fractions")
+        print(
+            f"  collateral scenario: separate fixed leg budgets, {s.collateral_valuation} valuation, explicit maintenance fractions"
+        )
         print("  no liquidation simulation; the unchanged path after a breach is counterfactual")
         for symbol, detail in scenario["per_symbol"].items():
             for leg, values in detail.items():
@@ -716,6 +719,10 @@ def cmd_carry_study(cfg, a):
                     f"    {symbol} {leg}: first budget breach {when}; min headroom {values['minimum_headroom']:.6g}; "
                     f"ex-post collateral boundary {values['ex_post_initial_collateral_boundary']:.6g}"
                 )
+                if "interval_stress" in values:
+                    stress = values["interval_stress"]["first_envelope_breach"]
+                    when = f"{stress['from']} through {stress['through']}" if stress else "none in exposed intervals"
+                    print(f"      OHLC/debit stress breach {when}; hypothetical ordering, not an observed liquidation")
     else:
         print("  collateral scenario unavailable: supply all four --collateral/--maintenance leg assumptions")
     print(
@@ -955,6 +962,12 @@ def build_parser() -> argparse.ArgumentParser:
     cst.add_argument("--fee-bps", type=float, default=5.0, help="perpetual taker fee per side, bps (default 5)")
     cst.add_argument("--spot-fee-bps", type=float, default=10.0, help="spot taker fee per side, bps (default 10)")
     cst.add_argument("--slippage-bps", type=float, default=1.0, help="per leg and side, bps (default 1)")
+    cst.add_argument(
+        "--collateral-valuation",
+        choices=("trade-close", "mark-ohlc"),
+        default="trade-close",
+        help="diagnostic valuation; mark-ohlc needs all four assumptions and historical marks; funding stays a close proxy",
+    )
     for leg in ("long", "short"):
         cst.add_argument(
             f"--collateral-{leg}",

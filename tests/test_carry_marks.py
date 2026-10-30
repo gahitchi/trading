@@ -417,7 +417,7 @@ def test_actual_cli_writes_bounded_coverage_and_returns_nonzero_for_gaps(missing
     for venue in cd.VENUES:
         report = read_json(tmp_path / "data" / "carry" / f"{venue}-perp-mark-coverage-BTCUSDT.json")
         assert report["requested_hours"] == 4 and report["missing_hours"] == len(missing)
-    assert "studies still use their declared close proxies" in capsys.readouterr().out
+    assert "studies use declared valuation settings (trade-close by default)" in capsys.readouterr().out
     assert not list((tmp_path / "results").glob("research_attempts/*.json"))  # fetching is not a strategy evaluation
 
 
