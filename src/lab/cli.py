@@ -470,6 +470,30 @@ def cmd_carry_study(cfg, a):
     return 0
 
 
+def cmd_carry_paper(cfg, a):
+    from urllib.error import URLError
+
+    from lab.carry_paper import PaperSettings, run
+
+    try:
+        p = PaperSettings(capital=a.capital, leverage=a.leverage)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    c = p.carry
+    print(
+        f"carry paper trading: top {c.top} by funding, perpetual turnover >= {c.min_turnover_m:g} M USDT a day, "
+        f"{p.notional:,.2f} USDT per leg and slot (capital {p.capital:,.0f}, perpetual at {p.leverage:g}x); "
+        "live public data, simulated fills, no keys; `lab kill` stops new positions"
+    )
+    try:
+        run(cfg.data_dir / "carry", cfg.results_dir, p, cfg.kill_path, once=a.once)
+    except KeyboardInterrupt:
+        print("stopped")
+    except (URLError, TimeoutError) as e:
+        raise SystemExit(f"could not reach binance: {e}") from e
+    return 0
+
+
 def cmd_carry_release(cfg, a):
     from lab import carry_study as cs
 
@@ -646,6 +670,11 @@ def build_parser() -> argparse.ArgumentParser:
     cst.add_argument("--holdout", action="store_true", help="the one-time test on the reserved holdout data")
     cst.add_argument("--again", metavar="REASON", help="repeat a holdout test; the reason is recorded")
     cst.set_defaults(fn=cmd_carry_study)
+    cpp = csub.add_parser("paper", help="paper-trade the holdout-tested carry configuration (live data, no orders)")
+    cpp.add_argument("--capital", type=float, default=10_000.0, help="simulated capital, USDT (default 10000)")
+    cpp.add_argument("--leverage", type=float, default=3.0, help="perpetual margin leverage (default 3)")
+    cpp.add_argument("--once", action="store_true", help="one rebalance step now, then exit")
+    cpp.set_defaults(fn=cmd_carry_paper)
     crl = csub.add_parser("release", help="turn the carry holdout into research data; later data is the new holdout")
     crl.add_argument("--reason", required=True, help="recorded with the new boundary")
     crl.set_defaults(fn=cmd_carry_release)

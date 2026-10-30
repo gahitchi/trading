@@ -40,6 +40,21 @@ services:
       LAB_RECORD_VENUE: bybit
     command: record --venue bybit --symbols ${LAB_RECORD_BYBIT_SYMBOLS:-BTCUSDT ETHUSDT SOLUSDT}
 
+  # Paper trading of the funding-carry strategy that passed its holdout: live public data, simulated fills, no keys.
+  # Rebalances at 00, 08 and 16 UTC; state and ledger in results/carry/. `lab kill` stops new positions.
+  carry-paper:
+    image: trading-lab:latest
+    build: .
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+    command: carry paper
+    volumes:
+      - ./lab.toml:/lab/lab.toml:ro
+      - ./data:/lab/data              # updates data/carry/
+      - ./results:/lab/results        # writes results/carry/
+    logging: *logging
+
   # Read-only dashboard of the recorders and their data: http://127.0.0.1:8766
   monitor:
     image: trading-lab:latest
