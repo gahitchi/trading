@@ -107,5 +107,7 @@ Still unmodelled: event mark-price funding; collateral per venue/leg; initial/ma
 liquidation losses; transfers and funding/cash financing; rebalancing policy/costs; partial fills; borrow and
 volume-tier fees; and historical listing/delisting sensitivity. In particular, spot gains do not automatically
 fund the short perpetual's margin. A simple division by a leverage factor cannot qualify returns on capital.
+The subsequent [B4b collateral diagnostic](carry-collateral-scenarios.md) checks explicit fixed leg budgets
+against close proxies, without claiming to reproduce actual venue margin rules or liquidation execution.
 No B2/B3 empirical run, B4 solvency acceptance, A8b statistical qualification or holdout profitability gate
 passes because this accounting prerequisite exists. Phase 1 remains active; Phase 2 has not started.

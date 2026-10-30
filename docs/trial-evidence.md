@@ -42,6 +42,10 @@ The displayed configuration count distinguishes settings and source/runtime iden
 the same settings under the same identity remain one distinct configuration, while every attempt is retained.
 Legacy entries have unknown source identity and remain counted separately from identified new evaluations.
 Git commit alone does not identify uncommitted code, and a content hash alone does not archive its source.
+Carry's optional B4b collateral scenario also fingerprints its model and all four budget/maintenance settings;
+both the candidate and automatic always-in comparison persist `collateral_scenario` in their results. A changed
+scenario is a changed attempted configuration. An absent scenario is explicitly unavailable, and a computed
+one always remains unqualified; it cannot turn normalized P&L into funded returns or qualify inference.
 
 ## Loaded-input identity
 

@@ -223,10 +223,15 @@ The [leg ledger](docs/carry-leg-ledger.md) keeps base quantities fixed until exi
 changes, values each venue's funding separately and records terminal quantities, exposure drift and per-leg
 cash flows in the trial result. Equal entry notional does not guarantee equal base quantities or exact delta
 neutrality. Funding valuation explicitly uses an hourly close proxy, not the historical settlement mark.
+Optional [collateral scenarios](docs/carry-collateral-scenarios.md) take all four explicit
+`--collateral-long/short` and `--maintenance-long/short` assumptions. They check separate fixed leg budgets
+before each decision and after its trades, retain losses across re-entry, require fully funded spot inventory,
+and report first breaches and ex-post budget boundaries. No venue defaults or transfers are assumed; any path
+after exhaustion is counterfactual. This is an unqualified stress diagnostic, not a liquidation simulator.
 It reports the portfolio's estimated normalized P&L a
 year split into funding, basis and costs, Sharpe, a Newey-West t-statistic (positions last days, so daily returns
-are autocorrelated), drawdown, an always-in benchmark for `cash`, and each symbol's P&L. Not modelled: leg
-collateral/financing, liquidation of the short perpetual in a rally, rebalancing policy, spot borrow,
+are autocorrelated), drawdown, an always-in benchmark for `cash`, and each symbol's P&L. Not modelled: actual venue
+margin rules/financing, liquidation of the short perpetual in a rally, rebalancing policy, spot borrow,
 event mark-price funding and volume-tier fees. Economics remain unqualified; these estimates are not account-capital returns.
 
 On the majors the cash trade earns about what cash does, so the next place to look is the whole market, where

@@ -564,6 +564,8 @@ def cmd_carry_study(cfg, a):
             mode=a.mode, lookback_h=a.lookback_h, entry_apr=a.entry_apr, exit_apr=a.exit_apr,
             rebalance_h=a.rebalance_h, perp_fee_bps=a.fee_bps, spot_fee_bps=a.spot_fee_bps, slippage_bps=a.slippage_bps,
             top=a.top, min_turnover_m=a.min_turnover,
+            collateral_long=a.collateral_long, collateral_short=a.collateral_short,
+            maintenance_long=a.maintenance_long, maintenance_short=a.maintenance_short,
         )  # fmt: skip
         b = cs.boundary(cfg.results_dir, root)
         params = cs.params_of(s, symbols)
@@ -596,7 +598,7 @@ def cmd_carry_study(cfg, a):
                 raise ValueError(
                     f"no carry data for {' '.join(symbols)} {'after' if a.holdout else 'before'} {b:%Y-%m-%d}"
                 )
-            st = cs.summary(pnl, settings.top)
+            st = cs.summary(pnl, settings.top, settings)
             result = nullable_numbers(
                 {
                     k: st[k]
@@ -610,6 +612,7 @@ def cmd_carry_study(cfg, a):
                         "return_stats",
                         "daily_inference",
                         "leg_ledger",
+                        "collateral_scenario",
                     )
                 }
             )
@@ -637,7 +640,21 @@ def cmd_carry_study(cfg, a):
         who += f", perpetual turnover >= {s.min_turnover_m:g} M USDT a day"
     print(f"carry {a.mode}: {trade}, {who}, {st['start']} .. {st['end']} UTC")
     print("  leg quantities stay fixed between entries/exits; funding valuation uses an hour-end close proxy")
-    print("  collateral, liquidation and rebalancing policy are unmodelled; economics remain unqualified")
+    print("  venue collateral/liquidation and rebalancing policy are unmodelled; economics remain unqualified")
+    scenario = st["collateral_scenario"]
+    if scenario["configured"]:
+        print("  collateral scenario: separate fixed leg budgets, hourly close proxies, explicit maintenance fractions")
+        print("  no liquidation simulation; the unchanged path after a breach is counterfactual")
+        for symbol, detail in scenario["per_symbol"].items():
+            for leg, values in detail.items():
+                breach = values["first_breach"]
+                when = f"{breach['time']} {breach['stage']}" if breach else "none observed on proxy grid"
+                print(
+                    f"    {symbol} {leg}: first budget breach {when}; min headroom {values['minimum_headroom']:.6g}; "
+                    f"ex-post collateral boundary {values['ex_post_initial_collateral_boundary']:.6g}"
+                )
+    else:
+        print("  collateral scenario unavailable: supply all four --collateral/--maintenance leg assumptions")
     print(
         "  funding uses recorded API query coverage and actual event times; historical schedule coverage is unverified"
     )
@@ -869,6 +886,17 @@ def build_parser() -> argparse.ArgumentParser:
     cst.add_argument("--fee-bps", type=float, default=5.0, help="perpetual taker fee per side, bps (default 5)")
     cst.add_argument("--spot-fee-bps", type=float, default=10.0, help="spot taker fee per side, bps (default 10)")
     cst.add_argument("--slippage-bps", type=float, default=1.0, help="per leg and side, bps (default 1)")
+    for leg in ("long", "short"):
+        cst.add_argument(
+            f"--collateral-{leg}",
+            type=float,
+            help=f"scenario fixed {leg}-leg budget per unit initial notional; requires all four assumptions",
+        )
+        cst.add_argument(
+            f"--maintenance-{leg}",
+            type=float,
+            help=f"scenario {leg}-leg maintenance fraction (not bps); cash long must be 0; no venue defaults",
+        )
     cst.add_argument("--all", action="store_true", help="every symbol fetched (instead of --symbols)")
     cst.add_argument("--top", type=int, default=0, help="cash: hold only the K highest-funding symbols (default: all)")
     cst.add_argument(

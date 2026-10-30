@@ -78,6 +78,10 @@ class CarrySettings:
     slippage_bps: float = 1.0  # per leg and side
     top: int = 0  # 0: every symbol trades on its own; K: the K highest signals share the notional
     min_turnover_m: float = 0.0  # M USDT a day on the perpetual, 30-day mean, to open a position
+    collateral_long: float | None = None  # fixed, separate quote-currency budgets per symbol/leg
+    collateral_short: float | None = None
+    maintenance_long: float | None = None  # explicit scenario fractions, not exchange parameters
+    maintenance_short: float | None = None
 
     def __post_init__(self):
         if self.mode not in MODES:
@@ -90,6 +94,14 @@ class CarrySettings:
             raise ValueError("top applies to the cash trade only, and must be positive")
         if any(not math.isfinite(v) or v < 0 for v in (self.perp_fee_bps, self.spot_fee_bps, self.slippage_bps)):
             raise ValueError("carry taker fees and slippage must be finite and nonnegative")
+        scenario = (self.collateral_long, self.collateral_short, self.maintenance_long, self.maintenance_short)
+        if any(v is not None for v in scenario):
+            if any(v is None or not math.isfinite(v) or v < 0 for v in scenario):
+                raise ValueError("all four collateral/maintenance assumptions must be finite and nonnegative")
+            if self.maintenance_long >= 1 or self.maintenance_short >= 1:
+                raise ValueError("maintenance fractions must be less than one")
+            if self.mode == "cash" and self.maintenance_long != 0:
+                raise ValueError("cash spot leg requires maintenance_long=0; spot purchases must be fully funded")
 
     @property
     def cost(self) -> float:
@@ -352,7 +364,7 @@ def backtest(
     out["net"] = out["basis"] + out["funding"] - out["cost"]
     if not np.isfinite(out).all().all():
         raise ValueError("nonfinite carry leg ledger; evaluation is unavailable")
-    out.attrs.update(leg_model=LEG_MODEL, funding_valuation=FUNDING_VALUATION)
+    out.attrs.update(leg_model=LEG_MODEL, funding_valuation=FUNDING_VALUATION, mode=s.mode)
     return out
 
 
@@ -433,9 +445,10 @@ def leg_ledger_summary(pnl: dict[str, pd.DataFrame]) -> dict:
     }
 
 
-def summary(pnl: dict[str, pd.DataFrame], slots: int = 0) -> dict:
+def summary(pnl: dict[str, pd.DataFrame], slots: int = 0, settings: CarrySettings | None = None) -> dict:
     """Portfolio statistics on daily net returns. Each symbol with data has an equal share of the notional (a
     symbol requested without data is left out, not counted as idle notional), or with `slots`, each slot has."""
+    from lab.carry_collateral import collateral_report
     from lab.daily_inference import CARRY_BASIS, daily_inference
 
     if not pnl:
@@ -473,6 +486,7 @@ def summary(pnl: dict[str, pd.DataFrame], slots: int = 0) -> dict:
         "return_stats": return_stats,
         "daily_inference": daily_inference(return_stats),
         "leg_ledger": leg_ledger_summary(pnl),
+        "collateral_scenario": collateral_report(pnl, settings),
         "funding_apr": part["funding"] / years * 100,
         "basis_apr": part["basis"] / years * 100,
         "cost_apr": part["cost"] / years * 100,
@@ -641,12 +655,15 @@ def trial_sharpes(results_dir: Path, kind: str, instrument: str) -> list[float]:
 
 
 def params_of(s: CarrySettings, symbols: list[str]) -> dict:
+    from lab.carry_collateral import MODEL as COLLATERAL_MODEL
+
     p = {
         **asdict(s),
         "symbols": sorted(symbols),
         "funding_policy": FUNDING_POLICY,
         "leg_model": LEG_MODEL,
         "funding_valuation": FUNDING_VALUATION,
+        "collateral_model": COLLATERAL_MODEL,
     }
     for k in ("top", "min_turnover_m"):  # omit these defaults; always fingerprint the funding policy
         if p[k] == CarrySettings.__dataclass_fields__[k].default:
