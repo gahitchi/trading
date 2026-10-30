@@ -91,11 +91,14 @@ def _binance_funding(symbol, start_ms, now_ms, get, pause):
 def _binance_closes(url, limit, start_ms, now_ms, get, pause):
     rows = []
     while start_ms < now_ms:
-        page = get(f"{url}&interval=1h&startTime={start_ms}&limit={limit}")
+        # ask for no more rows than the hours left: Binance weighs a request by its limit, and an hourly update of
+        # every pair would otherwise spend the minute's budget
+        n = min(limit, (now_ms - start_ms) // HOUR_MS + 2)
+        page = get(f"{url}&interval=1h&startTime={start_ms}&limit={n}")
         # [open time, open, high, low, close, volume, close time, quote volume, ...]; the hour ends at open + 1 h.
         # The open kline is left out.
         rows += [(int(k[0]) + HOUR_MS, float(k[4]), float(k[7])) for k in page if int(k[0]) + HOUR_MS <= now_ms]
-        if len(page) < limit:
+        if len(page) < n:
             break
         start_ms = int(page[-1][0]) + HOUR_MS
         pause()

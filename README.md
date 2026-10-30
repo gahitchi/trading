@@ -38,6 +38,7 @@ pytest -n auto
 | `lab carry fetch [--symbols ... \| --all] [--since 2023-01-01]` | download or update hourly funding and closes (Binance spot and perpetual, Bybit perpetual) |
 | `lab carry study [--mode cash\|cross] [--lookback-h] [--entry-apr] [--exit-apr] [--all --top K --min-turnover M]` | does funding carry pay after costs? (holdout-guarded, logged) |
 | `lab carry study --holdout [--again REASON]`, `lab carry release --reason` | the one-time carry holdout test; turning it into research data |
+| `lab carry paper [--capital 10000] [--leverage 3] [--once]` | paper-trade the holdout-tested carry configuration on live data (no keys, no orders) |
 | `lab kill [--flatten]`, `lab resume` | kill switch: stop all new orders now (`results/KILL`), and clear it |
 
 ## Recording, research and paper trading
@@ -163,6 +164,14 @@ above `--entry-apr` among perpetuals that traded at least 20 M USDT a day over t
 time. Today's list misses pairs delisted since, which flatters the result; thin altcoins also cost more to trade
 than the majors, so raise `--slippage-bps`.
 
+`lab carry paper` (the `carry-paper` service in compose) paper-trades the configuration that passed the holdout
+(top 10, 20 M USDT turnover) on live public data: at 00, 08 and 16 UTC it updates the history, adds the funding each
+open position earned, decides with the same code as the study, and trades the difference at the live best bid and
+ask (buy spot at the ask, sell the perpetual at the bid, taker fees on both), with `--capital` split over the 10
+slots and the perpetual margined at `--leverage`. Fills assume the touch is deep enough. State and a ledger of every
+fill and funding payment are in `results/carry/`; `lab kill` stops new positions and `lab kill --flatten` closes them
+at the next step.
+
 Carry has its own time holdout: the first study reserves the last 180 days fetched by then and everything fetched
 later (`results/carry_partition.json`). Research runs drop that data before computing anything; `--holdout` tests
 a finished configuration on it once. Every run goes into the trial log, and research runs print a deflated Sharpe
@@ -196,6 +205,7 @@ src/lab/maker.py          PassiveMaker strategy (post-only quotes, inventory cap
 src/lab/fast_research.py  forward holdout, holdout ledger, trial log
 src/lab/carry_data.py     hourly funding and closes from public REST history (Binance, Bybit)
 src/lab/carry_study.py    funding carry backtest after costs, time holdout, deflated Sharpe
+src/lab/carry_paper.py    carry paper trading on live public data (simulated fills)
 src/lab/monitor.py        read-only dashboard of the recorder and its data (assets in monitor_ui/)
 src/lab/risk_manager.py   pre-trade risk shared by every strategy
 src/lab/safety.py         kill switch
