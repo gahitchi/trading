@@ -3,9 +3,12 @@ holdout and every configuration counted."""
 
 import json
 import math
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from lab import carry_data as cd
@@ -83,10 +86,27 @@ def test_update_appends_only_what_is_new(tmp_path):
 # --- the backtest ---------------------------------------------------------------------------------------------
 
 
-def write(root, venue, market, kind, symbol, s: pd.Series):
+def write(root, venue, market, kind, symbol, s: pd.Series, *, coverage=None):
     p = cd.path_of(root, venue, market, kind, symbol)
     p.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"ts": s.index, "value": s.to_numpy()}).to_parquet(p, index=False)
+    # Synthetic source fixtures explicitly declare their query window. Rewrites preserve that fixture
+    # declaration; this is not a production migration/override for unverified historical caches.
+    metadata = pq.read_schema(p).metadata or {} if p.exists() else {}
+    if coverage is not None:
+        metadata[cd.FUNDING_COVERAGE_KEY] = json.dumps(
+            {
+                "version": 1,
+                "venue": venue,
+                "symbol": symbol,
+                "intervals_ms": [[int(a.value // 1_000_000), int(b.value // 1_000_000)] for a, b in coverage],
+            }
+        ).encode()
+    table = pa.Table.from_pandas(pd.DataFrame({"ts": s.index, "value": s.to_numpy()}), preserve_index=False)
+    if cd.FUNDING_COVERAGE_KEY in metadata:
+        table = table.replace_schema_metadata(
+            {**(table.schema.metadata or {}), cd.FUNDING_COVERAGE_KEY: metadata[cd.FUNDING_COVERAGE_KEY]}
+        )
+    pq.write_table(table, p)
 
 
 def market(root, symbol="BTCUSDT", days=60, rate=1e-4, bybit_rate=0.0, seed=0, start=T0, turnover=1e6):
@@ -100,9 +120,9 @@ def market(root, symbol="BTCUSDT", days=60, rate=1e-4, bybit_rate=0.0, seed=0, s
     write(root, "binance", "spot", "close", symbol, spot)
     write(root, "binance", "perp", "close", symbol, perp)
     write(root, "binance", "perp", "turnover", symbol, pd.Series(turnover, index=hours))
-    write(root, "binance", "perp", "funding", symbol, pd.Series(rate, index=settle))
+    write(root, "binance", "perp", "funding", symbol, pd.Series(rate, index=settle), coverage=[(start, hours[-1])])
     write(root, "bybit", "perp", "close", symbol, perp * (1 + rng.normal(0, 1e-4, len(hours))))
-    write(root, "bybit", "perp", "funding", symbol, pd.Series(bybit_rate, index=settle))
+    write(root, "bybit", "perp", "funding", symbol, pd.Series(bybit_rate, index=settle), coverage=[(start, hours[-1])])
 
 
 def flat_legs(hours=24 * 10, rate=1e-4, short_jump=None):
@@ -111,7 +131,12 @@ def flat_legs(hours=24 * 10, rate=1e-4, short_jump=None):
     short = long.copy()
     if short_jump is not None:
         short[short.index >= short_jump] = 101.0
-    return cs.Legs(long, short, pd.Series(rate, index=pd.date_range(T0, periods=hours // 8 + 1, freq="8h")))
+    return cs.Legs(
+        long,
+        short,
+        pd.Series(rate, index=pd.date_range(T0, periods=hours // 8 + 1, freq="8h")),
+        funding_coverage=((int(T0.value), int(idx[-1].value)),),
+    )
 
 
 def test_cash_carry_earns_funding_after_entry_and_pays_both_legs_costs():
@@ -150,7 +175,7 @@ def test_hysteresis_holds_between_exit_and_entry_and_closes_below_exit():
     rate = pd.Series(2e-4, index=lg.funding.index)  # 21.9% a year
     rate[rate.index >= T0 + pd.Timedelta(days=4)] = 0.5e-4  # 5.5%: between exit (0) and entry (10)
     rate[rate.index >= T0 + pd.Timedelta(days=8)] = -0.5e-4
-    w = cs.positions(cs.hourly(cs.Legs(lg.long, lg.short, rate)), cs.CarrySettings(lookback_h=24, entry_apr=10.0))
+    w = cs.positions(cs.hourly(replace(lg, funding=rate)), cs.CarrySettings(lookback_h=24, entry_apr=10.0))
     assert w[T0 + pd.Timedelta(days=6)] == 1  # still in at 5.5%
     assert w.iloc[-1] == 0  # out once the trailing rate is negative
     assert (w.diff().abs() > 0).sum() == 2  # one entry, one exit
@@ -161,10 +186,10 @@ def test_a_decision_never_sees_later_funding_or_prices():
     lg = flat_legs(24 * 10)
     base = cs.positions(cs.hourly(lg), s)
     cut = T0 + pd.Timedelta(days=5)
-    shocked = cs.Legs(
-        lg.long.where(lg.long.index <= cut, 50.0),
-        lg.short,
-        lg.funding.where(lg.funding.index <= cut, -0.01),
+    shocked = replace(
+        lg,
+        long=lg.long.where(lg.long.index <= cut, 50.0),
+        funding=lg.funding.where(lg.funding.index <= cut, -0.01),
     )
     after = cs.positions(cs.hourly(shocked), s)
     pd.testing.assert_series_equal(base[base.index <= cut], after[after.index <= cut])
@@ -177,7 +202,7 @@ def test_a_held_position_with_a_long_price_gap_cannot_report_a_valid_return(eval
     gap = lg.long.index[48:69]
     short = lg.short.drop(gap)
     short.loc[short.index > gap[-1]] = 120.0  # the short rallies while its prices are unavailable
-    h = cs.hourly(cs.Legs(lg.long, short, lg.funding))
+    h = cs.hourly(replace(lg, short=short))
     with pytest.raises(ValueError, match="cannot value held carry position"):
         cs.backtest(h, cs.CarrySettings(lookback_h=24, entry_apr=5.0), eval_from=eval_from)
 
@@ -185,7 +210,7 @@ def test_a_held_position_with_a_long_price_gap_cannot_report_a_valid_return(eval
 def test_price_gaps_while_flat_do_not_invalidate_later_trading():
     lg = flat_legs()
     gap = lg.long.index[2:12]  # before the first entry
-    h = cs.hourly(cs.Legs(lg.long.drop(gap), lg.short, lg.funding))
+    h = cs.hourly(replace(lg, long=lg.long.drop(gap)))
     r = cs.backtest(h, cs.CarrySettings(lookback_h=24, entry_apr=5.0))
     assert np.isfinite(r["net"]).all()
     assert (r.loc[gap, "w"] == 0).all()
@@ -197,7 +222,7 @@ def test_a_short_price_gap_preserves_the_return_when_prices_resume():
     gap = lg.short.index[48:50]
     short = lg.short.drop(gap)
     short.loc[short.index > gap[-1]] = 120.0
-    h = cs.hourly(cs.Legs(lg.long, short, lg.funding))
+    h = cs.hourly(replace(lg, short=short))
     r = cs.backtest(h, cs.CarrySettings(lookback_h=24, entry_apr=5.0))
     assert r["basis"].sum() == pytest.approx(-0.2)
 
@@ -205,7 +230,7 @@ def test_a_short_price_gap_preserves_the_return_when_prices_resume():
 def test_holdout_does_not_value_a_price_gap_in_the_research_period():
     lg = flat_legs()
     gap = lg.short.index[48:69]
-    h = cs.hourly(cs.Legs(lg.long, lg.short.drop(gap), lg.funding))
+    h = cs.hourly(replace(lg, short=lg.short.drop(gap)))
     start = lg.long.index[96]
     s = cs.CarrySettings(lookback_h=24, entry_apr=5.0)
     r = cs.backtest(h, s, eval_from=start)
@@ -393,10 +418,10 @@ def test_fetching_waits_out_rate_limits_and_timeouts_but_not_answers():
 
 def test_a_thin_perpetual_is_never_opened():
     lg = flat_legs(24 * 40)
-    thin = cs.Legs(lg.long, lg.short, lg.funding, pd.Series(1e5, index=lg.long.index))  # 2.4 M a day
+    thin = replace(lg, turnover=pd.Series(1e5, index=lg.long.index))  # 2.4 M a day
     s = cs.CarrySettings(lookback_h=24, entry_apr=5.0, min_turnover_m=5.0)
     assert (cs.positions(cs.hourly(thin), s) == 0).all()
-    thick = cs.Legs(lg.long, lg.short, lg.funding, pd.Series(1e6, index=lg.long.index))  # 24 M a day
+    thick = replace(lg, turnover=pd.Series(1e6, index=lg.long.index))  # 24 M a day
     w = cs.positions(cs.hourly(thick), s)
     assert w.iloc[-1] == 1 and w[w != 0].index[0] >= T0 + pd.Timedelta(days=30)  # once 30 days are known
 
@@ -421,7 +446,7 @@ def test_slot_choices_never_see_later_data():
     s = cs.CarrySettings(lookback_h=24, entry_apr=5.0, top=1)
     a, b = flat_legs(24 * 10, rate=1e-4), flat_legs(24 * 10, rate=2e-4)
     cut = T0 + pd.Timedelta(days=5)
-    b_later = cs.Legs(b.long, b.short, b.funding.where(b.funding.index <= cut, -0.01))
+    b_later = replace(b, funding=b.funding.where(b.funding.index <= cut, -0.01))
     base = cs.top_positions({"A": cs.hourly(a), "B": cs.hourly(b)}, s)
     after = cs.top_positions({"A": cs.hourly(a), "B": cs.hourly(b_later)}, s)
     for sym in "AB":

@@ -199,13 +199,17 @@ result means.
 
 The microstructure studies found no edge after taker costs at seconds horizons, so the next question is a slower
 one: perpetual funding. `lab carry fetch` downloads years of hourly closes and funding settlements from the public
-REST APIs (Binance USD-M and spot, Bybit linear; no keys) into `data/carry/`. Later runs append funding events
+REST APIs (Binance USD-M and spot, Bybit linear; no keys) into `data/carry/`. Later runs fill unqueried funding windows
 and repair missing hourly close/turnover intervals, including old internal holes. Native candle requests use
 opening timestamps; cached candle rows use hour ends. The [history integrity policy](docs/carry-history.md)
 documents that contract, response validation and recovery when a close/turnover pair was saved unevenly.
 Each close update saves a `*-coverage-*.json` snapshot with exact hourly gaps and unverified leading history.
 Fetch exits nonzero when a series is unavailable/empty or hourly gaps remain; other completed series stay cached.
 Funding settlement schedule coverage remains explicitly unverified, even when candle history is continuous.
+Funding rates now carry [successful API query coverage](docs/funding-retrieval.md) in the same atomic Parquet
+snapshot. Studies reject unqueried hours, require both venues for cross carry, and place delayed settlements
+in the hour ending after their actual event time. Legacy files need a normal re-fetch for the required window;
+there is no assume-complete override. Query coverage does not independently verify the historical schedule.
 The default basket is ten liquid USDT pairs (BTC ETH SOL XRP BNB DOGE ADA LINK AVAX LTC). They were picked today,
 so the past is flattered by their survival.
 

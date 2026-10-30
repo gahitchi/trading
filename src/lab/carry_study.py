@@ -55,6 +55,7 @@ HOURS_PER_YEAR = 24 * 365
 HOLDOUT_DAYS = 180
 PARTITION = "carry_partition.json"
 FILL_GAP_H = 3  # prices carry forward this far; a held position beyond it invalidates the study
+FUNDING_POLICY = "queried-event-time-v1"
 EULER_GAMMA = 0.5772156649015329
 # Liquid USDT pairs with a Binance spot market and a Bybit perpetual. Chosen today: they survived, which flatters
 # the past. Pass --symbols for others (the recorded ones without spot only work in `cross`).
@@ -102,30 +103,57 @@ class Legs:
     short: pd.Series
     funding: pd.Series
     turnover: pd.Series | None = None  # the Binance perpetual's traded value per hour, USDT
+    funding_coverage: tuple[tuple[int, int], ...] | None = None  # inclusive UTC ns; None is unverified legacy data
 
 
-def legs(root: Path, mode: str, symbol: str) -> Legs | None:
+def _intersection(left, right):
+    if left is None or right is None:
+        return None
+    return tuple((max(a, c), min(b, d)) for a, b in left for c, d in right if max(a, c) <= min(b, d))
+
+
+def legs(root: Path, mode: str, symbol: str, end: pd.Timestamp | None = None) -> Legs | None:
     """The cached series of a symbol's trade, or None if any is missing."""
-    perp = carry_data.load(root, "binance", "perp", "close", symbol)
-    turnover = carry_data.load(root, "binance", "perp", "turnover", symbol)
-    f_bin = carry_data.load(root, "binance", "perp", "funding", symbol)
+
+    def cut(series):
+        return series if end is None else series[series.index < end]
+
+    perp = cut(carry_data.load(root, "binance", "perp", "close", symbol))
+    turnover = cut(carry_data.load(root, "binance", "perp", "turnover", symbol))
+    f_bin, coverage = carry_data.load_funding(root, "binance", symbol)
+    f_bin = cut(f_bin)
     if mode == "cash":
-        spot = carry_data.load(root, "binance", "spot", "close", symbol)
-        out = Legs(long=spot, short=perp, funding=f_bin, turnover=turnover)
+        spot = cut(carry_data.load(root, "binance", "spot", "close", symbol))
+        out = Legs(long=spot, short=perp, funding=f_bin, turnover=turnover, funding_coverage=coverage)
     else:
-        byb = carry_data.load(root, "bybit", "perp", "close", symbol)
-        f_byb = carry_data.load(root, "bybit", "perp", "funding", symbol)
-        if f_byb.empty or f_bin.empty:
-            return None
-        both = max(f_bin.index[0], f_byb.index[0])  # before both venues pay funding there is no difference
+        byb = cut(carry_data.load(root, "bybit", "perp", "close", symbol))
+        f_byb, byb_coverage = carry_data.load_funding(root, "bybit", symbol)
+        f_byb = cut(f_byb)
+        # Combine only bounded inputs. Held-out funding never enters the difference arithmetic.
+        carry_data._valid_cache(f_byb, "funding")
+        carry_data._valid_cache(f_bin, "funding")
         diff = f_bin.sub(f_byb, fill_value=0.0)
-        out = Legs(long=byb, short=perp, funding=diff[diff.index >= both], turnover=turnover)
-    return None if out.long.empty or out.short.empty or f_bin.empty else out
+        out = Legs(
+            long=byb,
+            short=perp,
+            funding=diff,
+            turnover=turnover,
+            funding_coverage=_intersection(coverage, byb_coverage),
+        )
+    return None if out.long.empty or out.short.empty else out
 
 
 def truncate(lg: Legs, end: pd.Timestamp) -> Legs:
     """Only what was known before `end`."""
-    return Legs(*(None if s is None else s[s.index < end] for s in (lg.long, lg.short, lg.funding, lg.turnover)))
+    coverage = (
+        None
+        if lg.funding_coverage is None
+        else tuple((a, min(b, int(end.value) - 1)) for a, b in lg.funding_coverage if a < end.value)
+    )
+    return Legs(
+        *(None if s is None else s[s.index < end] for s in (lg.long, lg.short, lg.funding, lg.turnover)),
+        funding_coverage=coverage,
+    )
 
 
 def hourly(lg: Legs) -> pd.DataFrame | None:
@@ -139,7 +167,15 @@ def hourly(lg: Legs) -> pd.DataFrame | None:
     grid = pd.date_range(start, end, freq="h")
     closes = [s.groupby(s.index.floor("h")).last().reindex(grid) for s in (lg.long, lg.short)]
     rets = [c.ffill(limit=FILL_GAP_H).pct_change(fill_method=None) for c in closes]
-    funding = lg.funding.groupby(lg.funding.index.floor("h")).sum().reindex(grid, fill_value=0.0)
+    carry_data._valid_cache(lg.funding, "funding")
+    # Hour T contains settlements in (T-1h, T]. Do not reveal a delayed event before its timestamp.
+    funding = lg.funding.groupby(lg.funding.index.ceil("h")).sum().reindex(grid, fill_value=0.0)
+    times = grid.as_unit("ns").asi8
+    queried = np.zeros(len(grid), dtype=bool)
+    # API event timestamps have millisecond resolution; the left-open hour starts at T-1h+1ms.
+    for a, b in lg.funding_coverage or ():
+        queried |= (times - 3_600_000_000_000 + 1_000_000 >= a) & (times <= b)
+    funding = funding.where(queried)
     if lg.turnover is not None and len(lg.turnover):
         hourly_value = lg.turnover.groupby(lg.turnover.index.floor("h")).sum().reindex(grid, fill_value=0.0)
         turnover = hourly_value.rolling(30 * 24, min_periods=30 * 24).sum() / 30
@@ -150,6 +186,7 @@ def hourly(lg: Legs) -> pd.DataFrame | None:
             "r_long": rets[0],
             "r_short": rets[1],
             "funding": funding,
+            "funding_queried": queried,
             "tradable": closes[0].notna() & closes[1].notna() & rets[0].notna() & rets[1].notna(),
             "turnover_d": turnover,
         }
@@ -240,11 +277,16 @@ def backtest(
         raise ValueError(
             f"cannot value held carry position at {first}: leg prices exceed the {FILL_GAP_H}-hour carry-forward limit"
         )
+    invalid_funding = (prev != 0) & ~np.isfinite(h["funding"])
+    if invalid_funding.any():
+        raise ValueError(
+            f"cannot value held carry position: funding retrieval coverage missing at {invalid_funding.index[invalid_funding][0]}"
+        )
     out = pd.DataFrame(
         {
             "w": w,
             "basis": (prev * (h["r_long"] - h["r_short"])).where(prev != 0, 0.0),
-            "funding": prev * h["funding"],
+            "funding": (prev * h["funding"]).where(prev != 0, 0.0),
             "cost": (w - prev).abs() * s.cost,
         }
     )
@@ -372,11 +414,12 @@ def run(
     Also returns the symbols left out for lack of data."""
     hs, missing = {}, []
     for sym in symbols:
-        lg = legs(root, s.mode, sym)
-        if lg is not None and end is not None:
-            lg = truncate(lg, end + pd.Timedelta(nanoseconds=1))
-        if lg is not None and not holdout:
-            lg = truncate(lg, boundary)
+        limit = end + pd.Timedelta(nanoseconds=1) if end is not None else None
+        if not holdout:
+            limit = boundary if limit is None else min(limit, boundary)
+        lg = legs(root, s.mode, sym, end=limit)
+        if lg is not None and limit is not None:
+            lg = truncate(lg, limit)
         if evidence is not None:
             for name in ("long", "short", "funding", "turnover"):
                 evidence.series(f"{sym}/{name}", getattr(lg, name) if lg is not None else None)
@@ -384,6 +427,14 @@ def run(
         if h is None:
             missing.append(sym)
         else:
+            relevant = h if not holdout else h[h.index >= boundary - pd.Timedelta(hours=s.lookback_h - 1)]
+            if evidence is not None:
+                evidence.series(f"{sym}/funding-queried", relevant["funding_queried"])
+            if not relevant["funding_queried"].all():
+                first = relevant.index[~relevant["funding_queried"]][0]
+                raise ValueError(
+                    f"{sym}: funding retrieval coverage missing at {first}; rerun `lab carry fetch` for the required window"
+                )
             hs[sym] = h
     ws = top_positions(hs, s) if s.top and hs else {}
     pnl = {}
@@ -484,8 +535,8 @@ def trial_sharpes(results_dir: Path, kind: str, instrument: str) -> list[float]:
 
 
 def params_of(s: CarrySettings, symbols: list[str]) -> dict:
-    p = {**asdict(s), "symbols": sorted(symbols)}
-    for k in ("top", "min_turnover_m"):  # left out at their defaults: earlier trials keep their fingerprints
+    p = {**asdict(s), "symbols": sorted(symbols), "funding_policy": FUNDING_POLICY}
+    for k in ("top", "min_turnover_m"):  # omit these defaults; always fingerprint the funding policy
         if p[k] == CarrySettings.__dataclass_fields__[k].default:
             del p[k]
     return p

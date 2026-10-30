@@ -3,7 +3,7 @@ Hourly history for funding-carry research: funding settlements and hourly closes
 Binance spot and Bybit linear perpetuals, from the venues' public REST APIs (no keys).
 
 The recorder's catalog holds days of funding; carry needs years, which the exchanges serve for free. `fetch`
-downloads missing hourly intervals and funding after the last event into one Parquet file per series under
+downloads missing hourly intervals and unqueried funding windows into one Parquet file per series under
 <data>/carry/; `load` reads it back. Hourly close/turnover holes are retried, never filled with invented values.
 
 Each series is (ts, value), ts in UTC nanoseconds:
@@ -15,21 +15,26 @@ Klines still open are never stored.
 
 from __future__ import annotations
 
+import json
 import math
+import os
 import time
 from itertools import pairwise
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 
-from lab.persistence import file_lock
+from lab.persistence import file_lock, parse_json
 from lab.survey import binance_perpetuals, get_json
 
 BINANCE_FAPI = "https://fapi.binance.com/fapi/v1"
 BINANCE_SPOT = "https://api.binance.com/api/v3"
 BYBIT_V5 = "https://api.bybit.com/v5/market"
 HOUR_MS = 3_600_000
+FUNDING_COVERAGE_KEY = b"lab.funding-retrieval-v1"
 # Waits of 2, 4, ... 64 s, then 120 s: about 10 minutes in all, so rate limits, timeouts and a DNS or Wi-Fi blip pass.
 TRIES = 10
 MAX_WAIT_S = 120
@@ -226,10 +231,128 @@ def load(root: Path, venue: str, market: str, kind: str, symbol: str) -> pd.Seri
     return pd.Series(df["value"].to_numpy(), index=pd.to_datetime(df["ts"], utc=True), name=kind)
 
 
+def merge_intervals(intervals):
+    """Canonical union of inclusive integer-millisecond intervals."""
+    normalized = []
+    for pair in intervals:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            raise ValueError("invalid funding retrieval coverage interval")
+        a, b = pair
+        if type(a) is not int or type(b) is not int or a < 0 or b < a or b > pd.Timestamp.max.value // 1_000_000:
+            raise ValueError("invalid funding retrieval coverage interval")
+        normalized.append((a, b))
+    out = []
+    for a, b in sorted(normalized):
+        if out and a <= out[-1][1] + 1:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out
+
+
+def _unqueried(intervals, start, end):
+    cursor, missing = start, []
+    for a, b in intervals:
+        if cursor < a:
+            missing.append((cursor, min(a - 1, end)))
+        cursor = max(cursor, b + 1)
+        if cursor > end:
+            break
+    if cursor <= end:
+        missing.append((cursor, end))
+    return [(a, b) for a, b in missing if a <= b]
+
+
+def _funding_metadata(table, venue, symbol):
+    raw = (table.schema.metadata or {}).get(FUNDING_COVERAGE_KEY)
+    if raw is None:
+        return None  # legacy rates do not establish retrieval coverage
+    try:
+        meta = parse_json(raw.decode())
+        if (
+            not isinstance(meta, dict)
+            or set(meta) != {"version", "venue", "symbol", "intervals_ms"}
+            or type(meta["version"]) is not int
+            or meta["version"] != 1
+            or meta["venue"] != venue
+            or meta["symbol"] != symbol
+            or not isinstance(meta["intervals_ms"], list)
+            or any(not isinstance(pair, list) or len(pair) != 2 for pair in meta["intervals_ms"])
+            or merge_intervals(meta["intervals_ms"]) != meta["intervals_ms"]
+        ):
+            raise ValueError("invalid funding retrieval coverage metadata")
+    except (ValueError, TypeError, KeyError, UnicodeError) as e:
+        raise ValueError(f"invalid funding retrieval coverage metadata: {e}") from e
+    return meta["intervals_ms"]
+
+
+def load_funding(root, venue, symbol):
+    """Read rates and inclusive request coverage from the SAME atomically replaced Parquet snapshot.
+
+    Coverage records successful paginated API retrieval, not historical settlement-schedule verification.
+    """
+    path = path_of(root, venue, "perp", "funding", symbol)
+    if not path.exists():
+        return load(root, venue, "perp", "funding", symbol), None
+    with path.open("rb") as source:
+        table = pq.read_table(source)  # one file descriptor remains bound to one snapshot across atomic rename
+    df = table.to_pandas()
+    rates = pd.Series(df["value"].to_numpy(), index=pd.to_datetime(df["ts"], utc=True), name="funding")
+    intervals = _funding_metadata(table, venue, symbol)
+    return rates, None if intervals is None else tuple((a * 1_000_000, b * 1_000_000) for a, b in intervals)
+
+
+def _update_funding(root, venue, symbol, since, now, **io):
+    path = path_of(root, venue, "perp", "funding", symbol)
+    # Called under the funding cache lock. Old data and coverage remain one coherent snapshot on failure.
+    old, coverage = load_funding(root, venue, symbol)
+    _valid_cache(old, "funding")
+    intervals = [] if coverage is None else [[a // 1_000_000, b // 1_000_000] for a, b in coverage]
+    windows = _unqueried(intervals, _ms(since), _ms(now))
+    if not windows:
+        return 0, len(old)
+    rows = []
+    for a, b in windows:
+        returned = download(venue, "perp", "funding", symbol, a, b, **io)
+        expected = old.index[
+            (old.index >= pd.Timestamp(a, unit="ms", tz="UTC")) & (old.index <= pd.Timestamp(b, unit="ms", tz="UTC"))
+        ]
+        actual = pd.to_datetime([r[0] for r in returned], unit="ms", utc=True)
+        if len(expected.difference(actual)):
+            raise ValueError("funding API retrieval contradicts cached settlements; original cache retained")
+        rows.extend(returned)
+    new = pd.Series([r[1] for r in rows], index=pd.to_datetime([r[0] for r in rows], unit="ms", utc=True), dtype=float)
+    both = pd.concat([old, new]).sort_index()
+    both = both[~both.index.duplicated(keep="last")]
+    _valid_cache(both, "funding")
+    meta = {"version": 1, "venue": venue, "symbol": symbol, "intervals_ms": merge_intervals([*intervals, *windows])}
+    table = pa.Table.from_pandas(pd.DataFrame({"ts": both.index, "value": both.to_numpy()}), preserve_index=False)
+    table = table.replace_schema_metadata(
+        {**(table.schema.metadata or {}), FUNDING_COVERAGE_KEY: json.dumps(meta, allow_nan=False).encode()}
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        pq.write_table(table, tmp)
+        with tmp.open("rb") as f:
+            os.fsync(f.fileno())
+        tmp.replace(path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return len(both) - len(old), len(both)
+
+
 def _valid_cache(series, kind):
     if not series.index.is_unique or not series.index.is_monotonic_increasing or series.index.hasnans:
         raise ValueError("invalid history cache: timestamps must be ordered, unique and nonmissing")
     for ts, value in series.items():
+        if kind == "funding" and ts.value % 1_000_000:
+            raise ValueError("invalid history cache: funding timestamps must be integer milliseconds")
         if kind != "funding" and ts != ts.floor("h"):
             raise ValueError("invalid history cache: hourly timestamps must be aligned")
         _value(value, positive=kind == "close", nonnegative=kind == "turnover")
@@ -304,7 +427,7 @@ def close_coverage(root, venue, market, symbol, since, now):
 
 
 def update(root: Path, venue, market, kind, symbol, since: pd.Timestamp, now: pd.Timestamp, **io) -> tuple[int, int]:
-    """Append funding; repair missing hourly close/turnover ranges as well as the tail, without invented values.
+    """Fetch unqueried funding windows; repair missing hourly close/turnover ranges without invented values.
     Returns (new rows, total rows) of `kind`."""
     kinds = (kind, "turnover") if kind == "close" else (kind,)
     since, now = _window(since, now)
@@ -312,16 +435,14 @@ def update(root: Path, venue, market, kind, symbol, since: pd.Timestamp, now: pd
         raise ValueError(f"unknown series: {venue} {market} {kind}")
     p = path_of(root, venue, market, kind, symbol)
     with file_lock(p.with_name(p.name + ".lock")):
+        if kind == "funding":
+            return _update_funding(root, venue, symbol, since, now, **io)
         old = [load(root, venue, market, k, symbol) for k in kinds]
         for k, o in zip(kinds, old, strict=True):
             _valid_cache(o, k)
-        if kind == "close":
-            grid = _hourly_grid(old, since, now)
-            present = old[0].index.intersection(old[1].index)
-            windows = [(a - pd.Timedelta(hours=1), b) for a, b in _ranges(grid.difference(present))]
-        else:
-            start = max(since, old[0].index[-1] + pd.Timedelta(milliseconds=1)) if len(old[0]) else since
-            windows = [(start, now)] if start <= now else []
+        grid = _hourly_grid(old, since, now)
+        present = old[0].index.intersection(old[1].index)
+        windows = [(a - pd.Timedelta(hours=1), b) for a, b in _ranges(grid.difference(present))]
         rows = [row for a, b in windows for row in download(venue, market, kind, symbol, _ms(a), _ms(b), **io)]
         index = pd.to_datetime([r[0] for r in rows], unit="ms", utc=True)
         counts = []

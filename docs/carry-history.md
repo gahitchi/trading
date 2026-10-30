@@ -14,8 +14,9 @@ Six regressions failed before the fix: resume and existing-gap repair on Binance
 Bybit perpetuals. The fixtures apply API bounds to actual opening timestamps rather than generating rows
 from the requested cursor.
 
-Funding is a separate event stream: its timestamp is the settlement time, so `last_event + 1 millisecond`
-remains the correct incremental lower bound. Binance funding requests now also send their frozen upper bound.
+Funding is a separate event stream: its timestamp is the settlement time. B1b now records successful query
+windows and advances past the last queried millisecond, including empty periods; see [funding retrieval](funding-retrieval.md).
+Binance funding requests also send their frozen upper bound.
 The snapshot cutoff for a fetch is fixed once at CLI startup. Candle requests exclude opens whose hour has
 not finished by that cutoff. No incomplete candle is stored as a final close.
 
@@ -74,8 +75,9 @@ blocker. Neither exit code is a research/strategy gate. Every coverage report ex
 `funding_schedule_verified=false`, and the CLI repeats that limitation.
 
 Funding intervals vary by contract and time. Candle continuity and finite cached funding events cannot prove
-that every expected settlement was downloaded. Historical settlement schedules, funding-hole detection and
-repair, listing/delisting availability, a full-universe data run and the B2/B3 empirical studies remain open.
+that every expected settlement was downloaded. B1b records/repairs unqueried funding windows and blocks studies
+without that retrieval evidence; it does not verify historical schedules or detect every venue-side omission.
+Historical settlement schedules, listing/delisting availability, a full-universe data run and the B2/B3 empirical studies remain open.
 The existing strategy's price-gap, holdout, trial-provenance and failed-inference safeguards still apply.
 Repairing inputs can invalidate comparison with earlier identified inputs; retain all prior attempts instead
 of erasing their history. No strategy setting, financial gate threshold, statistical estimator or risk limit

@@ -528,6 +528,10 @@ def cmd_carry_fetch(cfg, a):
                 except (URLError, TimeoutError) as e:
                     raise SystemExit(f"could not reach {venue}: {e}") from e
                 print(f"{name:34} +{added:,} rows, {total:,} cached")
+                if kind == "funding":
+                    print(
+                        "  successful API query coverage stored with rates; historical settlement schedule is still unverified"
+                    )
                 if not total:
                     print("  no cached rows: history availability is unverified")
                     incomplete = True
@@ -622,6 +626,9 @@ def cmd_carry_study(cfg, a):
     if s.min_turnover_m:
         who += f", perpetual turnover >= {s.min_turnover_m:g} M USDT a day"
     print(f"carry {a.mode}: {trade}, {who}, {st['start']} .. {st['end']} UTC")
+    print(
+        "  funding uses recorded API query coverage and actual event times; historical schedule coverage is unverified"
+    )
     if a.holdout:
         psr = cs.probabilistic_sharpe(st["sr_daily"], st["days"], st["skew"], st["kurt"])
         print(f"  HOLDOUT test from {b:%Y-%m-%d} (recorded); P(Sharpe > 0) {psr:.2f} (IID diagnostic)")
