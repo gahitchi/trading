@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 
 import pandas as pd
 
@@ -155,6 +156,7 @@ def download(
 ):
     """[(ts_ms, value)] from start_ms (inclusive) up to now_ms; [(ts_ms, close, turnover)] for closes."""
     get = patient(get, sleep)
+    symbol = quote(symbol)  # Binance lists pairs such as 币安人生USDT; a URL must be ASCII
     if (venue, market) == ("binance", "perp"):
         if kind == "funding":
             return _binance_funding(symbol, start_ms, now_ms, get, pause)
