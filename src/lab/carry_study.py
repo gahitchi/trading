@@ -1,17 +1,17 @@
 """
-Is there a funding-carry edge after costs? A rules-based, delta-neutral carry backtest on hourly history
+Is there a funding-carry edge after costs? A rules-based, paired-leg carry backtest on hourly history
 (lab.carry_data), with a time holdout, the trial log, and a Sharpe ratio deflated for every configuration tried.
 
-Two trades, each a pair of legs of equal notional:
+Two trades, each a pair of fixed-quantity legs with equal INITIAL notional:
 
 - `cash`: long Binance spot, short the Binance USD-M perpetual. Earns the perpetual's funding while it is positive
-  (shorts are paid), plus the change in basis (spot return minus perpetual return). Long spot only: shorting spot
+  (shorts are paid), plus the marked change in each held leg. Long spot only: shorting spot
   needs a margin loan whose cost isn't modelled, so negative funding is never traded.
 - `cross`: short the perpetual on the venue whose funding is higher, long it on the other (Binance vs Bybit).
   Earns the funding difference plus the change in the cross-venue price gap.
 
 Signal, decided at each rebalance hour T (every `rebalance_h` hours from 00:00 UTC, default the 8-hour funding
-times) from data up to T only: the funding the trade earned over the last `lookback_h` hours, annualized. A
+times) from data up to T only: the trailing funding rate difference over `lookback_h` hours, annualized. A
 position opens when it exceeds `entry_apr` and closes when it falls below `exit_apr` (hysteresis keeps turnover
 down). The new position trades at the close of the hour ending at T, after T's funding has settled, so it first
 earns the next settlement. Each change of position pays both legs' taker fees and slippage on the notional changed.
@@ -21,13 +21,13 @@ signal fell below `exit_apr` close, and free slots go to the highest signals abo
 perpetual traded at least `min_turnover_m` M USDT a day over the last 30 days (also known at T). This is the test
 on a whole universe, where the highest funding is usually on small altcoins.
 
-Per symbol and hour T the trade earns w(T-1h) x (long leg return - short leg return + funding difference at T),
-minus |w(T) - w(T-1h)| x cost. Returns are per unit of notional per leg; the portfolio gives every symbol an
-equal share of notional whether or not its trade is open. The cash trade also ties up the perpetual's margin
-beside the spot notional: divide by (1 + 1/leverage) for a return on capital. With `top`, each slot has 1/K of the
-notional and an empty slot earns nothing. Not modelled: rebalancing the legs
-as prices drift, liquidation of the short perpetual on a rally (the spot leg covers it only if collateral can be
-moved in time), borrow costs, funding paid on mark rather than last price, and fees that depend on volume tier.
+Each entry opens one quote-currency unit of notional per leg and retains those base quantities until exit or
+reversal. P&L uses quantity times price change; fees/slippage use actual traded notional. Each venue's funding
+is valued separately on the previous quantity using an explicit hour-end close proxy, not an exchange mark.
+The portfolio assigns equal initial-notional budgets per symbol (1/K per slot with `top`); an empty slot earns
+nothing. These are estimated P&L units, not returns on funded account capital. Equal initial notionals do not
+guarantee equal base quantities, and drift/exposure remain visible. Collateral, liquidation, rebalancing policy,
+borrow costs, event mark-price funding and volume-tier fees remain unmodelled. No B4 gate is qualified.
 
 The holdout is a time boundary shared by every carry study: the first run reserves the last HOLDOUT_DAYS of the
 history fetched by then plus everything fetched later. Research runs drop all data from the boundary on before
@@ -56,6 +56,8 @@ HOLDOUT_DAYS = 180
 PARTITION = "carry_partition.json"
 FILL_GAP_H = 3  # prices carry forward this far; a held position beyond it invalidates the study
 FUNDING_POLICY = "queried-event-time-v1"
+LEG_MODEL = "fixed-entry-notional-quantities-v1"
+FUNDING_VALUATION = "hour-end-close-proxy-v1"
 EULER_GAMMA = 0.5772156649015329
 # Liquid USDT pairs with a Binance spot market and a Bybit perpetual. Chosen today: they survived, which flatters
 # the past. Pass --symbols for others (the recorded ones without spot only work in `cross`).
@@ -86,10 +88,12 @@ class CarrySettings:
             raise ValueError("exit_apr must not exceed entry_apr")
         if self.top < 0 or (self.top and self.mode != "cash"):
             raise ValueError("top applies to the cash trade only, and must be positive")
+        if any(not math.isfinite(v) or v < 0 for v in (self.perp_fee_bps, self.spot_fee_bps, self.slippage_bps)):
+            raise ValueError("carry taker fees and slippage must be finite and nonnegative")
 
     @property
     def cost(self) -> float:
-        """Cost of changing one unit of position (both legs, one side), as a fraction of notional."""
+        """Entry cost at one initial notional unit per leg; exits use their actual held quantities."""
         other = self.spot_fee_bps if self.mode == "cash" else self.perp_fee_bps
         return (self.perp_fee_bps + other + 2 * self.slippage_bps) / 10_000
 
@@ -104,6 +108,8 @@ class Legs:
     funding: pd.Series
     turnover: pd.Series | None = None  # the Binance perpetual's traded value per hour, USDT
     funding_coverage: tuple[tuple[int, int], ...] | None = None  # inclusive UTC ns; None is unverified legacy data
+    funding_long: pd.Series | None = None  # individual venue rates, not netted notional cash flows
+    funding_short: pd.Series | None = None
 
 
 def _intersection(left, right):
@@ -124,7 +130,15 @@ def legs(root: Path, mode: str, symbol: str, end: pd.Timestamp | None = None) ->
     f_bin = cut(f_bin)
     if mode == "cash":
         spot = cut(carry_data.load(root, "binance", "spot", "close", symbol))
-        out = Legs(long=spot, short=perp, funding=f_bin, turnover=turnover, funding_coverage=coverage)
+        out = Legs(
+            long=spot,
+            short=perp,
+            funding=f_bin,
+            turnover=turnover,
+            funding_coverage=coverage,
+            funding_long=pd.Series(dtype=float, index=pd.DatetimeIndex([], tz="UTC")),
+            funding_short=f_bin,
+        )
     else:
         byb = cut(carry_data.load(root, "bybit", "perp", "close", symbol))
         f_byb, byb_coverage = carry_data.load_funding(root, "bybit", symbol)
@@ -139,6 +153,8 @@ def legs(root: Path, mode: str, symbol: str, end: pd.Timestamp | None = None) ->
             funding=diff,
             turnover=turnover,
             funding_coverage=_intersection(coverage, byb_coverage),
+            funding_long=f_byb,
+            funding_short=f_bin,
         )
     return None if out.long.empty or out.short.empty else out
 
@@ -153,6 +169,8 @@ def truncate(lg: Legs, end: pd.Timestamp) -> Legs:
     return Legs(
         *(None if s is None else s[s.index < end] for s in (lg.long, lg.short, lg.funding, lg.turnover)),
         funding_coverage=coverage,
+        funding_long=None if lg.funding_long is None else lg.funding_long[lg.funding_long.index < end],
+        funding_short=None if lg.funding_short is None else lg.funding_short[lg.funding_short.index < end],
     )
 
 
@@ -165,17 +183,29 @@ def hourly(lg: Legs) -> pd.DataFrame | None:
     if end <= start:
         return None
     grid = pd.date_range(start, end, freq="h")
+    for series in (lg.long, lg.short):
+        carry_data._valid_cache(series, "close")
     closes = [s.groupby(s.index.floor("h")).last().reindex(grid) for s in (lg.long, lg.short)]
-    rets = [c.ffill(limit=FILL_GAP_H).pct_change(fill_method=None) for c in closes]
-    carry_data._valid_cache(lg.funding, "funding")
+    marks = [c.ffill(limit=FILL_GAP_H) for c in closes]
+    rets = [c.pct_change(fill_method=None) for c in marks]
+    if (lg.funding_long is None) != (lg.funding_short is None):
+        raise ValueError("both individual funding legs are required together")
+    rates = (
+        (pd.Series(dtype=float, index=pd.DatetimeIndex([], tz="UTC")), lg.funding)
+        if lg.funding_long is None
+        else (lg.funding_long, lg.funding_short)
+    )
+    for series in rates:
+        carry_data._valid_cache(series, "funding")
     # Hour T contains settlements in (T-1h, T]. Do not reveal a delayed event before its timestamp.
-    funding = lg.funding.groupby(lg.funding.index.ceil("h")).sum().reindex(grid, fill_value=0.0)
+    rates = [series.groupby(series.index.ceil("h")).sum().reindex(grid, fill_value=0.0) for series in rates]
     times = grid.as_unit("ns").asi8
     queried = np.zeros(len(grid), dtype=bool)
     # API event timestamps have millisecond resolution; the left-open hour starts at T-1h+1ms.
     for a, b in lg.funding_coverage or ():
         queried |= (times - 3_600_000_000_000 + 1_000_000 >= a) & (times <= b)
-    funding = funding.where(queried)
+    rates = [rate.where(queried) for rate in rates]
+    funding = rates[1] - rates[0]
     if lg.turnover is not None and len(lg.turnover):
         hourly_value = lg.turnover.groupby(lg.turnover.index.floor("h")).sum().reindex(grid, fill_value=0.0)
         turnover = hourly_value.rolling(30 * 24, min_periods=30 * 24).sum() / 30
@@ -185,6 +215,10 @@ def hourly(lg: Legs) -> pd.DataFrame | None:
         {
             "r_long": rets[0],
             "r_short": rets[1],
+            "price_long": marks[0],
+            "price_short": marks[1],
+            "rate_long": rates[0],
+            "rate_short": rates[1],
             "funding": funding,
             "funding_queried": queried,
             "tradable": closes[0].notna() & closes[1].notna() & rets[0].notna() & rets[1].notna(),
@@ -194,7 +228,7 @@ def hourly(lg: Legs) -> pd.DataFrame | None:
 
 
 def signal(h: pd.DataFrame, s: CarrySettings) -> np.ndarray:
-    """The funding the trade earned over the last lookback_h hours up to and including T, % a year."""
+    """Trailing funding RATE difference up to T, annualized; not the held quantities' funding cash flow."""
     x = h["funding"].rolling(s.lookback_h, min_periods=s.lookback_h).sum() * (HOURS_PER_YEAR / s.lookback_h)
     return (x * 100).to_numpy()
 
@@ -261,36 +295,64 @@ def top_positions(hs: dict[str, pd.DataFrame], s: CarrySettings) -> dict[str, pd
 def backtest(
     h: pd.DataFrame, s: CarrySettings, eval_from: pd.Timestamp | None = None, w: pd.Series | None = None
 ) -> pd.DataFrame:
-    """Hourly P&L as a fraction of notional: basis, funding, cost, net, and the position w(T) (computed here
-    unless given). With eval_from, only hours from it on, as if the trade started flat just before it."""
+    """Fixed quantities from equal initial notional per leg. Funding uses an explicit close-price proxy.
+
+    No collateral account, mark-price funding or liquidation is modelled; this ledger cannot qualify B4.
+    """
     w = positions(h, s) if w is None else w
-    prev = w.shift(1, fill_value=0.0)
+    if not w.index.equals(h.index) or not w.isin([0.0, 1.0] if s.mode == "cash" else [-1.0, 0.0, 1.0]).all():
+        raise ValueError("carry position path must match the hourly grid and use supported directions")
     if eval_from is not None:
         w = w[w.index >= eval_from]
-        prev = prev.reindex(w.index).copy()
         h = h.reindex(w.index)
-        if len(prev):
-            prev.iloc[0] = 0.0  # evaluation starts flat; no earlier exposure or settlement is earned
+    prev = w.shift(1, fill_value=0.0)  # evaluation starts flat, with fresh quantities at its first entry
     invalid = (prev != 0) & ~np.isfinite(h[["r_long", "r_short"]]).all(axis=1)
     if invalid.any():
         first = invalid.index[invalid][0]
         raise ValueError(
             f"cannot value held carry position at {first}: leg prices exceed the {FILL_GAP_H}-hour carry-forward limit"
         )
-    invalid_funding = (prev != 0) & ~np.isfinite(h["funding"])
+    required = {"price_long", "price_short", "rate_long", "rate_short"}
+    if not required <= set(h.columns):
+        raise ValueError("carry ledger requires individual leg prices and funding rates")
+    changed = w != prev
+    bad_price = ~np.isfinite(h[["price_long", "price_short"]]).all(axis=1) | (
+        h[["price_long", "price_short"]] <= 0
+    ).any(axis=1)
+    if (((w != 0) | (prev != 0)) & bad_price).any():
+        raise ValueError("cannot value held carry position: leg prices must be finite and positive")
+    if (changed & ~h["tradable"]).any():
+        raise ValueError("cannot trade carry position without usable prices on both legs")
+    invalid_funding = (prev != 0) & ~np.isfinite(h[["rate_long", "rate_short"]]).all(axis=1)
     if invalid_funding.any():
         raise ValueError(
             f"cannot value held carry position: funding retrieval coverage missing at {invalid_funding.index[invalid_funding][0]}"
         )
-    out = pd.DataFrame(
-        {
-            "w": w,
-            "basis": (prev * (h["r_long"] - h["r_short"])).where(prev != 0, 0.0),
-            "funding": (prev * h["funding"]).where(prev != 0, 0.0),
-            "cost": (w - prev).abs() * s.cost,
-        }
-    )
+    entry = changed & (w != 0)
+    prices = [h["price_long"], h["price_short"]]
+    quantities = [
+        (direction * w / price).where(entry).ffill().where(w != 0, 0.0)
+        for direction, price in zip((1, -1), prices, strict=True)
+    ]
+    old = [quantity.shift(1, fill_value=0.0) for quantity in quantities]
+    fees = ((s.spot_fee_bps if s.mode == "cash" else s.perp_fee_bps) + s.slippage_bps, s.perp_fee_bps + s.slippage_bps)
+    out = pd.DataFrame({"w": w})
+    for name, price, rate, qty, previous, fee in zip(
+        ("long", "short"), prices, (h["rate_long"], h["rate_short"]), quantities, old, fees, strict=True
+    ):
+        traded = (qty - previous).abs()
+        out[f"qty_{name}"] = qty
+        out[f"notional_{name}"] = (qty * price).where(qty != 0, 0.0)
+        out[f"basis_{name}"] = (previous * price.diff()).where(previous != 0, 0.0)
+        out[f"funding_{name}"] = (-previous * price * rate).where(previous != 0, 0.0)
+        out[f"turnover_{name}"] = (traded * price).where(traded != 0, 0.0)
+        out[f"cost_{name}"] = out[f"turnover_{name}"] * fee / 10_000
+    for name in ("basis", "funding", "cost"):
+        out[name] = out[f"{name}_long"] + out[f"{name}_short"]
     out["net"] = out["basis"] + out["funding"] - out["cost"]
+    if not np.isfinite(out).all().all():
+        raise ValueError("nonfinite carry leg ledger; evaluation is unavailable")
+    out.attrs.update(leg_model=LEG_MODEL, funding_valuation=FUNDING_VALUATION)
     return out
 
 
@@ -328,6 +390,47 @@ def expected_max_sharpe(trial_srs: list[float]) -> float:
     z = NormalDist().inv_cdf
     sd = float(np.std(trial_srs, ddof=1))
     return sd * ((1 - EULER_GAMMA) * z(1 - 1 / n) + EULER_GAMMA * z(1 - 1 / (n * math.e)))
+
+
+def leg_ledger_summary(pnl: dict[str, pd.DataFrame]) -> dict:
+    """Auditable quantities, marked exposure and per-leg cash flows; never a collateral/solvency pass."""
+    details = {}
+    for symbol, frame in pnl.items():
+        required = {
+            f"{name}_{leg}"
+            for name in ("qty", "notional", "basis", "funding", "cost", "turnover")
+            for leg in ("long", "short")
+        }
+        if (
+            frame.empty
+            or frame.attrs.get("leg_model") != LEG_MODEL
+            or frame.attrs.get("funding_valuation") != FUNDING_VALUATION
+            or not required <= set(frame.columns)
+        ):
+            details[symbol] = {"available": False, "reason": "missing identified leg ledger"}
+            continue
+        terminal = frame.iloc[-1]
+        details[symbol] = {
+            "available": True,
+            "terminal": {
+                k: float(terminal[k]) for k in ("w", "qty_long", "qty_short", "notional_long", "notional_short")
+            },
+            "peak_gross_notional": float((frame["notional_long"].abs() + frame["notional_short"].abs()).max()),
+            "peak_abs_net_notional": float((frame["notional_long"] + frame["notional_short"]).abs().max()),
+            "peak_abs_net_base_qty": float((frame["qty_long"] + frame["qty_short"]).abs().max()),
+            "cashflows": {
+                k: float(frame[k].sum()) for k in sorted(required) if not k.startswith(("qty_", "notional_"))
+            },
+        }
+    return {
+        "model": LEG_MODEL,
+        "funding_valuation": FUNDING_VALUATION,
+        "unit": "one quote-currency unit of initial notional per leg at each entry",
+        "available": bool(details) and all(v["available"] for v in details.values()),
+        "qualified": False,
+        "limitation": "Estimated positions/P&L only; mark-price funding, collateral, liquidation and rebalancing policy remain unmodelled.",
+        "per_symbol": details,
+    }
 
 
 def summary(pnl: dict[str, pd.DataFrame], slots: int = 0) -> dict:
@@ -369,6 +472,7 @@ def summary(pnl: dict[str, pd.DataFrame], slots: int = 0) -> dict:
         "kurt": kurt,
         "return_stats": return_stats,
         "daily_inference": daily_inference(return_stats),
+        "leg_ledger": leg_ledger_summary(pnl),
         "funding_apr": part["funding"] / years * 100,
         "basis_apr": part["basis"] / years * 100,
         "cost_apr": part["cost"] / years * 100,
@@ -381,6 +485,7 @@ def summary(pnl: dict[str, pd.DataFrame], slots: int = 0) -> dict:
 
 def per_symbol(pnl: dict[str, pd.DataFrame]) -> pd.DataFrame:
     rows = []
+    ledger = leg_ledger_summary(pnl)["per_symbol"]
     for sym, v in pnl.items():
         years = len(v) / HOURS_PER_YEAR
         opened = int(((v["w"] != 0) & (v["w"].shift(1, fill_value=0.0) != v["w"])).sum())
@@ -395,6 +500,7 @@ def per_symbol(pnl: dict[str, pd.DataFrame]) -> pd.DataFrame:
                 "cost_bps": v["cost"].sum() * 1e4,
                 "net_bps": v["net"].sum() * 1e4,
                 "net_apr_%": v["net"].sum() / years * 100 if years else math.nan,
+                "peak_gross_notional": ledger[sym].get("peak_gross_notional", math.nan),
             }
         )
     return pd.DataFrame(rows)
@@ -421,7 +527,7 @@ def run(
         if lg is not None and limit is not None:
             lg = truncate(lg, limit)
         if evidence is not None:
-            for name in ("long", "short", "funding", "turnover"):
+            for name in ("long", "short", "funding", "turnover", "funding_long", "funding_short"):
                 evidence.series(f"{sym}/{name}", getattr(lg, name) if lg is not None else None)
         h = hourly(lg) if lg is not None and len(lg.long) and len(lg.short) else None
         if h is None:
@@ -535,7 +641,13 @@ def trial_sharpes(results_dir: Path, kind: str, instrument: str) -> list[float]:
 
 
 def params_of(s: CarrySettings, symbols: list[str]) -> dict:
-    p = {**asdict(s), "symbols": sorted(symbols), "funding_policy": FUNDING_POLICY}
+    p = {
+        **asdict(s),
+        "symbols": sorted(symbols),
+        "funding_policy": FUNDING_POLICY,
+        "leg_model": LEG_MODEL,
+        "funding_valuation": FUNDING_VALUATION,
+    }
     for k in ("top", "min_turnover_m"):  # omit these defaults; always fingerprint the funding policy
         if p[k] == CarrySettings.__dataclass_fields__[k].default:
             del p[k]

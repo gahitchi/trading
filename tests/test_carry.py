@@ -267,10 +267,13 @@ def test_research_never_reads_the_holdout_and_the_holdout_starts_flat(tmp_path):
     s = cs.CarrySettings(lookback_h=24, entry_apr=5.0)
     research, _ = cs.run(root, ["BTCUSDT"], s, b)
     assert research["BTCUSDT"].index[-1] < b
-    market(root, days=400, rate=-0.01, seed=7)  # rewrite everything: research before b must not change
-    write(root, "binance", "perp", "funding", "BTCUSDT", pd.Series(1e-4, index=pd.date_range(T0, b, freq="8h")))
+    # Funding cash flows now depend on held quantities and prices. Preserve ALL research inputs while
+    # changing the held-out rates, rather than rewriting the research prices as the old test did.
+    rates = cd.load(root, "binance", "perp", "funding", "BTCUSDT")
+    rates.loc[rates.index >= b] = -0.01
+    write(root, "binance", "perp", "funding", "BTCUSDT", rates)
     again, _ = cs.run(root, ["BTCUSDT"], s, b)
-    assert again["BTCUSDT"]["funding"].sum() == pytest.approx(research["BTCUSDT"]["funding"].sum())
+    pd.testing.assert_frame_equal(again["BTCUSDT"], research["BTCUSDT"])
     market(root, days=400)
     hold, _ = cs.run(root, ["BTCUSDT"], s, b, holdout=True)
     first = hold["BTCUSDT"].iloc[0]

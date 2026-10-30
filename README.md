@@ -213,21 +213,27 @@ there is no assume-complete override. Query coverage does not independently veri
 The default basket is ten liquid USDT pairs (BTC ETH SOL XRP BNB DOGE ADA LINK AVAX LTC). They were picked today,
 so the past is flattered by their survival.
 
-`lab carry study` backtests a delta-neutral trade per symbol with equal notional on each leg: `--mode cash` is long
+`lab carry study` estimates paired-leg P&L per symbol with equal INITIAL notional on each leg: `--mode cash` is long
 Binance spot and short the Binance perpetual while funding is positive, `--mode cross` shorts the perpetual on
-whichever of Binance and Bybit pays more funding and buys it on the other. At every funding time (00, 08, 16 UTC)
+whichever of Binance and Bybit pays more funding and buys it on the other. At each rebalance hour (default 00, 08, 16 UTC)
 it looks at the funding the trade would have earned over the last `--lookback-h` hours, annualized, opens above
 `--entry-apr` and closes below `--exit-apr`. A new position first earns the next settlement, and every change pays
-both legs' taker fees (5 bps perpetual, 10 bps spot) and `--slippage-bps`. It reports the portfolio's net return a
+both legs' taker fees (5 bps perpetual, 10 bps spot) and `--slippage-bps` on their actual traded notional.
+The [leg ledger](docs/carry-leg-ledger.md) keeps base quantities fixed until exit/reversal, marks their price
+changes, values each venue's funding separately and records terminal quantities, exposure drift and per-leg
+cash flows in the trial result. Equal entry notional does not guarantee equal base quantities or exact delta
+neutrality. Funding valuation explicitly uses an hourly close proxy, not the historical settlement mark.
+It reports the portfolio's estimated normalized P&L a
 year split into funding, basis and costs, Sharpe, a Newey-West t-statistic (positions last days, so daily returns
 are autocorrelated), drawdown, an always-in benchmark for `cash`, and each symbol's P&L. Not modelled: leg
-rebalancing, liquidation of the short perpetual in a rally, spot borrow, volume-tier fees.
+collateral/financing, liquidation of the short perpetual in a rally, rebalancing policy, spot borrow,
+event mark-price funding and volume-tier fees. Economics remain unqualified; these estimates are not account-capital returns.
 
 On the majors the cash trade earns about what cash does, so the next place to look is the whole market, where
 the highest funding is on small altcoins. `lab carry fetch --all` downloads every pair that trades today as both a
 Binance perpetual and a Binance spot pair (Binance only; this takes hours, and an interrupted run retains
 completed series but may repeat the download interrupted before saving). `lab carry study --all --top 10 --min-turnover 20` then lets the symbols compete for 10 equal slots: at each
-funding time it closes positions whose funding fell below `--exit-apr` and fills free slots with the highest funding
+rebalance it closes positions whose funding fell below `--exit-apr` and fills free slots with the highest funding
 above `--entry-apr` among perpetuals that traded at least 20 M USDT a day over the last 30 days, all known at that
 time. Today's list misses pairs delisted since, which flatters the result; thin altcoins also cost more to trade
 than the majors, so raise `--slippage-bps`.

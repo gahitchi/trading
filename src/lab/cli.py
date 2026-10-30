@@ -600,7 +600,17 @@ def cmd_carry_study(cfg, a):
             result = nullable_numbers(
                 {
                     k: st[k]
-                    for k in ("days", "apr", "sharpe", "sr_daily", "t_nw", "max_dd", "return_stats", "daily_inference")
+                    for k in (
+                        "days",
+                        "apr",
+                        "sharpe",
+                        "sr_daily",
+                        "t_nw",
+                        "max_dd",
+                        "return_stats",
+                        "daily_inference",
+                        "leg_ledger",
+                    )
                 }
             )
             first, last = min(v.index[0] for v in pnl.values()), max(v.index[-1] for v in pnl.values())
@@ -626,6 +636,8 @@ def cmd_carry_study(cfg, a):
     if s.min_turnover_m:
         who += f", perpetual turnover >= {s.min_turnover_m:g} M USDT a day"
     print(f"carry {a.mode}: {trade}, {who}, {st['start']} .. {st['end']} UTC")
+    print("  leg quantities stay fixed between entries/exits; funding valuation uses an hour-end close proxy")
+    print("  collateral, liquidation and rebalancing policy are unmodelled; economics remain unqualified")
     print(
         "  funding uses recorded API query coverage and actual event times; historical schedule coverage is unverified"
     )
@@ -667,10 +679,11 @@ def cmd_carry_study(cfg, a):
     print(table.to_string(index=False, float_format=lambda x: f"{x:.1f}"))
     share = f"1/{s.top} of the notional per slot" if s.top else "equal notional per symbol"
     print(
-        f"Returns per unit of notional per leg, {share}, after taker fees and slippage on both"
+        f"Estimated P&L per unit of initial notional per leg, {share}, after taker fees and slippage on both"
         " legs. Deflated Sharpe is a research diagnostic; trial correlation and serial dependence need separate"
         " qualification before any gate can pass."
     )
+    print(f"  leg ledger summary: {cfg.results_dir / 'research_attempts' / (trial_id + '.json')}")
     return 0
 
 

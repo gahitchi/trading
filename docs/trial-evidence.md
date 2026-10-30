@@ -57,7 +57,8 @@ modification times or future data files. Its method is `sha256-canonical-records
 3. Carry hashes the normalized long, short, funding and turnover series after the existing window truncation,
    before hourly study calculations. Each record contains UTC nanoseconds and `float.hex()` values, including
    explicit nonfinite values. A one-ULP value change is distinguishable. Absent series have an explicit sentinel.
-   Cross-venue funding is the derived funding difference consumed by the study, not an archive of both raw files.
+   B4a retains the derived rate difference and both bounded venue funding series: fixed quantities require
+   separately valued leg cash flows, so a difference alone no longer identifies the consumed funding inputs.
 4. Each stream records count, timestamp bounds, completion status and SHA-256; the ordered stream manifest is
    hashed again. A failure while hashing retains a partial stream. A hard exit can leave input identity unknown.
 
