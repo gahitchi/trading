@@ -349,3 +349,16 @@ def test_cli_top_k_on_a_universe(tmp_path, capsys):
     assert lab_main(run) == 0
     trials = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
     assert "top" not in trials[-1]["params"]  # defaults keep the fingerprints of earlier trials
+
+
+def test_symbols_with_chinese_names_are_fetched():
+    urls = []
+
+    def get(url):
+        url.encode("ascii")  # what urllib requires
+        urls.append(url)
+        return []
+
+    t0 = int(T0.value // 1_000_000)
+    assert cd.download("binance", "perp", "funding", "币安人生USDT", t0, t0 + H, get=get, pause=lambda: None) == []
+    assert "symbol=%E5%B8%81%E5%AE%89%E4%BA%BA%E7%94%9FUSDT" in urls[0]
