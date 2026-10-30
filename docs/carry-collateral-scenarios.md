@@ -102,6 +102,10 @@ execution/losses are missing. So are transfer latency/costs, cash financing, reb
 and survivorship sensitivity. A funded strategy simulator must stop or explicitly model execution at a breach;
 this diagnostic does neither and cannot qualify B4, B5 or the Phase 1 exit gate.
 
+The subsequent [B4c mark-history downloader](carry-mark-history.md) stores separate hourly perpetual mark
+OHLC as an input prerequisite. This B4b diagnostic still uses its declared trade-close proxy: mark ingestion
+alone does not integrate causal mark valuation, recover exact funding-event marks or establish margin tiers.
+
 Primary references for the distinction: Bybit's [maintenance margin description](https://www.bybit.com/en/help-center/article/Maintenance-Margin-USDT-Contract)
 uses mark-based position value and tier deductions, and its [liquidation process](https://www.bybit.com/en/help-center/article/UTA-Trading-Rules-Liquidation-Process)
 depends on account mode and liquidation procedures. Those venue mechanisms are not reproduced by a constant

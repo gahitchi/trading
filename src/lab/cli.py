@@ -552,6 +552,69 @@ def cmd_carry_fetch(cfg, a):
     return 1 if incomplete else 0
 
 
+def cmd_carry_fetch_marks(cfg, a):
+    from lab import carry_data, carry_marks
+    from lab.persistence import atomic_json
+
+    root = cfg.data_dir / "carry"
+    try:
+        since = pd.Timestamp(a.since)
+        wall_clock = pd.Timestamp.now(tz="UTC")
+        now = pd.Timestamp(a.until) if a.until else wall_clock
+        since = since.tz_localize("UTC") if since.tzinfo is None else since.tz_convert("UTC")
+        now = now.tz_localize("UTC") if now.tzinfo is None else now.tz_convert("UTC")
+        carry_data._window(since, now)
+        if now > wall_clock:
+            raise ValueError("--until cannot be in the future; only closed mark candles may be cached")
+        symbols = list(dict.fromkeys(s.upper() for s in a.symbols))
+        for venue in a.venues:
+            for symbol in symbols:
+                carry_marks.path_of(root, venue, symbol)  # validate every identity before any download
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    incomplete = False
+    for symbol in symbols:
+        for venue in a.venues:
+            path = root / f"{venue}-perp-mark-coverage-{symbol}.json"
+            try:
+                added, total = carry_marks.update(root, venue, symbol, since, now)
+                report = carry_marks.coverage(root, venue, symbol, since, now)
+                atomic_json(path, report)
+            except (ValueError, OSError) as e:
+                print(f"{symbol} {venue} mark history unavailable ({e}); rerun to retry")
+                try:
+                    atomic_json(
+                        path,
+                        {
+                            "model": carry_marks.MODEL,
+                            "venue": venue,
+                            "symbol": symbol,
+                            "since": since.isoformat(),
+                            "through": now.floor("h").isoformat(),
+                            "state": "fetch-error",
+                            "error": str(e),
+                            "complete_requested_window": False,
+                            "listing_verified": False,
+                            "funding_event_marks_verified": False,
+                            "liquidation_qualified": False,
+                        },
+                    )
+                except OSError as report_error:
+                    print(f"  could not save mark coverage error report: {report_error}")
+                incomplete = True
+                continue
+            print(
+                f"{symbol} {venue} mark OHLC: +{added:,} rows, {total:,} cached; "
+                f"{report['state']}, {report['missing_hours']:,} missing requested hours; details: {path}"
+            )
+            if report["leading_unverified_hours"]:
+                print(f"  {report['leading_unverified_hours']:,} leading hours have unverified availability")
+            incomplete |= not report["complete_requested_window"]
+    print("Hourly mark candles cached separately from traded prices; studies still use their declared close proxies.")
+    print("Exact funding-event marks, historical margin tiers and liquidation modelling remain unqualified.")
+    return 1 if incomplete else 0
+
+
 def cmd_carry_study(cfg, a):
     from lab import carry_data
     from lab import carry_study as cs
@@ -874,6 +937,12 @@ def build_parser() -> argparse.ArgumentParser:
     cf.add_argument("--all", action="store_true", help="every pair with a Binance perpetual and spot market today")
     cf.add_argument("--venues", nargs="+", choices=VENUES, help="default: all (binance with --all)")
     cf.set_defaults(fn=cmd_carry_fetch)
+    cm = csub.add_parser("fetch-marks", help="cache separate hourly perpetual mark OHLC for B4 research")
+    cm.add_argument("--symbols", nargs="+", default=list(CARRY_SYMBOLS), help="USDT perpetual pairs")
+    cm.add_argument("--venues", nargs="+", choices=VENUES, default=list(VENUES))
+    cm.add_argument("--since", default="2023-01-01", help="UTC start (default 2023-01-01)")
+    cm.add_argument("--until", help="fixed UTC cutoff (default: now); unfinished candles are excluded")
+    cm.set_defaults(fn=cmd_carry_fetch_marks)
     cst = csub.add_parser("study", help="does a carry trade pay after costs? (holdout-guarded, logged)")
     cst.add_argument(
         "--mode", choices=CARRY_MODES, default="cash", help="cash: spot vs perpetual; cross: Binance vs Bybit"

@@ -213,6 +213,13 @@ there is no assume-complete override. Query coverage does not independently veri
 The default basket is ten liquid USDT pairs (BTC ETH SOL XRP BNB DOGE ADA LINK AVAX LTC). They were picked today,
 so the past is flattered by their survival.
 
+`lab carry fetch-marks --symbols BTCUSDT --venues binance bybit --since 2023-01-01` separately caches
+[hourly perpetual mark OHLC](docs/carry-mark-history.md) for the pending solvency model. It validates native
+pages and OHLC bounds, repairs requested gaps, publishes coherent atomic snapshots and saves coverage/error
+reports. `--until` fixes a historical cutoff; future cutoffs are rejected. Auxiliary marks do not move the
+current study's holdout boundaries or replace its declared funding/collateral close proxies. Exact-event
+funding marks, historical margin rules and liquidation execution still need implementation and evidence.
+
 `lab carry study` estimates paired-leg P&L per symbol with equal INITIAL notional on each leg: `--mode cash` is long
 Binance spot and short the Binance perpetual while funding is positive, `--mode cross` shorts the perpetual on
 whichever of Binance and Bybit pays more funding and buys it on the other. At each rebalance hour (default 00, 08, 16 UTC)

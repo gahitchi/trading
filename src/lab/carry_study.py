@@ -576,10 +576,13 @@ def _now() -> str:
 
 def _last_cached(root: Path) -> pd.Timestamp | None:
     last = None
-    for p in Path(root).glob("*.parquet"):
-        ts = pd.to_datetime(pd.read_parquet(p, columns=["ts"])["ts"], utc=True)
-        if len(ts):
-            last = ts.max() if last is None else max(last, ts.max())
+    # Auxiliary mark history is not consumed by this study and must not move its holdout boundaries/cutoffs.
+    for (venue, market), kinds in carry_data.SERIES.items():
+        for kind in (*kinds, "turnover"):
+            for p in Path(root).glob(f"{venue}-{market}-{kind}-*.parquet"):
+                ts = pd.to_datetime(pd.read_parquet(p, columns=["ts"])["ts"], utc=True)
+                if len(ts):
+                    last = ts.max() if last is None else max(last, ts.max())
     return last
 
 
