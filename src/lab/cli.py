@@ -508,6 +508,117 @@ def cmd_carry_release(cfg, a):
     return 0
 
 
+def cmd_crash_fetch(cfg, a):
+    from datetime import date
+    from urllib.error import HTTPError, URLError
+
+    from lab import crash_data
+
+    root = cfg.data_dir / "crash"
+    since = date.fromisoformat(a.since)
+    for sym in [x.upper() for x in a.symbols]:
+        for kind in crash_data.KINDS:
+            try:
+                added, total = crash_data.update(root, kind, sym, since)
+            except HTTPError as e:
+                print(f"{sym} {kind:6} not available ({e}): skipped")
+                continue
+            except (URLError, TimeoutError) as e:
+                raise SystemExit(f"could not reach data.binance.vision: {e}") from e
+            print(f"{sym} {kind:6} +{added:,} files, {total:,} cached")
+    print(f"cached in {root}; next: lab crash study")
+    return 0
+
+
+def cmd_crash_study(cfg, a):
+    import numpy as np
+
+    from lab import crash_data
+    from lab import crash_study as cs
+    from lab.carry_study import trial_sharpes
+    from lab.persistence import nullable_numbers
+
+    root = cfg.data_dir / "crash"
+    symbols = crash_data.cached_symbols(root) if a.all else [x.upper() for x in a.symbols]
+    try:
+        s = cs.CrashSettings.preset(
+            a.mode, drop_pct=a.drop_pct, window_min=a.window_min, vol_mult=a.vol_mult, oi_pct=a.oi_pct,
+            tp_pct=a.tp_pct, sl_pct=a.sl_pct, hold_min=a.hold_min, delay_min=a.delay_min, fee_bps=a.fee_bps,
+            slippage_bps=a.slippage_bps, vol_target=a.vol_target,
+        )  # fmt: skip
+        b = cs.boundary(cfg.results_dir, root)
+        params = cs.params_of(s, symbols)
+        key = f"crash-{a.mode}"
+        if a.holdout:
+            fast_research.check_holdout(cfg.results_dir, key, params, int(b.value), a.again or "")
+        elif a.again:
+            raise SystemExit("--again only applies with --holdout")
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    r = cs.run(root, symbols, s, b, holdout=a.holdout)
+    if not r.trades:
+        raise SystemExit(f"no crash data for {' '.join(symbols)} {'after' if a.holdout else 'before'} {b:%Y-%m-%d}")
+    st = cs.summary(r.trades, r.start, r.end)
+    keys = ("days", "trades", "mean_bps", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")
+    result = nullable_numbers({k: st[k] for k in keys})
+    if a.holdout:
+        fast_research.record_holdout(cfg.results_dir, key, params, int(b.value), result, a.again or "")
+    n = fast_research.register_trial(
+        cfg.results_dir, "crash-study", key, params, (int(r.start.value), int(r.end.value)), result,
+        holdout=a.holdout,
+    )  # fmt: skip
+    trade = {"wick": "buy the flush, sell the bounce", "breakdown": "short the sell-off, ride it"}[a.mode]
+    print(f"crash {a.mode} ({trade}): {len(r.trades)} symbol(s), {st['start']} .. {st['end']} UTC")
+    oi_rule = f"OI {'fell' if a.mode == 'wick' else 'rose'} {'>= ' + format(s.oi_pct, 'g') + '%' if s.oi_pct else ''}"
+    print(
+        f"  signal: -{s.drop_pct:g}% in {s.window_min} min, volume >= {s.vol_mult:g}x usual, {oi_rule.strip()}; "
+        f"enter {s.delay_min} min later; target {s.tp_pct:g}%, stop {s.sl_pct:g}%, hold <= {s.hold_min} min; "
+        f"costs {s.cost * 1e4:g} bps a round trip; sized to {s.vol_target:.0%} vol"
+    )
+    if a.holdout:
+        psr = cs.probabilistic_sharpe(st["sr_daily"], st["days"], st["skew"], st["kurt"])
+        print(f"  HOLDOUT test from {b:%Y-%m-%d} (recorded); P(Sharpe > 0) {psr:.2f}")
+    else:
+        srs = trial_sharpes(cfg.results_dir, "crash-study", key)
+        print(
+            f"  research data only (holdout from {b:%Y-%m-%d}); configurations tried: {n}; "
+            f"deflated Sharpe {cs.deflated_sharpe(st, srs):.2f} (the chance the edge is real, after {n} tries)"
+        )
+    if r.missing:
+        print(f"  no data, left out: {' '.join(r.missing)}")
+    print(
+        f"  {st['trades']} trades on {st['trade_days']} days: mean {st['mean_bps']:+.1f} bps net, median "
+        f"{st['median_bps']:+.1f}, win {st['win_%']:.0f}%; portfolio {st['apr']:+.2f}% a year, Sharpe "
+        f"{st['sharpe']:+.2f}, t (Newey-West, daily) {st['t_nw']:+.2f}, max drawdown {st['max_dd']:.2f}%"
+    )
+    bs = cs.summary(r.baseline, r.start, r.end)
+    print(
+        f"  baseline, same exits entered daily at 00:00 UTC: {bs['trades']} trades, mean {bs['mean_bps']:+.1f} bps"
+        f" net, {bs['apr']:+.2f}% a year, Sharpe {bs['sharpe']:+.2f}"
+    )
+    side = "in the trade's direction"
+    fwd = "  ".join(f"{m}m {np.mean(x) * 1e4:+.0f} (n {len(x)})" if len(x) else f"{m}m -" for m, x in r.forward.items())
+    print(f"  gross move after each crash's first signal, bps {side}, before exits and costs: {fwd}")
+    table = cs.per_symbol(r.trades)
+    print(table.to_string(index=False, float_format=lambda x: f"{x:.1f}"))
+    print(
+        "Taker fills both sides, fees and slippage included. The deflated Sharpe discounts the best of the"
+        " configurations tried; under 0.95 the edge is not established."
+    )
+    return 0
+
+
+def cmd_crash_release(cfg, a):
+    from lab import crash_study as cs
+
+    try:
+        old, new = cs.release(cfg.results_dir, cfg.data_dir / "crash", a.reason)
+    except ValueError as e:
+        raise SystemExit(str(e)) from e
+    print(f"crash data {old:%Y-%m-%d} .. {new:%Y-%m-%d} UTC is now research data; the new holdout starts there")
+    return 0
+
+
 def cmd_kill(cfg, a):
     from lab.notify import Notifier
     from lab.safety import set_kill_switch
@@ -678,6 +789,37 @@ def build_parser() -> argparse.ArgumentParser:
     crl = csub.add_parser("release", help="turn the carry holdout into research data; later data is the new holdout")
     crl.add_argument("--reason", required=True, help="recorded with the new boundary")
     crl.set_defaults(fn=cmd_carry_release)
+
+    from lab.crash_study import MODES as CRASH_MODES
+    from lab.crash_study import SYMBOLS as CRASH_SYMBOLS
+
+    crash = sub.add_parser("crash", help="crash research: trade sell-offs on 1-minute history (data.binance.vision)")
+    xsub = crash.add_subparsers(dest="sub", required=True)
+    xf = xsub.add_parser("fetch", help="download or update 1-minute klines and open interest into <data>/crash")
+    xf.add_argument("--symbols", nargs="+", default=list(CRASH_SYMBOLS), help="Binance USD-M perpetuals")
+    xf.add_argument("--since", default="2022-01-01", help="UTC start date (default 2022-01-01)")
+    xf.set_defaults(fn=cmd_crash_fetch)
+    xs = xsub.add_parser("study", help="does trading crashes pay after costs? (holdout-guarded, logged)")
+    xs.add_argument("--mode", choices=CRASH_MODES, default="wick", help="wick: buy the flush; breakdown: short it")
+    xs.add_argument("--symbols", nargs="+", default=list(CRASH_SYMBOLS), help="Binance USD-M perpetuals")
+    xs.add_argument("--all", action="store_true", help="every symbol fetched (instead of --symbols)")
+    xs.add_argument("--drop-pct", type=float, help="fall that makes a crash, %% (preset per mode)")
+    xs.add_argument("--window-min", type=int, help="minutes the fall happens in (preset: 60)")
+    xs.add_argument("--vol-mult", type=float, help="volume of the window vs usual, times (preset: 3)")
+    xs.add_argument("--oi-pct", type=float, help="open interest change, %%: wick needs a fall, breakdown a rise")
+    xs.add_argument("--tp-pct", type=float, help="target, %% (0: none)")
+    xs.add_argument("--sl-pct", type=float, help="stop, %% (0: none)")
+    xs.add_argument("--hold-min", type=int, help="time exit, minutes")
+    xs.add_argument("--delay-min", type=int, default=1, help="minutes between signal and entry (default 1)")
+    xs.add_argument("--fee-bps", type=float, default=5.0, help="taker fee per side, bps (default 5)")
+    xs.add_argument("--slippage-bps", type=float, default=5.0, help="per side, bps (default 5)")
+    xs.add_argument("--vol-target", type=float, default=0.5, help="volatility each trade is sized to (default 0.5)")
+    xs.add_argument("--holdout", action="store_true", help="the one-time test on the reserved holdout data")
+    xs.add_argument("--again", metavar="REASON", help="repeat a holdout test; the reason is recorded")
+    xs.set_defaults(fn=cmd_crash_study)
+    xr = xsub.add_parser("release", help="turn the crash holdout into research data; later data is the new holdout")
+    xr.add_argument("--reason", required=True, help="recorded with the new boundary")
+    xr.set_defaults(fn=cmd_crash_release)
 
     k = sub.add_parser("kill", help="kill switch: stop all new orders now")
     k.add_argument("--flatten", action="store_true", help="also exit every position")
