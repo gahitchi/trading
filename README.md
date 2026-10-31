@@ -39,6 +39,9 @@ pytest -n auto
 | `lab carry study [--mode cash\|cross] [--lookback-h] [--entry-apr] [--exit-apr] [--all --top K --min-turnover M]` | does funding carry pay after costs? (holdout-guarded, logged) |
 | `lab carry study --holdout [--again REASON]`, `lab carry release --reason` | the one-time carry holdout test; turning it into research data |
 | `lab carry paper [--capital 10000] [--leverage 3] [--once]` | paper-trade the holdout-tested carry configuration on live data (no keys, no orders) |
+| `lab crash fetch [--symbols ...] [--since 2022-01-01]` | download or update 1-minute klines and 5-minute open interest from data.binance.vision |
+| `lab crash study [--mode wick\|breakdown] [--drop-pct] [--tp-pct] [--sl-pct] [--hold-min] [--slippage-bps]` | does trading crashes pay after costs? (holdout-guarded, logged) |
+| `lab crash study --holdout [--again REASON]`, `lab crash release --reason` | the one-time crash holdout test; turning it into research data |
 | `lab kill [--flatten]`, `lab resume` | kill switch: stop all new orders now (`results/KILL`), and clear it |
 
 ## Recording, research and paper trading
@@ -178,6 +181,29 @@ a finished configuration on it once. Every run goes into the trial log, and rese
 ratio: the chance the edge is real given how many configurations have been tried on the same data (under 0.95,
 it isn't established).
 
+## Crash trading
+
+Most strategies here earn from normal markets. `lab crash` looks for an edge in the abnormal ones: fast sell-offs,
+liquidation cascades, panic wicks. Crashes are rare, so the research needs years of minute data, which Binance's
+public archive serves for free. `lab crash fetch` downloads 1-minute klines and 5-minute open interest per symbol
+(10 liquid perpetuals by default, from 2022) into `data/crash/`, one file per month or day, and resumes after an
+interruption. It takes an hour or two the first time; later runs add only what is new.
+
+`lab crash study` finds every crash (a fall of `--drop-pct` in `--window-min` minutes on several times the usual
+volume) and trades it one of two ways:
+
+| `--mode` | Trade | Why it should pay |
+|---|---|---|
+| `wick` | buy when open interest fell during the drop (forced liquidations), sell the bounce | liquidity provision to forced sellers earns a premium, largest in stressed markets (Grossman & Miller 1988, Nagel 2012) |
+| `breakdown` | short when open interest rose during the drop, ride it for up to a day | crisis alpha of time-series momentum (Moskowitz, Ooi & Pedersen 2012; Hurst, Ooi & Pedersen 2017) and liquidity spirals (Brunnermeier & Pedersen 2009) |
+
+Trades enter a minute after the signal, exit at a target, a stop or a time limit, pay taker fees and slippage on
+both sides, and are sized to a volatility target. The report shows the trades after costs, the portfolio's Sharpe
+with a Newey-West t on daily P&L (crashes hit every coin at once), a baseline with the same exits entered every
+day at 00:00 UTC, and the raw move after each crash at 5 minutes to a day. Each mode starts from a preset that was
+fixed before any data was seen (`PRESETS` in `lab.crash_study`). The holdout, trial log and deflated Sharpe work as
+for carry, with their own boundary in `results/crash_partition.json`.
+
 Binance and Bybit are not available in every country; check that they are in yours.
 
 
@@ -206,6 +232,8 @@ src/lab/fast_research.py  forward holdout, holdout ledger, trial log
 src/lab/carry_data.py     hourly funding and closes from public REST history (Binance, Bybit)
 src/lab/carry_study.py    funding carry backtest after costs, time holdout, deflated Sharpe
 src/lab/carry_paper.py    carry paper trading on live public data (simulated fills)
+src/lab/crash_data.py     1-minute klines and open interest from the public archive (data.binance.vision)
+src/lab/crash_study.py    crash trades (buy the wick, short the breakdown) after costs, time holdout, deflated Sharpe
 src/lab/monitor.py        read-only dashboard of the recorder and its data (assets in monitor_ui/)
 src/lab/risk_manager.py   pre-trade risk shared by every strategy
 src/lab/safety.py         kill switch

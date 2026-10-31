@@ -1,13 +1,17 @@
 # Roadmap
 
 The step-by-step plan for trading-lab: what the software does today, what gets built next and in which order, and
-the measured thresholds that decide whether the project moves on. Updated 2026-10-29.
+the measured thresholds that decide whether the project moves on. Updated 2026-10-31.
 
 ## 1. Goal
 
 An automated, independent trading system with institutional-grade research and risk discipline, able to trade
 any asset class through the right broker or exchange. Fast (low-latency) trading comes first. Longer-horizon
 trading with an AI strategist comes later.
+
+Since 2026-10-31 the research aims first at **profiting from market losses**: crashes, sell-offs, liquidation
+cascades and panic wicks, rather than from normal market behaviour (Gabriel's decision). Track D below carries it;
+the other tracks continue as before.
 
 Crypto perpetual futures are the test bed: the market never closes, the data is free, and every module can be
 run and tested at any hour.
@@ -31,6 +35,7 @@ run and tested at any hour.
                     │                                    └─> lab monitor       (health, coverage, disk)
  Binance/Bybit REST ──> lab carry fetch ─> data/carry/ ───> lab carry study   (funding carry)
  Binance/Bybit REST ──> lab survey (live spreads vs maker fees)
+ data.binance.vision ──> lab crash fetch ─> data/crash/ ──> lab crash study   (buy the wick / short the breakdown)
 
  Live ws ─> lab fast paper ─> strategy ─> RiskManager ─> NautilusTrader RiskEngine ─> sandbox fills
                                  │            │  kill switch (results/KILL), daily loss cap,
@@ -50,13 +55,15 @@ run and tested at any hour.
 | Funding carry, majors | `lab carry study --mode cash/cross` | **Cash-like.** 2023-01 to 2026-04, 10 majors: cash-and-carry +5.5%/yr (always-in +6.3%), about the risk-free rate. Cross-venue funding −0.4%/yr after fees. The 10% APR entry filter hurts. |
 | Funding carry, altcoins | `lab carry study --all --top 10 --min-turnover 20` | **Pending.** Pre-registered first run: top 10 slots, 20 M USDT/day turnover, 5 bps slippage. |
 | Cross-venue lead-lag | `lab micro-study --leader` | **Not studied.** Feature built; needs overlapping Binance and Bybit recordings. |
+| Crash: buy the wick | `lab crash study --mode wick` | **Pending.** Built 2026-10-31; first run is the registered preset (D2). |
+| Crash: short the breakdown | `lab crash study --mode breakdown` | **Pending.** Built 2026-10-31; first run is the registered preset (D2). |
 
 ## 5. Phases
 
 | Phase | Name | State | Exit gate (summary) |
 |---|---|---|---|
 | 0 | Foundation | ✅ done | — |
-| 1 | Find an edge | 🔄 now | One strategy passes its holdout after costs at 150 ms |
+| 1 | Find an edge | 🔄 now (crash track first) | One strategy passes its holdout after costs at 150 ms (10 bps slippage for crash and carry) |
 | 2 | Paper trading | ⏳ next | ≥ 300 paper trades over ≥ 14 session-days, net profitable, t ≥ 2, matches backtest |
 | 3 | Small live trading | 💤 | Funding decision by Gabriel; 4 weeks live within risk limits |
 | 4 | Speed: co-location and Rust hot paths | 💤 | Measured latency budget met |
@@ -88,8 +95,9 @@ Markers: ✅ done on `main` · 🔄 in progress · ⏳ next · 💤 later.
 
 ## Phase 1: Find an edge 🔄
 
-Three tracks run in parallel because they need different data: the maker track needs recorded books, the carry
-track needs only REST history, the lead-lag track needs both venues recorded at the same time.
+Four tracks run in parallel because they need different data: the maker track needs recorded books, the carry
+track needs only REST history, the lead-lag track needs both venues recorded at the same time, and the crash track
+needs years of minute history from the public archive. Track D (crashes) is the priority since 2026-10-31.
 
 ### Track A: passive market making (main track)
 
@@ -136,13 +144,45 @@ fails, and later as a cash-like base return under the fast strategies.
 | C3 | Both directions: Bybit leads Binance and Binance leads Bybit, BTC leading ETH and SOL. | `lab micro-study SYMBOL --venue V --leader L --leader-venue W` | The decile move against a taker round trip, per pair, in §4. |
 | C4 | If a pair passes a taker round trip at 150 ms: build `LeadLagTaker` on `FastStrategy`, backtest, holdout (as A7–A9). If it passes only as a maker signal: feed it into `PassiveMaker` as a quote skew. | `lab.fast`, `lab.maker` | Same gates as A7–A9. |
 
+### Track D: profit from crashes and sell-offs (priority)
+
+The aim is money made when markets fall or break, not in calm markets. Every strategy here is an established
+institutional one, applied to crypto perpetuals, where open interest shows who is being forced out:
+
+| Rank | Strategy | Institutional basis | Data | State |
+|---|---|---|---|---|
+| 1 | **Buy the capitulation wick**: after a fast drop on heavy volume with open interest falling (liquidations), buy and sell the bounce within hours | Liquidity provision to forced sellers (Grossman & Miller 1988; Coval & Stafford 2007); reversal premium peaks in stress (Nagel 2012) | 1-min klines + 5-min OI, free archive | built: `lab crash study --mode wick` |
+| 2 | **Short the breakdown**: a sell-off on rising open interest, shorted and held up to a day | Crisis alpha of time-series momentum (Moskowitz, Ooi & Pedersen 2012; Hurst, Ooi & Pedersen 2017); liquidity spirals (Brunnermeier & Pedersen 2009) | same | built: `lab crash study --mode breakdown` |
+| 3 | **Panic funding**: when funding turns deeply negative in a crash, long the perpetual and short spot to collect it | Cash-and-carry in reverse; dislocation trading | `lab carry` history | not built (D7) |
+| 4 | **Ride live liquidation cascades** from the exchange's liquidation stream | Order-flow momentum on forced orders | must be recorded from now on: no free history | parked (D8) |
+
+Both built strategies share one detector and are sized to a volatility target (Moskowitz, Ooi & Pedersen's 40%/σ
+idea, at 50% for crypto). Costs are taker fills with fixed slippage per side, stressed upward because crash books
+are thin; square-root impact (Almgren & Chriss 2000) is not modelled yet.
+
+| Step | Do | Command / module | Done when |
+|---|---|---|---|
+| D1 | Download the history: 10 liquid perpetuals, 1-minute klines and 5-minute open interest since 2022 (covers LUNA, FTX, August 2024 and October 2025). Resumes after interruption. | `lab crash fetch` | `data/crash/` covers 2022-01 to yesterday for every symbol. |
+| D2 | The pre-registered first runs, exactly as registered (the `PRESETS` in `lab.crash_study`): wick −5% in 60 min, volume ≥ 3×, OI −1%, target 3%, stop 4%, hold 4 h; breakdown −3% in 60 min, volume ≥ 3×, OI rising, target 8%, stop 3%, hold 24 h. 1-minute entry delay, 5 + 5 bps a side, 50% vol target. | `lab crash study --mode wick`, `--mode breakdown` | Both results in §4: trades, mean net bps, Sharpe, Newey-West t, drawdown, deflated Sharpe, the 00:00 baseline and the forward-move table. |
+| D3 | Research gate per mode (research data only). | — | ≥ 30 trades on ≥ 15 separate days, mean net > 0 with t (daily) ≥ 2, beats its 00:00 baseline, and still positive at `--slippage-bps 10` and at `--delay-min 3`. |
+| D4 | Only if D3 fails narrowly: at most 12 further configurations per mode (drop 4/6/8%, window 15/60 min, target and hold), all counted in the trial log. | `lab crash study ...` | Best configuration's deflated Sharpe ≥ 0.95, else the mode stops. |
+| D5 | One-time holdout test of the frozen configuration. | `lab crash study ... --holdout` | Net > 0 after costs, t ≥ 2 on the holdout, deflated Sharpe of the research result ≥ 0.95. A fail is written in §4. |
+| D6 | Live signal and paper runner for the D5 survivor: 1-minute klines from the websocket, open interest from REST every 5 minutes, simulated fills at the next trade, the risk manager and kill switch in front. Crashes come rarely and without warning, so it runs whenever the PC is on and alerts on every signal. | `lab crash paper` (new) | A week of runs with every signal logged; replaying the same minutes through `lab crash study` gives the same signals. |
+| D7 | Panic funding: in `lab carry`, allow the reverse cash trade (long perpetual, short spot) only while funding is below a crash threshold, with the cost of borrowing spot charged. | `lab.carry_study` | Study result in §4, holdout as B5. |
+| D8 | Record Binance's liquidation stream (`forceOrder`) with the books, so cascades can be studied once months have built up. | `lab.record` | The monitor shows liquidations per symbol. |
+
+Crash strategies trade rarely: tens of times a year, not hundreds. The Phase 2 gate of 300 round trips in 14 days
+cannot fit them, so for a Track D survivor the paper gate counts every crash signal the PC was on for: ≥ 15
+signals, net P&L > 0, and each paper trade within the backtest's range for the same minutes. This variant is set
+now, before any crash data has been looked at.
+
 ### Phase 1 exit gate
 
 One strategy configuration with all of:
 
 1. Research result with deflated Sharpe ≥ 0.95 over every configuration in the trial log for that data.
 2. One-time holdout pass: net P&L > 0 after fees and slippage, t ≥ 2.
-3. Still positive at 150 ms latency (fast strategies) or at 10 bps slippage (carry).
+3. Still positive at 150 ms latency (fast strategies) or at 10 bps slippage (carry and crash).
 
 ---
 
