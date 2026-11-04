@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "symbol": "BTCUSDT",
+  "holdout_start": "2026-05-08",
+  "entries": [
+    {
+      "day": "2024-07-10",
+      "archive_sha256": "07f9626d18d8213d00a1eff210c11b44068154e1223099086678cacbbc7aaa64",
+      "legacy_sha256": "2096f81d4598085407fd0bdf93653efd8659a58e021c88ababf6bc79aec05b31",
+      "expect_zero_pairs": 41
+    },
+    {
+      "day": "2024-07-11",
+      "archive_sha256": "ecb897d848eb22afc2fa23642178a3d8441a4a799ecf7f1b96a3ed8d19a62c77",
+      "legacy_sha256": "8a2059e20c07fcbc43012193bc5518472eea492a865540ab3f09f8351a5512d6",
+      "expect_zero_pairs": 46
+    },
+    {
+      "day": "2024-07-12",
+      "archive_sha256": "75fa339ad1b933fe648bdbe6c5a4ba2d6c7204e02cbe3e939583c738c453ae6d",
+      "legacy_sha256": "305c98f224f28b3ab4838226daf75d148c6571adac0403faf6f2c8df0c21ddf3",
+      "expect_zero_pairs": 43
+    },
+    {
+      "day": "2024-07-13",
+      "archive_sha256": "c9434b7692e7b05ec812ce53b120834e25519d5c29010285d1f5b91dab3d0c73",
+      "legacy_sha256": "a8da874b347aea18b54ac638a17f9873c547ae66492ea723a6c4f3a67c111560",
+      "expect_zero_pairs": 52
+    },
+    {
+      "day": "2024-07-14",
+      "archive_sha256": "a2643538666a3c0ae63f64bafda08094da68b087ac907dfbb446f7ff2085ba0c",
+      "legacy_sha256": "03533a199bc9a75394deaaaac91a798cf88ad58289716c5190bdf4d9c058c911",
+      "expect_zero_pairs": 85
+    },
+    {
+      "day": "2024-07-15",
+      "archive_sha256": "bce56234f10b9509272732d1414750b0f61424be1926c3e16369c40a40fba44f",
+      "legacy_sha256": "61a8726199135dcffcf02a915d009dd7a067a69168fcee98b3c291cfedb6d62f",
+      "expect_zero_pairs": 26
+    }
+  ]
+}
