@@ -155,9 +155,17 @@ def update(
     return added, len(list(d.glob("*.parquet")))
 
 
-def load(root: Path, kind: str, symbol: str) -> pd.DataFrame | None:
+def load(root: Path, kind: str, symbol: str, *, before: pd.Timestamp | None = None) -> pd.DataFrame | None:
     """Every cached period of a symbol as one frame sorted by ts (a month and its days overlap: kept once)."""
     files = sorted(_dir(root, kind, symbol).glob("*.parquet"))
+    if before is not None:
+        if kind != "oi":
+            raise ValueError("before cutoff is only implemented for OI metrics")
+        cutoff = pd.Timestamp(before)
+        if cutoff.tzinfo is None:
+            raise ValueError("OI cache cutoff must be UTC timezone-aware")
+        # Only complete pre-holdout daily periods are touched.
+        files = [path for path in files if _end_of(path.stem) <= cutoff.date()]
     if not files:
         return None
     parts = []
