@@ -160,6 +160,40 @@ resume, after the failure is diagnosed. **Do not** run this alongside another
 migration or crash study. Full migration of all days requires subsequent
 explicit passes; do not run unbounded unattended loops.
 
+
+### Five-minute coverage diagnosis (different from migration integrity)
+
+The migration audit proves that upgraded Parquet content matches the original
+archive for timestamps and OI notional. **It does not establish the original
+Binance archive contained every five-minute snapshot.**
+
+A read-only coverage report checks the **already migrated pre-holdout days**
+against a benchmark of 288 five-minute samples per complete UTC day. It
+identifies days with fewer rows, out-of-order or duplicated timestamps, and
+internal gaps in the five-minute cadence. The check permits a snapshot at
+00:00 the next day (some archive time-label conventions use an end-of-period
+stamp). It never loads protected holdout files.
+
+    PYTHONPATH=src:. python -m pytest \
+      tests/test_crash_oi_coverage.py -v
+
+    PYTHONPATH=src:. python -m lab.crash_oi_coverage \
+      --config ~/trading-termux-tests/lab.toml \
+      --symbol BTCUSDT
+
+An incomplete day intentionally gives the CLI a **nonzero exit**. That is a
+data-quality gate and does **not** mean the earlier content migration failed.
+Continue to use \`lab.crash_oi_audit\` for post-batch migration integrity.
+The coverage report has \`integrity_verified: false\` because it does not
+repeat SHA-256 verification. Run both audits separately.
+
+The 2024-01-01 through 2024-05-01 migration produced 35,011 observations
+across 122 days, compared with a 35,136-observation full-day benchmark.
+The 125-observation discrepancy first appeared in the 2024-02-12 through
+2024-03-02 batch. The coverage report is needed to localize the affected
+period(s); it does not by itself identify why the source observations are
+absent. No imputation or fabricated OI snapshots are authorized.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
