@@ -39,6 +39,7 @@ def audit_migrations(config_path: Path, symbol: str = "BTCUSDT") -> dict:
     verified = 0
     records = 0
     names: set[str] = set()
+    verified_names: list[str] = []
     # Never scan into the protected holdout Parquet data.
     manifests = sorted(backups.glob("*.parquet.migration.json"))
     for manifest in manifests:
@@ -63,7 +64,7 @@ def audit_migrations(config_path: Path, symbol: str = "BTCUSDT") -> dict:
             recorded_boundary = date.fromisoformat(meta["holdout_start"])
             if recorded_boundary > boundary or date.fromisoformat(Path(name).stem) >= recorded_boundary:
                 raise ValueError("manifest holdout boundary is inconsistent")
-            if not isinstance(meta.get("records"), int) or meta["records"] < 1:
+            if type(meta.get("records")) is not int or meta["records"] < 1:
                 raise ValueError("invalid manifest record count")
             if not isinstance(meta.get("binance_archive_sha256"), str) or len(meta["binance_archive_sha256"]) != 64:
                 raise ValueError("missing Binance archive digest")
@@ -99,6 +100,7 @@ def audit_migrations(config_path: Path, symbol: str = "BTCUSDT") -> dict:
 
             verified += 1
             records += len(after)
+            verified_names.append(name)
         except (OSError, ValueError, KeyError, TypeError, AssertionError) as exc:
             issues.append(f"{name}: {exc}")
 
@@ -125,8 +127,8 @@ def audit_migrations(config_path: Path, symbol: str = "BTCUSDT") -> dict:
         "verified_files": verified,
         "verified_records": records,
         "legacy_remaining": len(legacy),
-        "first_verified": min(names) if names else None,
-        "last_verified": max(names) if names else None,
+        "first_verified": min(verified_names) if verified_names else None,
+        "last_verified": max(verified_names) if verified_names else None,
         "issues": issues,
         "read_only": True,
     }
