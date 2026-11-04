@@ -382,6 +382,58 @@ The independent coverage audit must still flag February 16's
 (July 9's 6 plus July 10–15's 293). It will not return a clean
 data-quality status merely because checksum integrity passes.
 
+
+### 2024-08-12 migration stop: read-only source survey
+
+The normal migration resumed successfully through 2024-08-04 with 217
+independently audited files, then committed seven more days through
+2024-08-11 before stopping on a nonpositive source OI value for
+2024-08-12. The state is at least 217 audited files; the next audit
+should confirm 224 committed files (and may correctly report an orphan
+backup for the failed August 12 attempt). Do not delete the original
+backup or repeat a batch until the anomaly is characterized.
+
+Because July exhibited clusters of exact (0 quantity, 0 notional) pairs,
+use the **read-only**, date-bounded OI archive survey:
+
+    PYTHONPATH=src:. python -m pytest \
+      tests/test_crash_oi_source_survey.py \
+      tests/test_crash_oi_quarantine_batch.py \
+      tests/test_crash_oi_quarantine.py \
+      tests/test_crash_oi_migration.py \
+      tests/test_crash_oi_audit.py \
+      tests/test_crash_oi_coverage.py -v
+
+    PYTHONPATH=src:. python -m lab.crash_oi_audit \
+      --config ~/trading-termux-tests/lab.toml --symbol BTCUSDT
+
+    PYTHONPATH=src:. python -m lab.crash_oi_source_survey \
+      --config ~/trading-termux-tests/lab.toml \
+      --symbol BTCUSDT --start 2024-08-12 --days 14
+
+Default survey performs no writes, locks or backups. Each selected
+pre-holdout day is checked against its exact original Binance ZIP:
+timestamps, notionals, exact ZIP/local SHA-256 digests, quantity and
+notional finiteness, and aligned zero-pair masks. Only exact (0,0)
+pairs may become candidate exceptions; unexpected negatives, mixed
+zeros, corrupt archives, already-migrated days or missing files are
+reported as \`blocked\`. It cannot read a range reaching the holdout.
+At most 20 calendar days are scanned.
+
+Results categorize each day as \`clean\`, \`exact_zero_pairs\` or
+\`blocked\`. This is **not a migration command**; it cannot authorize
+exceptions. If a short, consecutive range contains only exact zero-pair
+days, rescan just that range (up to six days) with explicit
+\`--manifest-out /tmp/august-oi-review.json\` to create a **new** JSON
+candidate plan without touching market data. The command refuses to
+overwrite an existing path. Separately validate the generated plan
+through \`lab.crash_oi_quarantine_batch\` **without --apply** and
+review the result before considering any write operation.
+
+Never assume that the 2024-08-12 anomaly matches July's source quality.
+Do not globally relax the OI positivity constraint or silently
+interpret archived (0,0) values as genuine market-wide open interest.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
