@@ -129,7 +129,7 @@ def test_invalid_message_logged_without_breaking_capture(tmp_path):
 def test_runner_recovers_old_segment_before_capture(tmp_path):
     old = tmp_path / "market-old-0000.jsonl.open"
     old.write_text(json.dumps({"received_ns": 1, "stream": "x", "data": {}}) + "\n")
-    results = asyncio.run(run_capture(tmp_path, ["BTCUSDT"], 0.00001, connector=lambda _: None))
+    results = asyncio.run(run_capture(tmp_path, ["BTCUSDT"], 0.00001, connector=lambda _: FakeSession([])))
     assert len(results) == 2
     assert (tmp_path / "market-old-0000.recovered.jsonl").exists()
     assert (tmp_path / "market-old-0000.recovered.jsonl.recovery.json").exists()
