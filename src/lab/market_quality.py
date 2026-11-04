@@ -100,10 +100,9 @@ def audit_directory(directory: Path, *, require_reconnect: bool = False) -> dict
             if previous_session == session and previous_sequence is not None and sequence != previous_sequence + 1:
                 issues.append(f"{category}: missing or reordered segment before {path.name}")
             if previous_session != session and previous_session is not None:
-                # A new capture session is not continuous, regardless of event-ID adjacency.
-                if pending is not None:
-                    disconnections.append({"gap_ms": None, "closed": False, "reason": "session_boundary"})
-                    pending = None
+                # Any stop/restart may have dropped unseen messages, even when IDs appear adjacent.
+                disconnections.append({"gap_ms": None, "closed": False, "reason": "session_boundary"})
+                pending = None
             previous_session, previous_sequence = session, sequence
             sessions.add(session)
             if ".recovered.jsonl" in path.name:
