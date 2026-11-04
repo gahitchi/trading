@@ -107,3 +107,29 @@ Any such gap invalidates cross-gap market signals and should be reflected in
 quality gates. This is a controlled network-transport fault, **not** a
 power-loss test or proof of lossless delivery. Omit the injection option in
 normal recording.
+
+## Offline continuity audit
+
+After running the controlled 90-second disconnect experiment, audit the
+actual files (including verified gzip-only archives when raw files have been
+pruned):
+
+    PYTHONPATH=src:. python -m pytest \
+      tests/test_market_quality.py -v
+
+    PYTHONPATH=src:. python -m lab.market_quality \
+      --out data/portable-market-fault-test \
+      --require-reconnect
+
+The command exits 0 only if record structure and status transitions check out,
+each connection logs an injected failure and a completed reconnection, and at
+least one market event was recorded *after* the reconnect. The JSON report
+includes per-feed connection-epoch counts and measured disconnect-to-reconnect
+intervals. Nonincreasing recorded book/trade IDs, bad recovery manifests,
+unclosed disconnects and unfinished segments are reported as audit failures.
+
+**Important:** even a green audit does not establish lossless delivery or
+continuity of exchange book data; every documented reconnect interval is a
+gap unsuitable for continuous market-microstructure calculations. Aggregate
+trade IDs can advance while the client is disconnected, and bookTicker is not
+a replayable incremental order book.
