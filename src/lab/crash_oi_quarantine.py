@@ -20,7 +20,7 @@ from lab.config import load_config
 from lab.crash_oi_forensics import inspect_source
 from lab.crash_oi_migration import (
     _headroom, _holdout_boundary, _migrate_one,
-    _reconcile_prior_transactions, _sha, MIN_FREE_MIB,
+    _quantity_from_original, _reconcile_prior_transactions, _sha, MIN_FREE_MIB,
 )
 from lab.market_symbols import SYMBOL_RE
 from lab.persistence import file_lock
@@ -89,8 +89,15 @@ def quarantine_day(
             or report["nonpositive_or_nonfinite_notional"] != expect_zero_pairs
         ):
             raise ValueError("unexpected number of nonpositive/nonfinite source observations")
-        # Explicitly enforce matching (0,0) pairs in the migration parser,
-        # rather than simply trusting the two per-column invalid counts.
+        # Enforce matching (0,0) pairs, exact row alignment and the quality
+        # schema in memory even for the read-only dry run.
+        archive_url = crash_data.url_of("oi", symbol, day)
+        preview, _ = _quantity_from_original(
+            source, captured[archive_url], quarantine_zero_pairs=True
+        )
+        exact_zeros = int((~preview["oi_valid"]).sum())
+        if exact_zeros != expect_zero_pairs:
+            raise ValueError(f"quarantine mask count differs: {exact_zeros}")
         if not apply:
             return {
                 "read_only": True,
