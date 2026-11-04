@@ -1,0 +1,143 @@
+"""Offline regression tests for portable public Binance market-data capture."""
+
+import asyncio
+import fcntl
+import json
+from pathlib import Path
+
+import pytest
+
+from lab.market_capture import capture_feed, parse_message, run_capture, stream_urls
+
+
+class FakeClock:
+    def __init__(self):
+        self.value = 0.0
+
+    def __call__(self):
+        self.value += 0.2
+        return self.value
+
+
+class FakeSession:
+    def __init__(self, messages):
+        self.messages = iter(messages)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+    async def recv(self):
+        try:
+            item = next(self.messages)
+        except StopIteration:
+            raise TimeoutError("no new message") from None
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+def websocket_message(stream="btcusdt@aggTrade", event=1):
+    return json.dumps({"stream": stream, "data": {"a": event}})
+
+
+def test_stream_endpoints_are_separated():
+    urls = stream_urls(["BTCUSDT", "ETHUSDT"])
+    assert urls["public"].startswith("wss://fstream.binance.com/public/stream?")
+    assert "btcusdt@bookTicker" in urls["public"]
+    assert "ethusdt@bookTicker" in urls["public"]
+    assert "@aggTrade" not in urls["public"]
+    assert urls["market"].startswith("wss://fstream.binance.com/market/stream?")
+    for suffix in ("@aggTrade", "@markPrice@1s", "@forceOrder"):
+        assert "btcusdt" + suffix in urls["market"]
+        assert "ethusdt" + suffix in urls["market"]
+
+
+@pytest.mark.parametrize("symbols", [[], ["BTCUSDT", "BTCUSDT"], ["../../bad"], ["btcusdt"]])
+def test_invalid_symbols_are_rejected(symbols):
+    with pytest.raises(ValueError, match="symbols"):
+        stream_urls(symbols)
+
+
+def test_control_message_is_ignored_and_corruption_fails_closed():
+    assert parse_message('{"result":null,"id":1}') is None
+    assert parse_message(websocket_message()) == ("btcusdt@aggTrade", {"a": 1})
+    with pytest.raises(ValueError):
+        parse_message('{"stream":"btcusdt@aggTrade","data":[]}')
+    with pytest.raises(ValueError):
+        parse_message('{"stream":"btcusdt@aggTrade","data":{"x":NaN}}')
+
+
+def test_capture_records_connection_loss_and_recovers(tmp_path):
+    sessions = [
+        [websocket_message(event=10), ConnectionError("wire cut")],
+        [websocket_message(event=11)],
+    ]
+    connections = []
+
+    def connector(url):
+        connections.append(url)
+        return FakeSession(sessions.pop(0) if sessions else [])
+
+    clock = FakeClock()
+
+    async def immediate_sleep(_seconds):
+        return None
+
+    result = asyncio.run(
+        capture_feed(
+            "market", "fake://market", tmp_path, "session", 6.0,
+            connector=connector,
+            clock=clock,
+            timestamp=lambda: 1_000_000,
+            sleep=immediate_sleep,
+        )
+    )
+
+    assert len(connections) >= 2
+    assert result["reconnects"] >= 1
+    assert result["counts"]["btcusdt@aggTrade"] == 2
+    records = [json.loads(line) for p in tmp_path.glob("*.jsonl") for line in p.read_text().splitlines()]
+    trade_ids = [x["data"]["a"] for x in records if x["stream"] == "btcusdt@aggTrade"]
+    statuses = [x["data"]["event"] for x in records if x["stream"] == "collector.status"]
+    assert trade_ids == [10, 11]
+    assert "connected" in statuses and "disconnected" in statuses
+    assert not list(tmp_path.glob("*.open"))
+
+
+def test_invalid_message_logged_without_breaking_capture(tmp_path):
+    def connector(_url):
+        return FakeSession(['{"stream":"x","data":[]}', '{"result":null}', websocket_message()])
+
+    result = asyncio.run(
+        capture_feed(
+            "market", "fake://market", tmp_path, "session", 4.0,
+            connector=connector,
+            clock=FakeClock(),
+            timestamp=lambda: 123,
+        )
+    )
+    assert result["invalid"] == 1
+    assert result["counts"]["btcusdt@aggTrade"] == 1
+    records = [json.loads(line) for p in tmp_path.glob("*.jsonl") for line in p.read_text().splitlines()]
+    events = [x["data"]["event"] for x in records if x["stream"] == "collector.status"]
+    assert "invalid_message" in events and "control_message" in events
+
+
+def test_runner_recovers_old_segment_before_capture(tmp_path):
+    old = tmp_path / "market-old-0000.jsonl.open"
+    old.write_text(json.dumps({"received_ns": 1, "stream": "x", "data": {}}) + "\n")
+    results = asyncio.run(run_capture(tmp_path, ["BTCUSDT"], 0.00001, connector=lambda _: None))
+    assert len(results) == 2
+    assert (tmp_path / "market-old-0000.recovered.jsonl").exists()
+    assert (tmp_path / "market-old-0000.recovered.jsonl.recovery.json").exists()
+
+
+def test_simultaneous_capture_fails_closed(tmp_path):
+    lock_path = Path(tmp_path) / ".capture.lock"
+    with lock_path.open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(RuntimeError, match="another market capture"):
+            asyncio.run(run_capture(tmp_path, ["BTCUSDT"], 0.01, connector=lambda _: None))
