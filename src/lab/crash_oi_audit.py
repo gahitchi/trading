@@ -101,8 +101,11 @@ def audit_migrations(config_path: Path, symbol: str = "BTCUSDT") -> dict:
             verified += 1
             records += len(after)
             verified_names.append(name)
-        except (OSError, ValueError, KeyError, TypeError, AssertionError) as exc:
-            issues.append(f"{name}: {exc}")
+        except Exception as exc:
+            # pyarrow corruption exceptions are not all ValueError subclasses.
+            # Malformed files must produce an audit failure, not a traceback
+            # or a falsely clean report.
+            issues.append(f"{name}: {type(exc).__name__}: {exc}")
 
     # An orphan backup implies an aborted attempt; flag it instead of
     # claiming the full migration history has been verified.
@@ -119,14 +122,20 @@ def audit_migrations(config_path: Path, symbol: str = "BTCUSDT") -> dict:
             issues.append(f"{tmp.name}: unrecognized temporary file")
 
     # The legacy inventory helper does not open any post-boundary file.
-    legacy = crash_data.legacy_oi_paths(root, symbol, before=boundary)
+    # A corrupted migrated Parquet may fail here; retain the integrity
+    # failure report rather than discarding it with an uncaught Arrow error.
+    try:
+        legacy_remaining = len(crash_data.legacy_oi_paths(root, symbol, before=boundary))
+    except Exception as exc:
+        issues.append(f"legacy inventory unavailable: {type(exc).__name__}: {exc}")
+        legacy_remaining = None
     return {
         "ok": not issues,
         "symbol": symbol,
         "holdout_start": boundary.isoformat(),
         "verified_files": verified,
         "verified_records": records,
-        "legacy_remaining": len(legacy),
+        "legacy_remaining": legacy_remaining,
         "first_verified": min(verified_names) if verified_names else None,
         "last_verified": max(verified_names) if verified_names else None,
         "issues": issues,
