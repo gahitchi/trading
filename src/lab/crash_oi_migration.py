@@ -103,7 +103,9 @@ def _backup(source: Path, backup: Path) -> str:
     return source_sha
 
 
-def _quantity_from_original(source: Path, archive_blob: bytes) -> tuple[pd.DataFrame, int]:
+def _quantity_from_original(
+    source: Path, archive_blob: bytes, *, quarantine_zero_pairs: bool = False
+) -> tuple[pd.DataFrame, int]:
     """Match every original timestamp and notional value before adding quantity."""
     old = pd.read_parquet(source)
     if "oi_qty" in old and old["oi_qty"].notna().all():
@@ -113,23 +115,31 @@ def _quantity_from_original(source: Path, archive_blob: bytes) -> tuple[pd.DataF
     old_ts = pd.to_datetime(old["ts"], utc=True, errors="raise")
     if old_ts.isna().any() or old_ts.duplicated().any():
         raise ValueError(f"invalid legacy timestamps: {source}")
-    new = crash_data.parse_metrics(archive_blob)
+    new = crash_data.parse_metrics(archive_blob, quarantine_zero_pairs=quarantine_zero_pairs)
     new_ts = pd.to_datetime(new["ts"], utc=True)
     if len(old) != len(new) or not np.array_equal(
         np.sort(old_ts.to_numpy()), np.sort(new_ts.to_numpy())
     ):
         raise ValueError(f"original Binance archive timestamps differ: {source}")
     old_values = pd.to_numeric(old["oi_value"], errors="raise").to_numpy(dtype=float)
-    if not np.isfinite(old_values).all() or (old_values <= 0).any():
-        raise ValueError(f"invalid legacy OI notional: {source}")
+    if not np.isfinite(old_values).all():
+        raise ValueError(f"nonfinite legacy OI notional: {source}")
     aligned = new.set_index("ts").reindex(pd.DatetimeIndex(old_ts))
+    if quarantine_zero_pairs:
+        # The legacy zeros must match precisely the ZIP's (0,0) pairs.
+        invalid = ~aligned["oi_valid"].to_numpy(dtype=bool)
+        if ((old_values <= 0) != invalid).any():
+            raise ValueError(f"legacy notional anomaly does not match original zero-pair mask: {source}")
+    elif (old_values <= 0).any():
+        raise ValueError(f"invalid legacy OI notional: {source}")
     if not np.array_equal(old_values, aligned["oi_value"].to_numpy(dtype=float)):
         raise ValueError(f"original Binance archive notional differs: {source}")
 
     upgraded = old.copy()
     upgraded["oi_qty"] = aligned["oi_qty"].to_numpy(dtype=float)
-    if not np.isfinite(upgraded["oi_qty"].to_numpy()).all():
-        raise ValueError(f"invalid quantity after aligning source: {source}")
+    if quarantine_zero_pairs:
+        upgraded["oi_valid"] = aligned["oi_valid"].to_numpy(dtype=bool)
+    crash_data.validate_oi_quantity(upgraded)
     return upgraded, len(old)
 
 
@@ -165,6 +175,8 @@ def _migrate_one(
     symbol: str,
     boundary: date,
     get,
+    quarantine_archive_sha256: str | None = None,
+    expected_zero_pairs: int | None = None,
 ) -> str:
     """Full transaction for one known-legacy, pre-boundary daily cache."""
     if source.stem.count("-") != 2 or date.fromisoformat(source.stem) >= boundary:
@@ -172,12 +184,30 @@ def _migrate_one(
     manifest = backup.with_name(source.name + ".migration.json")
     _reconcile_manifest(source, backup, manifest)
     current = pd.read_parquet(source)
-    if "oi_qty" in current and current["oi_qty"].notna().all():
+    if "oi_qty" in current:
+        crash_data.validate_oi_quantity(current)
         return "already_migrated"
 
     original_sha = _backup(source, backup)
     blob = get(crash_data.url_of("oi", symbol, source.stem))
-    updated, records = _quantity_from_original(source, blob)
+    quarantine = quarantine_archive_sha256 is not None
+    archive_sha = hashlib.sha256(blob).hexdigest()
+    if quarantine:
+        if archive_sha != quarantine_archive_sha256:
+            raise ValueError(f"pinned Binance ZIP digest differs at {source}")
+        if expected_zero_pairs is None or expected_zero_pairs <= 0:
+            raise ValueError("quarantine requires a positive exact zero-pair count")
+    elif expected_zero_pairs is not None:
+        raise ValueError("zero-pair count supplied without a pinned archive digest")
+    updated, records = _quantity_from_original(
+        source, blob, quarantine_zero_pairs=quarantine
+    )
+    count = int((~updated["oi_valid"]).sum()) if quarantine else 0
+    if quarantine and count != expected_zero_pairs:
+        raise ValueError(
+            f"unexpected quarantine row count for {source}: "
+            f"found {count}; expected {expected_zero_pairs}"
+        )
 
     tmp = source.with_name(source.name + ".oi-quantity.tmp")
     if tmp.exists() and (tmp.is_symlink() or not tmp.is_file()):
@@ -188,6 +218,7 @@ def _migrate_one(
         with tmp.open("rb") as f:
             os.fsync(f.fileno())
         reread = pd.read_parquet(tmp)
+        crash_data.validate_oi_quantity(reread)
         if not reread.equals(updated):
             raise ValueError(f"Parquet write verification failed: {source}")
         updated_sha = _sha(tmp)
@@ -201,8 +232,16 @@ def _migrate_one(
             "records": records,
             "original_sha256": original_sha,
             "updated_sha256": updated_sha,
-            "binance_archive_sha256": hashlib.sha256(blob).hexdigest(),
+            "binance_archive_sha256": archive_sha,
             "status": "prepared",
+            **({
+                "quality_policy": "quarantined-original-zero-pairs-v1",
+                "quarantined_zero_pairs": count,
+                "quarantine_timestamps": [
+                    pd.Timestamp(ts).isoformat()
+                    for ts in updated.loc[~updated["oi_valid"], "ts"]
+                ],
+            } if quarantine else {}),
         }
         atomic_json(manifest, info)
         os.replace(tmp, source)
