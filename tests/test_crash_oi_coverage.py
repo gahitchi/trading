@@ -76,7 +76,9 @@ def test_125_missing_snapshots_are_identified_on_correct_day(tmp_path):
     assert problem["observations"] == 163
     assert problem["count_shortfall"] == 125
     assert problem["internal_missing_slots"] == 125
-    assert problem["non_five_minute_intervals"] == 0
+    assert problem["off_five_minute_grid"] == 0
+    assert problem["missing_slots"] == 125
+    assert problem["duplicate_timestamps"] == 0
 
 
 def test_nonmonotonic_but_complete_archive_has_advisory_not_missing_slots(tmp_path):
