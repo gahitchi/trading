@@ -97,3 +97,19 @@ def test_recovered_segment_requires_verified_manifest(tmp_path):
 def test_empty_or_missing_directory_never_passes(tmp_path):
     assert not audit_directory(tmp_path)["ok"]
     assert not audit_directory(tmp_path, require_reconnect=True)["ok"]
+
+
+def test_two_recording_sessions_are_not_silently_treated_as_continuous(tmp_path):
+    with JournalWriter(tmp_path, "public", "first") as writer:
+        status(writer, 1, "public", "connected")
+        market_event(writer, 2, "public", 1)
+    with JournalWriter(tmp_path, "public", "second") as writer:
+        status(writer, 101, "public", "connected")
+        market_event(writer, 102, "public", 2)
+    result = audit_directory(tmp_path)
+    assert not result["ok"]
+    assert result["categories"]["public"]["sessions"] == 2
+    assert any(
+        gap.get("reason") == "session_boundary"
+        for gap in result["categories"]["public"]["reconnect_gaps"]
+    )
