@@ -11,7 +11,7 @@ from lab.crash_oi_audit import audit_migrations
 from lab.crash_oi_migration import migrate_batch
 from lab.crash_oi_quarantine import quarantine_day
 from lab.crash_study import CrashSettings, bars, signals
-from tests.test_crash_oi_migration import DATA, HEADER, setup_cache, zipped
+from tests.test_crash_oi_migration import DATA, HEADER, SECOND, setup_cache, zipped
 
 
 def anomaly(tmp_path):
@@ -96,7 +96,7 @@ def test_quarantine_refuses_mismatched_pair_even_with_pinned_zip(tmp_path):
     args["get"] = lambda _: bad
     args["archive_sha256"] = hashlib.sha256(bad).hexdigest()
     old = (folder / "2024-01-01.parquet").read_bytes()
-    with pytest.raises(ValueError, match="must be positive"):
+    with pytest.raises(ValueError, match="unexpected number|must be positive"):
         quarantine_day(**args)
     assert (folder / "2024-01-01.parquet").read_bytes() == old
 
@@ -166,3 +166,35 @@ def test_quality_quarantine_rejects_holdout_even_with_correct_hashes(tmp_path):
     with pytest.raises(ValueError, match="protected holdout"):
         quarantine_day(**{**args, "day": "2024-01-03"}, apply=True)
     assert (folder / "2024-01-01.parquet").read_bytes() == original
+
+
+
+def test_mixed_valid_and_quarantined_daily_sources_load_without_mask_nulls(tmp_path):
+    cfg, folder, _, args = anomaly(tmp_path)
+    valid_day = crash_data.parse_metrics(zipped(HEADER + SECOND))
+    valid_day.to_parquet(folder / "2024-01-02.parquet", index=False)
+    quarantine_day(**args, apply=True)
+    loaded = crash_data.load(
+        tmp_path / "data" / "crash", "oi", "BTCUSDT",
+        before=pd.Timestamp("2024-01-03T00:00:00Z"),
+    )
+    assert loaded["oi_valid"].tolist() == [True, False, True, True]
+    assert loaded["oi_qty"].isna().sum() == 1
+    crash_data.validate_oi_quantity(loaded)
+
+
+def test_reject_malformed_quality_masks_that_would_fake_valid_oi():
+    f = pd.DataFrame({
+        "ts": pd.date_range("2024-01-01", periods=2, freq="5min", tz="UTC"),
+        "oi_qty": [100, np.nan],
+        "oi_value": [4200000, 0],
+        "oi_valid": [True, False],
+    })
+    crash_data.validate_oi_quantity(f)
+    f.loc[1, "oi_qty"] = 0.0
+    with pytest.raises(ValueError, match="quarantined OI"):
+        crash_data.validate_oi_quantity(f)
+    f.loc[1, "oi_qty"] = np.nan
+    f["oi_valid"] = [True, None]
+    with pytest.raises(ValueError, match="quality-mask"):
+        crash_data.validate_oi_quantity(f)
