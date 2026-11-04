@@ -198,3 +198,21 @@ def test_reject_malformed_quality_masks_that_would_fake_valid_oi():
     f["oi_valid"] = [True, None]
     with pytest.raises(ValueError, match="quality-mask"):
         crash_data.validate_oi_quantity(f)
+
+
+
+def test_audit_rejects_quarantine_manifest_missing_timestamps(tmp_path):
+    import json
+
+    cfg, _, _, args = anomaly(tmp_path)
+    quarantine_day(**args, apply=True)
+    manifest = (
+        tmp_path / "data" / "crash" / "oi-original-backups"
+        / "BTCUSDT" / "2024-01-01.parquet.migration.json"
+    )
+    meta = json.loads(manifest.read_text())
+    meta["quarantine_timestamps"] = []
+    manifest.write_text(json.dumps(meta))
+    report = audit_migrations(cfg)
+    assert not report["ok"]
+    assert any("quarantine timestamps differ" in issue for issue in report["issues"])
