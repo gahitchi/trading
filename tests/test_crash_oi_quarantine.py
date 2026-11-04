@@ -111,6 +111,16 @@ def test_quality_mask_cannot_hide_positive_or_unrelated_missing_oi(tmp_path):
         crash_data.validate_oi_quantity(frame)
     frame = pd.read_parquet(file)
     frame.loc[1, "oi_valid"] = True
+    # Clearing the sole quarantine flag is itself an invalid state.
+    with pytest.raises(ValueError, match="without any quarantined samples"):
+        crash_data.validate_oi_quantity(frame)
+    frame = pd.read_parquet(file)
+    # Also verify the separate invalid-positive path when some OTHER
+    # observation still carries a valid quarantine marker.
+    frame.loc[0, "oi_qty"] = float("nan")
+    frame.loc[0, "oi_value"] = 0.0
+    frame.loc[0, "oi_valid"] = False
+    frame.loc[1, "oi_valid"] = True
     with pytest.raises(ValueError, match="invalid positive"):
         crash_data.validate_oi_quantity(frame)
     frame = pd.read_parquet(file)
