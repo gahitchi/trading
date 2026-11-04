@@ -118,6 +118,48 @@ post-boundary OI cache files. A *future* authorized holdout evaluation
 must first verify the held-out OI data's quantity representation, but
 must never be used to fit thresholds.
 
+
+### Independent read-only audit after every batch
+
+The audit command verifies **every** committed transaction, not just the
+latest batch. It checks original and upgraded SHA-256 digests, byte-backed
+Parquet values and timestamps, quantity positivity, record counts, migration
+status and holdout boundaries. Orphan backups and incomplete transactions
+cause a nonzero exit code. It does not open holdout Parquet files or mutate
+any cache, manifest or lock file.
+
+    PYTHONPATH=src:. python -m pytest \
+      tests/test_crash_oi_audit.py -v
+
+    PYTHONPATH=src:. python -m lab.crash_oi_audit \
+      --config ~/trading-termux-tests/lab.toml \
+      --symbol BTCUSDT
+
+Only continue if the JSON report has "ok": true, "issues": [] and the
+expected number of verified historical files.
+
+Once a first 20-file batch and its independent audit have passed, a bounded
+five-batch pass can be run explicitly from the validation worktree:
+
+    (
+      set -e
+      for batch in 1 2 3 4 5; do
+        echo "OI migration batch $batch / 5"
+        PYTHONPATH=src:. python -m lab.crash_oi_migration \
+          --config ~/trading-termux-tests/lab.toml \
+          --symbol BTCUSDT --limit 20 --apply
+        PYTHONPATH=src:. python -m lab.crash_oi_audit \
+          --config ~/trading-termux-tests/lab.toml \
+          --symbol BTCUSDT
+      done
+    )
+
+Any migration or audit failure aborts the subshell immediately, retaining all
+previously committed days and their backups. A later batch invocation can
+resume, after the failure is diagnosed. **Do not** run this alongside another
+migration or crash study. Full migration of all days requires subsequent
+explicit passes; do not run unbounded unattended loops.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
