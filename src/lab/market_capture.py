@@ -82,13 +82,17 @@ async def capture_feed(
     timestamp=time.time_ns,
     sleep=asyncio.sleep,
     max_reconnect_delay: float = 10.0,
+    fault_disconnect_after: int | None = None,
 ) -> dict:
     """Capture one endpoint. Injectable transport makes failure tests network-free.
 
     Every disconnection is recorded in the journal. There is intentionally no
     unbounded application queue: slow persistence backpressures the WebSocket.
     """
+    if fault_disconnect_after is not None and fault_disconnect_after < 1:
+        raise ValueError("fault_disconnect_after must be positive")
     counts: Counter[str] = Counter()
+    fault_injected = False
     reconnects = 0
     failures = 0
     errors = 0
@@ -128,6 +132,14 @@ async def capture_feed(
                         stream, data = payload
                         writer.append({"received_ns": received, "stream": stream, "data": data})
                         counts[stream] += 1
+                        if (
+                            fault_disconnect_after is not None
+                            and not fault_injected
+                            and sum(counts.values()) >= fault_disconnect_after
+                        ):
+                            fault_injected = True
+                            status("fault_injected_disconnect", after_events=fault_disconnect_after)
+                            await websocket.close()
 
             except Exception as exc:
                 if not _retryable_transport_error(exc):
@@ -156,10 +168,13 @@ async def run_capture(
     duration: float,
     *,
     connector,
+    fault_disconnect_after: int | None = None,
 ) -> list[dict]:
     """Exclusive single-process capture: recover only after acquiring the lock."""
     if duration <= 0:
         raise ValueError("duration must be positive")
+    if fault_disconnect_after is not None and fault_disconnect_after < 1:
+        raise ValueError("fault_disconnect_after must be positive")
     urls = stream_urls(symbols)
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -181,7 +196,10 @@ async def run_capture(
             deadline = time.monotonic() + duration
             return await asyncio.gather(
                 *(
-                    capture_feed(category, url, directory, session, deadline, connector=connector)
+                    capture_feed(
+                        category, url, directory, session, deadline, connector=connector,
+                        fault_disconnect_after=fault_disconnect_after,
+                    )
                     for category, url in urls.items()
                 )
             )
@@ -194,6 +212,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=Path("data/market-journal"))
     parser.add_argument("--symbols", nargs="+", default=["BTCUSDT"])
     parser.add_argument("--seconds", type=float, default=60)
+    parser.add_argument(
+        "--inject-disconnect-after", type=int, default=None, metavar="N",
+        help="qualification only: close each feed once after N market events to test reconnection",
+    )
     args = parser.parse_args(argv)
 
     # Imported only when running live; unit tests and recovery need no WebSocket package.
@@ -213,7 +235,12 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     try:
-        summary = asyncio.run(run_capture(args.out, args.symbols, args.seconds, connector=connector))
+        summary = asyncio.run(
+            run_capture(
+                args.out, args.symbols, args.seconds, connector=connector,
+                fault_disconnect_after=args.inject_disconnect_after,
+            )
+        )
     except (ValueError, RuntimeError) as exc:
         parser.error(str(exc))
     for result in summary:
