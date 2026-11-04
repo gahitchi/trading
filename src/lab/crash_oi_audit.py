@@ -81,22 +81,42 @@ def audit_migrations(config_path: Path, symbol: str = "BTCUSDT") -> dict:
 
             before = pd.read_parquet(original)
             after = pd.read_parquet(upgraded)
+            quarantined = meta.get("quality_policy") == "quarantined-original-zero-pairs-v1"
+            if meta.get("quality_policy") is not None and not quarantined:
+                raise ValueError("unknown OI quality policy")
+            expected_columns = set(before.columns) | (
+                {"oi_qty", "oi_valid"} if quarantined else {"oi_qty"}
+            )
             if (
                 "oi_qty" in before
-                or "oi_qty" not in after
-                or set(after.columns) != set(before.columns) | {"oi_qty"}
+                or "oi_valid" in before
+                or set(after.columns) != expected_columns
                 or len(before) != meta["records"]
                 or len(after) != meta["records"]
             ):
                 raise ValueError("original/updated schema or record count differs")
-            # Confirm that migration introduced quantity ONLY, without
-            # modifying old timestamps or notional values.
+            # Preserve all original timestamps and notional values byte-for-byte
+            # at the Parquet level, even when the original OI pair was zero.
             pd.testing.assert_frame_equal(
                 after[list(before.columns)], before, check_exact=True
             )
-            qty = pd.to_numeric(after["oi_qty"], errors="raise").to_numpy(dtype=float)
-            if not np.isfinite(qty).all() or (qty <= 0).any():
-                raise ValueError("invalid upgraded contract quantities")
+            crash_data.validate_oi_quantity(after)
+            if quarantined:
+                mask = ~after["oi_valid"].to_numpy(dtype=bool)
+                if type(meta.get("quarantined_zero_pairs")) is not int or (
+                    int(mask.sum()) != meta["quarantined_zero_pairs"]
+                ):
+                    raise ValueError("quarantined zero-pair count differs from manifest")
+                stamps = [
+                    pd.Timestamp(ts).isoformat()
+                    for ts in after.loc[mask, "ts"]
+                ]
+                if stamps != meta.get("quarantine_timestamps"):
+                    raise ValueError("quarantine timestamps differ from manifest")
+                if not mask.any():
+                    raise ValueError("empty zero-pair quarantine marker")
+            elif "quarantined_zero_pairs" in meta or "quarantine_timestamps" in meta:
+                raise ValueError("quarantine metadata lacks explicit quality policy")
 
             verified += 1
             records += len(after)
