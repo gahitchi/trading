@@ -317,7 +317,9 @@ def run(root: Path, symbols: list[str], s: CrashSettings, boundary: pd.Timestamp
         if k is None or len(k) < 2 * 1440:
             missing.append(sym)
             continue
-        b = bars(k, crash_data.load(root, "oi", sym))
+        # Never open holdout OI files while tuning research configurations.
+        oi_frame = crash_data.load(root, "oi", sym, before=boundary if not holdout else None)
+        b = bars(k, oi_frame)
         keep = b.index >= boundary if holdout else np.ones(len(b), dtype=bool)
         if not keep.any():
             missing.append(sym)
