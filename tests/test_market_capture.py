@@ -22,6 +22,7 @@ class FakeClock:
 class FakeSession:
     def __init__(self, messages):
         self.messages = iter(messages)
+        self.closed = False
 
     async def __aenter__(self):
         return self
@@ -29,7 +30,12 @@ class FakeSession:
     async def __aexit__(self, *_):
         return False
 
+    async def close(self):
+        self.closed = True
+
     async def recv(self):
+        if self.closed:
+            raise ConnectionError("intentionally closed")
         try:
             item = next(self.messages)
         except StopIteration:
@@ -141,3 +147,46 @@ def test_simultaneous_capture_fails_closed(tmp_path):
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         with pytest.raises(RuntimeError, match="another market capture"):
             asyncio.run(run_capture(tmp_path, ["BTCUSDT"], 0.01, connector=lambda _: None))
+
+
+def test_deliberate_disconnect_reconnects_and_logs_gap(tmp_path):
+    sessions = [
+        [websocket_message(event=10), websocket_message(event=11)],
+        [websocket_message(event=12)],
+    ]
+    connections = []
+
+    def connector(url):
+        connections.append(url)
+        return FakeSession(sessions.pop(0) if sessions else [])
+
+    async def immediate_sleep(_seconds):
+        return None
+
+    result = asyncio.run(
+        capture_feed(
+            "market", "fake://market", tmp_path, "session", 12.0,
+            connector=connector,
+            clock=FakeClock(),
+            timestamp=lambda: 123,
+            sleep=immediate_sleep,
+            fault_disconnect_after=2,
+        )
+    )
+    assert len(connections) >= 2
+    assert result["reconnects"] >= 1
+    assert result["counts"]["btcusdt@aggTrade"] == 3
+    records = [json.loads(line) for p in tmp_path.glob("*.jsonl") for line in p.read_text().splitlines()]
+    trade_ids = [x["data"]["a"] for x in records if x["stream"] == "btcusdt@aggTrade"]
+    statuses = [x["data"]["event"] for x in records if x["stream"] == "collector.status"]
+    assert trade_ids == [10, 11, 12]
+    assert statuses.count("fault_injected_disconnect") == 1
+    assert "disconnected" in statuses
+    assert statuses.count("connected") >= 2
+
+
+def test_invalid_injection_threshold_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="fault_disconnect_after"):
+        asyncio.run(run_capture(
+            tmp_path, ["BTCUSDT"], 1, connector=lambda _: None, fault_disconnect_after=0
+        ))
