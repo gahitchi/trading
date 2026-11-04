@@ -133,3 +133,26 @@ continuity of exchange book data; every documented reconnect interval is a
 gap unsuitable for continuous market-microstructure calculations. Aggregate
 trade IDs can advance while the client is disconnected, and bookTicker is not
 a replayable incremental order book.
+
+## Disk-exhaustion safeguard
+
+The capture command reserves **512 MiB free** on the filesystem containing
+the output directory by default. A filesystem free-space query is performed
+before opening the WebSocket connections and then at most once every 2 seconds
+during active recording. If the reserve is breached, capture **fails closed**:
+the receiver does not reconnect repeatedly, and its journals are finalized
+as far as the storage device permits. A sudden full disk can still prevent
+the final fsync/rename, in which case the interrupted segment is left for
+normal recovery and should not be treated as complete.
+
+The minimum reserve is 64 MiB; lowering the default is discouraged. A
+recording intentionally isolated on a small test filesystem may use
+--min-free-mib 128, for example:
+
+    PYTHONPATH=src:. python -m lab.market_capture \
+      --seconds 60 --symbols BTCUSDT --min-free-mib 128 \
+      --out data/portable-market-disk-test
+
+The safeguard does **not** remove existing recordings automatically or
+predict disk growth. Check actual free space, background app activity and
+data-retention requirements before beginning long sessions.
