@@ -225,8 +225,18 @@ def load(root: Path, kind: str, symbol: str, *, before: pd.Timestamp | None = No
                     "original Binance archive must be verified before research"
                 ) from exc
         parts.append(part)
+    if kind == "oi" and any("oi_valid" in part for part in parts):
+        # A quality-marked day may coexist with ordinary fully valid days.
+        # Explicitly mark the latter True before concatenation; otherwise
+        # pandas introduces null mask flags that invalidate the whole study.
+        parts = [
+            part if "oi_valid" in part else part.assign(oi_valid=True)
+            for part in parts
+        ]
     df = pd.concat(parts, ignore_index=True)
     df = df.drop_duplicates("ts", keep="last").sort_values("ts").reset_index(drop=True)
+    if kind == "oi":
+        validate_oi_quantity(df)
     return df
 
 
