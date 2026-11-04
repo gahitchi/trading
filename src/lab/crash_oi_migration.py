@@ -316,7 +316,8 @@ def migrate_batch(
                     source, backup_dir / source.name,
                     symbol=symbol, boundary=boundary, get=fetch,
                 )
-            except (OSError, ValueError, RuntimeError) as exc:
+            except Exception as exc:
+                # Data parser and Arrow errors may not be ValueError subclasses.
                 # An earlier day in this batch may already be committed.
                 # Never present the whole batch as atomic or retry it blindly.
                 completed = [item["file"] for item in migrated]
