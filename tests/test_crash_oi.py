@@ -133,3 +133,27 @@ def test_crash_study_rejects_notional_only_frame():
     oi = cd.parse_metrics(zipped(HEADER + DATA)).drop(columns="oi_qty")
     with pytest.raises(ValueError, match="contract-quantity"):
         cs.bars(k, oi)
+
+
+
+def test_research_only_oi_load_does_not_read_legacy_holdout(tmp_path):
+    p, old = legacy_file(tmp_path, "2024-01-01")
+    early = old.assign(oi_qty=[100.0, 105.0])
+    early.to_parquet(p, index=False)
+    holdout = p.parent / "2024-01-02.parquet"
+    old.to_parquet(holdout, index=False)
+
+    research = cd.load(
+        tmp_path, "oi", "BTCUSDT",
+        before=pd.Timestamp("2024-01-02", tz="UTC"),
+    )
+    assert research["oi_qty"].tolist() == [100, 105]
+    # A real holdout evaluation still rejects the unmigrated file.
+    with pytest.raises(ValueError, match="contract quantity missing"):
+        cd.load(tmp_path, "oi", "BTCUSDT")
+
+
+def test_oi_research_only_cutoff_requires_timezone_aware_timestamp(tmp_path):
+    legacy_file(tmp_path)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        cd.load(tmp_path, "oi", "BTCUSDT", before=pd.Timestamp("2024-01-02"))
