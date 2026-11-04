@@ -305,6 +305,83 @@ changed. \`lab.crash_oi_coverage\` should still flag 2024-02-16's
 125 missing slots and the six quarantined 2024-07-09 measurements.
 This is not a qualified trading strategy or permission to read holdout.
 
+
+### Six-day July 10–15 BTCUSDT source-data anomaly
+
+After successfully quarantining July 9, the next default migration stopped at
+July 10. The read-only forensic scan established the following exact counts of
+nonpositive quantity and notional snapshots, with identical archive and local
+timestamp/notional series:
+
+| Day | Suspect snapshots / 288 |
+| --- | ---: |
+| 2024-07-10 | 41 |
+| 2024-07-11 | 46 |
+| 2024-07-12 | 43 |
+| 2024-07-13 | 52 |
+| 2024-07-14 | 85 |
+| 2024-07-15 | 26 |
+| **Total** | **293 / 1,728** |
+
+July 16–19 had no nonpositive values in the same forensic check.
+The six days contain 293 suspect samples, a particularly poor-quality
+OI interval; **quarantine is not a finding that OI signals are usable
+throughout these dates**. The research mask must continue vetoing OI
+lookbacks spanning unavailable observations, and experiments must report
+reduced eligible-signal coverage. Never interpolate quantities or drop
+raw rows. Keep original backups and notional zeros.
+
+Their 12-sample forensic previews cannot alone prove all 293 are exact
+(0,0) pairs. **The preflight parser checks every row** and rejects any
+negative, nonfinite or asymmetric zero pair. The recorded original ZIP
+and legacy Parquet hashes are pinned for every day in:
+
+    docs/crash-oi-quarantine-2024-07-10-to-15.json
+
+The independent audit after the stopped July 10 attempt reports the
+expected orphan original backup, while retaining 191 verified files and
+667 legacy files remaining. This must not be "fixed" by deleting a backup.
+
+Use the following **read-only** preflight after fetching the maintenance
+branch (no cache, lock, backup or manifest changes):
+
+    PYTHONPATH=src:. python -m pytest \
+      tests/test_crash_oi_quarantine_batch.py \
+      tests/test_crash_oi_quarantine.py \
+      tests/test_crash_oi_audit.py \
+      tests/test_crash_oi_migration.py \
+      tests/test_crash_oi_coverage.py -v
+
+    PYTHONPATH=src:. python -m lab.crash_oi_quarantine_batch \
+      --config ~/trading-termux-tests/lab.toml \
+      --manifest docs/crash-oi-quarantine-2024-07-10-to-15.json
+
+The preflight requires \`preflight_ok=true\`, \`checked_days=6\`,
+\`total_zero_pairs=293\` and six individual matching pinned hashes.
+If any fail, no day is written.
+
+**Only following operator review**, the same invocation with \`--apply\`
+migrates the six days individually, using the pinned ZIP and original
+Parquet hash on every application and running the full independent
+migration integrity auditor **after each committed day**.
+An error stops the batch, reports the failing day and already committed
+prefix. The six-day operation is not atomic.
+
+    PYTHONPATH=src:. python -m lab.crash_oi_quarantine_batch \
+      --config ~/trading-termux-tests/lab.toml \
+      --manifest docs/crash-oi-quarantine-2024-07-10-to-15.json \
+      --apply
+
+Following six successful commits, the expected result is
+\`verified_files=197\`, \`verified_records=56611\`,
+\`legacy_remaining=661\`, \`quarantined_zero_pairs=293\`,
+and \`migration_integrity_ok=true\`.
+Afterwards, run \`lab.crash_oi_audit\` again as an external acceptance check.
+The independent coverage audit must still flag February 16's
+125 missing timestamps and the 299 quarantined zero-pair snapshots
+(July 9's 6 plus July 10–15's 293). It will not return a clean
+data-quality status merely because checksum integrity passes.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
