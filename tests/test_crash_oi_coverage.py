@@ -208,3 +208,27 @@ def test_period_end_convention_ending_next_midnight_is_accepted(tmp_path):
     assert report["abnormal_days"] == []
     assert report["ordering_only_day_count"] == 0
     assert report["observations"] == 288
+
+
+
+def test_full_timestamp_grid_with_quality_mask_still_reports_unavailable_evidence(tmp_path):
+    cfg, folder, _ = make_cache(tmp_path, days=(1,))
+    p = folder / "2024-01-01.parquet"
+    frame = pd.read_parquet(p)
+    frame["oi_value"] = 4200000.0
+    frame["oi_valid"] = True
+    frame.loc[120, "oi_qty"] = float("nan")
+    frame.loc[120, "oi_value"] = 0.0
+    frame.loc[120, "oi_valid"] = False
+    frame.to_parquet(p, index=False)
+
+    report = audit_coverage(cfg)
+    assert report["abnormal_days"] == []
+    assert report["observations"] == 288
+    assert report["count_shortfall"] == 0
+    assert not report["coverage_ok_for_checked_days"]
+    assert report["quality_anomaly_days"] == [{
+        "day": "2024-01-01",
+        "unavailable_quantity_snapshots": 1,
+        "timestamps": ["2024-01-01T10:00:00+00:00"],
+    }]
