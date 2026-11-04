@@ -216,6 +216,55 @@ def _migrate_one(
         tmp.unlink(missing_ok=True)
 
 
+
+def _reconcile_prior_transactions(
+    folder: Path,
+    backup_dir: Path,
+    *,
+    symbol: str,
+    boundary: date,
+) -> list[str]:
+    """Validate all previous transactions and finish interrupted commits.
+
+    After an atomic Parquet replacement, the upgraded file is no longer
+    considered legacy; therefore reconciling *only* legacy files misses the
+    precise SIGKILL window between rename and manifest commit. Reconcile
+    all existing manifests before selecting the next migration batch.
+    """
+    if not backup_dir.exists():
+        return []
+    if backup_dir.is_symlink() or not backup_dir.is_dir():
+        raise ValueError(f"unsafe migration backup directory: {backup_dir}")
+    reconciled = []
+    for manifest in sorted(backup_dir.glob("*.parquet.migration.json")):
+        if manifest.is_symlink():
+            raise ValueError(f"unsafe transaction manifest: {manifest}")
+        filename = manifest.name.removesuffix(".migration.json")
+        if filename != Path(filename).name or not filename.endswith(".parquet"):
+            raise ValueError(f"invalid transaction filename: {manifest}")
+        try:
+            day = date.fromisoformat(Path(filename).stem)
+        except ValueError as exc:
+            raise ValueError(f"invalid transaction date: {manifest}") from exc
+        if day >= boundary:
+            raise ValueError(f"transaction touches protected holdout: {manifest}")
+        meta = read_json(manifest)
+        if meta.get("symbol") != symbol:
+            raise ValueError(f"transaction symbol differs: {manifest}")
+        try:
+            recorded_boundary = date.fromisoformat(meta["holdout_start"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"invalid transaction holdout boundary: {manifest}") from exc
+        if recorded_boundary > boundary or day >= recorded_boundary:
+            raise ValueError(f"transaction exceeds its recorded holdout boundary: {manifest}")
+        source = folder / filename
+        backup = backup_dir / filename
+        prior_status = meta.get("status")
+        _reconcile_manifest(source, backup, manifest)
+        if prior_status == "prepared" and read_json(manifest).get("status") == "committed":
+            reconciled.append(filename)
+    return reconciled
+
 def migrate_batch(
     config_path: Path,
     symbol: str = "BTCUSDT",
@@ -253,8 +302,11 @@ def migrate_batch(
 
     # Live migration serialized with the old migrate_oi_quantity implementation.
     with file_lock(lock_path):
-        old = crash_data.legacy_oi_paths(root, symbol, boundary)
         _headroom(folder, min_free_mib)
+        reconciled = _reconcile_prior_transactions(
+            folder, backup_dir, symbol=symbol, boundary=boundary
+        )
+        old = crash_data.legacy_oi_paths(root, symbol, boundary)
         fetch = crash_data.patient(get)
         migrated = []
         for source in old[:limit]:
@@ -270,6 +322,7 @@ def migrate_batch(
             "boundary": boundary.isoformat(),
             "legacy_remaining": len(left),
             "processed": migrated,
+            "reconciled_transactions": reconciled,
             "backup_dir": str(backup_dir),
         }
 
