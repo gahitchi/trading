@@ -25,9 +25,9 @@ def make_fault_recording(path, category="public", *, last_epoch=True):
         market_event(writer, 1_000_001, category, 11)
         status(writer, 1_000_002, category, "fault_injected_disconnect")
         status(writer, 1_000_003, category, "disconnected")
-        status(writer, 1_500_003, category, "connected")
+        status(writer, 501_000_003, category, "connected")
         if last_epoch:
-            market_event(writer, 1_500_005, category, 12)
+            market_event(writer, 501_000_005, category, 12)
 
 
 def test_fault_injection_report_proves_market_events_after_reconnect(tmp_path):
@@ -82,7 +82,6 @@ def test_recovered_segment_requires_verified_manifest(tmp_path):
     with JournalWriter(tmp_path, "market", "session") as writer:
         status(writer, 1, "market", "connected")
         market_event(writer, 2, "market", 1)
-    raw = tmp_path / "market-session-0000.jsonl"
     aborted = tmp_path / "market-session-0001.jsonl.open"
     aborted.write_text('{"received_ns":3,"stream":"btcusdt@aggTrade","data":{"a":2}}\n')
     restored = recover_directory(tmp_path)
