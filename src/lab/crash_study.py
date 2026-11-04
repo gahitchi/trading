@@ -132,14 +132,23 @@ def bars(klines: pd.DataFrame, oi: pd.DataFrame | None) -> pd.DataFrame:
     grid = pd.date_range(k.index[0], k.index[-1], freq="min")
     b = k.reindex(grid)
     if oi is not None and len(oi):
-        if "oi_qty" not in oi or oi["oi_qty"].isna().any():
-            raise ValueError("contract-quantity open interest (oi_qty) required; legacy notional-only cache rejected")
+        crash_data.validate_oi_quantity(oi)
         o = oi.set_index("ts")["oi_qty"]
         o = o[~o.index.duplicated(keep="last")].sort_index()
         o.index = o.index + OI_DELAY
         b["oi"] = o.reindex(grid, method="ffill", tolerance=pd.Timedelta(minutes=OI_STALE_MIN))
+        if "oi_valid" in oi:
+            # Missing OI becomes known only after the archive's publication
+            # delay; prohibit signals that compare across such a gap.
+            quality = oi.set_index("ts")["oi_valid"]
+            quality = quality[~quality.index.duplicated(keep="last")].sort_index()
+            unavailable_at = quality.index[~quality] + OI_DELAY
+            b["oi_invalid"] = grid.isin(unavailable_at)
+        else:
+            b["oi_invalid"] = False
     else:
         b["oi"] = np.nan
+        b["oi_invalid"] = False
     return b
 
 
@@ -156,6 +165,12 @@ def signals(b: pd.DataFrame, s: CrashSettings) -> np.ndarray:
     else:
         oi_ok = oi_chg >= s.oi_pct / 100 if s.oi_pct else oi_chg > 0
     hit = (ret <= -s.drop_pct / 100) & (vol >= s.vol_mult * base) & oi_ok
+    if "oi_invalid" in b:
+        # Exclude the signal and its entire OI-comparison lookback after
+        # a zero-pair exchange artifact. Do not fill a missing snapshot
+        # with zero, interpolate it or bridge across it.
+        untrusted = b["oi_invalid"].rolling(w + 1, min_periods=1).max().fillna(0).astype(bool)
+        hit &= ~untrusted
     return hit.fillna(False).to_numpy(dtype=bool)
 
 
