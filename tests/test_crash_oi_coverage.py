@@ -79,16 +79,18 @@ def test_125_missing_snapshots_are_identified_on_correct_day(tmp_path):
     assert problem["non_five_minute_intervals"] == 0
 
 
-def test_nonmonotonic_timestamps_are_a_quality_failure_even_if_full_count(tmp_path):
+def test_nonmonotonic_but_complete_archive_has_advisory_not_missing_slots(tmp_path):
     cfg, folder, _ = make_cache(tmp_path, days=(1,))
     p = folder / "2024-01-01.parquet"
     df = pd.read_parquet(p)
     df.loc[[50, 51], "ts"] = df.loc[[51, 50], "ts"].to_numpy()
     df.to_parquet(p, index=False)
     report = audit_coverage(cfg)
-    assert not report["coverage_ok_for_checked_days"]
+    assert report["coverage_ok_for_checked_days"]
     assert report["count_shortfall"] == 0
-    assert report["abnormal_days"][0]["unordered_or_duplicate"] > 0
+    assert report["abnormal_days"] == []
+    assert report["ordering_only_day_count"] == 1
+    assert report["ordering_only_days"][0]["raw_order_inversions"] == 1
 
 
 def test_missing_migrated_calendar_day_is_reported_without_opening_data(tmp_path):
@@ -129,3 +131,78 @@ def test_cli_returns_nonzero_on_missing_observations(tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["count_shortfall"] == 125
     assert out["coverage_ok_for_checked_days"] is False
+
+
+
+def test_tail_gap_is_not_confused_with_an_internal_gap(tmp_path):
+    # Matches the observed 2024-02-16 short day: 00:00 through 13:30 only.
+    missing = pd.date_range("2024-01-02T13:35:00Z", periods=125, freq="5min")
+    cfg, _, _ = make_cache(tmp_path, lengths={2: missing})
+    report = audit_coverage(cfg)
+    day = report["abnormal_days"][0]
+    assert day["missing_slots"] == 125
+    assert day["internal_missing_slots"] == 0
+    assert day["trailing_missing_slots"] == 125
+    assert day["leading_missing_slots"] == 0
+    assert day["missing_ranges"] == [{
+        "start": "2024-01-02T13:35:00+00:00",
+        "end": "2024-01-02T23:55:00+00:00",
+        "slots": 125,
+    }]
+
+
+def test_288_shuffled_complete_rows_have_zero_missing_and_no_failure(tmp_path):
+    cfg, folder, _ = make_cache(tmp_path, days=(1,))
+    p = folder / "2024-01-01.parquet"
+    original = pd.read_parquet(p)
+    original.sample(frac=1, random_state=102).reset_index(drop=True).to_parquet(p, index=False)
+    report = audit_coverage(cfg)
+    assert report["coverage_ok_for_checked_days"]
+    assert report["observations"] == report["full_day_count_benchmark"] == 288
+    assert report["ordering_only_day_count"] == 1
+    assert report["abnormal_days"] == []
+    assert report["ordering_only_days"][0]["raw_order_inversions"] > 0
+
+
+def test_duplicate_replaces_missing_slot_even_when_row_count_is_288(tmp_path):
+    cfg, folder, _ = make_cache(tmp_path, days=(1,))
+    p = folder / "2024-01-01.parquet"
+    df = pd.read_parquet(p)
+    df.loc[100, "ts"] = df.loc[99, "ts"]
+    df.to_parquet(p, index=False)
+    report = audit_coverage(cfg)
+    assert not report["coverage_ok_for_checked_days"]
+    assert report["count_shortfall"] == 0
+    day = report["abnormal_days"][0]
+    assert day["duplicate_timestamps"] == 1
+    assert day["unique_observations"] == 287
+    assert day["missing_slots"] == 1
+    assert day["internal_missing_slots"] == 1
+    assert day["raw_order_inversions"] == 0
+
+
+def test_offgrid_snapshot_is_never_silently_accepted(tmp_path):
+    cfg, folder, _ = make_cache(tmp_path, days=(1,))
+    p = folder / "2024-01-01.parquet"
+    df = pd.read_parquet(p)
+    df.loc[77, "ts"] = df.loc[77, "ts"] + pd.Timedelta(minutes=1)
+    df.to_parquet(p, index=False)
+    report = audit_coverage(cfg)
+    assert not report["coverage_ok_for_checked_days"]
+    day = report["abnormal_days"][0]
+    assert day["off_five_minute_grid"] == 1
+    assert day["missing_slots"] == 1
+    assert day["unexpected_slots"] == 1
+
+
+def test_period_end_convention_ending_next_midnight_is_accepted(tmp_path):
+    cfg, folder, _ = make_cache(tmp_path, days=(1,))
+    p = folder / "2024-01-01.parquet"
+    frame = pd.read_parquet(p)
+    frame["ts"] = frame["ts"] + pd.Timedelta(minutes=5)
+    frame.to_parquet(p, index=False)
+    report = audit_coverage(cfg)
+    assert report["coverage_ok_for_checked_days"]
+    assert report["abnormal_days"] == []
+    assert report["ordering_only_day_count"] == 0
+    assert report["observations"] == 288
