@@ -47,13 +47,11 @@ def _sync_directory(directory: Path) -> None:
 
 
 def _holdout_boundary(cfg) -> date:
-    path = cfg.results_dir / crash_data.PARTITION if hasattr(crash_data, "PARTITION") else (
-        cfg.results_dir / "crash_partition.json"
-    )
+    path = cfg.results_dir / "crash_partition.json"
     if not path.is_file():
         raise ValueError(f"protected crash holdout partition missing: {path}")
     part = read_json(path)
-    if part.get("version") != 1 or not part.get("holdout_start"):
+    if not isinstance(part, dict) or part.get("version") != 1 or not part.get("holdout_start"):
         raise ValueError(f"invalid crash holdout partition: {path}")
     boundary = pd.Timestamp(part["holdout_start"])
     if boundary.tzinfo is None or boundary.utcoffset() != pd.Timedelta(0):
@@ -257,12 +255,13 @@ def migrate_batch(
     with file_lock(lock_path):
         old = crash_data.legacy_oi_paths(root, symbol, boundary)
         _headroom(folder, min_free_mib)
+        fetch = crash_data.patient(get)
         migrated = []
         for source in old[:limit]:
             _headroom(folder, min_free_mib)
             result = _migrate_one(
                 source, backup_dir / source.name,
-                symbol=symbol, boundary=boundary, get=get,
+                symbol=symbol, boundary=boundary, get=fetch,
             )
             migrated.append({"file": source.name, "result": result})
         left = crash_data.legacy_oi_paths(root, symbol, boundary)
