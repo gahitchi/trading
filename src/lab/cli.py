@@ -811,75 +811,67 @@ def cmd_crash_fetch(cfg, a):
 
 
 def cmd_crash_study(cfg, a):
-    # The port is research-only until the maintenance branch's pre-access
-    # holdout reservation and trial-provenance protocols are integrated.
+    # Crash research on the maintenance branch is exploratory only.
+    # Holdout runs and releases remain disabled until independently qualified.
     if a.holdout:
         raise SystemExit(
             "crash holdout is disabled on this branch until reservation/qualification is complete"
         )
+    if a.again:
+        raise SystemExit("--again only applies with --holdout")
+
     import numpy as np
 
     from lab import crash_data
     from lab import crash_study as cs
-    from lab.carry_study import trial_sharpes
     from lab.persistence import nullable_numbers
+    from lab.trials import count_configurations, trial_run
 
     root = cfg.data_dir / "crash"
     symbols = crash_data.cached_symbols(root) if a.all else [x.upper() for x in a.symbols]
     try:
-        s = cs.CrashSettings.preset(
+        settings = cs.CrashSettings.preset(
             a.mode, drop_pct=a.drop_pct, window_min=a.window_min, vol_mult=a.vol_mult, oi_pct=a.oi_pct,
             tp_pct=a.tp_pct, sl_pct=a.sl_pct, hold_min=a.hold_min, delay_min=a.delay_min, fee_bps=a.fee_bps,
             slippage_bps=a.slippage_bps, vol_target=a.vol_target,
         )  # fmt: skip
-        b = cs.boundary(cfg.results_dir, root)
-        params = cs.params_of(s, symbols)
-        key = f"crash-{a.mode}"
-        if a.holdout:
-            fast_research.check_holdout(cfg.results_dir, key, params, int(b.value), a.again or "")
-        elif a.again:
-            raise SystemExit("--again only applies with --holdout")
-    except ValueError as e:
-        raise SystemExit(str(e)) from e
+        boundary = cs.boundary(cfg.results_dir, root)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    key = f"crash-{a.mode}"
+    # No possible reclassification of old notional-based studies as contract-quantity evidence.
+    params = {**cs.params_of(settings, symbols), "oi_measure": "contract-quantity-v1"}
     try:
-        r = cs.run(root, symbols, s, b, holdout=a.holdout)
-    except ValueError as e:
-        raise SystemExit(f"invalid crash research input: {e}") from e
-    if not r.trades:
-        raise SystemExit(f"no crash data for {' '.join(symbols)} {'after' if a.holdout else 'before'} {b:%Y-%m-%d}")
-    st = cs.summary(r.trades, r.start, r.end)
-    keys = ("days", "trades", "mean_bps", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")
-    result = nullable_numbers({k: st[k] for k in keys})
-    if a.holdout:
-        fast_research.record_holdout(cfg.results_dir, key, params, int(b.value), result, a.again or "")
-    n = fast_research.register_trial(
-        cfg.results_dir, "crash-study", key, params, (int(r.start.value), int(r.end.value)), result,
-        holdout=a.holdout,
-    )  # fmt: skip
+        # Durable attempt is reserved BEFORE reading historical candle / OI data.
+        with trial_run(
+            cfg.results_dir, "crash-study", key, params, (None, int(boundary.value) - 1)
+        ) as attempt:
+            r = cs.run(root, symbols, settings, boundary, holdout=False)
+            if not r.trades:
+                raise ValueError(f"no pre-holdout crash data for {' '.join(symbols)} before {boundary:%Y-%m-%d}")
+            st = cs.summary(r.trades, r.start, r.end)
+            keys = ("days", "trades", "mean_bps", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")
+            attempt.result = nullable_numbers({k: st[k] for k in keys})
+            attempt.window = (int(r.start.value), int(r.end.value))
+        n = count_configurations(cfg.results_dir, "crash-study", key)
+    except ValueError as exc:
+        raise SystemExit(f"crash research unavailable: {exc}") from exc
+
     trade = {"wick": "buy the flush, sell the bounce", "breakdown": "short the sell-off, ride it"}[a.mode]
     print(f"crash {a.mode} ({trade}): {len(r.trades)} symbol(s), {st['start']} .. {st['end']} UTC")
-    oi_rule = f"OI {'fell' if a.mode == 'wick' else 'rose'} {'>= ' + format(s.oi_pct, 'g') + '%' if s.oi_pct else ''}"
+    oi_rule = f"contract OI {'fell' if a.mode == 'wick' else 'rose'} {'>= ' + format(settings.oi_pct, 'g') + '%' if settings.oi_pct else ''}"
     print(
-        f"  signal: -{s.drop_pct:g}% in {s.window_min} min, volume >= {s.vol_mult:g}x usual, {oi_rule.strip()}; "
-        f"enter {s.delay_min} min later; target {s.tp_pct:g}%, stop {s.sl_pct:g}%, hold <= {s.hold_min} min; "
-        f"costs {s.cost * 1e4:g} bps a round trip; sized to {s.vol_target:.0%} vol"
+        f"  signal: -{settings.drop_pct:g}% in {settings.window_min} min, "
+        f"volume >= {settings.vol_mult:g}x usual, {oi_rule.strip()}; "
+        f"enter {settings.delay_min} min later; target {settings.tp_pct:g}%, "
+        f"stop {settings.sl_pct:g}%, hold <= {settings.hold_min} min; "
+        f"costs {settings.cost * 1e4:g} bps a round trip; sized to {settings.vol_target:.0%} vol"
     )
-    if a.holdout:
-        psr = cs.probabilistic_sharpe(st["sr_daily"], st["days"], st["skew"], st["kurt"])
-        print(f"  HOLDOUT test from {b:%Y-%m-%d} (recorded); P(Sharpe > 0) {psr:.2f}")
-    else:
-        if n < 2:
-            deflated = "unavailable (fewer than two research configurations)"
-        else:
-            try:
-                srs = trial_sharpes(cfg.results_dir, "crash-study", key)
-            except ValueError as e:
-                raise SystemExit(f"cannot qualify crash research Sharpe: {e}") from e
-            deflated = f"{cs.deflated_sharpe(st, srs):.2f} (provisional IID diagnostic only)"
-        print(
-            f"  research data only (holdout from {b:%Y-%m-%d}); configurations tried: {n}; "
-            f"deflated Sharpe {deflated}"
-        )
+    print(
+        f"  research data only (holdout from {boundary:%Y-%m-%d}); configurations tried: {n}; "
+        "deflated Sharpe unavailable until complete, comparable input provenance is verified"
+    )
     if r.missing:
         print(f"  no data, left out: {' '.join(r.missing)}")
     print(
@@ -889,17 +881,18 @@ def cmd_crash_study(cfg, a):
     )
     bs = cs.summary(r.baseline, r.start, r.end)
     print(
-        f"  baseline, same exits entered daily at 00:00 UTC: {bs['trades']} trades, mean {bs['mean_bps']:+.1f} bps"
-        f" net, {bs['apr']:+.2f}% a year, Sharpe {bs['sharpe']:+.2f}"
+        f"  baseline, same exits entered daily at 00:00 UTC: {bs['trades']} trades, "
+        f"mean {bs['mean_bps']:+.1f} bps net, {bs['apr']:+.2f}% a year, Sharpe {bs['sharpe']:+.2f}"
     )
-    side = "in the trade's direction"
-    fwd = "  ".join(f"{m}m {np.mean(x) * 1e4:+.0f} (n {len(x)})" if len(x) else f"{m}m -" for m, x in r.forward.items())
-    print(f"  gross move after each crash's first signal, bps {side}, before exits and costs: {fwd}")
-    table = cs.per_symbol(r.trades)
-    print(table.to_string(index=False, float_format=lambda x: f"{x:.1f}"))
+    fwd = "  ".join(
+        f"{m}m {np.mean(x) * 1e4:+.0f} (n {len(x)})" if len(x) else f"{m}m -"
+        for m, x in r.forward.items()
+    )
+    print(f"  gross move after each crash's first signal, bps in trade direction, before costs: {fwd}")
+    print(cs.per_symbol(r.trades).to_string(index=False, float_format=lambda x: f"{x:.1f}"))
     print(
-        "Taker fills both sides, fees and slippage included. The deflated Sharpe discounts the best of the"
-        " configurations tried; under 0.95 the edge is not established."
+        "Both sides assume taker fills with fees/slippage; this preliminary study "
+        "does not establish predictive power or qualify live execution."
     )
     return 0
 
