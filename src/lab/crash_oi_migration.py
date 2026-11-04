@@ -310,11 +310,22 @@ def migrate_batch(
         fetch = crash_data.patient(get)
         migrated = []
         for source in old[:limit]:
-            _headroom(folder, min_free_mib)
-            result = _migrate_one(
-                source, backup_dir / source.name,
-                symbol=symbol, boundary=boundary, get=fetch,
-            )
+            try:
+                _headroom(folder, min_free_mib)
+                result = _migrate_one(
+                    source, backup_dir / source.name,
+                    symbol=symbol, boundary=boundary, get=fetch,
+                )
+            except (OSError, ValueError, RuntimeError) as exc:
+                # An earlier day in this batch may already be committed.
+                # Never present the whole batch as atomic or retry it blindly.
+                completed = [item["file"] for item in migrated]
+                raise ValueError(
+                    f"OI migration stopped at {source.name}; "
+                    f"this invocation already migrated {len(completed)} "
+                    f"preceding files ({', '.join(completed) or 'none'}); "
+                    f"cause: {exc}. Audit committed days before retrying."
+                ) from exc
             migrated.append({"file": source.name, "result": result})
         left = crash_data.legacy_oi_paths(root, symbol, boundary)
         return {
