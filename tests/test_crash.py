@@ -266,7 +266,7 @@ def test_research_never_sees_the_holdout(tmp_path):
     assert len(held.trades["AUSDT"]) == 1 and held.start >= late
 
 
-def test_cli_research_counts_trials_and_meets_the_holdout_once(tmp_path, capsys):
+def test_cli_research_counts_trials_but_blocks_unqualified_holdout(tmp_path, capsys):
     (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
     root = tmp_path / "data" / "crash"
     for i, sym in enumerate(("AUSDT", "BUSDT")):
@@ -281,11 +281,11 @@ def test_cli_research_counts_trials_and_meets_the_holdout_once(tmp_path, capsys)
     assert "configurations tried: 2" in capsys.readouterr().out
     assert lab_main([*run, "--mode", "breakdown"]) == 0
     assert "configurations tried: 1" in capsys.readouterr().out  # counted per mode
-    assert lab_main([*run, "--holdout"]) == 0
-    assert "HOLDOUT test" in capsys.readouterr().out
-    with pytest.raises(SystemExit, match="--again"):
+    with pytest.raises(SystemExit, match="crash holdout is disabled"):
         lab_main([*run, "--holdout"])
+    with pytest.raises(SystemExit, match="crash holdout release is disabled"):
+        lab_main(["--config", str(tmp_path / "lab.toml"), "crash", "release", "--reason", "test"])
     trials = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
-    assert [t["holdout"] for t in trials] == [False, False, False, True]
+    assert [t["holdout"] for t in trials] == [False, False, False]
     assert all(t["kind"] == "crash-study" and "sr_daily" in t["result"] for t in trials)
     assert trials[0]["params"]["drop_pct"] == 5 and trials[2]["params"]["hold_min"] == 1440  # the preset
