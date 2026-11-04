@@ -75,18 +75,63 @@ def parse_klines(blob: bytes) -> pd.DataFrame:
     return out
 
 
-def parse_metrics(blob: bytes) -> pd.DataFrame:
-    df = _csv(blob)  # create_time, symbol, sum_open_interest, sum_open_interest_value, ...
-    qty = pd.to_numeric(df["sum_open_interest"], errors="raise").astype(float).to_numpy()
-    notional = pd.to_numeric(df["sum_open_interest_value"], errors="raise").astype(float).to_numpy()
+def parse_metrics(blob: bytes, *, quarantine_zero_pairs: bool = False) -> pd.DataFrame:
+    """Parse OI metrics; ordinary ingestion rejects zeros without exception.
+
+    The explicit, hash-pinned historical quarantine path may mark only
+    (quantity == 0, notional == 0) pairs as unavailable measurements.
+    Contract quantities become NaN; the original notional zeros are retained.
+    Asymmetric zeros, negative numbers, nonfinite values remain invalid.
+    """
+    df = _csv(blob)
+    qty = pd.to_numeric(df["sum_open_interest"], errors="raise").to_numpy(dtype=float)
+    notional = pd.to_numeric(df["sum_open_interest_value"], errors="raise").to_numpy(dtype=float)
     if not (np.isfinite(qty).all() and np.isfinite(notional).all()):
         raise ValueError("nonfinite Binance open-interest snapshot")
-    if (qty <= 0).any() or (notional <= 0).any():
+    zero_pair = (qty == 0) & (notional == 0)
+    if (qty < 0).any() or (notional < 0).any() or (
+        ((qty <= 0) | (notional <= 0)) & ~zero_pair
+    ).any():
+        raise ValueError("open-interest quantity and notional must be positive")
+    if zero_pair.any() and not quarantine_zero_pairs:
         raise ValueError("open-interest quantity and notional must be positive")
     ts = pd.to_datetime(df["create_time"], utc=True, errors="raise")
     if ts.isna().any() or ts.duplicated().any():
         raise ValueError("invalid or duplicate Binance open-interest timestamps")
+    if quarantine_zero_pairs:
+        if not zero_pair.any():
+            raise ValueError("zero-pair quarantine requested without invalid zero-pair observations")
+        qty = qty.copy()
+        qty[zero_pair] = np.nan
+        return pd.DataFrame({
+            "ts": ts, "oi_qty": qty, "oi_value": notional, "oi_valid": ~zero_pair,
+        })
     return pd.DataFrame({"ts": ts, "oi_qty": qty, "oi_value": notional})
+
+
+def validate_oi_quantity(frame: pd.DataFrame) -> None:
+    """Fail closed unless every OI row is positive or explicitly quarantined."""
+    if "oi_qty" not in frame:
+        raise ValueError("contract quantity missing: legacy open-interest cache")
+    qty = pd.to_numeric(frame["oi_qty"], errors="raise").to_numpy(dtype=float)
+    if "oi_valid" not in frame:
+        if not np.isfinite(qty).all() or (qty <= 0).any():
+            raise ValueError("contract quantity missing/invalid: unmarked open-interest snapshot")
+        return
+    flags = frame["oi_valid"]
+    if flags.isna().any() or not pd.api.types.is_bool_dtype(flags.dtype):
+        raise ValueError("invalid OI quality-mask datatype")
+    valid = flags.to_numpy(dtype=bool)
+    if not (~valid).any():
+        raise ValueError("OI quality marker without any quarantined samples")
+    if "oi_value" not in frame:
+        raise ValueError("missing original OI notional for quality validation")
+    value = pd.to_numeric(frame["oi_value"], errors="raise").to_numpy(dtype=float)
+    if not np.isfinite(value).all() or (valid & ((qty <= 0) | ~np.isfinite(qty) | (value <= 0))).any():
+        raise ValueError("invalid positive OI quality-mask row")
+    if ((~valid) & (~np.isnan(qty) | (value != 0))).any():
+        raise ValueError("quarantined OI must be NaN contract quantity and original zero notional")
+
 
 
 def periods(kind: str, since: date, today: date) -> list[str]:
@@ -171,15 +216,14 @@ def load(root: Path, kind: str, symbol: str, *, before: pd.Timestamp | None = No
     parts = []
     for path in files:
         part = pd.read_parquet(path)
-        if kind == "oi" and (
-            "oi_qty" not in part or part["oi_qty"].isna().any()
-            or not np.isfinite(part["oi_qty"].to_numpy(dtype=float)).all()
-            or (part["oi_qty"] <= 0).any()
-        ):
-            raise ValueError(
-                f"legacy/invalid open-interest cache at {path}: contract quantity missing; "
-                "re-fetch the original Binance metrics archive before running any crash study"
-            )
+        if kind == "oi":
+            try:
+                validate_oi_quantity(part)
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"legacy/invalid open-interest cache at {path}: {exc}; "
+                    "original Binance archive must be verified before research"
+                ) from exc
         parts.append(part)
     df = pd.concat(parts, ignore_index=True)
     df = df.drop_duplicates("ts", keep="last").sort_values("ts").reset_index(drop=True)
@@ -210,8 +254,11 @@ def legacy_oi_paths(root: Path, symbol: str, before: date) -> list[Path]:
         if len(path.stem) != 10 or _end_of(path.stem) > before:
             continue
         df = pd.read_parquet(path)
-        if "oi_qty" not in df or df["oi_qty"].isna().any():
+        if "oi_qty" not in df or ("oi_valid" not in df and df["oi_qty"].isna().any()):
             out.append(path)
+        else:
+            # An invalid or unaudited marker is not eligible for silent retry.
+            validate_oi_quantity(df)
     return out
 
 
