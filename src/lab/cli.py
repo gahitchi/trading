@@ -934,7 +934,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config", help="path to lab.toml (default: search upwards from here)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    from lab.record import DEFAULT_SYMBOLS, VENUES
+    # Parser construction must not import the native NautilusTrader recorder:
+    # research subcommands also run in portable Termux environments.
+    from lab.market_symbols import DEFAULT_SYMBOLS, VENUES
 
     rec = sub.add_parser("record", help="record crypto order books, trades, mark prices and funding (data only)")
     rec.add_argument("--venue", choices=VENUES, default="binance", help="exchange; run one recorder per venue")
