@@ -237,6 +237,74 @@ them with guessed values, relax parser validation, or delete a failed-day
 backup. Do not run the rest of the migration until the cause is investigated
 and a documented handling rule is tested. The protected holdout is not read.
 
+
+
+### 2024-07-09 BTCUSDT: exact-source zero-pair quarantine
+
+The original Binance daily metrics ZIP at
+\`data.binance.vision/data/futures/um/daily/metrics/BTCUSDT/BTCUSDT-metrics-2024-07-09.zip\`
+contains six **(quantity=0, notional=0)** pairs at 17:25, 18:05, 19:00,
+19:15, 20:20 and 20:35 UTC. All 288 timestamps and the original
+notional values match the cached file. These six OI values are not
+credible evidence of the exchange's actual outstanding positions.
+
+**This does not authorize replacing zeros with interpolated values.**
+The isolated exception path converts the six unusable *quantity* values
+to NaN and attaches an explicit \`oi_valid=False\` marker; it preserves
+the original zero *notional* values and all timestamps unchanged.
+Regular ingestion and general batch migration continue rejecting zero
+quantity. Research must veto signals for any OI lookback spanning a
+published invalid snapshot. The quality-aware coverage checker reports
+the six unavailable observations separately from missing timestamps.
+
+Original ZIP SHA-256 (from the operator's read-only forensic report):
+
+    7954ac8410a251604524ba8398f0753332ce2542bacadbdb4c5a5a77bb585150
+
+Original legacy Parquet SHA-256 (same verified report):
+
+    2d8d3b30b47a708cb3354ae1c92a94a1dfd03de18859a796c2eb789a64bb8748
+
+The failed attempt created a byte-exact backup without a completed
+manifest. That orphan is intentional and must match the pinned legacy
+digest; do not delete it.
+
+Validate the new exception path and all existing regression tests first:
+
+    PYTHONPATH=src:. python -m pytest \
+      tests/test_crash_oi_quarantine.py \
+      tests/test_crash_oi_forensics.py \
+      tests/test_crash_oi_coverage.py \
+      tests/test_crash_oi_audit.py \
+      tests/test_crash_oi_migration.py \
+      tests/test_crash_oi.py \
+      tests/test_crash.py \
+      -k "not test_cli_research" -v
+
+Then inspect the exact day **without --apply**:
+
+    PYTHONPATH=src:. python -m lab.crash_oi_quarantine \
+      --config ~/trading-termux-tests/lab.toml \
+      --symbol BTCUSDT --day 2024-07-09 \
+      --archive-sha256 7954ac8410a251604524ba8398f0753332ce2542bacadbdb4c5a5a77bb585150 \
+      --legacy-sha256 2d8d3b30b47a708cb3354ae1c92a94a1dfd03de18859a796c2eb789a64bb8748 \
+      --expect-zero-pairs 6
+
+That read-only command must return \`eligible_for_explicit_quarantine=true\`;
+it checks both content hashes, every archive timestamp and notional, the
+exact six (0,0) pairs, and the quality-mask result. Do not apply the
+exception until the tests and dry-run are accepted.
+
+With explicit operator approval, the *same command* plus \`--apply\`
+atomically migrates only that named pre-holdout day, preserving the
+original backup and recording the six invalid timestamps in the
+transaction. Follow with the independent \`lab.crash_oi_audit\` before
+any further ordinary migration. A successful repair should produce
+191 committed files and 667 remaining, unless unrelated files have
+changed. \`lab.crash_oi_coverage\` should still flag 2024-02-16's
+125 missing slots and the six quarantined 2024-07-09 measurements.
+This is not a qualified trading strategy or permission to read holdout.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
