@@ -14,6 +14,7 @@ import asyncio
 import fcntl
 import json
 import re
+import shutil
 import time
 from collections import Counter
 from datetime import UTC, datetime
@@ -23,6 +24,51 @@ from lab.market_journal import JournalWriter, recover_directory
 
 HOST = "wss://fstream.binance.com"
 SYMBOL_RE = re.compile(r"[A-Z0-9]{2,20}\Z")
+
+
+class LowDiskSpace(RuntimeError):
+    """The reserved free-space budget has been exhausted: stop writing."""
+
+
+class DiskSpaceGuard:
+    """Amortized free-disk check, shared by both feed tasks.
+
+    The minimum is enforced at startup and periodically during capture.
+    A successful check cannot prevent another process from consuming the
+    reserve or protect against a sudden disk I/O failure.
+    """
+
+    def __init__(
+        self,
+        directory: Path,
+        min_free_mib: int = 512,
+        *,
+        interval_s: float = 2.0,
+        clock=time.monotonic,
+        free_bytes=None,
+    ) -> None:
+        if min_free_mib < 64:
+            raise ValueError("min_free_mib must be at least 64 MiB")
+        if interval_s <= 0:
+            raise ValueError("disk check interval must be positive")
+        self.directory = Path(directory)
+        self.minimum_bytes = min_free_mib * 1024 * 1024
+        self.interval_s = interval_s
+        self.clock = clock
+        self.free_bytes = free_bytes or (lambda path: shutil.disk_usage(path).free)
+        self.next_check = 0.0
+
+    def check(self, *, force: bool = False) -> None:
+        now = self.clock()
+        if not force and now < self.next_check:
+            return
+        available = self.free_bytes(self.directory)
+        if available < self.minimum_bytes:
+            raise LowDiskSpace(
+                f"recording stopped: {available / 1048576:.1f} MiB free in "
+                f"{self.directory}, below {self.minimum_bytes / 1048576:.0f} MiB reserve"
+            )
+        self.next_check = now + self.interval_s
 
 
 def stream_urls(symbols: list[str]) -> dict[str, str]:
@@ -83,6 +129,7 @@ async def capture_feed(
     sleep=asyncio.sleep,
     max_reconnect_delay: float = 10.0,
     fault_disconnect_after: int | None = None,
+    disk_guard: DiskSpaceGuard | None = None,
 ) -> dict:
     """Capture one endpoint. Injectable transport makes failure tests network-free.
 
@@ -106,11 +153,15 @@ async def capture_feed(
 
     try:
         while clock() < deadline:
+            if disk_guard is not None:
+                disk_guard.check()
             try:
                 async with connector(url) as websocket:
                     status("connected")
                     failures = 0
                     while clock() < deadline:
+                        if disk_guard is not None:
+                            disk_guard.check()
                         try:
                             raw = await asyncio.wait_for(
                                 websocket.recv(),
@@ -130,6 +181,8 @@ async def capture_feed(
                             status("control_message")
                             continue
                         stream, data = payload
+                        if disk_guard is not None:
+                            disk_guard.check()
                         writer.append({"received_ns": received, "stream": stream, "data": data})
                         counts[stream] += 1
                         if (
@@ -169,6 +222,8 @@ async def run_capture(
     *,
     connector,
     fault_disconnect_after: int | None = None,
+    min_free_mib: int = 512,
+    free_bytes=None,
 ) -> list[dict]:
     """Exclusive single-process capture: recover only after acquiring the lock."""
     if duration <= 0:
@@ -176,6 +231,8 @@ async def run_capture(
     if fault_disconnect_after is not None and fault_disconnect_after < 1:
         raise ValueError("fault_disconnect_after must be positive")
     urls = stream_urls(symbols)
+    if min_free_mib < 64:
+        raise ValueError("min_free_mib must be at least 64 MiB")
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     lock_path = directory / ".capture.lock"
@@ -185,6 +242,8 @@ async def run_capture(
         except BlockingIOError as exc:
             raise RuntimeError(f"another market capture owns {directory}") from exc
         try:
+            disk_guard = DiskSpaceGuard(directory, min_free_mib, free_bytes=free_bytes)
+            disk_guard.check(force=True)
             restored = recover_directory(directory)
             for report in restored:
                 print(
@@ -199,6 +258,7 @@ async def run_capture(
                     capture_feed(
                         category, url, directory, session, deadline, connector=connector,
                         fault_disconnect_after=fault_disconnect_after,
+                        disk_guard=disk_guard,
                     )
                     for category, url in urls.items()
                 )
@@ -212,6 +272,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=Path("data/market-journal"))
     parser.add_argument("--symbols", nargs="+", default=["BTCUSDT"])
     parser.add_argument("--seconds", type=float, default=60)
+    parser.add_argument(
+        "--min-free-mib", type=int, default=512,
+        help="fail-closed free-space reserve in MiB (minimum 64; default 512)",
+    )
     parser.add_argument(
         "--inject-disconnect-after", type=int, default=None, metavar="N",
         help="qualification only: close each feed once after N market events to test reconnection",
@@ -239,6 +303,7 @@ def main(argv: list[str] | None = None) -> int:
             run_capture(
                 args.out, args.symbols, args.seconds, connector=connector,
                 fault_disconnect_after=args.inject_disconnect_after,
+                min_free_mib=args.min_free_mib,
             )
         )
     except (ValueError, RuntimeError) as exc:
