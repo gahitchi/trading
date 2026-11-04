@@ -88,8 +88,10 @@ On each processed historical day the tool:
 3. Writes and checks an upgraded temporary Parquet, recording the original,
    ZIP and new-file SHA-256 hashes in a durable `.migration.json` transaction.
 4. Atomically replaces only that pre-holdout file and commits the transaction.
-   After interruption, a prepared transaction is reconciled with the backup
-   and live file before any replay.
+   On each later --apply invocation, all prior transactions are verified and
+   prepared manifests are reconciled **before** the next legacy files are
+   selected. This catches a kill after the data rename when the upgraded
+   Parquet no longer appears in the legacy-file inventory.
 
 Migrations are limited to at most **20 days per invocation**; the default is
 two. A 128 MiB minimum free-space reserve and a directory lock are enforced.
@@ -101,6 +103,11 @@ physical device loss; preserve a separate off-device copy of valuable raw
 history. Do not run other crash-research or data-fetch processes while the
 cache is being migrated. Historical market research remains unqualified
 until all eligible pre-holdout OI days have been corrected and audited.
+
+The first two-file application is a pilot, not permission to start the
+remaining 856 days unattended. After that pilot, separately compare the
+backup-file and original SHA-256 hashes from each transaction sidecar and
+verify `oi_qty` in the upgraded Parquet, before increasing batch size.
 
 The original unbounded Python `migrate_oi_quantity(..., apply=True)` API
 exists for backwards compatibility, but should **not** be used for this
