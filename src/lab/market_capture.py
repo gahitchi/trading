@@ -42,9 +42,23 @@ def stream_urls(symbols: list[str]) -> dict[str, str]:
     }
 
 
+def _reject_nonfinite(value: str) -> None:
+    raise ValueError(f"nonfinite JSON value: {value}")
+
+
+def _retryable_transport_error(exc: Exception) -> bool:
+    if isinstance(exc, (OSError, ConnectionError, TimeoutError, EOFError)):
+        return True
+    try:
+        from websockets.exceptions import ConnectionClosed
+    except ImportError:
+        return False
+    return isinstance(exc, ConnectionClosed)
+
+
 def parse_message(raw: str | bytes) -> tuple[str, dict] | None:
     """Return a validated combined-stream event; ignore subscription/control replies."""
-    item = json.loads(raw, parse_constant=lambda x: (_ for _ in ()).throw(ValueError(f"nonfinite {x}")))
+    item = json.loads(raw, parse_constant=_reject_nonfinite)
     if not isinstance(item, dict):
         raise ValueError("WebSocket message must be an object")
     stream = item.get("stream")
@@ -115,7 +129,9 @@ async def capture_feed(
                         writer.append({"received_ns": received, "stream": stream, "data": data})
                         counts[stream] += 1
 
-            except (OSError, ConnectionError, TimeoutError, EOFError) as exc:
+            except Exception as exc:
+                if not _retryable_transport_error(exc):
+                    raise
                 reconnects += 1
                 failures += 1
                 status("disconnected", reason=type(exc).__name__, reconnects=reconnects)
