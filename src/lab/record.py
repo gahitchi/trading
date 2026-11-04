@@ -20,23 +20,17 @@ Layout (NautilusTrader's own catalog, readable with `ParquetDataCatalog(<out>/ca
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from nautilus_trader.common import DataActor, DataActorConfig
 from nautilus_trader.model import BookType, InstrumentId
 
+from lab.market_symbols import BINANCE, BYBIT, DEFAULT_SYMBOLS, PERPETUAL, SYMBOL_RE, VENUES
 from lab.persistence import atomic_json
 
-BINANCE = "BINANCE"
-BYBIT = "BYBIT"
-# NautilusTrader's instrument-ID suffix for each venue's USDT-margined perpetuals.
-PERPETUAL = {BINANCE: "PERP", BYBIT: "LINEAR"}
-VENUES = tuple(v.lower() for v in PERPETUAL)
-DEFAULT_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT")
 KINDS = ("book", "trades", "mark", "funding")
-_SYMBOL = re.compile(r"[A-Z0-9]{2,20}")
+_SYMBOL = SYMBOL_RE
 
 
 def perpetual_ids(symbols, venue: str = "binance") -> list[InstrumentId]:
