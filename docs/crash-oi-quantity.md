@@ -55,17 +55,56 @@ original Termux checkout:
     print("First 5:", pending[:5])
     PY
 
-The default is **dry run**: no archive download or Parquet rewrite (the
-migration lock file may be created). The cutoff is read from the original
-research checkout, not inferred from current dates or validation-worktree
-results. Use the original historical cache; do not create a new partition.
-After the archive source/holdout path is verified, the operator may
-explicitly call `migrate_oi_quantity(..., apply=True)`. That operation
-fetches each original daily Binance metrics ZIP, compares every timestamp
-and notional OI value against the local cache, then atomically adds
-`oi_qty` only if the input matches. On any mismatch the affected period
-is preserved; migration can be resumed on the remaining legacy days.
-It may require many archive downloads and rate-limit backoff.
+The default is **dry run**: no archive download or Parquet rewrite.
+The cutoff is read from the original research checkout, not inferred from
+current dates or validation-worktree results. Use the original historical
+cache; do not create a new partition.
+
+### Controlled migration CLI (preferred over direct migrate_oi_quantity)
+
+Use the **new** guarded migration tool; it never defaults to modifying
+historical data and does not accept a hand-entered cutoff. It reads the
+existing partition from the specified **original** lab.toml.
+
+First run the offline transaction tests, then inspect the exact two selected
+days in a read-only dry run:
+
+    PYTHONPATH=src:. python -m pytest       tests/test_crash_oi_migration.py -v
+
+    PYTHONPATH=src:. python -m lab.crash_oi_migration       --config ~/trading-termux-tests/lab.toml       --symbol BTCUSDT --limit 2
+
+Only after the dry-run selection, backup destination, filesystem headroom
+and original research partition are verified, run a **pilot** migration:
+
+    PYTHONPATH=src:. python -m lab.crash_oi_migration       --config ~/trading-termux-tests/lab.toml       --symbol BTCUSDT --limit 2 --apply
+
+On each processed historical day the tool:
+
+1. Saves the **exact raw Parquet bytes** to
+   `data/crash/oi-original-backups/BTCUSDT/<day>.parquet`, verifies SHA-256
+   and fsyncs the immutable copy.
+2. Downloads the original Binance daily metrics ZIP and validates every
+   timestamp and **exact** USDT notional value against the legacy Parquet.
+3. Writes and checks an upgraded temporary Parquet, recording the original,
+   ZIP and new-file SHA-256 hashes in a durable `.migration.json` transaction.
+4. Atomically replaces only that pre-holdout file and commits the transaction.
+   After interruption, a prepared transaction is reconciled with the backup
+   and live file before any replay.
+
+Migrations are limited to at most **20 days per invocation**; the default is
+two. A 128 MiB minimum free-space reserve and a directory lock are enforced.
+A mismatch aborts the affected day without overwriting its legacy data.
+Existing repaired days are not downloaded again.
+
+These backup copies are **on the same device**, and cannot protect against
+physical device loss; preserve a separate off-device copy of valuable raw
+history. Do not run other crash-research or data-fetch processes while the
+cache is being migrated. Historical market research remains unqualified
+until all eligible pre-holdout OI days have been corrected and audited.
+
+The original unbounded Python `migrate_oi_quantity(..., apply=True)` API
+exists for backwards compatibility, but should **not** be used for this
+858-file operational migration because it does not retain per-day backups.
 
 Research-only crash studies use pre-boundary OI periods and never open
 post-boundary OI cache files. A *future* authorized holdout evaluation
