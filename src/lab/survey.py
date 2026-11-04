@@ -10,14 +10,12 @@ selection, which `lab maker-study` measures on recorded data. Public data only, 
 from __future__ import annotations
 
 import json
-import re
 import time
 import urllib.request
 
 import pandas as pd
 
-# Keep public-data survey and historical fetch usable without NautilusTrader.
-_SYMBOL = re.compile(r"[A-Z0-9]{2,20}")
+from lab.market_symbols import SYMBOL_RE as _SYMBOL
 
 BINANCE_FAPI = "https://fapi.binance.com/fapi/v1"
 BYBIT_TICKERS = "https://api.bybit.com/v5/market/tickers?category=linear"
