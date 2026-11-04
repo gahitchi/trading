@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from lab import crash_data
 from lab.config import load_config
 from lab.crash_oi_migration import _holdout_boundary
 from lab.market_symbols import SYMBOL_RE
@@ -125,6 +126,7 @@ def audit_coverage(config_path: Path, symbol: str = "BTCUSDT") -> dict:
     benchmark = 0
     anomaly_days = []
     ordering_only_days = []
+    quality_anomaly_days = []
     errors = []
     day_names: list[date] = []
     for manifest in sorted(backups.glob("*.parquet.migration.json")):
@@ -141,8 +143,20 @@ def audit_coverage(config_path: Path, symbol: str = "BTCUSDT") -> dict:
             p = folder / name
             if p.is_symlink() or not p.is_file():
                 raise ValueError("missing or unsafe upgraded OI file")
-            frame = pd.read_parquet(p, columns=["ts"])
+            frame = pd.read_parquet(p)
             item = _cadence(frame, day)
+            if "oi_valid" in frame:
+                crash_data.validate_oi_quantity(frame)
+                invalid = ~frame["oi_valid"].to_numpy(dtype=bool)
+                if invalid.any():
+                    quality_anomaly_days.append({
+                        "day": day.isoformat(),
+                        "unavailable_quantity_snapshots": int(invalid.sum()),
+                        "timestamps": [
+                            pd.Timestamp(ts).isoformat()
+                            for ts in frame.loc[invalid, "ts"]
+                        ],
+                    })
             observed += item["observations"]
             benchmark += DAILY_EXPECTED
             checked += 1
@@ -180,9 +194,12 @@ def audit_coverage(config_path: Path, symbol: str = "BTCUSDT") -> dict:
         "abnormal_days": anomaly_days,
         "ordering_only_days": ordering_only_days,
         "ordering_only_day_count": len(ordering_only_days),
+        "quality_anomaly_days": quality_anomaly_days,
         "missing_calendar_days_within_checked_range": missing_days,
         "errors": errors,
-        "coverage_ok_for_checked_days": not (anomaly_days or missing_days or errors) and checked > 0,
+        "coverage_ok_for_checked_days": not (
+            anomaly_days or quality_anomaly_days or missing_days or errors
+        ) and checked > 0,
     }
 
 
