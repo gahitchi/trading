@@ -31,19 +31,34 @@ an audit-only dry run can inspect the *historical research* cache in the
 original Termux checkout:
 
     PYTHONPATH=src:. python - <<'PY'
-    from datetime import date
+    import json
     from pathlib import Path
+    import pandas as pd
     from lab import crash_data as cd
+    from lab.config import load_config
 
-    root = Path.home() / "trading-termux-tests/data/crash"
+    original = Path.home() / "trading-termux-tests"
+    cfg = load_config(original / "lab.toml")
+    partition = cfg.results_dir / "crash_partition.json"
+    if not partition.is_file():
+        raise SystemExit("BLOCKED: original crash holdout partition is missing")
+    boundary = pd.Timestamp(json.loads(partition.read_text())["holdout_start"])
+    if boundary.tzinfo is None or boundary.utcoffset().total_seconds() != 0:
+        raise SystemExit("BLOCKED: partition is not a UTC timestamp")
+    if boundary.time() != pd.Timestamp("00:00").time():
+        raise SystemExit("BLOCKED: partition is not at a UTC day boundary")
+    print("Protected holdout starts:", boundary)
     pending = cd.migrate_oi_quantity(
-        root, "BTCUSDT", before=date(2026, 5, 8)
+        cfg.data_dir / "crash", "BTCUSDT", before=boundary.date()
     )
     print("Legacy pre-boundary OI files:", len(pending))
     print("First 5:", pending[:5])
     PY
 
-The default is **dry run**: no archive download or Parquet rewrite.
+The default is **dry run**: no archive download or Parquet rewrite (the
+migration lock file may be created). The cutoff is read from the original
+research checkout, not inferred from current dates or validation-worktree
+results. Use the original historical cache; do not create a new partition.
 After the archive source/holdout path is verified, the operator may
 explicitly call `migrate_oi_quantity(..., apply=True)`. That operation
 fetches each original daily Binance metrics ZIP, compares every timestamp
@@ -56,6 +71,16 @@ Research-only crash studies use pre-boundary OI periods and never open
 post-boundary OI cache files. A *future* authorized holdout evaluation
 must first verify the held-out OI data's quantity representation, but
 must never be used to fit thresholds.
+
+## Research attempt provenance
+
+The ported `lab crash study` CLI now reserves each research attempt durably
+**before** reading klines or open-interest history. Interrupted/failed runs
+remain counted in the trial ledger and include source/runtime provenance.
+Its `oi_measure` fingerprint distinguishes contract-based studies from old
+notional-based results. Input-content hashes and a comparable multi-trial
+inference method are not yet qualified, so the CLI does **not** produce a
+deflated Sharpe qualification. Holdout study/release remain blocked.
 
 ## Termux acceptance
 
