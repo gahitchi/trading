@@ -13,7 +13,6 @@ import argparse
 import asyncio
 import fcntl
 import json
-import re
 import shutil
 import time
 from collections import Counter
@@ -21,9 +20,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from lab.market_journal import JournalWriter, recover_directory
+from lab.market_symbols import SYMBOL_RE
 
 HOST = "wss://fstream.binance.com"
-SYMBOL_RE = re.compile(r"[A-Z0-9]{2,20}\Z")
 
 
 class LowDiskSpace(RuntimeError):
