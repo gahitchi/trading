@@ -811,6 +811,12 @@ def cmd_crash_fetch(cfg, a):
 
 
 def cmd_crash_study(cfg, a):
+    # The port is research-only until the maintenance branch's pre-access
+    # holdout reservation and trial-provenance protocols are integrated.
+    if a.holdout:
+        raise SystemExit(
+            "crash holdout is disabled on this branch until reservation/qualification is complete"
+        )
     import numpy as np
 
     from lab import crash_data
@@ -899,6 +905,10 @@ def cmd_crash_study(cfg, a):
 
 
 def cmd_crash_release(cfg, a):
+    raise SystemExit(
+        "crash holdout release is disabled on this branch until qualification is complete"
+    )
+
     from lab import crash_study as cs
 
     try:
