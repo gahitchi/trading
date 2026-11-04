@@ -58,3 +58,31 @@ recovery without duplicate paths, high-load throughput, sustained CPU/disk
 measurement, stale-feed alarms and strict cross-session gap reporting.
 Compression/retention with verified archival checksums is not yet integrated.
 Do not reuse the current crash holdout for signal fitting.
+
+## Verified archival (after the recorder stops)
+
+Keep the original journal files while first validating compression:
+
+    PYTHONPATH=src:. python -m pytest tests/test_market_archive.py -v
+    PYTHONPATH=src:. python -m lab.market_archive \
+      --out data/portable-market-capture
+
+Every finalized .jsonl file receives a .jsonl.gz archive and a
+.gz.manifest.json sidecar containing SHA-256 digests, byte lengths and the
+record count. Compression is checked by streaming the compressed bytes back
+and comparing their digest/length/count with the finalized original.
+
+The default **never deletes raw data**. Only after inspecting the results and
+confirming the archives are intact may the operator reclaim disk space:
+
+    PYTHONPATH=src:. python -m lab.market_archive \
+      --out data/portable-market-capture --prune-verified
+
+Pruning is optional and explicit. The archiver re-verifies archive contents
+and the manifest before deleting a raw file. It skips any .jsonl.open files,
+refuses to run concurrently with a recorder in the same directory, and
+restarts abandoned .gz.partial writes from the original finalized file.
+If a completed gzip was left without its manifest, it is reconciled against
+the original raw data. No compression runs in the network receive loop.
+Long-term background compression, monitoring of available disk space and
+retention rules are still unqualified.
