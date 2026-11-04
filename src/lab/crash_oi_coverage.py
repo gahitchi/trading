@@ -24,46 +24,86 @@ INTERVAL = pd.Timedelta(minutes=5)
 DAILY_EXPECTED = 24 * 60 // 5
 
 
+def _missing_runs(missing: pd.DatetimeIndex) -> list[dict]:
+    """Compact chronological missing intervals; count independent of raw row order."""
+    if len(missing) == 0:
+        return []
+    ranges = []
+    first = previous = missing[0]
+    n = 1
+    for value in missing[1:]:
+        if value - previous == INTERVAL:
+            previous = value
+            n += 1
+        else:
+            ranges.append({"start": first.isoformat(), "end": previous.isoformat(), "slots": n})
+            first = previous = value
+            n = 1
+    ranges.append({"start": first.isoformat(), "end": previous.isoformat(), "slots": n})
+    return ranges
+
+
 def _cadence(frame: pd.DataFrame, day: date) -> dict:
+    """Assess actual UTC five-minute slots, independently of archived row order.
+
+    Some archives use period-start (00:00..23:55), others period-end
+    (00:05..next 00:00) timestamps. Compare both complete grids and
+    choose the convention needing the fewest missing/extra slots.
+    """
     if "ts" not in frame:
         raise ValueError("missing timestamp column")
     ts = pd.DatetimeIndex(pd.to_datetime(frame["ts"], utc=True, errors="raise"))
     if ts.isna().any():
         raise ValueError("missing or invalid timestamp")
+    if not len(ts):
+        raise ValueError("empty OI period")
     lo = pd.Timestamp(day, tz="UTC")
     hi = lo + pd.Timedelta(days=1)
     if ((ts < lo) | (ts > hi)).any():
         raise ValueError("snapshot timestamp outside named UTC day")
-    if len(ts) < 1:
-        raise ValueError("empty OI period")
 
-    diffs = np.diff(ts.asi8)
-    step = INTERVAL.value
-    duplicate_or_unordered = int(np.count_nonzero(diffs <= 0))
-    irregular = int(np.count_nonzero(diffs % step != 0))
-    # Only positive, aligned jumps can be counted as definitely missing
-    # five-minute observations. Boundary shortfalls are not inferred from
-    # file timestamp labels, since archives may include the next 00:00.
-    internal_missing = int(sum(max(0, int(x // step) - 1) for x in diffs if x > step and x % step == 0))
-    shortfall = max(0, DAILY_EXPECTED - len(ts))
-    extra = max(0, len(ts) - DAILY_EXPECTED)
-    abnormal = bool(shortfall or extra or duplicate_or_unordered or irregular)
-    summary = {
+    # Raw file order is only a warning: the research loader sorts by ts.
+    inversions = int(np.count_nonzero(np.diff(ts.asi8) < 0))
+    unique = ts.unique().sort_values()
+    duplicates = len(ts) - len(unique)
+    start_grid = pd.date_range(lo, periods=DAILY_EXPECTED, freq=INTERVAL)
+    end_grid = pd.date_range(lo + INTERVAL, periods=DAILY_EXPECTED, freq=INTERVAL)
+    options = [
+        (grid.difference(unique), unique.difference(grid), label)
+        for grid, label in ((start_grid, "period-start"), (end_grid, "period-end"))
+    ]
+    # Tie-break toward period-start, never toward the original unsorted ordering.
+    missing, unexpected, convention = min(
+        options, key=lambda x: len(x[0]) + len(x[1])
+    )
+    first, last = unique[0], unique[-1]
+    internal = int(((missing > first) & (missing < last)).sum())
+    leading = int((missing < first).sum())
+    trailing = int((missing > last).sum())
+    off_cadence = int(np.count_nonzero((ts.asi8 - lo.value) % INTERVAL.value))
+    failures = bool(len(missing) or len(unexpected) or duplicates or off_cadence)
+    return {
         "day": day.isoformat(),
-        "observations": int(len(ts)),
+        "observations": len(ts),
+        "unique_observations": len(unique),
         "benchmark_per_full_day": DAILY_EXPECTED,
-        "count_shortfall": shortfall,
-        "count_excess": extra,
-        "internal_missing_slots": internal_missing,
-        "unordered_or_duplicate": duplicate_or_unordered,
-        "non_five_minute_intervals": irregular,
-        "first_timestamp": ts[0].isoformat(),
-        "last_timestamp": ts[-1].isoformat(),
+        "timestamp_convention": convention,
+        "count_shortfall": max(0, DAILY_EXPECTED - len(ts)),
+        "count_excess": max(0, len(ts) - DAILY_EXPECTED),
+        "missing_slots": len(missing),
+        "missing_ranges": _missing_runs(missing),
+        "unexpected_slots": len(unexpected),
+        "duplicate_timestamps": duplicates,
+        "raw_order_inversions": inversions,
+        "off_five_minute_grid": off_cadence,
+        "internal_missing_slots": internal,
+        "leading_missing_slots": leading,
+        "trailing_missing_slots": trailing,
+        "first_timestamp": first.isoformat(),
+        "last_timestamp": last.isoformat(),
+        "abnormal": failures,
+        "ordering_only": bool(inversions) and not failures,
     }
-    if not abnormal and internal_missing:
-        abnormal = True
-    summary["abnormal"] = abnormal
-    return summary
 
 
 def audit_coverage(config_path: Path, symbol: str = "BTCUSDT") -> dict:
@@ -84,6 +124,7 @@ def audit_coverage(config_path: Path, symbol: str = "BTCUSDT") -> dict:
     observed = 0
     benchmark = 0
     anomaly_days = []
+    ordering_only_days = []
     errors = []
     day_names: list[date] = []
     for manifest in sorted(backups.glob("*.parquet.migration.json")):
@@ -108,6 +149,13 @@ def audit_coverage(config_path: Path, symbol: str = "BTCUSDT") -> dict:
             day_names.append(day)
             if item["abnormal"]:
                 anomaly_days.append(item)
+            elif item["ordering_only"]:
+                ordering_only_days.append({
+                    "day": day.isoformat(),
+                    "raw_order_inversions": item["raw_order_inversions"],
+                    "unique_observations": item["unique_observations"],
+                    "timestamp_convention": item["timestamp_convention"],
+                })
         except Exception as exc:
             errors.append(f"{name}: {type(exc).__name__}: {exc}")
 
@@ -130,6 +178,8 @@ def audit_coverage(config_path: Path, symbol: str = "BTCUSDT") -> dict:
         "full_day_count_benchmark": benchmark,
         "count_shortfall": benchmark - observed,
         "abnormal_days": anomaly_days,
+        "ordering_only_days": ordering_only_days,
+        "ordering_only_day_count": len(ordering_only_days),
         "missing_calendar_days_within_checked_range": missing_days,
         "errors": errors,
         "coverage_ok_for_checked_days": not (anomaly_days or missing_days or errors) and checked > 0,
