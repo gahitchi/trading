@@ -909,15 +909,6 @@ def cmd_crash_release(cfg, a):
         "crash holdout release is disabled on this branch until qualification is complete"
     )
 
-    from lab import crash_study as cs
-
-    try:
-        old, new = cs.release(cfg.results_dir, cfg.data_dir / "crash", a.reason)
-    except ValueError as e:
-        raise SystemExit(str(e)) from e
-    print(f"crash data {old:%Y-%m-%d} .. {new:%Y-%m-%d} UTC is now research data; the new holdout starts there")
-    return 0
-
 
 def cmd_kill(cfg, a):
     from lab.notify import Notifier
