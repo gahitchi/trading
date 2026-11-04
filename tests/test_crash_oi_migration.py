@@ -177,3 +177,48 @@ def test_cannot_modify_when_holdout_boundary_is_not_utc_midnight(tmp_path):
     with pytest.raises(ValueError, match="UTC day"):
         migrate_batch(cfg, apply=True, get=exchange)
     assert not (folder / ".oi-quantity-migration.lock").exists()
+
+
+
+def test_batch_recovers_manifest_after_rename_without_requery(tmp_path):
+    cfg, folder = setup_cache(tmp_path, with_second=False, with_holdout=False)
+    first = migrate_batch(cfg, apply=True, get=exchange)
+    assert first["legacy_remaining"] == 0
+    backup_dir = tmp_path / "data" / "crash" / "oi-original-backups" / "BTCUSDT"
+    manifest = backup_dir / "2024-01-01.parquet.migration.json"
+    meta = read_json(manifest)
+    meta["status"] = "prepared"
+    manifest.write_text(json.dumps(meta))
+
+    def fail_fetch(_):
+        raise AssertionError("already upgraded data must not be downloaded")
+
+    # Critical: the upgraded Parquet no longer appears in legacy_oi_paths.
+    # The batch entry point must still reconcile the pending transaction.
+    resumed = migrate_batch(cfg, apply=True, get=fail_fetch)
+    assert resumed["legacy_remaining"] == 0
+    assert resumed["processed"] == []
+    assert resumed["reconciled_transactions"] == ["2024-01-01.parquet"]
+    assert read_json(manifest)["status"] == "committed"
+    assert pd.read_parquet(folder / "2024-01-01.parquet")["oi_qty"].tolist() == [100, 105]
+
+
+def test_batch_rejects_corruption_of_previously_committed_day(tmp_path):
+    cfg, folder = setup_cache(tmp_path, with_second=False, with_holdout=False)
+    migrate_batch(cfg, apply=True, get=exchange)
+    source = folder / "2024-01-01.parquet"
+    source.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="committed migration source was modified"):
+        migrate_batch(cfg, apply=True, get=exchange)
+
+
+def test_batch_rejects_missing_backup_even_after_source_upgraded(tmp_path):
+    cfg, _ = setup_cache(tmp_path, with_second=False, with_holdout=False)
+    migrate_batch(cfg, apply=True, get=exchange)
+    backup = (
+        tmp_path / "data" / "crash" / "oi-original-backups"
+        / "BTCUSDT" / "2024-01-01.parquet"
+    )
+    backup.unlink()
+    with pytest.raises(ValueError, match="original backup digest differs"):
+        migrate_batch(cfg, apply=True, get=exchange)
