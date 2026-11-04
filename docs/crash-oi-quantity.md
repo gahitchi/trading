@@ -167,12 +167,14 @@ The migration audit proves that upgraded Parquet content matches the original
 archive for timestamps and OI notional. **It does not establish the original
 Binance archive contained every five-minute snapshot.**
 
-A read-only coverage report checks the **already migrated pre-holdout days**
-against a benchmark of 288 five-minute samples per complete UTC day. It
-identifies days with fewer rows, out-of-order or duplicated timestamps, and
-internal gaps in the five-minute cadence. The check permits a snapshot at
-00:00 the next day (some archive time-label conventions use an end-of-period
-stamp). It never loads protected holdout files.
+A read-only coverage report checks **already migrated pre-holdout days**
+against a benchmark of 288 five-minute observations per UTC day. It compares
+sorted unique timestamps against both five-minute grids (period-start
+00:00–23:55, period-end 00:05–next 00:00) and distinguishes missing slots,
+duplicates and off-grid timestamps. Out-of-order archived rows are reported
+separately as `ordering_only_days` and are advisory if all unique timestamps
+exist. The crash research loader sorts OI timestamps before aligning signals.
+The checker never opens protected holdout files.
 
     PYTHONPATH=src:. python -m pytest \
       tests/test_crash_oi_coverage.py -v
@@ -181,18 +183,21 @@ stamp). It never loads protected holdout files.
       --config ~/trading-termux-tests/lab.toml \
       --symbol BTCUSDT
 
-An incomplete day intentionally gives the CLI a **nonzero exit**. That is a
-data-quality gate and does **not** mean the earlier content migration failed.
-Continue to use \`lab.crash_oi_audit\` for post-batch migration integrity.
+Missing, duplicate or off-grid timestamps intentionally give a **nonzero exit**.
+Shuffled archives with an otherwise complete, unique timestamp grid do not
+alone fail the gate. Coverage is separate from migration integrity; incomplete
+source history does not imply migration corruption.
+Continue to use `lab.crash_oi_audit` for post-batch migration integrity.
 The coverage report has \`integrity_verified: false\` because it does not
 repeat SHA-256 verification. Run both audits separately.
 
 The 2024-01-01 through 2024-05-01 migration produced 35,011 observations
 across 122 days, compared with a 35,136-observation full-day benchmark.
-The 125-observation discrepancy first appeared in the 2024-02-12 through
-2024-03-02 batch. The coverage report is needed to localize the affected
-period(s); it does not by itself identify why the source observations are
-absent. No imputation or fabricated OI snapshots are authorized.
+The 125-observation discrepancy was localized to **2024-02-16**: 163
+observations from 00:00 through 13:30 UTC, apparently missing 13:35–23:55.
+April 2024 also contained shuffled timestamp rows. The revised sorted-grid
+report is needed to determine whether April dates are merely shuffled or
+have duplicate/missing timestamps. No gaps may be filled with invented values.
 
 ## Research attempt provenance
 
