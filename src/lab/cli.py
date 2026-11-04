@@ -835,7 +835,10 @@ def cmd_crash_study(cfg, a):
             raise SystemExit("--again only applies with --holdout")
     except ValueError as e:
         raise SystemExit(str(e)) from e
-    r = cs.run(root, symbols, s, b, holdout=a.holdout)
+    try:
+        r = cs.run(root, symbols, s, b, holdout=a.holdout)
+    except ValueError as e:
+        raise SystemExit(f"invalid crash research input: {e}") from e
     if not r.trades:
         raise SystemExit(f"no crash data for {' '.join(symbols)} {'after' if a.holdout else 'before'} {b:%Y-%m-%d}")
     st = cs.summary(r.trades, r.start, r.end)
@@ -859,10 +862,17 @@ def cmd_crash_study(cfg, a):
         psr = cs.probabilistic_sharpe(st["sr_daily"], st["days"], st["skew"], st["kurt"])
         print(f"  HOLDOUT test from {b:%Y-%m-%d} (recorded); P(Sharpe > 0) {psr:.2f}")
     else:
-        srs = trial_sharpes(cfg.results_dir, "crash-study", key)
+        if n < 2:
+            deflated = "unavailable (fewer than two research configurations)"
+        else:
+            try:
+                srs = trial_sharpes(cfg.results_dir, "crash-study", key)
+            except ValueError as e:
+                raise SystemExit(f"cannot qualify crash research Sharpe: {e}") from e
+            deflated = f"{cs.deflated_sharpe(st, srs):.2f} (provisional IID diagnostic only)"
         print(
             f"  research data only (holdout from {b:%Y-%m-%d}); configurations tried: {n}; "
-            f"deflated Sharpe {cs.deflated_sharpe(st, srs):.2f} (the chance the edge is real, after {n} tries)"
+            f"deflated Sharpe {deflated}"
         )
     if r.missing:
         print(f"  no data, left out: {' '.join(r.missing)}")
