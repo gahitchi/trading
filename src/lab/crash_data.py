@@ -189,3 +189,70 @@ def last_cached(root: Path) -> pd.Timestamp | None:
         end = pd.Timestamp(_end_of(p.stem), tz="UTC")
         last = end if last is None else max(last, end)
     return last
+
+
+
+def legacy_oi_paths(root: Path, symbol: str, before: date) -> list[Path]:
+    """Only daily OI caches entirely before the supplied UTC research boundary."""
+    if before is None:
+        raise ValueError("an explicit UTC cutoff is required to protect the holdout")
+    paths = sorted(_dir(root, "oi", symbol).glob("*.parquet"))
+    out = []
+    for path in paths:
+        if len(path.stem) != 10 or _end_of(path.stem) > before:
+            continue
+        df = pd.read_parquet(path)
+        if "oi_qty" not in df or df["oi_qty"].isna().any():
+            out.append(path)
+    return out
+
+
+def migrate_oi_quantity(
+    root: Path,
+    symbol: str,
+    *,
+    before: date,
+    apply: bool = False,
+    get=get_bytes,
+) -> list[str]:
+    """Explicit upgrade of pre-holdout cached metrics using the *original* daily ZIP.
+
+    Dry-run is the default. Each replacement requires exactly the same
+    timestamp set and notional values as the legacy file; a changed archive
+    is not accepted as an in-place correction. Existing files are replaced
+    atomically per period, and neither post-boundary caches nor research
+    holdout metadata are accessed.
+    """
+    from lab.persistence import file_lock
+
+    folder = _dir(root, "oi", symbol)
+    if not folder.is_dir():
+        return []
+    with file_lock(folder / ".oi-quantity-migration.lock"):
+        legacy = legacy_oi_paths(root, symbol, before)
+        if not apply:
+            return [path.name for path in legacy]
+        get = patient(get)
+        upgraded = []
+        for path in legacy:
+            old = pd.read_parquet(path).sort_values("ts").reset_index(drop=True)
+            new = parse_metrics(get(url_of("oi", symbol, path.stem))).sort_values("ts").reset_index(drop=True)
+            if len(old) != len(new) or not pd.to_datetime(old["ts"], utc=True).equals(new["ts"]):
+                raise ValueError(f"source timestamps changed for {path}; refusing migration")
+            old_value = old["oi_value"].to_numpy(dtype=float)
+            new_value = new["oi_value"].to_numpy(dtype=float)
+            if not np.isfinite(old_value).all() or not np.allclose(old_value, new_value, rtol=1e-10, atol=1e-8):
+                raise ValueError(f"source notional OI changed for {path}; refusing migration")
+            replacement = old.copy()
+            replacement["oi_qty"] = new["oi_qty"].to_numpy()
+            temp = path.with_name(path.name + ".oi-quantity.tmp")
+            try:
+                replacement.to_parquet(temp, index=False)
+                verify = pd.read_parquet(temp)
+                if not verify["oi_qty"].equals(replacement["oi_qty"]):
+                    raise ValueError(f"quantity write verification failed: {path}")
+                temp.replace(path)
+            finally:
+                temp.unlink(missing_ok=True)
+            upgraded.append(path.name)
+        return upgraded
