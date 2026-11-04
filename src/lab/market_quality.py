@@ -13,7 +13,7 @@ import gzip
 import hashlib
 import json
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 from lab.market_archive import _verify_archive
@@ -45,7 +45,6 @@ def _sources(directory: Path) -> tuple[list[tuple[str, str, int, Path]], list[Pa
 def _check_recovery_manifest(path: Path) -> None:
     if ".recovered.jsonl" not in path.name:
         return
-    raw = path if path.suffix != ".gz" else None
     sidecar = Path(str(path).removesuffix(".gz") + ".recovery.json")
     if not sidecar.exists():
         raise ValueError(f"missing recovery manifest: {sidecar}")
