@@ -199,6 +199,44 @@ April 2024 also contained shuffled timestamp rows. The revised sorted-grid
 report is needed to determine whether April dates are merely shuffled or
 have duplicate/missing timestamps. No gaps may be filled with invented values.
 
+
+### Paused historical batch: original Binance OI contains zero or negative data
+
+On 2026-11-04 a 20-day BTCUSDT migration batch starting 2024-07-01
+stopped on the source parser's positivity check. The *previous* 182 files
+were verified through 2024-06-30. The failed invocation may have committed
+some following days before encountering the invalid source, since each
+file is independently transactional.
+
+Before any retry, use the existing read-only integrity audit and dry run to
+establish the exact current state. The failed day may retain a byte-perfect
+backup without a committed manifest; the integrity audit intentionally
+reports that as an orphan backup and exits nonzero:
+
+    PYTHONPATH=src:. python -m lab.crash_oi_audit \
+      --config ~/trading-termux-tests/lab.toml \
+      --symbol BTCUSDT
+
+    PYTHONPATH=src:. python -m lab.crash_oi_migration \
+      --config ~/trading-termux-tests/lab.toml \
+      --symbol BTCUSDT --limit 2
+
+The new **read-only** forensics tool retrieves only the first still-legacy
+pre-holdout archive ZIP into memory. It never writes or modifies the cache,
+and it reports offending row timestamps and the exact offending field:
+
+    PYTHONPATH=src:. python -m lab.crash_oi_forensics \
+      --config ~/trading-termux-tests/lab.toml \
+      --symbol BTCUSDT
+
+This diagnostic emits a nonzero exit code when the selected source is
+not eligible for migration. It also reports the source ZIP's SHA-256, the
+legacy file's SHA-256, and whether timestamps and original OI notionals
+match. If zero or negative quantities/notionals are present, do not replace
+them with guessed values, relax parser validation, or delete a failed-day
+backup. Do not run the rest of the migration until the cause is investigated
+and a documented handling rule is tested. The protected holdout is not read.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
