@@ -132,6 +132,8 @@ def bars(klines: pd.DataFrame, oi: pd.DataFrame | None) -> pd.DataFrame:
     grid = pd.date_range(k.index[0], k.index[-1], freq="min")
     b = k.reindex(grid)
     if oi is not None and len(oi):
+        if "oi_qty" not in oi:
+            raise ValueError("contract-quantity open interest (oi_qty) required; legacy notional-only cache rejected")
         crash_data.validate_oi_quantity(oi)
         o = oi.set_index("ts")["oi_qty"]
         o = o[~o.index.duplicated(keep="last")].sort_index()
