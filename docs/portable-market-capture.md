@@ -86,3 +86,24 @@ If a completed gzip was left without its manifest, it is reconciled against
 the original raw data. No compression runs in the network receive loop.
 Long-term background compression, monitoring of available disk space and
 retention rules are still unqualified.
+
+## Controlled transport failure qualification
+
+After the 27 baseline tests pass, run an intentional disconnect on **both**
+WebSocket categories. Use an isolated output directory so the injected gap
+cannot be mistaken for uninterrupted market history:
+
+    PYTHONPATH=src:. python -m lab.market_capture \
+      --seconds 90 --symbols BTCUSDT \
+      --inject-disconnect-after 20 \
+      --out data/portable-market-fault-test
+
+The option closes each connection **once** after its 20th market event;
+normal WebSocket reconnect and journaling paths must then restore recording.
+The printed summary should report at least one reconnect per feed. The
+journal must contain `collector.status` entries with
+`fault_injected_disconnect`, `disconnected`, and a subsequent `connected`.
+Any such gap invalidates cross-gap market signals and should be reflected in
+quality gates. This is a controlled network-transport fault, **not** a
+power-loss test or proof of lossless delivery. Omit the injection option in
+normal recording.
