@@ -287,5 +287,59 @@ def test_cli_research_counts_trials_but_blocks_unqualified_holdout(tmp_path, cap
         lab_main(["--config", str(tmp_path / "lab.toml"), "crash", "release", "--reason", "test"])
     trials = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
     assert [t["holdout"] for t in trials] == [False, False, False]
-    assert all(t["kind"] == "crash-study" and "sr_daily" in t["result"] for t in trials)
+    assert all(
+        t["kind"] == "crash-study" and t["status"] == "completed" and "sr_daily" in t["result"]
+        for t in trials
+    )
+    assert all(t["params"]["oi_measure"] == "contract-quantity-v1" for t in trials)
+    assert all(t["attempt_id"] for t in trials)
     assert trials[0]["params"]["drop_pct"] == 5 and trials[2]["params"]["hold_min"] == 1440  # the preset
+
+
+
+def test_failed_crash_attempt_is_durable_before_reading_market_data(tmp_path, monkeypatch):
+    """Even missing or malformed data consumes a logged research attempt."""
+    from lab.trials import history
+
+    (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
+    results_dir = tmp_path / "results"
+    monkeypatch.setattr(cs, "boundary", lambda *_args: T0 + pd.Timedelta(days=10))
+
+    def simulated_failure(*_args, **_kwargs):
+        attempts = history(results_dir)
+        assert len(attempts) == 1
+        assert attempts[0]["status"] == "reserved"
+        assert attempts[0]["kind"] == "crash-study"
+        assert attempts[0]["params"]["oi_measure"] == "contract-quantity-v1"
+        raise ValueError("synthetic invalid input")
+
+    monkeypatch.setattr(cs, "run", simulated_failure)
+    with pytest.raises(SystemExit, match="synthetic invalid input"):
+        lab_main([
+            "--config", str(tmp_path / "lab.toml"), "crash", "study",
+            "--symbols", "BTCUSDT", "--mode", "breakdown",
+        ])
+    attempts = history(results_dir)
+    assert len(attempts) == 1
+    assert attempts[0]["status"] == "failed"
+    assert "synthetic invalid input" in attempts[0]["result"]["error"]
+    assert attempts[0]["holdout"] is False
+    assert not (results_dir / "fast_holdout_attempts.json").exists()
+
+
+def test_blocked_crash_holdout_does_not_reserve_or_read_data(tmp_path, monkeypatch):
+    from lab.trials import history
+
+    (tmp_path / "lab.toml").write_text((REPO / "lab.toml").read_text())
+
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("holdout code touched research data")
+
+    monkeypatch.setattr(cs, "boundary", unexpected)
+    monkeypatch.setattr(cs, "run", unexpected)
+    with pytest.raises(SystemExit, match="crash holdout is disabled"):
+        lab_main([
+            "--config", str(tmp_path / "lab.toml"), "crash", "study",
+            "--symbols", "BTCUSDT", "--holdout",
+        ])
+    assert history(tmp_path / "results") == []
