@@ -7,7 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from lab.market_capture import capture_feed, parse_message, run_capture, stream_urls
+from lab.market_capture import (
+    DiskSpaceGuard,
+    LowDiskSpace,
+    capture_feed,
+    parse_message,
+    run_capture,
+    stream_urls,
+)
 
 
 class FakeClock:
@@ -189,4 +196,91 @@ def test_invalid_injection_threshold_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="fault_disconnect_after"):
         asyncio.run(run_capture(
             tmp_path, ["BTCUSDT"], 1, connector=lambda _: None, fault_disconnect_after=0
+        ))
+
+
+def test_insufficient_disk_blocks_before_opening_connection(tmp_path):
+    calls = []
+
+    def connector(url):
+        calls.append(url)
+        return FakeSession([])
+
+    with pytest.raises(LowDiskSpace, match="recording stopped"):
+        asyncio.run(
+            run_capture(
+                tmp_path, ["BTCUSDT"], 10,
+                connector=connector,
+                min_free_mib=512,
+                free_bytes=lambda _: 0,
+            )
+        )
+    assert calls == []
+    assert not list(tmp_path.glob("*.jsonl*"))
+
+
+def test_disk_guard_polls_only_after_interval_and_then_fails(tmp_path):
+    now = [0.0]
+    free = [1024 * 1048576]
+    checks = []
+
+    def available_bytes(path):
+        checks.append(path)
+        return free[0]
+
+    guard = DiskSpaceGuard(
+        tmp_path, min_free_mib=512, interval_s=2.0,
+        clock=lambda: now[0], free_bytes=available_bytes,
+    )
+    guard.check(force=True)
+    assert len(checks) == 1
+    now[0] = 1.0
+    free[0] = 0
+    guard.check()
+    assert len(checks) == 1
+    now[0] = 2.0
+    with pytest.raises(LowDiskSpace):
+        guard.check()
+    assert len(checks) == 2
+
+
+def test_disk_exhaustion_is_fatal_but_finalizes_existing_journal(tmp_path):
+    class FailingGuard:
+        checks = 0
+
+        def check(self):
+            self.checks += 1
+            if self.checks >= 4:
+                raise LowDiskSpace("simulated full disk")
+
+    calls = []
+
+    def connector(url):
+        calls.append(url)
+        return FakeSession([websocket_message(event=1), websocket_message(event=2)])
+
+    with pytest.raises(LowDiskSpace, match="simulated full"):
+        asyncio.run(
+            capture_feed(
+                "market", "fake://market", tmp_path, "session", 10.0,
+                connector=connector,
+                clock=FakeClock(),
+                timestamp=lambda: 123,
+                disk_guard=FailingGuard(),
+            )
+        )
+    assert len(calls) == 1
+    assert not list(tmp_path.glob("*.open"))
+    records = [json.loads(line) for p in tmp_path.glob("*.jsonl") for line in p.read_text().splitlines()]
+    assert [r["data"]["a"] for r in records if r["stream"] == "btcusdt@aggTrade"] == [1]
+
+
+def test_disk_reserve_cannot_be_disabled_below_minimum(tmp_path):
+    with pytest.raises(ValueError, match="at least 64"):
+        DiskSpaceGuard(tmp_path, min_free_mib=0)
+    with pytest.raises(ValueError, match="at least 64"):
+        asyncio.run(run_capture(
+            tmp_path, ["BTCUSDT"], 1,
+            connector=lambda _: FakeSession([]),
+            min_free_mib=32,
         ))
