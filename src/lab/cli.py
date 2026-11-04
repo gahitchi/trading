@@ -841,7 +841,11 @@ def cmd_crash_study(cfg, a):
 
     key = f"crash-{a.mode}"
     # No possible reclassification of old notional-based studies as contract-quantity evidence.
-    params = {**cs.params_of(settings, symbols), "oi_measure": "contract-quantity-v1"}
+    params = {
+        **cs.params_of(settings, symbols),
+        "oi_measure": "contract-quantity-v1",
+        "oi_quality_policy": "source-pinned-zero-pair-null-and-window-veto-v1",
+    }
     try:
         # Durable attempt is reserved BEFORE reading historical candle / OI data.
         with trial_run(
