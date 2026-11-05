@@ -101,8 +101,12 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
     if len(b) < (PRIOR_HOURS + 1) * 60 + SUPPORT_MINUTES:
         return Result(pd.DataFrame(columns=empty_cols), {}, boundary)
 
-    # A complete hourly bucket has exactly sixty valid original minute bars.
-    hourly = b["quote_volume"].resample("h").agg(["sum", "count"])
+    # Source bars are indexed by their END time. Group hourly
+    # volumes by actual bar OPEN time so the hour 00:00-01:00
+    # contains exactly candles ending 00:01..01:00.
+    hourly_source = b["quote_volume"].copy()
+    hourly_source.index = hourly_source.index - UTC_MIN
+    hourly = hourly_source.resample("h").agg(["sum", "count"])
     hourly["sum"] = hourly["sum"].where(hourly["count"] == 60)
     hourly_median = hourly["sum"].rolling(PRIOR_HOURS, min_periods=PRIOR_HOURS).median()
     close = b["close"]
@@ -135,10 +139,11 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
         ):
             i += 1
             continue
-        # Last 60-minute volume includes candles [i-59, i]. Only
-        # hourly buckets ending <= start of that window are eligible
-        # as prior-seven-day reference; there is no lookahead or overlap.
-        start_recent = b.index[i] - pd.Timedelta(minutes=VOLUME_MINUTES - 1)
+        # Last 60-minute volume includes candles [i-59, i],
+        # each labelled by its END. The first such candle opened
+        # at i-60 minutes. Hourly reference buckets must end at
+        # or before that instant: no temporal overlap or lookahead.
+        start_recent = b.index[i] - pd.Timedelta(minutes=VOLUME_MINUTES)
         last_prior_hour = start_recent.floor("h") - pd.Timedelta(hours=1)
         typical = hourly_median.get(last_prior_hour, float("nan"))
         if not np.isfinite(typical) or typical <= 0 or recent_volume.iloc[i] < VOLUME_MULTIPLE * typical:
