@@ -766,6 +766,54 @@ The source plan must be inspected before any apply. This new
 functionality is **not yet externally validated** and funding is not
 yet reflected in strategy returns.
 
+## Crash funding settlement ownership bounds (pending Termux validation)
+
+The operator's first full 2024-01-01 to 2026-05-07 funded BTC
+breakdown attempt stopped with
+`ambiguous funding settlement inside unknown exit-minute execution
+interval`. This was an expected fail-closed response to minute-OHLC
+rather than timestamped order fills, not evidence of corrupt funding
+or negative/positive strategy profitability. No funded result was
+published from that attempt; the durable failed trial remains counted.
+
+The replacement model
+`audited-fixed-base-mark-minute-fill-funding-bounds-v2` keeps **all**
+strategy and baseline trades, including those whose minute-range
+executions overlap a recorded funding settlement. It computes
+deterministic funding P&L bounds using the exact audited Binance event
+timestamp, rate and settlement mark:
+
+- A settlement strictly after the 30-second entry uncertainty and
+  strictly before the earliest possible exit (end of bar minus one
+  minute and 30-second uncertainty) is **certainly owned** and its
+  actual funding cashflow is included in both bounds.
+- In either uncertainty window, an economically positive payment is
+  **excluded from the pessimistic lower bound** but included in the
+  optimistic upper bound; an economically negative payment is
+  included as a **cost in the pessimistic lower bound** but excluded
+  from the upper bound.
+- All remaining settlements are excluded as outside the position.
+  No trading-rule thresholds, signals, exits, size or trade count
+  are altered based on funding profitability.
+- The principal `net` and net-based research summary use the lower
+  funding bound. The `net_upper`, `funding_return_upper`,
+  funding-bound width, ambiguous settlement count, and a distinct
+  upper-scenario summary are retained separately.
+- Identical uncertain funding cashflows and their bounds are
+  preserved when rescoring 20/30/50-bp taker execution scenarios.
+
+These are **conservative scenario limits**, not proof that the
+pessimistic bound was an actual realized payment. The uncertainty
+windows are model assumptions, not measured exchange fill timestamps.
+They do not address partial fills, margin, liquidation, dynamic
+mark-to-market collateral, intrabar price path or separate
+settlement-day P&L. The research is not yet eligible for holdout
+evaluation or supervised execution.
+
+Termux acceptance and an actual funded exploratory study result
+are pending. The original source-audited funding, OI and candle
+caches are not rewritten.
+
 ## Audited funding integration in exploratory BTC short research (pending Termux tests)
 
 The operator completed pre-holdout funding evidence acceptance:
