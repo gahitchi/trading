@@ -221,7 +221,9 @@ def test_one_crash_is_one_trade_and_costs_are_paid():
     t = cs.trades(b, replace(S, window_min=4), sig)
     # signal 0 -> entry 1, time exit at bar 3; then 4 quiet minutes: next signal 7 -> entry 8, exit at bar 9
     assert list(t["exit"]) == [b.index[3], b.index[9]]
-    assert (t["net"] == t["gross"] - S.cost).all() and S.cost == pytest.approx(0.002)
+    assert t["net"].to_numpy() == pytest.approx((t["gross"] - S.cost).to_numpy())
+    assert S.cost == pytest.approx(0.002)  # unchanged price: executed notional equals entry notional
+    assert {"entry_reference", "exit_reference", "fee_cost", "slippage_cost"} <= set(t)
 
 
 def test_trades_are_sized_to_the_volatility_target():
@@ -292,6 +294,16 @@ def test_cli_research_counts_trials_but_blocks_unqualified_holdout(tmp_path, cap
         for t in trials
     )
     assert all(t["params"]["oi_measure"] == "contract-quantity-v1" for t in trials)
+    assert all(
+        t["params"]["execution_model"] == "reference-taker-fixed-base-two-fill-notional-fees-v1"
+        for t in trials
+    )
+    assert all(t["result"]["funding_status"] == "not_modelled" for t in trials)
+    assert all(
+        [s["flat_price_round_trip_bps"] for s in t["result"]["fixed_execution_scenarios"]]
+        == [20, 30, 50]
+        for t in trials
+    )
     assert all(t["attempt_id"] for t in trials)
     # The authoritative trial ledger must retain complete content
     # evidence for every requested symbol, even the unavailable one.
