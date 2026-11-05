@@ -537,6 +537,49 @@ Run:
       tests/test_crash.py tests/test_crash_oi.py \
       tests/test_crash_oi_missing_gap_signals.py -v
 
+## Read-only pre-holdout signal-window quality diagnostic (pending external tests)
+
+The new command `lab.crash_quality_gate` reads only cached pre-holdout
+candle and OI data. It refuses unsafe symlinked cache files and malformed
+minute OHLC/volume measurements, and reports:
+
+- Missing one-minute candle timestamps within the loaded candle range,
+  with bounded contiguous-gap examples and a trailing interval to the
+  reserved holdout boundary (important if a crossing monthly archive is
+  excluded).
+- Invalid 5-minute OI *source* observations separated into absent
+  snapshots and explicitly quarantined (0,0) records, by their earliest
+  conservatively assumed +5-minute publication time.
+- Potential decision minutes whose price, volume warmup, and OI endpoints
+  are available **before and after** the independent OI quality mask.
+  Quarantine and absent-source overlap is reported without double-counting
+  the combined excluded windows.
+- Hypothetical taker round-trip 20/30/50 bps cost cases (5 bps per-side
+  fees plus 5/10/20 bps per-side slippage). These are *assumptions*,
+  not measured fill costs, funding, trade P&L or parameterized strategy
+  performance.
+
+This diagnostic never evaluates a price-drop threshold, emits trades,
+edits cached inputs, registers a strategy trial, tests the holdout or
+claims predictive profitability. A full crash strategy run must still
+reserve a trial before reading data. It is a quality/eligibility
+diagnostic, not a parameter-search or research approval tool.
+
+Run from the original research checkout:
+
+    PYTHONPATH=src:. python -m lab.crash_quality_gate \
+      --config ~/trading-termux-tests/lab.toml \
+      --symbol BTCUSDT --window-min 60
+
+Verify before trusting the report:
+
+    PYTHONPATH=src:. python -m pytest \
+      tests/test_crash_quality_gate.py \
+      tests/test_crash_oi_missing_gap_signals.py \
+      tests/test_crash.py -v
+
+No external Termux acceptance has yet been received for this change.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
