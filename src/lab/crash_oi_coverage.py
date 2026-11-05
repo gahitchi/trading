@@ -81,7 +81,7 @@ def _cadence(frame: pd.DataFrame, day: date) -> dict:
     internal = int(((missing > first) & (missing < last)).sum())
     leading = int((missing < first).sum())
     trailing = int((missing > last).sum())
-    off_cadence = int(np.count_nonzero((ts.asi8 - lo.value) % INTERVAL.value))
+    off_cadence = int(np.count_nonzero((ts.as_unit("ns").asi8 - lo.value) % INTERVAL.value))
     failures = bool(len(missing) or len(unexpected) or duplicates or off_cadence)
     return {
         "day": day.isoformat(),
