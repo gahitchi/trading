@@ -214,3 +214,84 @@ def test_source_plan_change_after_registration_refuses_before_market_read(tmp_pa
     with pytest.raises(ValueError, match="not an exact member"):
         rs.evaluate(cfg, plan)
     assert history(tmp_path / "results") == []
+
+
+def test_end_stamped_cutoff_candle_is_excluded_before_signal_or_fingerprint(tmp_path, monkeypatch):
+    cfg, plan = configured(tmp_path)
+    register_family(tmp_path / "results", rs.proposed_plan(cfg, plan))
+    mocked_history(monkeypatch, plan)
+    source_load = crash_data.load
+    source_bars = crash_study.bars
+    def source_with_midnight(root, kind, symbol, *, before):
+        frame = source_load(root, kind, symbol, before=before)
+        # The last pre-holdout daily archive may label its 23:59
+        # candle at exactly midnight on the protected boundary.
+        ending = frame.iloc[-1:].copy()
+        ending["ts"] = rs.BOUNDARY
+        return pd.concat([frame, ending], ignore_index=True)
+    monkeypatch.setattr(crash_data, "load", source_with_midnight)
+    accepted = []
+    def checked_bars(klines, oi):
+        assert (klines["ts"] < rs.BOUNDARY).all()
+        assert (oi["ts"] < rs.BOUNDARY).all()
+        assert len(klines) == 3 and len(oi) == 2
+        accepted.append(True)
+        return source_bars(klines, oi)
+    monkeypatch.setattr(crash_study, "bars", checked_bars)
+    output = rs.evaluate(cfg, plan)
+    assert accepted and output["trade_count"] == 1
+    rows = history(tmp_path / "results")
+    assert len(rows) == 1 and rows[0]["status"] == "completed"
+
+
+def test_archive_row_strictly_past_holdout_boundary_fails_closed_and_is_counted(tmp_path, monkeypatch):
+    cfg, plan = configured(tmp_path)
+    register_family(tmp_path / "results", rs.proposed_plan(cfg, plan))
+    mocked_history(monkeypatch, plan)
+    original = crash_data.load
+    def invalid_archive(root, kind, symbol, *, before):
+        frame = original(root, kind, symbol, before=before)
+        if kind == "klines":
+            extra = frame.iloc[-1:].copy()
+            extra["ts"] = rs.BOUNDARY + pd.Timedelta(minutes=1)
+            return pd.concat([frame, extra], ignore_index=True)
+        return frame
+    monkeypatch.setattr(crash_data, "load", invalid_archive)
+    monkeypatch.setattr(br, "simulate", lambda *args, **kwargs: pytest.fail("unsafe simulation"))
+    with pytest.raises(ValueError, match="beyond protected boundary"):
+        rs.evaluate(cfg, plan)
+    rows = history(tmp_path / "results")
+    assert len(rows) == 1 and rows[0]["status"] == "failed"
+    assert rows[0]["result"]["status"] == "unavailable"
+
+
+def test_corrected_research_policy_uses_successor_after_failed_prior_generation(tmp_path, monkeypatch):
+    from copy import deepcopy
+    from lab.research_family import load_family, register_family
+    from lab.trials import trial_run
+    cfg, plan = configured(tmp_path)
+    old_proposal = deepcopy(rs.proposed_plan(cfg, plan))
+    old_params = old_proposal["members"][0]["params"]
+    old_params["study_policy"] = "guarded-preregistered-funding-adjusted-btc-retest-study-v1"
+    old_params["data_policy"] = "source-validated-contract-quantity-oi-veto-minute-bars"
+    first = register_family(tmp_path / "results", old_proposal)
+    old_member = old_proposal["members"][0]
+    with pytest.raises(ValueError, match="boundary mismatch"):
+        with trial_run(
+            tmp_path / "results", old_member["kind"], old_member["instrument"],
+            old_member["params"], tuple(old_member["window"]),
+        ):
+            raise ValueError("boundary mismatch")
+    failures = history(tmp_path / "results")
+    assert len(failures) == 1 and failures[0]["status"] == "failed"
+    second = register_family(tmp_path / "results", rs.proposed_plan(cfg, plan))
+    assert second["previous_registration_sha256"] == first["sha256"]
+    assert second["prior_history"] == failures
+    mocked_history(monkeypatch, plan)
+    report = rs.evaluate(cfg, plan)
+    assert report["status"] == "RETROSPECTIVE_UNQUALIFIED"
+    rows = history(tmp_path / "results")
+    assert len(rows) == 2 and rows[0] == failures[0]
+    assert rows[-1]["status"] == "completed"
+    assert rows[-1]["family_id"] == second["family_id"]
+    assert load_family(tmp_path / "results") == second
