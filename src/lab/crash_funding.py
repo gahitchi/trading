@@ -146,6 +146,8 @@ def _fetch(symbol: str, start: date, boundary: date, get) -> dict:
 
 
 def _validate_plan(plan: dict, symbol: str, boundary: date) -> None:
+    if not SYMBOL_RE.fullmatch(symbol):
+        raise ValueError("invalid funding perpetual symbol")
     if not isinstance(plan, dict) or set(plan) != {
         "version", "kind", "symbol", "start", "holdout_start",
         "pages", "event_count", "events_sha256",
@@ -160,8 +162,12 @@ def _validate_plan(plan: dict, symbol: str, boundary: date) -> None:
         raise ValueError("invalid funding plan coverage")
     if type(plan["event_count"]) is not int or plan["event_count"] <= 0:
         raise ValueError("invalid funding plan event count")
+    if any(not isinstance(page, dict) for page in plan["pages"]):
+        raise ValueError("invalid funding plan page")
+    if sum(page.get("rows", 0) for page in plan["pages"]) != plan["event_count"]:
+        raise ValueError("funding page row count differs from source event count")
     for entry in plan["pages"]:
-        if not isinstance(entry, dict) or set(entry) != {
+        if set(entry) != {
             "start_ms", "end_ms", "rows", "source_sha256",
         }:
             raise ValueError("invalid funding source page manifest")
@@ -172,6 +178,9 @@ def _validate_plan(plan: dict, symbol: str, boundary: date) -> None:
         digest = entry["source_sha256"]
         if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise ValueError("invalid funding page SHA-256")
+    for earlier, later in zip(plan["pages"], plan["pages"][1:]):
+        if earlier["end_ms"] != later["end_ms"] or earlier["start_ms"] >= later["start_ms"]:
+            raise ValueError("funding pagination source cursor not strictly advancing")
     digest = plan["events_sha256"]
     if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
         raise ValueError("invalid funding events SHA-256")
