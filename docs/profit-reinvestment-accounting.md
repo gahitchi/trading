@@ -48,7 +48,7 @@ marked-to-market calendar day**.
 ## Reinvestment policy
 
 Define a versioned, user-controlled `profit_reinvest_fraction`
-(f \in [0,1]\). It is **unset** until explicitly configured,
+with a value `f` between **0 and 1 inclusive**. It is **unset** until explicitly configured,
 and must not silently default to 100% or to leverage growth.
 Freeze the chosen fraction, conversion/rounding rule and effective
 time before any research evaluation or paper session. Changes
