@@ -55,6 +55,8 @@ run and tested at any hour.
 | Funding carry, altcoins | `lab carry study --all --top 10 --min-turnover 20` | **Pending.** Pre-registered first run: top 10 slots, 20 M USDT/day turnover, 5 bps slippage. |
 | Cross-venue lead-lag | `lab micro-study --leader` | **Not studied.** Feature built; needs overlapping Binance and Bybit recordings. |
 | BTCUSDT bearish crash breakdown (predefined) | `lab crash study --mode breakdown --symbols BTCUSDT --funding-plan ...` | **Rejected for this configuration on research data (2026-11-05).** 32 trades, −106.4 bps mean net, −8.38% modeled APR, −0.99 daily Sharpe, 17 stops / 1 target; 20/30/50-bps cost sensitivity −106.4/−116.4/−136.5 bps mean net. Audited 2,574-event BTCUSDT funding history contributed +30.89 bps summed across the 32 trades (62 certain, 0 ambiguous). Pre-holdout ends 2026-05-07; **no qualified inference and no holdout evaluation**. The 479-trade daily-entry baseline is not exposure/trade-count matched. See `docs/crash-oi-quantity.md`. |
+| BTC crash postmortem + matched placebo | `python -m lab.crash_postmortem_cli` | **Implemented, pending Termux acceptance.** Fixed-seed 16 same-month/hour, size/duration-matched descriptive calendar controls; explicit fee/slippage/funding reconciliation and all-attempt ledger. No significance inference or holdout use. See `docs/crash-postmortem.md`. |
+| Alternative bearish failed-retest hypothesis | `docs/bearish-failed-retest-proposal-v1.md` | **Specified, not implemented or evaluated.** New causal retest state machine, frozen design assumptions, independent protocol needed; not prospective to already inspected BTC research history. |
 
 ## 5. Phases
 
