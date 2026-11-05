@@ -7,6 +7,7 @@ within-bar ownership or incomplete coverage blocks the whole evaluation.
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import replace
 
 import pandas as pd
@@ -26,6 +27,11 @@ def funded_trades(trades: pd.DataFrame, side: int, evidence: dict) -> pd.DataFra
     a settlement inside the exit-minute uncertainty interval.
     """
     plan, events = evidence["plan"], evidence["events"]
+    if not events:
+        raise ValueError("funding ledger requires audited settlement events")
+    times = [int(event["fundingTime"]) for event in events]
+    if times != sorted(set(times)):
+        raise ValueError("funding ledger requires ordered unique settlement events")
     first = pd.Timestamp(plan["start"], tz="UTC")
     cutoff = pd.Timestamp(plan["holdout_start"], tz="UTC")
     required = {"entry", "exit", "entry_reference", "net", "reason"}
@@ -51,19 +57,24 @@ def funded_trades(trades: pd.DataFrame, side: int, evidence: dict) -> pd.DataFra
         # or target fill, so fail rather than assign favourable funding.
         # The time-based exit at bar close is conservatively subject
         # to this same ambiguity rule.
-        for event in events:
+        lo = bisect_left(times, int(entry.value // 1_000_000))
+        hi = bisect_right(times, int(exit_.value // 1_000_000))
+        # Include neighbouring settlement events for boundary checks
+        # even when no settlement actually falls inside the trade.
+        nearby = events[max(lo - 1, 0):min(hi + 1, len(events))]
+        uncertainty_start = exit_ - EXIT_UNCERTAINTY - pd.Timedelta(
+            milliseconds=MAX_SETTLEMENT_OFFSET_MS
+        )
+        uncertainty_end = exit_ + pd.Timedelta(milliseconds=MAX_SETTLEMENT_OFFSET_MS)
+        for event in nearby:
             ts = pd.Timestamp(event["fundingTime"], unit="ms", tz="UTC")
-            if (
-                exit_ - EXIT_UNCERTAINTY - pd.Timedelta(milliseconds=MAX_SETTLEMENT_OFFSET_MS)
-                <= ts
-                <= exit_ + pd.Timedelta(milliseconds=MAX_SETTLEMENT_OFFSET_MS)
-            ):
+            if uncertainty_start <= ts <= uncertainty_end:
                 raise ValueError(
                     "ambiguous funding settlement inside unknown exit-minute execution interval"
                 )
 
         result = settlement_return(
-            side, float(trade["entry_reference"]), entry, exit_, events,
+            side, float(trade["entry_reference"]), entry, exit_, nearby,
         )
         output.at[idx, "funding_return"] = result["funding_return"]
         output.at[idx, "funding_events"] = result["settlements"]
