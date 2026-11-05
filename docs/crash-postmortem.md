@@ -1,5 +1,54 @@
 # BTC crash research postmortem — protocol v1
 
+## Termux completed result — 2026-11-05
+
+The operator ran the frozen pre-holdout BTCUSDT breakdown diagnostic,
+producing `btc-breakdown-postmortem-v1.json`. This external acceptance
+checkpoint reports:
+
+- 32 BTCUSDT shorts; mean net **−106.3847 bps**; all 62
+  strategy-held funding events were unambiguous in the prior run.
+- Exit attribution: **17 stops** (mean **−319.8508 bps**),
+  **1 target** (+780.1524 bps), **14 time exits**
+  (mean **+89.5001 bps**). Mean duration **906.94 minutes**.
+- Unweighted return components summed over the 32 trades:
+  price **−2792.4061 bps**; fees **−321.3969 bps**;
+  slippage **−321.3962 bps**; exact audited funding
+  **+30.8894 bps**; net **−3404.3097 bps**.
+  Price movement itself was unfavorable: −87.26 bps per
+  trade before costs. All values are descriptive, not
+  independent samples or qualified inference.
+- Year breakdown (mean net): 2024, 15 trades,
+  **−77.8585 bps**; 2025, 10 trades, **−204.5736 bps**;
+  2026 research prefix, seven trades, **−27.2424 bps**.
+- Every one of the 16 predetermined, same-month/hour,
+  duration/weight-matched descriptive entry placebos had
+  a greater mean return than the original strategy.
+  The **original-minus-placebo** difference ranged
+  from **−166.6561 to −32.7541 bps**, with median
+  **−95.0158 bps**. The placebo holding durations
+  were inherited from realized original exits, so they
+  are not independent, tradable exit strategies and the
+  differences are not p-values or confidence intervals.
+- Durable attempt inventory: **10 total** (two completed,
+  one failed, seven legacy); **nine distinct
+  configurations/code versions**; seven records lack
+  complete identified input/code provenance.
+- Inference eligibility: **NOT_QUALIFIED**. The previously
+  attempted independent joint-inference calibration failed.
+  No holdout evaluation or strategy promotion is permitted.
+
+**Interpretation:** adverse gross price moves and stop outcomes,
+not funding or execution fees alone, explain the losing setup.
+These data do **not** demonstrate an optimal exit revision.
+The outcome supports retiring this particular initial-crash
+entry rule from the qualified-candidate path. The
+`docs/bearish-failed-retest-proposal-v1.md` concept
+remains a *new, untested hypothesis*, not a tuned retest of
+the unsuccessful preset.
+
+
+
 Status: committed, **not yet externally tested on Termux**.
 
 The predefined 2026-11-05 BTCUSDT breakdown experiment lost
