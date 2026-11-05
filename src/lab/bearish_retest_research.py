@@ -25,7 +25,7 @@ from lab.research_family import _digest, _member, load_family
 from lab.trials import _code_identity, code_provenance, trial_run
 
 KEY = "btc-failed-retest-v1"
-PLAN_NAME = "BTCUSDT failed-support-retest frozen v1 retrospective development study"
+PLAN_NAME = "BTCUSDT frozen failed-retest v1; corrected end-stamped archive replay v2"
 POLICY = "guarded-preregistered-funding-adjusted-btc-retest-study-v2-archive-endstamp"
 BOUNDARY = pd.Timestamp("2026-05-08T00:00:00Z")
 
