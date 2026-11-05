@@ -131,9 +131,23 @@ def test_bad_oi_quality_vetoes_prior_24h_and_retest_confirmation_windows():
 
 def test_holdout_is_enforced_by_exact_utc_bar_completion():
     b, t0 = setup()
-    boundary = b.index[t0+4]
+    # A non-midnight instant is not an admissible holdout boundary,
+    # irrespective of whether the candle data also crosses it.
+    with pytest.raises(ValueError, match="UTC midnight"):
+        br.simulate(b, boundary=b.index[t0+4])
+
+    # With a valid UTC midnight cutoff, any candle at or after the
+    # boundary must be rejected before strategy calculations.
+    boundary = pd.Timestamp("2026-01-11T00:00:00Z")
     with pytest.raises(ValueError, match="protected holdout"):
         br.simulate(b, boundary=boundary)
+
+    # A candle ending exactly at the protected instant is also
+    # excluded, rather than treated as an eligible research candle.
+    through_boundary = b.loc[b.index <= boundary]
+    with pytest.raises(ValueError, match="protected holdout"):
+        br.simulate(through_boundary, boundary=boundary)
+
     with pytest.raises(ValueError, match="UTC"):
         br.simulate(b, boundary=pd.Timestamp("2026-02-01"))
 
