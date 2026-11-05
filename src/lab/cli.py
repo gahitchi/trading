@@ -822,9 +822,9 @@ def cmd_crash_study(cfg, a):
 
     import numpy as np
 
-    from lab import crash_data, crash_execution
+    from lab import crash_data, crash_execution, crash_funding, crash_funding_ledger
     from lab import crash_study as cs
-    from lab.persistence import nullable_numbers
+    from lab.persistence import nullable_numbers, read_json
     from lab.trials import count_configurations, trial_run
 
     root = cfg.data_dir / "crash"
@@ -839,6 +839,17 @@ def cmd_crash_study(cfg, a):
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 
+    # Funding-adjusted evaluation currently supports one BTCUSDT
+    # contract with a complete accepted historical source plan.
+    funding_plan = getattr(a, "funding_plan", None)
+    if funding_plan and (a.all or symbols != ["BTCUSDT"]):
+        raise SystemExit("--funding-plan currently requires --symbols BTCUSDT without --all")
+    funding_plan_metadata = None
+    if funding_plan:
+        try:
+            funding_plan_metadata = read_json(funding_plan)
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"invalid funding source plan: {exc}") from exc
     key = f"crash-{a.mode}"
     # No possible reclassification of old notional-based studies as contract-quantity evidence.
     params = {
@@ -846,16 +857,48 @@ def cmd_crash_study(cfg, a):
         "oi_measure": "contract-quantity-v1",
         "oi_quality_policy": "source-pinned-zero-pair-and-absent-5m-window-veto-v2",
         "execution_model": crash_execution.MODEL,
-        "funding_model": "not-modelled-no-funding-adjusted-claim",
+        "funding_model": (
+            crash_funding_ledger.MODEL if funding_plan else
+            "not-modelled-no-funding-adjusted-claim"
+        ),
+        "funding_source": ({
+            "kind": funding_plan_metadata.get("kind"),
+            "start": funding_plan_metadata.get("start"),
+            "holdout_start": funding_plan_metadata.get("holdout_start"),
+            "events_sha256": funding_plan_metadata.get("events_sha256"),
+        } if funding_plan else None),
     }
     try:
         # Durable attempt is reserved BEFORE reading historical candle / OI data.
         with trial_run(
             cfg.results_dir, "crash-study", key, params, (None, int(boundary.value) - 1)
         ) as attempt:
+            funding_evidence = None
+            if funding_plan:
+                # Once the attempt is durable, independently audit the
+                # local funding evidence before using any market data.
+                funding_evidence = crash_funding.load_verified(
+                    a.config or cfg.root / "lab.toml",
+                    funding_plan, symbol="BTCUSDT",
+                )
             r = cs.run(root, symbols, settings, boundary, holdout=False, evidence=attempt.inputs)
             if not r.trades:
                 raise ValueError(f"no pre-holdout crash data for {' '.join(symbols)} before {boundary:%Y-%m-%d}")
+            if funding_evidence is not None:
+                plan = funding_evidence["plan"]
+                if any(
+                    plan.get(key) != funding_plan_metadata.get(key)
+                    for key in ("kind", "start", "holdout_start", "events_sha256")
+                ):
+                    raise ValueError("funding source plan changed between reservation and load")
+                from pandas import to_datetime, DataFrame
+                events = funding_evidence["events"]
+                attempt.inputs.frame("funding:BTCUSDT", DataFrame({
+                    "ts": to_datetime([event["fundingTime"] for event in events], unit="ms", utc=True),
+                    "fundingRate": [event["fundingRate"] for event in events],
+                    "markPrice": [event["markPrice"] for event in events],
+                }))
+                r = crash_funding_ledger.funded_run(r, settings.side, funding_evidence)
             st = cs.summary(r.trades, r.start, r.end)
             sensitivity = crash_execution.stress_summary(
                 r.trades, settings.side, r.start, r.end, cs.summary,
@@ -864,7 +907,13 @@ def cmd_crash_study(cfg, a):
             attempt.result = {
                 **nullable_numbers({k: st[k] for k in keys}),
                 "execution_model": crash_execution.MODEL,
-                "funding_status": "not_modelled",
+                "funding_status": "audited_settlements" if funding_evidence else "not_modelled",
+                "funding_evidence_sha256": (
+                    funding_evidence["plan"]["events_sha256"] if funding_evidence else None
+                ),
+                "funding_totals": (
+                    crash_funding_ledger.funding_totals(r.trades) if funding_evidence else None
+                ),
                 "fixed_execution_scenarios": sensitivity,
             }
             attempt.window = (int(r.start.value), int(r.end.value))
@@ -912,10 +961,18 @@ def cmd_crash_study(cfg, a):
             f"    {scenario['name']}: {scenario['flat_price_round_trip_bps']:g} bps "
             f"flat-price round trip, mean net {mean_text}"
         )
+    if funding_plan:
+        total = crash_funding_ledger.funding_totals(r.trades)
+        print(
+            f"  audited funding: {total['funded_settlements']} settlements across "
+            f"{total['trades']} trades; net funding "
+            f"{total['funding_return_sum_bps']:+.2f} bps of summed entry notionals"
+        )
     print(
         "Fixed-base reference-price fills and per-fill notional fees are modelled; "
-        "slippage is assumed, not measured. Funding, partial fills, "
-        "order-book impact and liquidation are NOT modelled. "
+        "slippage is assumed, not measured. "
+        + ("Audited funding is included; " if funding_plan else "Funding is NOT modelled; ")
+        + "partial fills, order-book impact and liquidation are NOT modelled. "
         "This exploratory study does not qualify live execution."
     )
     return 0
@@ -1145,6 +1202,7 @@ def build_parser() -> argparse.ArgumentParser:
     xs.add_argument("--mode", choices=CRASH_MODES, default="wick", help="wick: buy the flush; breakdown: short it")
     xs.add_argument("--symbols", nargs="+", default=list(CRASH_SYMBOLS), help="Binance USD-M perpetuals")
     xs.add_argument("--all", action="store_true", help="every symbol fetched (instead of --symbols)")
+    xs.add_argument("--funding-plan", type=Path, help="audited pre-holdout BTCUSDT funding source plan; enables funding-adjusted accounting")
     xs.add_argument("--drop-pct", type=float, help="fall that makes a crash, %% (preset per mode)")
     xs.add_argument("--window-min", type=int, help="minutes the fall happens in (preset: 60)")
     xs.add_argument("--vol-mult", type=float, help="volume of the window vs usual, times (preset: 3)")
