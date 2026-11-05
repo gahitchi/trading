@@ -1,8 +1,13 @@
 # Prospective search coverage (A8b4)
 
-`lab research register --plan plan.json` freezes one search plan for the configured results directory.
-`lab research report` audits **every research attempt** there, across instruments and all four study kinds.
-There is no scope filter, plan replacement, amendment, successful-retry recovery or history reset command.
+`lab research register --plan plan.json` freezes one search plan as an immutable
+**generation** for the configured results directory. `lab research report`
+audits **every research attempt**, across instruments and the five study kinds.
+The first registration is stored at `results/research_family.json`;
+successive generations, when allowed, are stored in append-only
+`results/research_family_epochs/000001.json`, `000002.json`, and so on.
+There is no scope filter, same-plan replacement, amendment,
+successful-retry recovery or history reset command.
 This is an evidence prerequisite, not statistical inference or a trading gate. `qualified` is always false.
 
 The existing joint daily diagnostic still covers only its `(study kind, instrument)` scope. Its saved report
@@ -11,11 +16,48 @@ those p-values for selection across instruments or study types. The [failed v1 v
 and its frozen method remain unchanged. A qualified Sharpe criterion, an inference method covering the full
 selection family, a new protocol and fresh independent validation remain open under A8b.
 
+## Append-only successor registration — no evidence reset
+
+A new separately frozen family can be registered only **after all
+planned members of the previous generation have at least been
+attempted**, and no durable trial remains `reserved`. A successor
+may have different candidate members, but it cannot overwrite or
+amend any previous registered plan. The registration:
+
+1. Validates every preceding registration's SHA-256 and
+   predecessor chain, with contiguous generation numbering.
+2. Verifies that prior completed/failed/legacy attempts and
+   the immutable fields of earlier `reserved` attempts have not
+   disappeared or changed.
+3. Freezes **the complete previous non-holdout trial history** into
+   the new registration. The original failures, legacy evidence,
+   attempted parameters, input fingerprints and registration
+   signatures remain counted.
+4. Binds newly reserved attempts to the current generation,
+   and refuses any unknown or missing family link, deleted
+   generation, edited evidence or concurrent unfinished attempt.
+5. Audits current history over *all* generations; reports remain
+   evidence audits with `qualified=false`.
+
+This allows a future, genuinely different strategy hypothesis to
+have its own exact frozen plan without inventing variants prematurely
+or declaring the original single-member plan to be the final search
+universe. It **does not** wash away search multiplicity or restore
+fresh out-of-sample status: an existing 10-trial BTCUSDT research
+history is still retrospective in every new generation. Passing a
+new backtest under this registry is not an inference gate pass.
+
+The same explicit registration workflow and unchanged CLI remain in
+use. Never delete `research_family.json`, a prior epoch file or
+any historical attempt to enable new registrations. No archival
+generation is a replacement for a genuinely fresh independent
+validation period and independently qualified joint inference.
+
 ## Plan and workflow
 
 A plan is strict finite JSON with exactly `name`, `rationale` and a nonempty `members` list. Each member has:
 
-- `kind`: `micro-study`, `maker-study`, `fast-backtest` or `carry-study`.
+- `kind`: `micro-study`, `maker-study`, `fast-backtest`, `carry-study` or `crash-study`.
 - `instrument`: the exact trial identifier, e.g. `BTCUSDT-PERP.BINANCE` or `carry-cash`.
 - `params`: the complete settings dictionary passed to the trial reservation, including model/gap policies,
   risk settings, costs and symbol lists where applicable. Do not supply only parameters that differ from defaults.
