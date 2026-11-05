@@ -506,6 +506,37 @@ execution; complete trial accounting and prospective statistical
 qualification. Holdout studies and releases remain disabled. Historical
 migration completion is not evidence of profitability.
 
+## Crash input fingerprint qualification (2026-11-05, pending Termux regression)
+
+Research-mode crash evaluation now excludes candle **and** open-interest
+archives overlapping the protected holdout before opening files. It also
+drops any period-end records stamped at or beyond the reserved boundary.
+A crossing monthly candle archive may therefore conservatively omit
+usable pre-boundary data; it must not be opened just to recover those rows.
+
+The durable crash-study attempt now receives two canonical SHA-256 input
+streams per requested symbol: the UTC-sorted minute candle frame and
+five-minute open-interest frame after boundary filtering, including
+schema, typed numeric values, explicit null/quarantine values, timestamps,
+and absent-input markers. Each digest is appended to the attempt under
+its existing trial evidence model; failed attempts retain the partial
+or complete evidence already gathered. Code identity is separately
+recorded in the trial ledger. Source-frame fingerprints distinguish
+different inputs; they are **not** standalone proof that every
+downstream statistic is statistically valid.
+
+The research-mode quality policy is versioned to include the
+missing-five-minute-snapshot veto. Holdout tests and release remain
+disabled. This code is awaiting independent external Termux regression;
+do not interpret it as qualified before those tests pass.
+
+Run:
+
+    PYTHONPATH=src:. python -m pytest \
+      tests/test_crash_input_provenance.py \
+      tests/test_crash.py tests/test_crash_oi.py \
+      tests/test_crash_oi_missing_gap_signals.py -v
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
