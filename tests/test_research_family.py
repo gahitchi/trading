@@ -14,6 +14,7 @@ from lab import fast_research as fr
 from lab import research_family as rf
 from lab import trials
 from lab.persistence import atomic_json, read_json
+
 # Test-only identifier. Importing tests.test_fast would also import NautilusTrader,
 # which is unrelated to research-family persistence and unavailable in Termux.
 IID = "BTCUSDT-PERP.BINANCE"
@@ -479,9 +480,10 @@ def test_corrupted_successor_chain_blocks_read_and_new_attempts(tmp_path):
     atomic_json(record, modified)
     with pytest.raises(ValueError, match="predecessor chain"):
         rf.load_family(tmp_path)
-    with pytest.raises(ValueError, match="predecessor chain"):
-        with trials.trial_run(tmp_path, "fast-backtest", "NEW", {}, (0, 100)):
-            pytest.fail("attempt should not be reserved with corrupted registration")
+    with pytest.raises(ValueError, match="predecessor chain"), trials.trial_run(
+        tmp_path, "fast-backtest", "NEW", {}, (0, 100)
+    ):
+        pytest.fail("attempt should not be reserved with corrupted registration")
 
 
 def test_missing_first_registration_blocks_even_with_successor_present(tmp_path):
@@ -504,9 +506,10 @@ def test_missing_successor_sequence_blocks_registration_and_attempts(tmp_path):
     (tmp_path / rf.EPOCHS / "000001.json").unlink()
     with pytest.raises(ValueError, match="sequence is missing"):
         rf.load_family(tmp_path)
-    with pytest.raises(ValueError, match="sequence is missing"):
-        with trials.trial_run(tmp_path, "fast-backtest", "THIRD", {}, (0, 100)):
-            pytest.fail("cannot issue after deleting middle generation")
+    with pytest.raises(ValueError, match="sequence is missing"), trials.trial_run(
+        tmp_path, "fast-backtest", "THIRD", {}, (0, 100)
+    ):
+        pytest.fail("cannot issue after deleting middle generation")
 
 
 def test_successor_cannot_reclassify_missing_prior_attempt_as_retrospective(tmp_path):
@@ -529,9 +532,10 @@ def test_missing_final_generation_cannot_relabel_linked_trials_to_older_plan(tmp
     (tmp_path / rf.EPOCHS / "000001.json").unlink()
     # A removed *last* generation has no sequence gap, so the
     # recorded links are the second independent proof of its existence.
-    with pytest.raises(ValueError, match="registration is missing"):
-        with trials.trial_run(tmp_path, "fast-backtest", "THIRD", {}, (0, 100)):
-            pytest.fail("missing last generation must not silently revert active plan")
+    with pytest.raises(ValueError, match="registration is missing"), trials.trial_run(
+        tmp_path, "fast-backtest", "THIRD", {}, (0, 100)
+    ):
+        pytest.fail("missing last generation must not silently revert active plan")
     with pytest.raises(ValueError, match="registration is missing"):
         rf.family_report(tmp_path)
 

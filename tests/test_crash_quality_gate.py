@@ -59,7 +59,7 @@ def cache(tmp_path):
 
 
 def test_quality_report_counts_missing_candles_and_two_separate_oi_exclusion_causes(tmp_path, monkeypatch):
-    cfg, root = cache(tmp_path)
+    cfg, _root = cache(tmp_path)
     original = pd.read_parquet
 
     def guarded(path, *args, **kwargs):

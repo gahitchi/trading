@@ -110,7 +110,7 @@ def test_postmortem_failure_remains_in_attempt_history(tmp_path, monkeypatch):
 
 
 def test_qualification_never_upgrades_from_descriptive_results(tmp_path):
-    cfg = _config(tmp_path)
+    _config(tmp_path)
     report = crash_qualification.inventory(tmp_path / "results")
     assert report["status"] == "NOT_QUALIFIED"
     assert report["all_historical_attempts"] == 0
