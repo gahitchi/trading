@@ -848,6 +848,8 @@ def cmd_crash_study(cfg, a):
     if funding_plan:
         try:
             funding_plan_metadata = read_json(funding_plan)
+            if not isinstance(funding_plan_metadata, dict):
+                raise ValueError("funding source plan must be a JSON object")
         except (OSError, ValueError) as exc:
             raise SystemExit(f"invalid funding source plan: {exc}") from exc
     key = f"crash-{a.mode}"
@@ -966,7 +968,7 @@ def cmd_crash_study(cfg, a):
         print(
             f"  audited funding: {total['funded_settlements']} settlements across "
             f"{total['trades']} trades; net funding "
-            f"{total['funding_return_sum_bps']:+.2f} bps of summed entry notionals"
+            f"{total['funding_return_sum_bps']:+.2f} bps summed across trade entry notionals"
         )
     print(
         "Fixed-base reference-price fills and per-fill notional fees are modelled; "
