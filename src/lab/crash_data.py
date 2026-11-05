@@ -201,15 +201,20 @@ def update(
 
 
 def load(root: Path, kind: str, symbol: str, *, before: pd.Timestamp | None = None) -> pd.DataFrame | None:
-    """Every cached period of a symbol as one frame sorted by ts (a month and its days overlap: kept once)."""
+    """Cached periods sorted by ts; optional UTC cutoff excludes overlapping files before reading."""
     files = sorted(_dir(root, kind, symbol).glob("*.parquet"))
     if before is not None:
-        if kind != "oi":
-            raise ValueError("before cutoff is only implemented for OI metrics")
+        if kind not in ("oi", "klines"):
+            raise ValueError("before cutoff is only implemented for OI metrics and klines")
         cutoff = pd.Timestamp(before)
-        if cutoff.tzinfo is None:
-            raise ValueError("OI cache cutoff must be UTC timezone-aware")
-        # Only complete pre-holdout daily periods are touched.
+        if cutoff.tzinfo is None or cutoff.utcoffset() != pd.Timedelta(0):
+            raise ValueError("research cache cutoff must be UTC timezone-aware")
+        if cutoff != cutoff.floor("D"):
+            raise ValueError("research cache cutoff must start on a UTC day")
+        # Exclude whole periods (daily or monthly) that overlap the
+        # protected holdout BEFORE opening their contents. For klines,
+        # excluding a crossing monthly archive may conservatively omit
+        # some pre-holdout candles; never trade safety for partial coverage.
         files = [path for path in files if _end_of(path.stem) <= cutoff.date()]
     if not files:
         return None
