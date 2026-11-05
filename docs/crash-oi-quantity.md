@@ -766,6 +766,73 @@ The source plan must be inspected before any apply. This new
 functionality is **not yet externally validated** and funding is not
 yet reflected in strategy returns.
 
+## First complete funded BTCUSDT breakdown research verdict (2026-11-05)
+
+Termux Python 3.13.5 acceptance: **97/97 crash and funding
+regression tests passed** on maintenance branch `24af5c5`. The
+predefined breakdown preset (60-minute drop >=3%, volume >=3x,
+contract-quantity OI increasing; short after 1-minute delay,
+8% target, 3% stop, <=1,440-minute hold, 50% annualized volatility
+target, default taker fee/slippage 5 bps each side) completed a
+pre-holdout BTCUSDT study over 2024-01-01 to 2026-05-07.
+The protected holdout starting 2026-05-08 remains untouched.
+There have been **8 configurations tried** in the crash-breakdown
+trial family per the reported durable trial count; none of these
+attempts can be ignored or reclassified merely because its result
+was unfavorable.
+
+Observed main strategy result (pessimistic funding bound):
+
+- 32 trades on 32 days, **mean −106.4 bps** net, median
+  **−317.4 bps**, win rate **34.4%**, 17 stops, 1 target,
+  aggregate trade net **−3,404.3 bps** before vol sizing.
+- Portfolio modeled annual return **−8.38%**, daily Sharpe
+  **−0.99**, Newey-West daily t **−1.58**, and maximum
+  modeled drawdown **22.02%**. These are descriptive diagnostics;
+  this trial was not statistically qualified, and no deflated
+  Sharpe was reported.
+- Identical trade entries/exits across 20/30/50 bps nominal
+  round-trip cost scenarios: mean net **−106.4/−116.4/−136.5
+  bps** per trade, respectively.
+- Audited funding: **62 certain** BTCUSDT settlement events
+  across 32 strategy trades; **0 ambiguous**; summed
+  funding +30.89 bps of each trade's entry-reference
+  notional (about +0.97 bps/trade). Funding contributed too
+  little to offset adverse price/exit performance.
+- The 37 detected first-crash signals had average
+  direction-adjusted gross forward movements of
+  −16/−29/−45/−50/−215 bps at
+  5/15/60/240/1,440 minutes. These forward measurements
+  are *not* 37 independent, executed trades and are not a
+  confidence interval.
+- The same-exit-rule, daily-at-midnight comparison produced
+  479 baseline trades, mean −25.0 bps and modeled
+  −58.21% annualized. Its event frequency and exposure
+  differ greatly from the 32-trigger strategy: raw aggregate
+  APR or Sharpe comparison is not a matched counterfactual
+  measure of signal value.
+
+**Decision:** the *predefined BTC short crash-continuation
+configuration* did not pass the exploratory pre-holdout
+profitability screen. **Do not advance this candidate to
+holdout or paper-trading qualification.** This conclusion
+does not prove that all bearish trading ideas fail; neither
+does it justify silently optimizing stop, drop threshold,
+volume or OI conditions on the same inspected history.
+Any new hypothesis and search family must be registered
+and counted separately. Stage-dependent performance,
+matched risk exposure, robust inference, actual
+execution/slippage, intraday funding timing and margin
+economics remain research gaps.
+
+The reported numbers come from the operator-run Termux
+command and are preserved here as an external acceptance
+checkpoint, not independently replayed in CI. For this
+result, there were 0 ambiguous funding settlements among
+*strategy* trades; the earlier blocked attempt reflected
+the old abort-on-ambiguity algorithm, and the v2 bounds
+remain required for general/baseline correctness.
+
 ## Crash funding settlement ownership bounds (pending Termux validation)
 
 The operator's first full 2024-01-01 to 2026-05-07 funded BTC
