@@ -86,6 +86,11 @@ def rescore(trades: pd.DataFrame, side: int, fee_bps: float, slippage_bps: float
         if not math.isfinite(funding):
             raise ValueError("funding-adjusted stress scenario has nonfinite settlement P&L")
         updated.loc[index, "net"] = result["net"] + funding
+        if "funding_return_upper" in updated:
+            upper = float(row["funding_return_upper"])
+            if not math.isfinite(upper) or upper < funding:
+                raise ValueError("invalid funding P&L bounds in cost stress")
+            updated.loc[index, "net_upper"] = result["net"] + upper
     return updated
 
 
