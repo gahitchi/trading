@@ -14,7 +14,9 @@ def sample():
         "open": np.full(len(idx), 100.0),
         "high": np.full(len(idx), 100.2),
         "low": np.full(len(idx), 99.8),
-        "close": np.full(len(idx), 100.0),
+        # Tiny deterministic fluctuations establish a nonzero,
+        # causally observable historical-volatility sizing reference.
+        "close": 100.0 + 0.02*np.sin(np.arange(len(idx)) / 23.0),
         "quote_volume": np.ones(len(idx)),
         "oi_invalid": np.zeros(len(idx), dtype=bool),
     }, index=idx)
