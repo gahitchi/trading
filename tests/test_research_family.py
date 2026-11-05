@@ -412,3 +412,109 @@ def test_actual_carry_command_links_and_counts_automatic_comparison(tmp_path, ca
         "whole_search_adjusted": False,
     }
     assert "independent validation failed" in capsys.readouterr().out
+
+
+def test_append_only_successor_family_keeps_old_registration_and_trial_evidence(tmp_path):
+    first = rf.register_family(tmp_path, plan())
+    evaluate(tmp_path, result={"pnl": -15})
+    old_rows = trials.history(tmp_path)
+    original_bytes = (tmp_path / rf.FAMILY).read_bytes()
+    new_plan = plan(member(instrument="NEXT", params={"threshold": 0.9}))
+    second = rf.register_family(tmp_path, new_plan)
+    assert (tmp_path / rf.FAMILY).read_bytes() == original_bytes
+    assert (tmp_path / rf.EPOCHS / "000001.json").is_file()
+    assert second["previous_registration_sha256"] == first["sha256"]
+    assert second["prior_history"] == old_rows
+    assert rf.load_family(tmp_path) == second
+    spec = new_plan["members"][0]
+    newer_attempt = evaluate(tmp_path, spec)
+    rows = trials.history(tmp_path)
+    assert rows[0] == old_rows[0]
+    assert rows[1]["attempt_id"] == newer_attempt
+    assert rows[1]["family_id"] == second["family_id"]
+    blocked = rf.family_report(tmp_path)
+    assert blocked["prior_entries"] == len(old_rows)
+    assert not blocked["prospective_coverage_complete"]
+    assert not blocked["qualified"]
+    third_plan = plan(member(instrument="THIRD", params={"threshold": 0.5}))
+    third = rf.register_family(tmp_path, third_plan)
+    assert third["previous_registration_sha256"] == second["sha256"]
+    assert (tmp_path / rf.EPOCHS / "000002.json").is_file()
+    assert rf.load_family(tmp_path) == third
+
+
+def test_successor_registration_denied_for_unattempted_member(tmp_path):
+    rf.register_family(tmp_path, plan())
+    with pytest.raises(ValueError, match="unattempted planned members"):
+        rf.register_family(tmp_path, plan(member(instrument="NEW")))
+    assert not (tmp_path / rf.EPOCHS / "000001.json").exists()
+
+
+def test_successor_registration_denied_for_identical_plan(tmp_path):
+    rf.register_family(tmp_path, plan())
+    evaluate(tmp_path)
+    with pytest.raises(ValueError, match="already registered"):
+        rf.register_family(tmp_path, plan())
+    assert not (tmp_path / rf.EPOCHS / "000001.json").exists()
+
+
+def test_successor_registration_denied_while_any_attempt_reserved(tmp_path):
+    rf.register_family(tmp_path, plan())
+    evaluate(tmp_path)
+    with trials.trial_run(tmp_path, "fast-backtest", "SLOW", {}, (0, 100)) as waiting:
+        with pytest.raises(ValueError, match="reserved research attempts"):
+            rf.register_family(tmp_path, plan(member(instrument="NEW")))
+        waiting.result = {"not_completed_at_registration": True}
+    assert not (tmp_path / rf.EPOCHS / "000001.json").exists()
+
+
+def test_corrupted_successor_chain_blocks_read_and_new_attempts(tmp_path):
+    rf.register_family(tmp_path, plan())
+    evaluate(tmp_path)
+    rf.register_family(tmp_path, plan(member(instrument="NEW")))
+    record = tmp_path / rf.EPOCHS / "000001.json"
+    prior = read_json(record)
+    modified = {**prior, "previous_registration_sha256": "f" * 64}
+    modified["sha256"] = rf._digest({k: v for k, v in modified.items() if k != "sha256"})
+    atomic_json(record, modified)
+    with pytest.raises(ValueError, match="predecessor chain"):
+        rf.load_family(tmp_path)
+    with pytest.raises(ValueError, match="predecessor chain"):
+        with trials.trial_run(tmp_path, "fast-backtest", "NEW", {}, (0, 100)):
+            pytest.fail("attempt should not be reserved with corrupted registration")
+
+
+def test_missing_first_registration_blocks_even_with_successor_present(tmp_path):
+    rf.register_family(tmp_path, plan())
+    evaluate(tmp_path)
+    rf.register_family(tmp_path, plan(member(instrument="NEXT")))
+    (tmp_path / rf.FAMILY).unlink()
+    with pytest.raises(ValueError, match="original research family registration is missing"):
+        rf.load_family(tmp_path)
+    with pytest.raises(ValueError, match="original research family registration is missing"):
+        rf.register_family(tmp_path, plan(member(instrument="THIRD")))
+
+
+def test_missing_successor_sequence_blocks_registration_and_attempts(tmp_path):
+    rf.register_family(tmp_path, plan())
+    evaluate(tmp_path)
+    rf.register_family(tmp_path, plan(member(instrument="NEXT")))
+    evaluate(tmp_path, member(instrument="NEXT"))
+    rf.register_family(tmp_path, plan(member(instrument="THIRD")))
+    (tmp_path / rf.EPOCHS / "000001.json").unlink()
+    with pytest.raises(ValueError, match="sequence is missing"):
+        rf.load_family(tmp_path)
+    with pytest.raises(ValueError, match="sequence is missing"):
+        with trials.trial_run(tmp_path, "fast-backtest", "THIRD", {}, (0, 100)):
+            pytest.fail("cannot issue after deleting middle generation")
+
+
+def test_successor_cannot_reclassify_missing_prior_attempt_as_retrospective(tmp_path):
+    rf.register_family(tmp_path, plan())
+    evaluate(tmp_path)
+    previous = trials.history(tmp_path)[0]
+    (tmp_path / fr.TRIALS).unlink()
+    (tmp_path / trials.ATTEMPTS / f"{previous['attempt_id']}.json").unlink()
+    with pytest.raises(ValueError, match="unattempted planned members"):
+        rf.register_family(tmp_path, plan(member(instrument="NEXT")))
+    assert not (tmp_path / rf.EPOCHS / "000001.json").exists()
