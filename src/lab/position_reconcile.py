@@ -222,7 +222,7 @@ def compile_source(
                 ),
             ]
         elif isinstance(row, PositionMark):
-            amount = _mark_total(positions, row.marks, q)
+            amount = _mark_total(positions, row.marks, q, row.timestamp)
             batch = [AllocationEvent(
                 f"e.{fingerprint}.mark", f"{row.source_id}.mark", row.timestamp,
                 policy.currency, "day_close" if row.close_day else "mark", str(amount),
