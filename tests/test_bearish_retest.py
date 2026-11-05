@@ -38,12 +38,16 @@ def setup(*, target=False, stop=True, confirm=True, retest=True, high_volume=Tru
     else:
         for i in range(start+2,start+7):
             b.loc[b.index[i], ["open","high","low","close"]] = [99.5,99.5,99.4,99.5]
-    # Entry is at open of bar confirmation+2 => start+4.
-    b.loc[b.index[start+4], ["open","high","low","close"]] = [99.0,99.5,98.4,99.2]
-    if stop:
-        b.loc[b.index[start+5], ["open","high","low","close"]] = [99.2,100.3,97.0 if target else 99.0,99.6]
-    elif target:
-        b.loc[b.index[start+5], ["open","high","low","close"]] = [99.2,99.3,97.0,97.2]
+    # Entry is at open of bar confirmation+2 => start+4. Do not
+    # synthesize an accidental confirmation in the no-confirm test.
+    if confirm:
+        b.loc[b.index[start+4], ["open","high","low","close"]] = [99.0,99.5,98.4,99.2]
+        if stop:
+            b.loc[b.index[start+5], ["open","high","low","close"]] = [
+                99.2,100.3,97.0 if target else 99.0,99.6
+            ]
+        elif target:
+            b.loc[b.index[start+5], ["open","high","low","close"]] = [99.2,99.3,97.0,97.2]
     return b, start
 
 
