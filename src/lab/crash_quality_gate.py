@@ -112,6 +112,14 @@ def audit_quality(
     o = crash_data.load(root, "oi", symbol, before=boundary)
     if k is None or o is None or not len(k) or not len(o):
         raise ValueError("qualified input requires pre-holdout candles and open interest")
+    # Period-end candles are stamped one minute after their open.
+    # A fully pre-holdout daily archive may therefore contain a final
+    # close-time stamp at the boundary. Mirror crash_study.run(): exclude
+    # that row before reporting the eligible pre-holdout sample.
+    boundary_stamped = int((k["ts"] >= boundary).sum())
+    k = k.loc[k["ts"] < boundary].copy()
+    if k.empty:
+        raise ValueError("no pre-holdout minute candles after boundary filtering")
     kt = _validate_klines(k, boundary)
     if (o["ts"] >= boundary).any():
         raise ValueError("pre-holdout OI frame contains protected timestamp")
@@ -154,6 +162,7 @@ def audit_quality(
         "window_min": w,
         "klines": {
             "loaded_rows": len(k),
+            "boundary_stamped_source_rows_excluded": boundary_stamped,
             "grid_minutes": len(grid),
             "missing_minutes": len(absent_candles),
             "missing_ranges_first_12": _gaps(absent_candles),
