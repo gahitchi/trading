@@ -156,3 +156,61 @@ def test_stop_reference_and_target_are_frozen_two_to_one_not_parameters():
     assert br.REWARD_TO_RISK == 2.0
     assert br.MAX_HOLD_MINUTES == 240
     assert br.VOL_TARGET == 0.5
+
+
+def test_target_only_fills_at_declared_two_to_one_target():
+    b, _ = setup(stop=False, target=True)
+    result = run(b)
+    assert len(result.trades) == 1
+    row = result.trades.iloc[0]
+    assert row["reason"] == "target"
+    assert row["exit_reference"] == pytest.approx(row["target_reference"])
+    assert row["gross"] > 0
+
+
+def test_time_exit_uses_240th_completed_candle_not_future_bars():
+    b, t0 = setup(stop=False)
+    for j in range(t0 + 5, t0 + 4 + br.MAX_HOLD_MINUTES):
+        b.loc[b.index[j], ["open", "high", "low", "close"]] = [
+            99.2,99.5,99.0,99.1
+        ]
+    result = run(b)
+    assert len(result.trades) == 1
+    row = result.trades.iloc[0]
+    assert row["reason"] == "time"
+    assert (row["exit"] - row["entry"]) == pd.Timedelta(minutes=br.MAX_HOLD_MINUTES)
+
+
+def test_invalid_stop_gap_is_counted_as_canceled_not_a_trade():
+    b, t0 = setup()
+    b.loc[b.index[t0+4], ["open", "high", "low", "close"]] = [
+        101,101.2,100.5,100.8
+    ]
+    result = run(b)
+    assert result.trades.empty
+    assert result.event_counts["invalid_stop"] == 1
+
+
+def test_invalid_negative_target_is_counted_not_entered():
+    b, t0 = setup()
+    b.loc[b.index[t0+4], ["open", "high", "low", "close"]] = [
+        50,51,49,50.5
+    ]
+    result = run(b)
+    assert result.trades.empty
+    assert result.event_counts["invalid_target"] == 1
+
+
+def test_zero_quote_volume_is_valid_source_but_cannot_satisfy_gate():
+    b, _ = setup(high_volume=False)
+    b.loc[b.index[-1], "quote_volume"] = 0
+    assert run(b).trades.empty
+
+
+def test_near_holdout_trade_does_not_read_after_boundary():
+    b, _ = setup()
+    # The same source must be explicitly passed as pre-holdout-only.
+    b = b.loc[b.index < pd.Timestamp("2026-01-11T00:00:00Z")]
+    result = br.simulate(b, boundary=pd.Timestamp("2026-01-11T00:00:00Z"))
+    assert len(result.trades) == 1
+    assert all(result.trades["exit"] < result.boundary)
