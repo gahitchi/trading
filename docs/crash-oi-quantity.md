@@ -580,24 +580,44 @@ Verify before trusting the report:
 
 No external Termux acceptance has yet been received for this change.
 
-## Daily candle tail qualification (pending external validation)
+## Daily candle tail qualification (accepted on Termux, 2026-11-05)
 
-The completed BTCUSDT quality audit revealed 10,079 trailing minute
-timestamps absent from research because the overlapping May 2026
-monthly archive is excluded. The append-only daily-tail command can
-preflight the seven May 1-7 source ZIPs, verify full one-minute grids,
-and pin ZIP SHA-256s before adding separate daily Parquet caches.
-It does not read the overlapping monthly archive.
+Operator-run Termux acceptance passed **50/50 tests** covering daily
+archive source pinning, pre-access holdout exclusion, and read-only
+quality reporting. A read-only preflight confirmed 7/7 original daily
+BTCUSDT Binance 1m ZIPs for **2026-05-01 through 2026-05-07**, each
+containing exactly 1,440 ordered one-minute candles. The source plan
+pins the original ZIP SHA-256 for every day.
 
-Use the new tests/test_crash_kline_tail.py suite first. The tool's
-default survey is read-only; --plan-out explicitly saves a source plan.
-Only --apply --plan permits adding source-pinned files; --audit --plan
-independently verifies the committed files. The research quality gate
-now removes any period-end record stamped at the boundary.
+The append-only apply committed 7/7 daily Parquets and preserved the
+excluded, holdout-overlapping monthly archive. Independent read-only
+audit returned `ok=true`, `checked_days=7`, and `issues=[]`.
 
-Neither this change nor the original quality report authorizes
-holdout evaluation or establishes profitability. Termux acceptance
-and archive preflight remain pending.
+The repeated quality audit after recovery found:
+
+- Holdout boundary: **2026-05-08T00:00:00+00:00** (unchanged).
+- Candles: **1,235,519** loaded pre-holdout minutes, from
+  2024-01-01T00:01Z to 2026-05-07T23:59Z; **0** missing minutes
+  within the loaded interval; **0** trailing gap minutes.
+- Exactly **1** boundary-stamped period-end source candle excluded.
+- OI: **246,974** five-minute records; **130** source timestamps
+  missing; **330** explicit (0,0) quarantine records.
+- At the 60-minute OI comparison window, **1,230,318** candidate
+  decision minutes before the independent OI quality veto,
+  **5,069** excluded (144 missing-source, 4,925 quarantine,
+  0 overlapping reasons), and **1,225,249** still available.
+  These are *data-ready minute windows*, **not** triggered crash
+  signals, trades, performance or predictive validity.
+- The separate OI migration audit had already verified all **858**
+  historical pre-holdout Parquets with 0 legacy remaining and 0
+  transaction issues.
+
+The 20/30/50 bps taker round-trip scenarios remain modeled
+assumptions, not measured market impact, funding or P&L. No
+holdout research was authorized or run. All observations above are
+taken from operator-provided Termux outputs, not CI access to
+operator-local market data. Full strategy cost, funding and
+statistical qualification remain pending.
 
 ## Research attempt provenance
 
