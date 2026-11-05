@@ -766,6 +766,62 @@ The source plan must be inspected before any apply. This new
 functionality is **not yet externally validated** and funding is not
 yet reflected in strategy returns.
 
+## Audited funding integration in exploratory BTC short research (pending Termux tests)
+
+The operator completed pre-holdout funding evidence acceptance:
+`lab.crash_funding --apply` returned `status=committed`,
+`events=2574`; the independent read-only audit returned
+`ok=true` and `issues=[]`. No protected-holdout records were read.
+
+The optional `lab crash study --mode breakdown --symbols BTCUSDT
+--funding-plan /path/to/btc-funding-preholdout-plan.json` now:
+
+- Reserves a durable trial **before** loading audited settlement events,
+  one-minute candles, or five-minute open interest.
+- Independently audits the pinned local funding cache on every funded
+  study; fails the trial on a missing, altered or incoherent source.
+- Fingerprints every actually used millisecond-level funding timestamp,
+  rate and exchange mark price in the same trial as the candle and
+  OI streams. The source-plan event SHA-256 and funding model version
+  are recorded in trial parameters and results.
+- Applies positive rates as receipts for a short and negative rates
+  as payments, using fixed-base position quantity and the *exchange
+  mark price at each settlement*. Original entry/exit decisions,
+  volatility sizing and price/fee assumptions are unchanged.
+- Adjusts both the breakdown strategy and its daily-entry baseline,
+  and carries identical audited funding cashflows through the fixed
+  20/30/50-bps execution-cost stress scenarios.
+- Fails closed on settlements whose ownership cannot be established
+  using minute-resolution OHLC fills, including a settlement in the
+  minute containing the modeled exit. It does not drop ambiguous
+  trades selectively or substitute an assumed payment.
+
+The ordinary no-`--funding-plan` crash study remains explicitly
+`funding_status=not_modelled` and cannot be called funding-adjusted.
+Only single-symbol BTCUSDT has an accepted source plan at this point.
+
+**Limitations:** Futures account balance, leverage, margin, liquidation,
+actual execution timestamp, funding attribution within exit minutes,
+partial fills, mark-vs-trade-price collateral variation, cost
+calibration, and statistical strategy qualification remain unresolved.
+In this provisional study, total realized trade P&L (including funding)
+is grouped on the exit day for summary statistics; funding cashflow is
+not yet marked as separate settlement-day daily P&L. It therefore
+must not be treated as a qualified daily Sharpe or institutional
+economic ledger.
+
+After external tests pass, an exploratory pre-holdout funded run can
+be invoked with:
+
+    PYTHONPATH=src:. python -m lab --config \
+      ~/trading-termux-tests/lab.toml crash study \
+      --mode breakdown --symbols BTCUSDT \
+      --funding-plan ~/trading-termux-tests/btc-funding-preholdout-plan.json
+
+**The funded integration has not yet been regression-accepted on
+Termux.** This is research-only, generates a durable trial attempt,
+and is not a paper-trading, live-execution or holdout authorization.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
