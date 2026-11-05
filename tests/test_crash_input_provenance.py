@@ -3,8 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from lab import crash_data
-from lab import crash_study
+from lab import crash_data, crash_study
 from lab.trials import InputEvidence
 
 

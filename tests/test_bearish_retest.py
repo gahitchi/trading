@@ -83,7 +83,7 @@ def test_intrabar_stop_wins_when_stop_and_target_both_touched():
 
 
 def test_retest_and_confirmation_required_before_entry():
-    b, t0 = setup(retest=False, confirm=False)
+    b, _ = setup(retest=False, confirm=False)
     result = run(b)
     assert result.trades.empty
     assert result.event_counts["breakout"] == 1

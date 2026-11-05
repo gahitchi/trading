@@ -50,7 +50,7 @@ def test_contract_quantity_and_notional_differ_on_falling_mark():
 @pytest.mark.parametrize("qty", ["0", "-1", "NaN"])
 def test_parser_rejects_invalid_quantities(qty):
     raw = HEADER + f"2024-01-01 00:05:00,BTCUSDT,{qty},4200000\n"
-    with pytest.raises(ValueError, match="quantity|nonfinite"):
+    with pytest.raises(ValueError, match=r"quantity|nonfinite"):
         cd.parse_metrics(zipped(raw))
 
 

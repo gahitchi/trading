@@ -7,8 +7,7 @@ import json
 import pandas as pd
 import pytest
 
-from lab import crash_execution
-from lab import crash_funding
+from lab import crash_execution, crash_funding
 from lab import crash_funding_ledger as ledger
 from lab import crash_study as study
 from lab.cli import main as lab_main

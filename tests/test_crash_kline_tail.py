@@ -4,8 +4,6 @@ import hashlib
 import io
 import json
 import zipfile
-from datetime import date
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -155,7 +153,7 @@ def test_missing_cache_manifest_detected_by_read_only_audit(tmp_path):
 
 
 def test_plan_cli_and_require_pinning(tmp_path, capsys, monkeypatch):
-    cfg, folder, blobs = setup(tmp_path)
+    cfg, _, blobs = setup(tmp_path)
     monkeypatch.setattr(crash_data, "get_bytes", blobs.__getitem__)
     plan_path = tmp_path / "source-plan.json"
     assert main(["--config", str(cfg), "--plan-out", str(plan_path)]) == 0
@@ -167,7 +165,7 @@ def test_plan_cli_and_require_pinning(tmp_path, capsys, monkeypatch):
 
 
 def test_tail_boundary_candle_dropped_from_research_quality_report(tmp_path):
-    cfg, folder, blobs = setup(tmp_path)
+    cfg, _, blobs = setup(tmp_path)
     plan = tmp_path / "pinned.json"
     plan.write_text(json.dumps(survey(cfg, get=blobs.__getitem__)))
     apply(cfg, plan, get=blobs.__getitem__)

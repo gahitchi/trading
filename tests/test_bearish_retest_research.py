@@ -267,6 +267,7 @@ def test_archive_row_strictly_past_holdout_boundary_fails_closed_and_is_counted(
 
 def test_corrected_research_policy_uses_successor_after_failed_prior_generation(tmp_path, monkeypatch):
     from copy import deepcopy
+
     from lab.research_family import load_family, register_family
     from lab.trials import trial_run
     cfg, plan = configured(tmp_path)
@@ -276,12 +277,11 @@ def test_corrected_research_policy_uses_successor_after_failed_prior_generation(
     old_params["data_policy"] = "source-validated-contract-quantity-oi-veto-minute-bars"
     first = register_family(tmp_path / "results", old_proposal)
     old_member = old_proposal["members"][0]
-    with pytest.raises(ValueError, match="boundary mismatch"):
-        with trial_run(
-            tmp_path / "results", old_member["kind"], old_member["instrument"],
-            old_member["params"], tuple(old_member["window"]),
-        ):
-            raise ValueError("boundary mismatch")
+    with pytest.raises(ValueError, match="boundary mismatch"), trial_run(
+        tmp_path / "results", old_member["kind"], old_member["instrument"],
+        old_member["params"], tuple(old_member["window"]),
+    ):
+        raise ValueError("boundary mismatch")
     failures = history(tmp_path / "results")
     assert len(failures) == 1 and failures[0]["status"] == "failed"
     second = register_family(tmp_path / "results", rs.proposed_plan(cfg, plan))

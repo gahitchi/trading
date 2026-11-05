@@ -26,7 +26,7 @@ from pathlib import Path
 from nautilus_trader.common import DataActor, DataActorConfig
 from nautilus_trader.model import BookType, InstrumentId
 
-from lab.market_symbols import BINANCE, BYBIT, DEFAULT_SYMBOLS, PERPETUAL, SYMBOL_RE, VENUES
+from lab.market_symbols import BINANCE, BYBIT, PERPETUAL, SYMBOL_RE, VENUES
 from lab.persistence import atomic_json
 
 KINDS = ("book", "trades", "mark", "funding")
