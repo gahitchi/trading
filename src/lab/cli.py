@@ -467,12 +467,16 @@ def cmd_fast_paper(cfg, a):
     from lab.fast import build_paper_node
 
     risk_dir = cfg.results_dir / "fast"
+    capture_path = (
+        str(risk_dir / f"paper-orders-{a.capture_session}.jsonl") if a.capture_session else None
+    )
     try:
         node, _ = build_paper_node(
             _fast_config(cfg, a, report=str(risk_dir / "paper.json")),
             capital=a.capital, taker_bps=a.fee_bps, maker_bps=a.maker_bps,
             max_loss=a.max_loss, max_position=a.max_position, kill_file=str(cfg.kill_path),
             state_path=str(risk_dir / "risk-state.json"), audit_path=str(risk_dir / "risk-audit.jsonl"),
+            capture_path=capture_path, capture_session=a.capture_session,
         )  # fmt: skip
     except ValueError as e:
         raise SystemExit(str(e)) from e
@@ -1143,6 +1147,10 @@ def build_parser() -> argparse.ArgumentParser:
             fp.add_argument("--again", metavar="REASON", help="repeat a holdout test; the reason is recorded")
         else:
             fp.add_argument("--check-only", action="store_true", help="validate the setup without connecting")
+            fp.add_argument(
+                "--capture-session", metavar="ID",
+                help="archive sandbox order events to results/fast/paper-orders-ID.jsonl; new ID each run",
+            )
 
     rel = fsub.add_parser("release", help="turn the holdout into research data and start a new holdout (logged)")
     rel.add_argument("symbol", help="Binance USD-M perpetual, e.g. BTCUSDT")
