@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -74,10 +73,10 @@ def source_survey(
 
             downloaded: dict[str, bytes] = {}
 
-            def fetch(url: str) -> bytes:
-                if url not in downloaded:
-                    downloaded[url] = get(url)
-                return downloaded[url]
+            def fetch(url: str, cache: dict[str, bytes] = downloaded) -> bytes:
+                if url not in cache:
+                    cache[url] = get(url)
+                return cache[url]
 
             r = inspect_source(config_path, symbol, day=day, get=fetch)
             if r["archive_rows"] != r["local_rows"] or not (

@@ -116,7 +116,7 @@ def comparison(strategy: pd.DataFrame, control: pd.DataFrame) -> dict:
     ):
         raise ValueError("control is not duration/size matched to strategy")
     return {
-        "trades": int(len(strategy)),
+        "trades": len(strategy),
         "status": "descriptive_no_hypothesis_test",
         "identical_entry_notional_weights": True,
         "identical_realized_exposure_minutes": True,

@@ -3,9 +3,11 @@
 Bar high/low excursions include the complete exit minute, so they are
 bounds on *observed bars*, not realized MFE/MAE before a stop fill.
 """
+
 from __future__ import annotations
 
 import math
+
 import numpy as np
 import pandas as pd
 
@@ -80,7 +82,7 @@ def describe(rows: pd.DataFrame) -> dict:
         return {"trades": 0, "status": "no_trades"}
     def stats(part):
         return {
-            "trades": int(len(part)),
+            "trades": len(part),
             "mean_net_bps": float(part.net_bps.mean()),
             "sum_weighted_net_bps": float((part.net_bps * part.weight).sum()),
             "mean_duration_min": float(part.duration_min.mean()),

@@ -4,6 +4,7 @@ This is a *postmortem*, not a new candidate, grid search or a holdout
 evaluation. Its 16 calendar placebo seeds are fixed in source code;
 all are reported, none are selected for performance.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -13,8 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from lab import crash_data, crash_funding, crash_funding_ledger
-from lab import crash_placebo, crash_postmortem, crash_qualification
+from lab import crash_data, crash_funding, crash_funding_ledger, crash_placebo, crash_postmortem, crash_qualification
 from lab import crash_study as study
 from lab.config import load_config
 from lab.persistence import atomic_json, nullable_numbers, read_json

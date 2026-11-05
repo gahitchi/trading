@@ -103,9 +103,8 @@ def _verify_archive(archive: Path, manifest: Path, source: Path | None = None) -
     ):
         if metadata.get(key) != actual:
             raise ArchiveIntegrityError(f"manifest mismatch for {archive}: {key}")
-    if source is not None and source.exists():
-        if _scan_path(source) != (decompressed_sha, decompressed_size, rows):
-            raise ArchiveIntegrityError(f"source differs from gzip archive: {source}")
+    if source is not None and source.exists() and _scan_path(source) != (decompressed_sha, decompressed_size, rows):
+        raise ArchiveIntegrityError(f"source differs from gzip archive: {source}")
     return ArchiveResult(archive, rows, decompressed_size, compressed_size, False)
 
 

@@ -55,11 +55,11 @@ def _validate_klines(frame: pd.DataFrame, boundary: pd.Timestamp) -> pd.Datetime
     ts = frame["ts"]
     if not isinstance(ts.dtype, pd.DatetimeTZDtype):
         raise ValueError("candle timestamps must be timezone-aware")
-    if ts.dt.tz is None or ts.dt.tz.utcoffset(None) != pd.Timedelta(0):
-        # tz.utcoffset(None) is None for some fixed-offset timezone
-        # implementations; absolute nanosecond timestamps are used below.
-        if str(ts.dt.tz) not in ("UTC", "datetime.timezone.utc"):
-            raise ValueError("candle timestamps must be UTC")
+    # tz.utcoffset(None) is None for some fixed-offset timezone implementations.
+    if (ts.dt.tz is None or ts.dt.tz.utcoffset(None) != pd.Timedelta(0)) and str(ts.dt.tz) not in (
+        "UTC", "datetime.timezone.utc"
+    ):
+        raise ValueError("candle timestamps must be UTC")
     stamps = pd.DatetimeIndex(ts)
     if stamps.empty or not stamps.is_monotonic_increasing or stamps.has_duplicates:
         raise ValueError("candle timestamps must be nonempty, sorted, unique")
@@ -70,13 +70,13 @@ def _validate_klines(frame: pd.DataFrame, boundary: pd.Timestamp) -> pd.Datetime
     numeric = frame[["open", "high", "low", "close", "quote_volume"]].to_numpy(dtype=float)
     if not np.isfinite(numeric).all():
         raise ValueError("nonfinite candle prices or quote volume")
-    o, h, l, c, v = numeric.T
+    o, h, low, c, v = numeric.T
     if (
-        (o <= 0).any() or (h <= 0).any() or (l <= 0).any()
+        (o <= 0).any() or (h <= 0).any() or (low <= 0).any()
         or (c <= 0).any() or (v < 0).any()
         or (h < np.maximum(o, c)).any()
-        or (l > np.minimum(o, c)).any()
-        or (l > h).any()
+        or (low > np.minimum(o, c)).any()
+        or (low > h).any()
     ):
         raise ValueError("invalid candle OHLC or quote-volume constraints")
     return stamps

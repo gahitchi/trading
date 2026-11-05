@@ -39,7 +39,7 @@ def inventory(results_dir: Path, *, key: str = "crash-breakdown") -> dict:
         "can_claim_statistical_significance": False,
         "policy": POLICY,
         "research_key": key,
-        "all_historical_attempts": int(len(rows)),
+        "all_historical_attempts": len(rows),
         "distinct_configurations_or_code_versions": count_configurations(results_dir, "crash-study", key),
         "attempt_statuses": dict(sorted(statuses.items())),
         "attempts_with_missing_or_incomplete_provenance": len(incomplete),
