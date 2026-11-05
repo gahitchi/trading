@@ -3,10 +3,11 @@
 This module implements the ALREADY-DOCUMENTED hypothesis, not a tuned
 variant of the losing immediate-crash strategy. It reads only bars supplied
 by the caller; there is no network access, optimization or hidden holdout
-capability. A bar indexed at t is the candle OPEN covering [t,t+1 min).
-Thus its OHLC is only usable at t+1 min. The confirmation signal is
-recorded at that completion instant, and the entry is the OPEN of the
-second following bar, t+2 min, not an intrabar assumed fill.
+capability. As in lab.crash_data, a bar indexed at t is the candle
+ENDING at t (opened at t-1 minute). Its OHLC is available at t.
+The confirmation signal is recorded at its bar-end instant;
+entry is at the open of the SECOND subsequent candle, i.e.
+confirmation bar-end + one full minute. No intrabar signal data.
 """
 
 from __future__ import annotations
@@ -61,8 +62,8 @@ def _check(b: pd.DataFrame, boundary: pd.Timestamp) -> pd.Timestamp:
         raise ValueError("bar timestamps must be UTC")
     if not b.index.is_monotonic_increasing or not b.index.is_unique:
         raise ValueError("bars must have unique ordered timestamps")
-    if b.index[-1] + UTC_MIN > boundary:
-        raise ValueError("refusing to analyze a bar overlapping protected holdout")
+    if b.index[-1] >= boundary:
+        raise ValueError("refusing to analyze a bar at or beyond protected holdout")
     if len(b) > 1 and not bool((b.index[1:] - b.index[:-1] == UTC_MIN).all()):
         raise ValueError("missing one-minute source bar; cannot bridge unknown price path")
     required = {"open", "high", "low", "close", "quote_volume", "oi_invalid"}
@@ -179,8 +180,9 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
             i = max(i + 1, min(n, retest_i + CONFIRM_MINUTES + 1))
             continue
         count["confirmation"] += 1
-        # Bar k is complete at k+1min. Entry at open of the
-        # second subsequent bar (index k+2), never at close[k].
+        # Bar k is complete at its index timestamp. Bar k+1 opens
+        # immediately, and bar k+2 opens a full minute later.
+        # This guarantees one complete minute of execution delay.
         entry_i = confirm_i + 2
         if entry_i >= n:
             count["late_entry"] += 1
@@ -221,12 +223,12 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
         executed = fill_accounting(SIDE, P, exit_ref, FEE_BPS, SLIPPAGE_BPS)
         count["trade"] += 1
         rows.append((
-            b.index[confirm_i] + UTC_MIN,
-            b.index[entry_i],
-            b.index[exit_i] + UTC_MIN,
+            b.index[confirm_i],
+            b.index[entry_i] - UTC_MIN,
+            b.index[exit_i],
             executed["reference_gross"], executed["net"], weight, reason,
             P, exit_ref, executed["fee_cost"], executed["slippage_cost"],
-            b.index[breakout_index] + UTC_MIN, b.index[retest_i] + UTC_MIN,
+            b.index[breakout_index], b.index[retest_i],
             L, stop, target,
         ))
         # One symbol: no overlapping candidate or position.
