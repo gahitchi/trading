@@ -897,10 +897,9 @@ def cmd_crash_study(cfg, a):
                     )
                 ):
                     raise ValueError("funding source plan changed between reservation and load")
-                from pandas import to_datetime, DataFrame
                 events = funding_evidence["events"]
-                attempt.inputs.frame("funding:BTCUSDT", DataFrame({
-                    "ts": to_datetime([event["fundingTime"] for event in events], unit="ms", utc=True),
+                attempt.inputs.frame("funding:BTCUSDT", pd.DataFrame({
+                    "ts": pd.to_datetime([event["fundingTime"] for event in events], unit="ms", utc=True),
                     "fundingRate": [event["fundingRate"] for event in events],
                     "markPrice": [event["markPrice"] for event in events],
                 }))
@@ -974,11 +973,11 @@ def cmd_crash_study(cfg, a):
             f"{total['trades']} trades; net funding "
             f"{total['funding_return_sum_bps']:+.2f} bps summed across trade entry notionals"
         )
+    funding_note = "Audited funding is included" if funding_plan else "Funding is NOT modelled"
     print(
         "Fixed-base reference-price fills and per-fill notional fees are modelled; "
-        "slippage is assumed, not measured. "
-        + ("Audited funding is included; " if funding_plan else "Funding is NOT modelled; ")
-        + "partial fills, order-book impact and liquidation are NOT modelled. "
+        f"slippage is assumed, not measured. {funding_note}; "
+        "partial fills, order-book impact and liquidation are NOT modelled. "
         "This exploratory study does not qualify live execution."
     )
     return 0
