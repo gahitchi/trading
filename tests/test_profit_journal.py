@@ -3,9 +3,8 @@
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, date, datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
