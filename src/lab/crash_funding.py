@@ -32,10 +32,13 @@ from lab.market_symbols import SYMBOL_RE
 from lab.persistence import atomic_json, read_json
 
 ENDPOINT = "https://fapi.binance.com/fapi/v1/fundingRate"
-KIND = "binance-usdm-funding-history-preholdout-v1"
+KIND = "binance-usdm-funding-history-preholdout-v2"
 LIMIT = 1000
 MAX_PAGES = 100
-MAX_GAP = pd.Timedelta(hours=8)
+# Preserve actual exchange milliseconds. Funding history can be slightly
+# displaced from its nominal hour; fail closed on larger offsets.
+MAX_SETTLEMENT_OFFSET_MS = 30_000
+MAX_GAP = pd.Timedelta(hours=8, seconds=30)
 UTC = "UTC"
 
 
@@ -63,8 +66,24 @@ def _event(row: dict, symbol: str, first_ms: int, end_ms: int) -> dict:
     if not isinstance(row, dict) or row.get("symbol") != symbol:
         raise ValueError("funding event symbol mismatch")
     ts = row.get("fundingTime")
-    if type(ts) is not int or not (first_ms <= ts <= end_ms) or ts % 60_000:
-        raise ValueError("funding event outside protected research time or off minute grid")
+    if type(ts) is not int:
+        raise ValueError("funding event timestamp must be integer milliseconds")
+    if not (first_ms <= ts <= end_ms):
+        raise ValueError(
+            f"funding event outside protected research time: "
+            f"{pd.Timestamp(ts, unit='ms', tz=UTC).isoformat()} "
+            f"(permitted milliseconds {first_ms}..{end_ms})"
+        )
+    # Historical fundingTime is an exact exchange millisecond timestamp,
+    # NOT guaranteed to be an exact UTC minute. Keep the original value
+    # rather than rounding and silently changing settlement ownership.
+    # BTC USD-M settlements should nevertheless be near a clock hour.
+    offset = ts % 3_600_000
+    if min(offset, 3_600_000 - offset) > MAX_SETTLEMENT_OFFSET_MS:
+        raise ValueError(
+            f"funding event unexpectedly far from UTC funding hour: "
+            f"{pd.Timestamp(ts, unit='ms', tz=UTC).isoformat()}"
+        )
     if row.get("rateType", "Regular") != "Regular":
         raise ValueError("unsupported funding rate type")
     rate = _decimal(row.get("fundingRate"))
@@ -137,7 +156,7 @@ def _fetch(symbol: str, start: date, boundary: date, get) -> dict:
         raise ValueError("historical funding settlement gap exceeds eight hours")
 
     source = {
-        "version": 1, "kind": KIND, "symbol": symbol,
+        "version": 2, "kind": KIND, "symbol": symbol,
         "start": start.isoformat(), "holdout_start": boundary.isoformat(),
         "pages": pages, "event_count": len(events),
         "events_sha256": _digest(events),
@@ -153,7 +172,7 @@ def _validate_plan(plan: dict, symbol: str, boundary: date) -> None:
         "pages", "event_count", "events_sha256",
     }:
         raise ValueError("invalid source plan")
-    if plan["version"] != 1 or plan["kind"] != KIND or plan["symbol"] != symbol:
+    if plan["version"] != 2 or plan["kind"] != KIND or plan["symbol"] != symbol:
         raise ValueError("funding plan identity mismatch")
     if plan["holdout_start"] != boundary.isoformat():
         raise ValueError("funding plan does not match protected holdout")
@@ -304,6 +323,8 @@ def settlement_return(
     exit_ = pd.Timestamp(exit_time)
     if entry.tzinfo is None or exit_.tzinfo is None or entry >= exit_:
         raise ValueError("funding position interval must be ordered and timezone-aware")
+    if entry.utcoffset() != pd.Timedelta(0) or exit_.utcoffset() != pd.Timedelta(0):
+        raise ValueError("funding position interval must use UTC timestamps")
     if not events:
         raise ValueError("no funding settlement evidence; cannot assume zero funding")
     paid = Decimal("0")
@@ -314,7 +335,10 @@ def settlement_return(
         if previous is not None and event_time <= previous:
             raise ValueError("funding events must be unique and chronologically ordered")
         previous = event_time
-        if event_time == entry or event_time == exit_:
+        if (
+            abs(event_time - entry) <= pd.Timedelta(milliseconds=MAX_SETTLEMENT_OFFSET_MS)
+            or abs(event_time - exit_) <= pd.Timedelta(milliseconds=MAX_SETTLEMENT_OFFSET_MS)
+        ):
             raise ValueError("funding settlement coincides with ambiguous entry/exit boundary")
         if entry < event_time < exit_:
             rate = Decimal(_decimal(event["fundingRate"]))
