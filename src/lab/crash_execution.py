@@ -82,7 +82,10 @@ def rescore(trades: pd.DataFrame, side: int, fee_bps: float, slippage_bps: float
         )
         if not math.isclose(float(row["gross"]), result["reference_gross"], rel_tol=1e-10, abs_tol=1e-12):
             raise ValueError("trade gross return and reference fill prices disagree")
-        updated.loc[index, "net"] = result["net"]
+        funding = float(row["funding_return"]) if "funding_return" in updated else 0.0
+        if not math.isfinite(funding):
+            raise ValueError("funding-adjusted stress scenario has nonfinite settlement P&L")
+        updated.loc[index, "net"] = result["net"] + funding
     return updated
 
 
