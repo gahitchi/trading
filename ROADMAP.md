@@ -143,13 +143,24 @@ through the newly added `ProfitJournal.append_batch`.
 the entire source-to-journal prefix, failing closed on
 source edits or missing records. The bridge and batch tests
 are **committed and externally accepted in the focused 81-test Termux suite**.
-Remaining dependencies are (1) focused bridge plus prior
-journal acceptance and full regression; (2) independently
-authenticated/durable raw paper execution and mark feeds;
-(3) actual broker position, margin/funding and
-partial-fill reconciliation; (4) risk-manager gating.
-This is accounting infrastructure, **not** a backtested
-profitable strategy or an order-routing permission.
+A separate, research-only `lab.paper_evidence` archive now
+durably records source-labelled sandbox/replay receipts before
+posting their normalized economics. SHA-256-linked records, a
+fsynced checkpoint, exact-source replay and fail-closed corruption
+tests are implemented (see
+[paper evidence archive](docs/paper-evidence-archive.md)).
+The Python 3.13 and 3.14 full CI test suites pass with this
+additional regression coverage. This source envelope is **not
+independent authentication** of an exchange or sandbox receipt.
+
+Remaining dependencies are (1) the actual NautilusTrader
+sandbox event-capture adapter and independently sourced/verified
+raw order, mark and funding evidence; (2) account-level broker
+inventory, outstanding order, margin/liquidation and
+partial-fill reconciliation; (3) pre-trade risk-manager
+gating and operational drill evidence. This is accounting
+infrastructure, **not** a backtested profitable strategy
+or an order-routing permission.
 
 **Priority update (2026-11-05):** a time-series of **net daily P&L and cumulative
 equity growth**, not a target winning-day percentage, is the primary short-horizon
