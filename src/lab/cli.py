@@ -822,7 +822,7 @@ def cmd_crash_study(cfg, a):
 
     import numpy as np
 
-    from lab import crash_data
+    from lab import crash_data, crash_execution
     from lab import crash_study as cs
     from lab.persistence import nullable_numbers
     from lab.trials import count_configurations, trial_run
@@ -845,6 +845,8 @@ def cmd_crash_study(cfg, a):
         **cs.params_of(settings, symbols),
         "oi_measure": "contract-quantity-v1",
         "oi_quality_policy": "source-pinned-zero-pair-and-absent-5m-window-veto-v2",
+        "execution_model": crash_execution.MODEL,
+        "funding_model": "not-modelled-no-funding-adjusted-claim",
     }
     try:
         # Durable attempt is reserved BEFORE reading historical candle / OI data.
@@ -855,8 +857,16 @@ def cmd_crash_study(cfg, a):
             if not r.trades:
                 raise ValueError(f"no pre-holdout crash data for {' '.join(symbols)} before {boundary:%Y-%m-%d}")
             st = cs.summary(r.trades, r.start, r.end)
+            sensitivity = crash_execution.stress_summary(
+                r.trades, settings.side, r.start, r.end, cs.summary,
+            )
             keys = ("days", "trades", "mean_bps", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")
-            attempt.result = nullable_numbers({k: st[k] for k in keys})
+            attempt.result = {
+                **nullable_numbers({k: st[k] for k in keys}),
+                "execution_model": crash_execution.MODEL,
+                "funding_status": "not_modelled",
+                "fixed_execution_scenarios": sensitivity,
+            }
             attempt.window = (int(r.start.value), int(r.end.value))
         n = count_configurations(cfg.results_dir, "crash-study", key)
     except ValueError as exc:
@@ -894,9 +904,19 @@ def cmd_crash_study(cfg, a):
     )
     print(f"  gross move after each crash's first signal, bps in trade direction, before costs: {fwd}")
     print(cs.per_symbol(r.trades).to_string(index=False, float_format=lambda x: f"{x:.1f}"))
+    print("  fixed-cost sensitivity on identical trade signals/exits (not additional parameter searches):")
+    for scenario in sensitivity:
+        mean_bps = scenario["mean_net_bps"]
+        mean_text = "unavailable" if mean_bps is None else f"{mean_bps:+.1f} bps"
+        print(
+            f"    {scenario['name']}: {scenario['flat_price_round_trip_bps']:g} bps "
+            f"flat-price round trip, mean net {mean_text}"
+        )
     print(
-        "Both sides assume taker fills with fees/slippage; this preliminary study "
-        "does not establish predictive power or qualify live execution."
+        "Fixed-base reference-price fills and per-fill notional fees are modelled; "
+        "slippage is assumed, not measured. Funding, partial fills, "
+        "order-book impact and liquidation are NOT modelled. "
+        "This exploratory study does not qualify live execution."
     )
     return 0
 
