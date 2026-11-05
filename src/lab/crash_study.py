@@ -351,6 +351,10 @@ def run(
         k = crash_data.load(
             root, "klines", sym, before=boundary if not holdout else None
         )
+        if k is not None and not holdout:
+            # Some period-end archives stamp their final observation at
+            # next-day midnight. Exclude any boundary-crossing record too.
+            k = k.loc[k["ts"] < boundary].copy()
         if evidence is not None:
             evidence.frame(f"klines:{sym}", k)
         if k is None or len(k) < 2 * 1440:
@@ -359,6 +363,8 @@ def run(
             missing.append(sym)
             continue
         oi_frame = crash_data.load(root, "oi", sym, before=boundary if not holdout else None)
+        if oi_frame is not None and not holdout:
+            oi_frame = oi_frame.loc[oi_frame["ts"] < boundary].copy()
         if evidence is not None:
             evidence.frame(f"oi:{sym}", oi_frame)
         b = bars(k, oi_frame)
