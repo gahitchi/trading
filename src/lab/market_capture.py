@@ -76,11 +76,7 @@ def stream_urls(symbols: list[str]) -> dict[str, str]:
         raise ValueError("symbols must be unique uppercase Binance symbols (e.g. BTCUSDT)")
     low = [symbol.lower() for symbol in symbols]
     public = "/".join(f"{s}@bookTicker" for s in low)
-    market = "/".join(
-        channel
-        for s in low
-        for channel in (f"{s}@aggTrade", f"{s}@markPrice@1s", f"{s}@forceOrder")
-    )
+    market = "/".join(channel for s in low for channel in (f"{s}@aggTrade", f"{s}@markPrice@1s", f"{s}@forceOrder"))
     return {
         "public": f"{HOST}/public/stream?streams={public}",
         "market": f"{HOST}/market/stream?streams={market}",
@@ -146,8 +142,11 @@ async def capture_feed(
 
     def status(event: str, **fields) -> None:
         writer.append(
-            {"received_ns": timestamp(), "stream": "collector.status",
-             "data": {"category": category, "event": event, **fields}}
+            {
+                "received_ns": timestamp(),
+                "stream": "collector.status",
+                "data": {"category": category, "event": event, **fields},
+            }
         )
 
     try:
@@ -255,7 +254,12 @@ async def run_capture(
             return await asyncio.gather(
                 *(
                     capture_feed(
-                        category, url, directory, session, deadline, connector=connector,
+                        category,
+                        url,
+                        directory,
+                        session,
+                        deadline,
+                        connector=connector,
                         fault_disconnect_after=fault_disconnect_after,
                         disk_guard=disk_guard,
                     )
@@ -272,11 +276,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--symbols", nargs="+", default=["BTCUSDT"])
     parser.add_argument("--seconds", type=float, default=60)
     parser.add_argument(
-        "--min-free-mib", type=int, default=512,
+        "--min-free-mib",
+        type=int,
+        default=512,
         help="fail-closed free-space reserve in MiB (minimum 64; default 512)",
     )
     parser.add_argument(
-        "--inject-disconnect-after", type=int, default=None, metavar="N",
+        "--inject-disconnect-after",
+        type=int,
+        default=None,
+        metavar="N",
         help="qualification only: close each feed once after N market events to test reconnection",
     )
     args = parser.parse_args(argv)
@@ -300,7 +309,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         summary = asyncio.run(
             run_capture(
-                args.out, args.symbols, args.seconds, connector=connector,
+                args.out,
+                args.symbols,
+                args.seconds,
+                connector=connector,
                 fault_disconnect_after=args.inject_disconnect_after,
                 min_free_mib=args.min_free_mib,
             )

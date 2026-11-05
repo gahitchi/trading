@@ -109,8 +109,14 @@ class CrashSettings:
         if self.drop_pct <= 0 or self.window_min < 1 or self.hold_min < 1 or self.delay_min < 0:
             raise ValueError("drop_pct > 0, window_min >= 1, hold_min >= 1 and delay_min >= 0 are required")
         numeric = (
-            self.drop_pct, self.vol_mult, self.oi_pct, self.tp_pct, self.sl_pct,
-            self.fee_bps, self.slippage_bps, self.vol_target,
+            self.drop_pct,
+            self.vol_mult,
+            self.oi_pct,
+            self.tp_pct,
+            self.sl_pct,
+            self.fee_bps,
+            self.slippage_bps,
+            self.vol_target,
         )
         if any(not math.isfinite(x) for x in numeric):
             raise ValueError("crash thresholds, costs and sizing must be finite")
@@ -155,7 +161,8 @@ def bars(klines: pd.DataFrame, oi: pd.DataFrame | None) -> pd.DataFrame:
         # the uninspected protected holdout cannot be inferred from here.
         source_index = o.index - OI_DELAY
         expected = pd.date_range(
-            start=source_index[0], end=source_index[-1],
+            start=source_index[0],
+            end=source_index[-1],
             freq=pd.Timedelta(minutes=5),
         )
         absent = expected.difference(source_index)
@@ -244,19 +251,39 @@ def trades(b: pd.DataFrame, s: CrashSettings, entries: np.ndarray | None = None)
         k, gross, why = done
         entry_reference = float(o[j])
         exit_reference = float(entry_reference * (1 + s.side * gross))
-        account = crash_execution.fill_accounting(
-            s.side, entry_reference, exit_reference, s.fee_bps, s.slippage_bps
+        account = crash_execution.fill_accounting(s.side, entry_reference, exit_reference, s.fee_bps, s.slippage_bps)
+        rows.append(
+            (
+                b.index[i],
+                b.index[j] - pd.Timedelta(minutes=1),
+                b.index[k],
+                gross,
+                account["net"],
+                wt[i],
+                why,
+                entry_reference,
+                exit_reference,
+                account["fee_cost"],
+                account["slippage_cost"],
+            )
         )
-        rows.append((
-            b.index[i], b.index[j] - pd.Timedelta(minutes=1), b.index[k],
-            gross, account["net"], wt[i], why,
-            entry_reference, exit_reference, account["fee_cost"], account["slippage_cost"],
-        ))
         free_from = k + s.window_min
-    return pd.DataFrame(rows, columns=[
-        "signal", "entry", "exit", "gross", "net", "weight", "reason",
-        "entry_reference", "exit_reference", "fee_cost", "slippage_cost",
-    ])
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "signal",
+            "entry",
+            "exit",
+            "gross",
+            "net",
+            "weight",
+            "reason",
+            "entry_reference",
+            "exit_reference",
+            "fee_cost",
+            "slippage_cost",
+        ],
+    )
 
 
 def weights(b: pd.DataFrame, s: CrashSettings) -> np.ndarray:
@@ -361,8 +388,12 @@ class Run:
 
 
 def run(
-    root: Path, symbols: list[str], s: CrashSettings, boundary: pd.Timestamp,
-    holdout: bool = False, evidence=None,
+    root: Path,
+    symbols: list[str],
+    s: CrashSettings,
+    boundary: pd.Timestamp,
+    holdout: bool = False,
+    evidence=None,
 ) -> Run:
     """Crash research; optional evidence fingerprints only the inputs actually used."""
     out, base, fwd, missing = {}, {}, {m: [] for m in FORWARD_MIN}, []
@@ -370,9 +401,7 @@ def run(
     for sym in symbols:
         # Exclude overlapping candle archives BEFORE reading them, not
         # after reading and slicing rows. The same boundary protects OI.
-        k = crash_data.load(
-            root, "klines", sym, before=boundary if not holdout else None
-        )
+        k = crash_data.load(root, "klines", sym, before=boundary if not holdout else None)
         if k is not None and not holdout:
             # Some period-end archives stamp their final observation at
             # next-day midnight. Exclude any boundary-crossing record too.

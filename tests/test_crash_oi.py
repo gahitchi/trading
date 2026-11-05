@@ -23,10 +23,7 @@ def zipped(csv: str) -> bytes:
 
 
 HEADER = "create_time,symbol,sum_open_interest,sum_open_interest_value\n"
-DATA = (
-    "2024-01-01 00:05:00,BTCUSDT,100,4200000\n"
-    "2024-01-01 00:10:00,BTCUSDT,105,3990000\n"
-)
+DATA = "2024-01-01 00:05:00,BTCUSDT,100,4200000\n2024-01-01 00:10:00,BTCUSDT,105,3990000\n"
 
 
 def legacy_file(root, day="2024-01-01"):
@@ -68,9 +65,7 @@ def test_pre_holdout_migration_is_dry_run_by_default(tmp_path):
         called.append(_url)
         return zipped(HEADER + DATA)
 
-    pending = cd.migrate_oi_quantity(
-        tmp_path, "BTCUSDT", before=date(2024, 1, 2), get=downloader
-    )
+    pending = cd.migrate_oi_quantity(tmp_path, "BTCUSDT", before=date(2024, 1, 2), get=downloader)
     assert pending == [path.name] and called == []
     assert pd.read_parquet(path).equals(frame)
 
@@ -78,17 +73,18 @@ def test_pre_holdout_migration_is_dry_run_by_default(tmp_path):
 def test_migration_preserves_original_notional_and_validates_archive(tmp_path):
     path, frame = legacy_file(tmp_path)
     updated = cd.migrate_oi_quantity(
-        tmp_path, "BTCUSDT", before=date(2024, 1, 2),
-        apply=True, get=lambda _url: zipped(HEADER + DATA),
+        tmp_path,
+        "BTCUSDT",
+        before=date(2024, 1, 2),
+        apply=True,
+        get=lambda _url: zipped(HEADER + DATA),
     )
     assert updated == [path.name]
     out = pd.read_parquet(path)
     assert out["oi_value"].equals(frame["oi_value"])
     assert out["oi_qty"].tolist() == [100, 105]
     assert cd.load(tmp_path, "oi", "BTCUSDT")["oi_qty"].tolist() == [100, 105]
-    assert cd.migrate_oi_quantity(
-        tmp_path, "BTCUSDT", before=date(2024, 1, 2), get=lambda _: None
-    ) == []
+    assert cd.migrate_oi_quantity(tmp_path, "BTCUSDT", before=date(2024, 1, 2), get=lambda _: None) == []
 
 
 def test_post_boundary_file_never_downloaded_or_changed(tmp_path):
@@ -101,23 +97,21 @@ def test_post_boundary_file_never_downloaded_or_changed(tmp_path):
         called.append(url)
         raise AssertionError("holdout archive was downloaded")
 
-    assert cd.migrate_oi_quantity(
-        tmp_path, "BTCUSDT", before=date(2024, 1, 1), apply=True, get=get
-    ) == []
+    assert cd.migrate_oi_quantity(tmp_path, "BTCUSDT", before=date(2024, 1, 1), apply=True, get=get) == []
     assert called == []
     assert pd.read_parquet(path).equals(before)
 
 
 def test_archive_mismatch_preserves_legacy_cache(tmp_path):
     path, original = legacy_file(tmp_path)
-    changed = (
-        "2024-01-01 00:05:00,BTCUSDT,100,4200000\n"
-        "2024-01-01 00:10:00,BTCUSDT,105,3000000\n"
-    )
+    changed = "2024-01-01 00:05:00,BTCUSDT,100,4200000\n2024-01-01 00:10:00,BTCUSDT,105,3000000\n"
     with pytest.raises(ValueError, match="source notional"):
         cd.migrate_oi_quantity(
-            tmp_path, "BTCUSDT", before=date(2024, 1, 2),
-            apply=True, get=lambda _: zipped(HEADER + changed),
+            tmp_path,
+            "BTCUSDT",
+            before=date(2024, 1, 2),
+            apply=True,
+            get=lambda _: zipped(HEADER + changed),
         )
     assert pd.read_parquet(path).equals(original)
     assert not list(path.parent.glob("*.tmp"))
@@ -126,14 +120,15 @@ def test_archive_mismatch_preserves_legacy_cache(tmp_path):
 def test_crash_study_rejects_notional_only_frame():
     from lab import crash_study as cs
 
-    k = pd.DataFrame({
-        "ts": pd.date_range("2024-01-01", periods=5, tz="UTC", freq="min"),
-        "close": np.full(5, 100.0),
-    })
+    k = pd.DataFrame(
+        {
+            "ts": pd.date_range("2024-01-01", periods=5, tz="UTC", freq="min"),
+            "close": np.full(5, 100.0),
+        }
+    )
     oi = cd.parse_metrics(zipped(HEADER + DATA)).drop(columns="oi_qty")
     with pytest.raises(ValueError, match="contract-quantity"):
         cs.bars(k, oi)
-
 
 
 def test_research_only_oi_load_does_not_read_legacy_holdout(tmp_path):
@@ -144,7 +139,9 @@ def test_research_only_oi_load_does_not_read_legacy_holdout(tmp_path):
     old.to_parquet(holdout, index=False)
 
     research = cd.load(
-        tmp_path, "oi", "BTCUSDT",
+        tmp_path,
+        "oi",
+        "BTCUSDT",
         before=pd.Timestamp("2024-01-02", tz="UTC"),
     )
     assert research["oi_qty"].tolist() == [100, 105]

@@ -25,8 +25,11 @@ EXIT_UNCERTAINTY = pd.Timedelta(minutes=1) + ENTRY_UNCERTAINTY
 
 
 def funding_bounds(
-    side: int, entry_reference: float, entry_time: pd.Timestamp,
-    exit_time: pd.Timestamp, events: list[dict],
+    side: int,
+    entry_reference: float,
+    entry_time: pd.Timestamp,
+    exit_time: pd.Timestamp,
+    events: list[dict],
 ) -> dict:
     """Funded cashflows for all possible ownership of uncertain settlements.
 
@@ -51,7 +54,8 @@ def funding_bounds(
     entry = pd.Timestamp(entry_time)
     exit_ = pd.Timestamp(exit_time)
     if (
-        entry.tzinfo is None or exit_.tzinfo is None
+        entry.tzinfo is None
+        or exit_.tzinfo is None
         or entry.utcoffset() != pd.Timedelta(0)
         or exit_.utcoffset() != pd.Timedelta(0)
         or entry >= exit_
@@ -113,9 +117,12 @@ def funded_trades(trades: pd.DataFrame, side: int, evidence: dict) -> pd.DataFra
         raise ValueError("funding ledger lacks original trade-time or economic fields")
     output = trades.copy()
     for field, default in (
-        ("funding_return", 0.0), ("funding_return_upper", 0.0),
-        ("funding_return_certain", 0.0), ("funding_bound_width", 0.0),
-        ("funding_events", 0), ("funding_ambiguous_events", 0),
+        ("funding_return", 0.0),
+        ("funding_return_upper", 0.0),
+        ("funding_return_certain", 0.0),
+        ("funding_bound_width", 0.0),
+        ("funding_events", 0),
+        ("funding_ambiguous_events", 0),
         ("net_upper", 0.0),
     ):
         output[field] = pd.Series(default, index=output.index)
@@ -124,7 +131,8 @@ def funded_trades(trades: pd.DataFrame, side: int, evidence: dict) -> pd.DataFra
         entry = pd.Timestamp(trade["entry"])
         exit_ = pd.Timestamp(trade["exit"])
         if (
-            entry.tzinfo is None or exit_.tzinfo is None
+            entry.tzinfo is None
+            or exit_.tzinfo is None
             or entry.utcoffset() != pd.Timedelta(0)
             or exit_.utcoffset() != pd.Timedelta(0)
             or not (first <= entry < exit_ < cutoff)
@@ -139,7 +147,11 @@ def funded_trades(trades: pd.DataFrame, side: int, evidence: dict) -> pd.DataFra
         lo = bisect_left(times, from_ms)
         hi = bisect_right(times, to_ms)
         result = funding_bounds(
-            side, float(trade["entry_reference"]), entry, exit_, events[lo:hi],
+            side,
+            float(trade["entry_reference"]),
+            entry,
+            exit_,
+            events[lo:hi],
         )
         for field, val in result.items():
             output.at[idx, field] = val

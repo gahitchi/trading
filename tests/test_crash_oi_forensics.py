@@ -49,7 +49,10 @@ def test_nonpositive_quantity_is_reported_without_accepting_source(tmp_path):
 
 
 def test_zero_notional_is_reported_as_source_difference(tmp_path):
-    cfg, _, = setup_cache(tmp_path, with_second=False, with_holdout=False)
+    (
+        cfg,
+        _,
+    ) = setup_cache(tmp_path, with_second=False, with_holdout=False)
     bad = DATA.replace("3990000", "0")
     report = inspect_source(cfg, get=lambda _: zipped(HEADER + bad))
     assert not report["safe_to_migrate_under_current_policy"]
@@ -59,8 +62,10 @@ def test_zero_notional_is_reported_as_source_difference(tmp_path):
 
 def test_holdout_day_never_downloaded_or_opened(tmp_path):
     cfg, _ = setup_cache(tmp_path)
+
     def forbidden(_):
         raise AssertionError("must not fetch protected holdout data")
+
     with pytest.raises(ValueError, match="protected holdout"):
         inspect_source(cfg, day="2024-01-03", get=forbidden)
 

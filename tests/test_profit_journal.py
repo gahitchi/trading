@@ -53,9 +53,17 @@ def test_duplicate_event_and_duplicate_economic_source_rejected_after_restart(tm
     with pytest.raises(ValueError, match="duplicate"):
         again.append(trade("once", "10.00"))
     repeated_source = AllocationEvent(
-        "event:new-id", "source:once", T0 + timedelta(minutes=2),
-        "USD", "trade", "2.00", gross="2.00", fees="0.00",
-        slippage="0.00", funding="0.00", released_mark="0.00",
+        "event:new-id",
+        "source:once",
+        T0 + timedelta(minutes=2),
+        "USD",
+        "trade",
+        "2.00",
+        gross="2.00",
+        fees="0.00",
+        slippage="0.00",
+        funding="0.00",
+        released_mark="0.00",
     )
     with pytest.raises(ValueError, match="duplicate"):
         again.append(repeated_source)
@@ -272,9 +280,7 @@ def test_malformed_input_does_not_publish_or_erase_journal(tmp_path):
     j = journal(tmp_path)
     data = j.path.read_bytes()
     with pytest.raises(ValueError, match="currency mismatch"):
-        j.append(AllocationEvent(
-            "other", "other-source", T0, "EUR", "mark", "0.00"
-        ))
+        j.append(AllocationEvent("other", "other-source", T0, "EUR", "mark", "0.00"))
     assert j.path.read_bytes() == data
 
 

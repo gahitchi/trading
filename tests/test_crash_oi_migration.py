@@ -13,17 +13,9 @@ from lab.crash_oi_migration import _migrate_one, migrate_batch
 from lab.persistence import read_json
 
 HEADER = "create_time,symbol,sum_open_interest,sum_open_interest_value\n"
-DATA = (
-    "2024-01-01 00:05:00,BTCUSDT,100,4200000\n"
-    "2024-01-01 00:10:00,BTCUSDT,105,3990000\n"
-)
-SECOND = (
-    "2024-01-02 00:05:00,BTCUSDT,107,4300000\n"
-    "2024-01-02 00:10:00,BTCUSDT,110,4400000\n"
-)
-HOLDOUT = (
-    "2024-01-03 00:05:00,BTCUSDT,120,4700000\n"
-)
+DATA = "2024-01-01 00:05:00,BTCUSDT,100,4200000\n2024-01-01 00:10:00,BTCUSDT,105,3990000\n"
+SECOND = "2024-01-02 00:05:00,BTCUSDT,107,4300000\n2024-01-02 00:10:00,BTCUSDT,110,4400000\n"
+HOLDOUT = "2024-01-03 00:05:00,BTCUSDT,120,4700000\n"
 
 
 def zipped(text: str) -> bytes:
@@ -148,7 +140,8 @@ def test_interrupted_transaction_is_reconciled_without_downloading(tmp_path):
     result = _migrate_one(
         folder / "2024-01-01.parquet",
         backup_dir / "2024-01-01.parquet",
-        symbol="BTCUSDT", boundary=pd.Timestamp("2024-01-03").date(),
+        symbol="BTCUSDT",
+        boundary=pd.Timestamp("2024-01-03").date(),
         get=lambda _url: (_ for _ in ()).throw(AssertionError("unnecessary fetch")),
     )
     assert result == "already_migrated"
@@ -175,7 +168,6 @@ def test_cannot_modify_when_holdout_boundary_is_not_utc_midnight(tmp_path):
     with pytest.raises(ValueError, match="UTC day"):
         migrate_batch(cfg, apply=True, get=exchange)
     assert not (folder / ".oi-quantity-migration.lock").exists()
-
 
 
 def test_batch_recovers_manifest_after_rename_without_requery(tmp_path):
@@ -213,10 +205,7 @@ def test_batch_rejects_corruption_of_previously_committed_day(tmp_path):
 def test_batch_rejects_missing_backup_even_after_source_upgraded(tmp_path):
     cfg, _ = setup_cache(tmp_path, with_second=False, with_holdout=False)
     migrate_batch(cfg, apply=True, get=exchange)
-    backup = (
-        tmp_path / "data" / "crash" / "oi-original-backups"
-        / "BTCUSDT" / "2024-01-01.parquet"
-    )
+    backup = tmp_path / "data" / "crash" / "oi-original-backups" / "BTCUSDT" / "2024-01-01.parquet"
     backup.unlink()
     with pytest.raises(ValueError, match="original backup digest differs"):
         migrate_batch(cfg, apply=True, get=exchange)

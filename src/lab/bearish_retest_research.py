@@ -83,7 +83,8 @@ def _params(plan: dict) -> dict:
 def member(config_path: Path, funding_plan_path: Path) -> dict:
     _cfg, plan = _sources(config_path, funding_plan_path)
     return {
-        "kind": "crash-study", "instrument": KEY,
+        "kind": "crash-study",
+        "instrument": KEY,
         "params": _params(plan),
         "window": [None, int(BOUNDARY.value) - 1],
     }
@@ -120,18 +121,26 @@ def evaluate(config_path: Path, funding_plan_path: Path) -> dict:
     _registered(cfg, expected)
     params = expected["params"]
     with trial_run(
-        cfg.results_dir, expected["kind"], expected["instrument"], params,
+        cfg.results_dir,
+        expected["kind"],
+        expected["instrument"],
+        params,
         tuple(expected["window"]),
     ) as attempt:
         funding = crash_funding.load_verified(config_path, funding_plan_path, symbol="BTCUSDT")
         if funding["plan_sha256"] != params["funding_plan_sha256"]:
             raise ValueError("funding evidence plan changed after reservation")
         events = funding["events"]
-        attempt.inputs.frame("funding:BTCUSDT", pd.DataFrame({
-            "ts": pd.to_datetime([row["fundingTime"] for row in events], unit="ms", utc=True),
-            "fundingRate": [row["fundingRate"] for row in events],
-            "markPrice": [row["markPrice"] for row in events],
-        }))
+        attempt.inputs.frame(
+            "funding:BTCUSDT",
+            pd.DataFrame(
+                {
+                    "ts": pd.to_datetime([row["fundingTime"] for row in events], unit="ms", utc=True),
+                    "fundingRate": [row["fundingRate"] for row in events],
+                    "markPrice": [row["markPrice"] for row in events],
+                }
+            ),
+        )
 
         root = cfg.data_dir / "crash"
         # The data loader filters out boundary-overlapping archives
@@ -166,25 +175,32 @@ def evaluate(config_path: Path, funding_plan_path: Path) -> dict:
         outcome = candidate.simulate(grid, boundary=BOUNDARY)
         funded = crash_funding_ledger.funded_trades(outcome.trades, -1, funding)
         summary = crash_study.summary(
-            {"BTCUSDT": funded}, grid.index[0], grid.index[-1],
+            {"BTCUSDT": funded},
+            grid.index[0],
+            grid.index[-1],
         )
         stress = crash_execution.stress_summary(
-            {"BTCUSDT": funded}, -1, grid.index[0], grid.index[-1],
+            {"BTCUSDT": funded},
+            -1,
+            grid.index[0],
+            grid.index[-1],
             crash_study.summary,
         )
         totals = crash_funding_ledger.funding_totals({"BTCUSDT": funded})
-        report = nullable_numbers({
-            "candidate": candidate.MODEL,
-            "status": "RETROSPECTIVE_UNQUALIFIED",
-            "qualified": False,
-            "holdout_used": False,
-            "trade_count": len(funded),
-            "events": outcome.event_counts,
-            "summary": summary,
-            "funding": totals,
-            "cost_sensitivity": stress,
-            "funding_source_sha256": plan["events_sha256"],
-        })
+        report = nullable_numbers(
+            {
+                "candidate": candidate.MODEL,
+                "status": "RETROSPECTIVE_UNQUALIFIED",
+                "qualified": False,
+                "holdout_used": False,
+                "trade_count": len(funded),
+                "events": outcome.event_counts,
+                "summary": summary,
+                "funding": totals,
+                "cost_sensitivity": stress,
+                "funding_source_sha256": plan["events_sha256"],
+            }
+        )
         attempt.result = report
         attempt.window = (int(grid.index[0].value), int(grid.index[-1].value))
     return report

@@ -26,21 +26,23 @@ def make_cache(tmp_path, *, days=(1, 2), lengths=None):
         stamps = pd.date_range(f"{day}T00:00:00Z", periods=288, freq="5min")
         if n in lengths:
             stamps = stamps[~stamps.isin(lengths[n])]
-        pd.DataFrame({"ts": stamps, "oi_qty": [100.0] * len(stamps)}).to_parquet(
-            folder / f"{day}.parquet", index=False
-        )
+        pd.DataFrame({"ts": stamps, "oi_qty": [100.0] * len(stamps)}).to_parquet(folder / f"{day}.parquet", index=False)
         (backup / f"{day}.parquet.migration.json").write_text(
-            json.dumps({
-                "status": "committed",
-                "source_name": f"{day}.parquet",
-                "symbol": "BTCUSDT",
-            })
+            json.dumps(
+                {
+                    "status": "committed",
+                    "source_name": f"{day}.parquet",
+                    "symbol": "BTCUSDT",
+                }
+            )
         )
     # Deliberately not migrated or listed in a manifest.
-    pd.DataFrame({
-        "ts": [pd.Timestamp("2024-01-04T00:00:00Z")],
-        "oi_value": [100000.0],
-    }).to_parquet(folder / "2024-01-04.parquet", index=False)
+    pd.DataFrame(
+        {
+            "ts": [pd.Timestamp("2024-01-04T00:00:00Z")],
+            "oi_value": [100000.0],
+        }
+    ).to_parquet(folder / "2024-01-04.parquet", index=False)
     return cfg, folder, backup
 
 
@@ -134,7 +136,6 @@ def test_cli_returns_nonzero_on_missing_observations(tmp_path, capsys):
     assert out["coverage_ok_for_checked_days"] is False
 
 
-
 def test_tail_gap_is_not_confused_with_an_internal_gap(tmp_path):
     # Matches the observed 2024-02-16 short day: 00:00 through 13:30 only.
     missing = pd.date_range("2024-01-02T13:35:00Z", periods=125, freq="5min")
@@ -145,11 +146,13 @@ def test_tail_gap_is_not_confused_with_an_internal_gap(tmp_path):
     assert day["internal_missing_slots"] == 0
     assert day["trailing_missing_slots"] == 125
     assert day["leading_missing_slots"] == 0
-    assert day["missing_ranges"] == [{
-        "start": "2024-01-02T13:35:00+00:00",
-        "end": "2024-01-02T23:55:00+00:00",
-        "slots": 125,
-    }]
+    assert day["missing_ranges"] == [
+        {
+            "start": "2024-01-02T13:35:00+00:00",
+            "end": "2024-01-02T23:55:00+00:00",
+            "slots": 125,
+        }
+    ]
 
 
 def test_288_shuffled_complete_rows_have_zero_missing_and_no_failure(tmp_path):
@@ -209,7 +212,6 @@ def test_period_end_convention_ending_next_midnight_is_accepted(tmp_path):
     assert report["observations"] == 288
 
 
-
 def test_full_timestamp_grid_with_quality_mask_still_reports_unavailable_evidence(tmp_path):
     cfg, folder, _ = make_cache(tmp_path, days=(1,))
     p = folder / "2024-01-01.parquet"
@@ -226,8 +228,10 @@ def test_full_timestamp_grid_with_quality_mask_still_reports_unavailable_evidenc
     assert report["observations"] == 288
     assert report["count_shortfall"] == 0
     assert not report["coverage_ok_for_checked_days"]
-    assert report["quality_anomaly_days"] == [{
-        "day": "2024-01-01",
-        "unavailable_quantity_snapshots": 1,
-        "timestamps": ["2024-01-01T10:00:00+00:00"],
-    }]
+    assert report["quality_anomaly_days"] == [
+        {
+            "day": "2024-01-01",
+            "unavailable_quantity_snapshots": 1,
+            "timestamps": ["2024-01-01T10:00:00+00:00"],
+        }
+    ]

@@ -30,9 +30,7 @@ _POLICY_FIELDS = {field.name for field in fields(AllocationPolicy)}
 
 
 def _canonical(value: dict) -> bytes:
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
-    ).encode("utf-8")
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8")
 
 
 def _digest(value: dict) -> str:
@@ -47,26 +45,22 @@ def _verify_seal(value: dict, expected: set[str]) -> None:
     if not isinstance(value, dict) or set(value) != expected | {"sha256"}:
         raise ValueError("invalid journal record fields")
     given = value["sha256"]
-    if not isinstance(given, str) or len(given) != 64 or given != _digest(
-        {key: val for key, val in value.items() if key != "sha256"}
+    if (
+        not isinstance(given, str)
+        or len(given) != 64
+        or given != _digest({key: val for key, val in value.items() if key != "sha256"})
     ):
         raise ValueError("journal integrity digest mismatch")
 
 
 def _policy_data(policy: AllocationPolicy) -> dict:
-    return {
-        key: str(value) if isinstance(value, Decimal) else value
-        for key, value in asdict(policy).items()
-    }
+    return {key: str(value) if isinstance(value, Decimal) else value for key, value in asdict(policy).items()}
 
 
 def _event_data(event: AllocationEvent) -> dict:
     raw = asdict(event)
     raw["timestamp"] = event.timestamp.isoformat()
-    return {
-        key: str(value) if isinstance(value, Decimal) else value
-        for key, value in raw.items()
-    }
+    return {key: str(value) if isinstance(value, Decimal) else value for key, value in raw.items()}
 
 
 def _deserialize_event(raw: dict) -> AllocationEvent:
@@ -141,12 +135,14 @@ class ProfitJournal:
                 if self._head.exists():
                     raise ValueError("journal is missing but its durable checkpoint exists")
                 self.path.parent.mkdir(parents=True, exist_ok=True)
-                header = _sealed({
-                    "version": _VERSION,
-                    "type": _HEADER,
-                    "policy": _policy_data(self.policy),
-                    "start_day": self.start_day.isoformat(),
-                })
+                header = _sealed(
+                    {
+                        "version": _VERSION,
+                        "type": _HEADER,
+                        "policy": _policy_data(self.policy),
+                        "start_day": self.start_day.isoformat(),
+                    }
+                )
                 data = _canonical(header) + b"\n"
                 fd = os.open(
                     self.path,
@@ -165,21 +161,24 @@ class ProfitJournal:
     def _publish_head(self, *, sequence: int, last: str, header: str) -> None:
         # This separately fsynced head seals the journal suffix: truncating
         # a complete trailing record cannot silently lose a settled event.
-        atomic_json(self._head, _sealed({
-            "version": _VERSION,
-            "type": _HEAD,
-            "sequence": sequence,
-            "last_sha256": last,
-            "header_sha256": header,
-        }))
+        atomic_json(
+            self._head,
+            _sealed(
+                {
+                    "version": _VERSION,
+                    "type": _HEAD,
+                    "sequence": sequence,
+                    "last_sha256": last,
+                    "header_sha256": header,
+                }
+            ),
+        )
 
     def _checkpoint_header_unlocked(self) -> str:
         # The current validated checkpoint already binds the header digest.
         # No additional reader opens external market input or source files.
         checkpoint = read_json(self._head)
-        _verify_seal(checkpoint, {
-            "version", "type", "sequence", "last_sha256", "header_sha256"
-        })
+        _verify_seal(checkpoint, {"version", "type", "sequence", "last_sha256", "header_sha256"})
         return checkpoint["header_sha256"]
 
     def _load_unlocked(self) -> tuple[ProfitAllocationLedger, int, str]:
@@ -207,14 +206,15 @@ class ProfitJournal:
         if not self._head.exists():
             raise ValueError("journal durable checkpoint is missing")
         checkpoint = read_json(self._head)
-        _verify_seal(checkpoint, {
-            "version", "type", "sequence", "last_sha256", "header_sha256"
-        })
-        if (checkpoint["version"] != _VERSION or checkpoint["type"] != _HEAD
-                or type(checkpoint["sequence"]) is not int
-                or checkpoint["sequence"] != len(rows) - 1
-                or checkpoint["last_sha256"] != previous
-                or checkpoint["header_sha256"] != header["sha256"]):
+        _verify_seal(checkpoint, {"version", "type", "sequence", "last_sha256", "header_sha256"})
+        if (
+            checkpoint["version"] != _VERSION
+            or checkpoint["type"] != _HEAD
+            or type(checkpoint["sequence"]) is not int
+            or checkpoint["sequence"] != len(rows) - 1
+            or checkpoint["last_sha256"] != previous
+            or checkpoint["header_sha256"] != header["sha256"]
+        ):
             raise ValueError("journal/checkpoint mismatch: missing committed event or incomplete write")
         return ledger, len(rows) - 1, previous
 
@@ -235,13 +235,15 @@ class ProfitJournal:
             ledger, sequence, previous = self._load_unlocked()
             proposed = deepcopy(ledger)
             day = proposed.apply(event)
-            record = _sealed({
-                "version": _VERSION,
-                "type": _ENTRY,
-                "sequence": sequence + 1,
-                "previous_sha256": previous,
-                "event": _event_data(event),
-            })
+            record = _sealed(
+                {
+                    "version": _VERSION,
+                    "type": _ENTRY,
+                    "sequence": sequence + 1,
+                    "previous_sha256": previous,
+                    "event": _event_data(event),
+                }
+            )
             raw = _canonical(record) + b"\n"
             fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CLOEXEC)
             try:
@@ -283,13 +285,15 @@ class ProfitJournal:
                 result = simulated.apply(event)
                 if result is not None:
                     closed.append(result)
-                row = _sealed({
-                    "version": _VERSION,
-                    "type": _ENTRY,
-                    "sequence": sequence + len(records) + 1,
-                    "previous_sha256": chain,
-                    "event": _event_data(event),
-                })
+                row = _sealed(
+                    {
+                        "version": _VERSION,
+                        "type": _ENTRY,
+                        "sequence": sequence + len(records) + 1,
+                        "previous_sha256": chain,
+                        "event": _event_data(event),
+                    }
+                )
                 records.append(row)
                 chain = row["sha256"]
             raw = b"".join(_canonical(row) + b"\n" for row in records)

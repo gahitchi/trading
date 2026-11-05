@@ -136,9 +136,16 @@ def _archive_one(source: Path, *, prune_verified: bool = False) -> ArchiveResult
             raise ArchiveIntegrityError(f"incomplete or mismatched gzip archive: {archive}")
         gzip_sha, gzip_bytes, _ = _scan_path(archive, require_newline=False)
         _atomic_manifest(
-            manifest, temp_manifest,
-            {"schema_version": 1, "source_sha256": original_sha, "source_bytes": original_bytes,
-             "records": records, "gzip_sha256": gzip_sha, "gzip_bytes": gzip_bytes},
+            manifest,
+            temp_manifest,
+            {
+                "schema_version": 1,
+                "source_sha256": original_sha,
+                "source_bytes": original_bytes,
+                "records": records,
+                "gzip_sha256": gzip_sha,
+                "gzip_bytes": gzip_bytes,
+            },
         )
     result = _verify_archive(archive, manifest, source)
     if prune_verified:
@@ -173,7 +180,9 @@ def archive_directory(directory: Path, *, prune_verified: bool = False) -> list[
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify and gzip finalized public-market journals")
     parser.add_argument("--out", type=Path, default=Path("data/market-journal"))
-    parser.add_argument("--prune-verified", action="store_true", help="remove raw files only after verified gzip + manifest")
+    parser.add_argument(
+        "--prune-verified", action="store_true", help="remove raw files only after verified gzip + manifest"
+    )
     args = parser.parse_args(argv)
     try:
         reports = archive_directory(args.out, prune_verified=args.prune_verified)

@@ -166,8 +166,11 @@ class ProfitAllocationLedger:
             raise ValueError("invalid event ID or stable economic source ID")
         if event.event_id in self._seen_events or event.source_id in self._seen_sources:
             raise ValueError("duplicate event or economic source ID")
-        if (not isinstance(event.timestamp, datetime) or event.timestamp.tzinfo is None
-                or event.timestamp.utcoffset() != timedelta(0)):
+        if (
+            not isinstance(event.timestamp, datetime)
+            or event.timestamp.tzinfo is None
+            or event.timestamp.utcoffset() != timedelta(0)
+        ):
             raise ValueError("event timestamp must be UTC aware")
         if self._last_ts is not None and event.timestamp < self._last_ts:
             raise ValueError("out-of-order allocation event")
@@ -188,14 +191,14 @@ class ProfitAllocationLedger:
             if any(x is None for x in details) or event.reason is not None:
                 raise ValueError("trade must specify gross, fees, slippage, funding and released mark")
             gross, fees, slip, funding, released = (
-                self._money(x, name) for x, name in zip(
-                    details, ("gross", "fees", "slippage", "funding", "released mark"), strict=True
-                )
+                self._money(x, name)
+                for x, name in zip(details, ("gross", "fees", "slippage", "funding", "released mark"), strict=True)
             )
             if fees < 0 or slip < 0 or amount != gross - fees - slip + funding:
                 raise ValueError("trade net does not reconcile to signed gross and nonnegative execution costs")
-            if released and (not self._unrealized or released * self._unrealized < 0
-                             or abs(released) > abs(self._unrealized)):
+            if released and (
+                not self._unrealized or released * self._unrealized < 0 or abs(released) > abs(self._unrealized)
+            ):
                 raise ValueError("released mark is not covered by the current unrealized P&L")
         elif any(x is not None for x in details):
             raise ValueError("only trade events may carry trade economics or released marks")
@@ -249,11 +252,18 @@ class ProfitAllocationLedger:
             if pnl != daily_realized + mark_change:
                 raise ValueError("UTC daily P&L does not reconcile to actual economic flows")
             record = DayClose(
-                self._next_day, self._last_close_equity, equity, daily_external,
-                pnl, daily_realized, mark_change,
+                self._next_day,
+                self._last_close_equity,
+                equity,
+                daily_external,
+                pnl,
+                daily_realized,
+                mark_change,
                 reinvested - self._last_close_reinvested,
                 retained - self._last_close_retained,
-                deployable, reserve, unrealized,
+                deployable,
+                reserve,
+                unrealized,
             )
 
         # The event is fully validated and reconciled before state is published.

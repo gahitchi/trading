@@ -17,9 +17,7 @@ def setup(tmp_path, boundary="2024-01-03T00:00:00Z"):
     config.write_text('[paths]\ndata="data"\nresults="results"\n')
     folder = tmp_path / "results"
     folder.mkdir()
-    (folder / "crash_partition.json").write_text(
-        json.dumps({"version": 1, "holdout_start": boundary})
-    )
+    (folder / "crash_partition.json").write_text(json.dumps({"version": 1, "holdout_start": boundary}))
     return config
 
 
@@ -45,9 +43,8 @@ def fake_get(source, seen):
         high = int(q["endTime"][0])
         seen.append((low, high))
         assert high < int(pd.Timestamp("2024-01-03T00:00:00Z").value // 1_000_000)
-        return [
-            r for r in source if low <= r["fundingTime"] <= high
-        ][:1000]
+        return [r for r in source if low <= r["fundingTime"] <= high][:1000]
+
     return get
 
 
@@ -98,10 +95,20 @@ def test_source_change_rejected_before_any_cache_write(tmp_path):
     assert not (tmp_path / "data").exists()
 
 
-@pytest.mark.parametrize("issue", [
-    "duplicate", "future", "off_hour", "wrong_symbol", "missing_mark",
-    "nan", "large_rate", "missing_event", "out_of_order",
-])
+@pytest.mark.parametrize(
+    "issue",
+    [
+        "duplicate",
+        "future",
+        "off_hour",
+        "wrong_symbol",
+        "missing_mark",
+        "nan",
+        "large_rate",
+        "missing_event",
+        "out_of_order",
+    ],
+)
 def test_invalid_exchange_history_fails_closed(tmp_path, issue):
     cfg = setup(tmp_path)
     source = events()
@@ -109,9 +116,11 @@ def test_invalid_exchange_history_fails_closed(tmp_path, issue):
         source = [source[0], source[0], *source[1:]]
     elif issue == "future":
         source = [*source, {**source[-1], "fundingTime": int(pd.Timestamp("2024-01-03T00:00:00Z").value // 1_000_000)}]
+
         # Ensure malformed response actually reaches the validator.
         def invalid_get(url):
             return source
+
         with pytest.raises(ValueError, match="outside"):
             survey(cfg, get=invalid_get)
         return
@@ -120,13 +129,13 @@ def test_invalid_exchange_history_fails_closed(tmp_path, issue):
     elif issue == "wrong_symbol":
         source[0] = {**source[0], "symbol": "ETHUSDT"}
     elif issue == "missing_mark":
-        source[0] = {k:v for k,v in source[0].items() if k != "markPrice"}
+        source[0] = {k: v for k, v in source[0].items() if k != "markPrice"}
     elif issue == "nan":
         source[0] = {**source[0], "fundingRate": "NaN"}
     elif issue == "large_rate":
         source[0] = {**source[0], "fundingRate": "1.5"}
     elif issue == "missing_event":
-        source = [r for i,r in enumerate(source) if i != 2]
+        source = [r for i, r in enumerate(source) if i != 2]
     elif issue == "out_of_order":
         source[0], source[1] = source[1], source[0]
     with pytest.raises(ValueError):
@@ -177,17 +186,23 @@ def test_plan_cannot_be_replayed_with_a_different_holdout(tmp_path):
     plan = tmp_path / "plan.json"
     plan.write_text(json.dumps(survey(cfg, get=fake_get(source, []))))
     partition = tmp_path / "results" / "crash_partition.json"
-    partition.write_text(json.dumps({
-        "version": 1, "holdout_start": "2024-01-04T00:00:00Z",
-    }))
+    partition.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "holdout_start": "2024-01-04T00:00:00Z",
+            }
+        )
+    )
     with pytest.raises(ValueError, match="protected holdout"):
         apply(cfg, plan, get=fake_get(source, []))
 
 
 def test_survey_validates_all_paginated_pages_and_bounds(tmp_path):
     cfg = setup(tmp_path, boundary="2024-02-12T00:00:00Z")
-    rows = events(hours=42*24, interval=1)
+    rows = events(hours=42 * 24, interval=1)
     calls = []
+
     def get(url):
         q = parse_qs(urlsplit(url).query)
         start = int(q["startTime"][0])
@@ -195,6 +210,7 @@ def test_survey_validates_all_paginated_pages_and_bounds(tmp_path):
         assert end == int(pd.Timestamp("2024-02-12T00:00:00Z").value // 1_000_000) - 1
         calls.append(start)
         return [row for row in rows if start <= row["fundingTime"] <= end][:1000]
+
     plan = survey(cfg, get=get)
     assert len(calls) == 2
     assert len(plan["pages"]) == 2
@@ -218,9 +234,7 @@ def test_exchange_subminute_settlements_preserve_milliseconds_and_pass_audit(tmp
     # Ensure the persisted source event time was not rounded or truncated.
     cached = next((tmp_path / "data" / "crash" / "funding-pinned" / "BTCUSDT").glob("*.json"))
     saved = json.loads(cached.read_text())
-    assert [e["fundingTime"] for e in saved["events"]] == [
-        e["fundingTime"] for e in source
-    ]
+    assert [e["fundingTime"] for e in saved["events"]] == [e["fundingTime"] for e in source]
 
 
 def test_subminute_funding_near_entry_or_exit_is_ambiguous():
@@ -228,15 +242,19 @@ def test_subminute_funding_near_entry_or_exit_is_ambiguous():
     source[1] = {**source[1], "fundingTime": source[1]["fundingTime"] + 10}
     with pytest.raises(ValueError, match="ambiguous"):
         settlement_return(
-            -1, 100.0,
+            -1,
+            100.0,
             pd.Timestamp("2024-01-01T08:00:00Z"),
-            pd.Timestamp("2024-01-01T20:00:00Z"), source,
+            pd.Timestamp("2024-01-01T20:00:00Z"),
+            source,
         )
     with pytest.raises(ValueError, match="ambiguous"):
         settlement_return(
-            -1, 100.0,
+            -1,
+            100.0,
             pd.Timestamp("2024-01-01T01:00:00Z"),
-            pd.Timestamp("2024-01-01T16:00:00Z"), source,
+            pd.Timestamp("2024-01-01T16:00:00Z"),
+            source,
         )
 
 
@@ -254,10 +272,14 @@ def test_source_limit_still_excludes_holdout_even_with_jitter(tmp_path):
     cfg = setup(tmp_path)
     source = events()
     last = int(pd.Timestamp("2024-01-03T00:00:00Z").value // 1_000_000)
-    source.append({
-        "symbol": "BTCUSDT", "fundingTime": last + 3,
-        "fundingRate": "0.0001", "markPrice": "100.0",
-    })
+    source.append(
+        {
+            "symbol": "BTCUSDT",
+            "fundingTime": last + 3,
+            "fundingRate": "0.0001",
+            "markPrice": "100.0",
+        }
+    )
 
     def unbounded_response(_url):
         # Defective provider ignores endTime: fail rather than truncating.

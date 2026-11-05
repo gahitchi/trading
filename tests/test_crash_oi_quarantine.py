@@ -66,10 +66,7 @@ def test_failed_normal_migration_then_quarantine_retains_original_backup_and_aud
     original = source.read_bytes()
     with pytest.raises(ValueError, match=r"stopped at 2024-01-01.parquet"):
         migrate_batch(cfg, limit=1, apply=True, get=lambda _: blob)
-    backup = (
-        tmp_path / "data" / "crash" / "oi-original-backups"
-        / "BTCUSDT" / "2024-01-01.parquet"
-    )
+    backup = tmp_path / "data" / "crash" / "oi-original-backups" / "BTCUSDT" / "2024-01-01.parquet"
     assert backup.read_bytes() == original
     assert not audit_migrations(cfg)["ok"]  # orphaned backup from failed attempt
 
@@ -80,9 +77,7 @@ def test_failed_normal_migration_then_quarantine_retains_original_backup_and_aud
     assert pd.isna(upgraded["oi_qty"].iloc[1])
     assert upgraded["oi_valid"].tolist() == [True, False]
     assert upgraded["oi_value"].tolist() == [4200000.0, 0.0]
-    assert crash_data.legacy_oi_paths(
-        tmp_path / "data" / "crash", "BTCUSDT", pd.Timestamp("2024-01-03").date()
-    ) == []
+    assert crash_data.legacy_oi_paths(tmp_path / "data" / "crash", "BTCUSDT", pd.Timestamp("2024-01-03").date()) == []
     checked = audit_migrations(cfg)
     assert checked["ok"], checked["issues"]
     assert checked["verified_files"] == 1
@@ -133,15 +128,15 @@ def test_quarantined_missing_quantity_is_preserved_by_research_loader(tmp_path):
     _cfg, _, _, args = anomaly(tmp_path)
     quarantine_day(**args, apply=True)
     root = tmp_path / "data" / "crash"
-    restored = crash_data.load(
-        root, "oi", "BTCUSDT", before=pd.Timestamp("2024-01-03T00:00:00Z")
-    )
+    restored = crash_data.load(root, "oi", "BTCUSDT", before=pd.Timestamp("2024-01-03T00:00:00Z"))
     assert restored["oi_valid"].tolist() == [True, False]
     assert np.isnan(restored["oi_qty"].iloc[1])
-    candles = pd.DataFrame({
-        "ts": pd.date_range("2024-01-01T00:00:00Z", periods=30, freq="min"),
-        "close": [100.0] * 30,
-    })
+    candles = pd.DataFrame(
+        {
+            "ts": pd.date_range("2024-01-01T00:00:00Z", periods=30, freq="min"),
+            "close": [100.0] * 30,
+        }
+    )
     one_minute = bars(candles, restored)
     assert one_minute.loc[pd.Timestamp("2024-01-01T00:15:00Z"), "oi_invalid"]
     assert pd.isna(one_minute.loc[pd.Timestamp("2024-01-01T00:15:00Z"), "oi"])
@@ -152,16 +147,23 @@ def test_signal_window_blocks_missing_oi_without_future_lookahead():
     # Make all financial filters true after the 1440-minute volume warmup.
     n = 1700
     idx = pd.date_range("2024-01-01", periods=n, freq="min", tz="UTC")
-    b = pd.DataFrame({
-        "close": 100 * np.power(.999, np.arange(n)),
-        "quote_volume": np.full(n, 100.0),
-        "oi": 1000 + np.arange(n, dtype=float),
-        "oi_invalid": np.zeros(n, dtype=bool),
-    }, index=idx)
+    b = pd.DataFrame(
+        {
+            "close": 100 * np.power(0.999, np.arange(n)),
+            "quote_volume": np.full(n, 100.0),
+            "oi": 1000 + np.arange(n, dtype=float),
+            "oi_invalid": np.zeros(n, dtype=bool),
+        },
+        index=idx,
+    )
     b.loc[idx[1600], "oi_invalid"] = True
     settings = CrashSettings.preset(
-        "breakdown", drop_pct=.01, window_min=1, vol_mult=0,
-        oi_pct=0, vol_target=0,
+        "breakdown",
+        drop_pct=0.01,
+        window_min=1,
+        vol_mult=0,
+        oi_pct=0,
+        vol_target=0,
     )
     active = signals(b, settings)
     assert active[1599]
@@ -178,14 +180,15 @@ def test_quality_quarantine_rejects_holdout_even_with_correct_hashes(tmp_path):
     assert (folder / "2024-01-01.parquet").read_bytes() == original
 
 
-
 def test_mixed_valid_and_quarantined_daily_sources_load_without_mask_nulls(tmp_path):
     _cfg, folder, _, args = anomaly(tmp_path)
     valid_day = crash_data.parse_metrics(zipped(HEADER + SECOND))
     valid_day.to_parquet(folder / "2024-01-02.parquet", index=False)
     quarantine_day(**args, apply=True)
     loaded = crash_data.load(
-        tmp_path / "data" / "crash", "oi", "BTCUSDT",
+        tmp_path / "data" / "crash",
+        "oi",
+        "BTCUSDT",
         before=pd.Timestamp("2024-01-03T00:00:00Z"),
     )
     assert loaded["oi_valid"].tolist() == [True, False, True, True]
@@ -194,12 +197,14 @@ def test_mixed_valid_and_quarantined_daily_sources_load_without_mask_nulls(tmp_p
 
 
 def test_reject_malformed_quality_masks_that_would_fake_valid_oi():
-    f = pd.DataFrame({
-        "ts": pd.date_range("2024-01-01", periods=2, freq="5min", tz="UTC"),
-        "oi_qty": [100, np.nan],
-        "oi_value": [4200000, 0],
-        "oi_valid": [True, False],
-    })
+    f = pd.DataFrame(
+        {
+            "ts": pd.date_range("2024-01-01", periods=2, freq="5min", tz="UTC"),
+            "oi_qty": [100, np.nan],
+            "oi_value": [4200000, 0],
+            "oi_valid": [True, False],
+        }
+    )
     crash_data.validate_oi_quantity(f)
     f.loc[1, "oi_qty"] = 0.0
     with pytest.raises(ValueError, match="quarantined OI"):
@@ -210,16 +215,12 @@ def test_reject_malformed_quality_masks_that_would_fake_valid_oi():
         crash_data.validate_oi_quantity(f)
 
 
-
 def test_audit_rejects_quarantine_manifest_missing_timestamps(tmp_path):
     import json
 
     cfg, _, _, args = anomaly(tmp_path)
     quarantine_day(**args, apply=True)
-    manifest = (
-        tmp_path / "data" / "crash" / "oi-original-backups"
-        / "BTCUSDT" / "2024-01-01.parquet.migration.json"
-    )
+    manifest = tmp_path / "data" / "crash" / "oi-original-backups" / "BTCUSDT" / "2024-01-01.parquet.migration.json"
     meta = json.loads(manifest.read_text())
     meta["quarantine_timestamps"] = []
     manifest.write_text(json.dumps(meta))

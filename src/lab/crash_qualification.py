@@ -4,6 +4,7 @@ The existing independent daily-inference v1 calibration FAILED.
 No Sharpe/t-statistic in this module can be used to graduate a
 strategy or to enable a protected holdout.
 """
+
 from __future__ import annotations
 
 from collections import Counter
@@ -22,14 +23,13 @@ BLOCKERS = (
 def inventory(results_dir: Path, *, key: str = "crash-breakdown") -> dict:
     """Retain completed, failed, reserved and legacy attempts in the count."""
     all_rows = history(results_dir)  # corrupt/inconsistent history raises
-    rows = [
-        r for r in all_rows
-        if r["kind"] == "crash-study" and r["instrument"] == key and not r["holdout"]
-    ]
+    rows = [r for r in all_rows if r["kind"] == "crash-study" and r["instrument"] == key and not r["holdout"]]
     statuses = Counter(r.get("status", "legacy") for r in rows)
     incomplete = [
-        r.get("attempt_id", "legacy") for r in rows
-        if "code" not in r or "inputs" not in r
+        r.get("attempt_id", "legacy")
+        for r in rows
+        if "code" not in r
+        or "inputs" not in r
         or not r["inputs"].get("streams")
         or any(not stream.get("complete") for stream in r["inputs"]["streams"])
     ]

@@ -94,9 +94,22 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
     boundary = _check(b, boundary)
     count = Counter()
     empty_cols = [
-        "signal", "entry", "exit", "gross", "net", "weight", "reason",
-        "entry_reference", "exit_reference", "fee_cost", "slippage_cost",
-        "breakout", "retest", "support", "stop_reference", "target_reference",
+        "signal",
+        "entry",
+        "exit",
+        "gross",
+        "net",
+        "weight",
+        "reason",
+        "entry_reference",
+        "exit_reference",
+        "fee_cost",
+        "slippage_cost",
+        "breakout",
+        "retest",
+        "support",
+        "stop_reference",
+        "target_reference",
     ]
     # The seven-day volume baseline and one-day support lookback
     # overlap in time; they are not sequential warm-up periods.
@@ -118,15 +131,24 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
     support = low.shift(1).rolling(SUPPORT_MINUTES, min_periods=SUPPORT_MINUTES).min()
     recent_volume = q.rolling(VOLUME_MINUTES, min_periods=VOLUME_MINUTES).sum()
     oi_bad = b["oi_invalid"].astype(bool).to_numpy()
-    oi_24h_invalid = b["oi_invalid"].astype(bool).rolling(
-        SUPPORT_MINUTES + 1, min_periods=SUPPORT_MINUTES + 1,
-    ).max().fillna(1).to_numpy(dtype=bool)
+    oi_24h_invalid = (
+        b["oi_invalid"]
+        .astype(bool)
+        .rolling(
+            SUPPORT_MINUTES + 1,
+            min_periods=SUPPORT_MINUTES + 1,
+        )
+        .max()
+        .fillna(1)
+        .to_numpy(dtype=bool)
+    )
 
     log_return = np.log(close).diff()
     # Use the preceding seven days, delayed by one full hour:
     # the breakout move itself cannot affect position sizing.
     sigma = log_return.rolling(
-        PRIOR_HOURS * 60, min_periods=PRIOR_HOURS * 60,
+        PRIOR_HOURS * 60,
+        min_periods=PRIOR_HOURS * 60,
     ).std().shift(VOLUME_MINUTES) * np.sqrt(MINUTES_PER_YEAR)
     eligible_sigma = sigma.where(np.isfinite(sigma) & (sigma > 0))
     weights = np.minimum(VOL_TARGET / eligible_sigma, MAX_WEIGHT).fillna(0).to_numpy()
@@ -136,10 +158,7 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
     n = len(b)
     while i < n:
         L = float(support.iloc[i])
-        if (
-            not np.isfinite(L) or not (c[i] <= (1 - BREACH_FRACTION) * L)
-            or oi_24h_invalid[i]
-        ):
+        if not np.isfinite(L) or not (c[i] <= (1 - BREACH_FRACTION) * L) or oi_24h_invalid[i]:
             i += 1
             continue
         # Last 60-minute volume includes candles [i-59, i],
@@ -209,7 +228,7 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
         # The entry candle's OI-quality marker is published only
         # when that candle completes. Checking it now would peek
         # one minute beyond the modeled opening fill.
-        if oi_bad[confirm_i + 1:entry_i].any():
+        if oi_bad[confirm_i + 1 : entry_i].any():
             count["untrusted_oi_before_entry"] += 1
             i = entry_i + 1
             continue
@@ -248,15 +267,26 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
             break
         executed = fill_accounting(SIDE, P, exit_ref, FEE_BPS, SLIPPAGE_BPS)
         count["trade"] += 1
-        rows.append((
-            b.index[confirm_i],
-            b.index[entry_i] - UTC_MIN,
-            b.index[exit_i],
-            executed["reference_gross"], executed["net"], weight, reason,
-            P, exit_ref, executed["fee_cost"], executed["slippage_cost"],
-            b.index[breakout_index], b.index[retest_i],
-            L, stop, target,
-        ))
+        rows.append(
+            (
+                b.index[confirm_i],
+                b.index[entry_i] - UTC_MIN,
+                b.index[exit_i],
+                executed["reference_gross"],
+                executed["net"],
+                weight,
+                reason,
+                P,
+                exit_ref,
+                executed["fee_cost"],
+                executed["slippage_cost"],
+                b.index[breakout_index],
+                b.index[retest_i],
+                L,
+                stop,
+                target,
+            )
+        )
         # One symbol: no overlapping candidate or position.
         i = exit_i + 1
     return Result(pd.DataFrame(rows, columns=empty_cols), dict(sorted(count.items())), boundary)

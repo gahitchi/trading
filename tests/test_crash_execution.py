@@ -34,17 +34,12 @@ def test_slippage_is_adverse_on_both_sides_and_fee_on_executed_prices(side):
     assert a["exit_fill"] == pytest.approx(exit_fill)
     assert a["slippage_cost"] == pytest.approx(slip * (entry + exit_) / entry)
     assert a["fee_cost"] == pytest.approx(0.0005 * (entry_fill + exit_fill) / entry)
-    assert a["net"] == pytest.approx(
-        side * (exit_fill - entry_fill) / entry - a["fee_cost"]
-    )
+    assert a["net"] == pytest.approx(side * (exit_fill - entry_fill) / entry - a["fee_cost"])
 
 
 @pytest.mark.parametrize("side", [1, -1])
 def test_more_slippage_never_improves_trade_return(side):
-    observed = [
-        execution.fill_accounting(side, 100.0, 103.0, 5.0, slip)["net"]
-        for slip in (0.0, 5.0, 10.0, 20.0)
-    ]
+    observed = [execution.fill_accounting(side, 100.0, 103.0, 5.0, slip)["net"] for slip in (0.0, 5.0, 10.0, 20.0)]
     assert observed == sorted(observed, reverse=True)
 
 
@@ -75,16 +70,25 @@ def test_crash_settings_reject_nonfinite_economics(field):
 def test_trade_event_reference_prices_and_default_net_are_consistent():
     idx = pd.date_range("2024-02-01", periods=8, freq="min", tz="UTC")
     prices = [100.0, 100.0, 99.0, 98.0, 97.0, 95.0, 95.0, 95.0]
-    frame = pd.DataFrame({
-        "open": prices,
-        "high": np.asarray(prices) + 0.2,
-        "low": np.asarray(prices) - 0.2,
-        "close": prices,
-    }, index=idx)
+    frame = pd.DataFrame(
+        {
+            "open": prices,
+            "high": np.asarray(prices) + 0.2,
+            "low": np.asarray(prices) - 0.2,
+            "close": prices,
+        },
+        index=idx,
+    )
     settings = crash.CrashSettings(
-        mode="breakdown", window_min=1, hold_min=3,
-        vol_target=0, delay_min=0, sl_pct=0, tp_pct=0,
-        fee_bps=5, slippage_bps=5,
+        mode="breakdown",
+        window_min=1,
+        hold_min=3,
+        vol_target=0,
+        delay_min=0,
+        sl_pct=0,
+        tp_pct=0,
+        fee_bps=5,
+        slippage_bps=5,
     )
     events = np.zeros(len(frame), dtype=bool)
     events[0] = True
@@ -102,17 +106,19 @@ def test_trade_event_reference_prices_and_default_net_are_consistent():
 
 def test_stress_preserves_trade_events_and_only_changes_cost_assumptions():
     idx = pd.date_range("2024-02-01", periods=4, freq="min", tz="UTC")
-    t = pd.DataFrame({
-        "signal": [idx[0]],
-        "entry": [idx[1]],
-        "exit": [idx[3]],
-        "entry_reference": [100.0],
-        "exit_reference": [95.0],
-        "gross": [0.05],
-        "net": [0.04],
-        "weight": [1.0],
-        "reason": ["time"],
-    })
+    t = pd.DataFrame(
+        {
+            "signal": [idx[0]],
+            "entry": [idx[1]],
+            "exit": [idx[3]],
+            "entry_reference": [100.0],
+            "exit_reference": [95.0],
+            "gross": [0.05],
+            "net": [0.04],
+            "weight": [1.0],
+            "reason": ["time"],
+        }
+    )
     original = t.copy(deep=True)
     base = execution.rescore(t, -1, 5.0, 5.0)
     harsh = execution.rescore(t, -1, 5.0, 20.0)
@@ -122,21 +128,21 @@ def test_stress_preserves_trade_events_and_only_changes_cost_assumptions():
     assert base["exit"].equals(harsh["exit"])
     assert base["weight"].equals(harsh["weight"])
     assert harsh["net"].iloc[0] < base["net"].iloc[0]
-    scenarios = execution.stress_summary(
-        {"BTCUSDT": t}, -1, idx[0], idx[-1], crash.summary
-    )
+    scenarios = execution.stress_summary({"BTCUSDT": t}, -1, idx[0], idx[-1], crash.summary)
     assert [x["flat_price_round_trip_bps"] for x in scenarios] == [20, 30, 50]
     assert all(x["trades"] == 1 for x in scenarios)
-    assert [x["mean_net_bps"] for x in scenarios] == sorted(
-        [x["mean_net_bps"] for x in scenarios], reverse=True
-    )
+    assert [x["mean_net_bps"] for x in scenarios] == sorted([x["mean_net_bps"] for x in scenarios], reverse=True)
 
 
 def test_stress_fails_closed_on_inconsistent_trade_return():
-    trade = pd.DataFrame({
-        "entry_reference": [100.0], "exit_reference": [90.0],
-        "gross": [-0.9], "net": [-1.0],
-    })
+    trade = pd.DataFrame(
+        {
+            "entry_reference": [100.0],
+            "exit_reference": [90.0],
+            "gross": [-0.9],
+            "net": [-1.0],
+        }
+    )
     with pytest.raises(ValueError, match="disagree"):
         execution.rescore(trade, -1, 5.0, 5.0)
 

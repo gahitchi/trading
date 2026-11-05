@@ -75,9 +75,7 @@ def _cadence(frame: pd.DataFrame, day: date) -> dict:
         for grid, label in ((start_grid, "period-start"), (end_grid, "period-end"))
     ]
     # Tie-break toward period-start, never toward the original unsorted ordering.
-    missing, unexpected, convention = min(
-        options, key=lambda x: len(x[0]) + len(x[1])
-    )
+    missing, unexpected, convention = min(options, key=lambda x: len(x[0]) + len(x[1]))
     first, last = unique[0], unique[-1]
     internal = int(((missing > first) & (missing < last)).sum())
     leading = int((missing < first).sum())
@@ -150,14 +148,13 @@ def audit_coverage(config_path: Path, symbol: str = "BTCUSDT") -> dict:
                 crash_data.validate_oi_quantity(frame)
                 invalid = ~frame["oi_valid"].to_numpy(dtype=bool)
                 if invalid.any():
-                    quality_anomaly_days.append({
-                        "day": day.isoformat(),
-                        "unavailable_quantity_snapshots": int(invalid.sum()),
-                        "timestamps": [
-                            pd.Timestamp(ts).isoformat()
-                            for ts in frame.loc[invalid, "ts"]
-                        ],
-                    })
+                    quality_anomaly_days.append(
+                        {
+                            "day": day.isoformat(),
+                            "unavailable_quantity_snapshots": int(invalid.sum()),
+                            "timestamps": [pd.Timestamp(ts).isoformat() for ts in frame.loc[invalid, "ts"]],
+                        }
+                    )
             observed += item["observations"]
             benchmark += DAILY_EXPECTED
             checked += 1
@@ -165,12 +162,14 @@ def audit_coverage(config_path: Path, symbol: str = "BTCUSDT") -> dict:
             if item["abnormal"]:
                 anomaly_days.append(item)
             elif item["ordering_only"]:
-                ordering_only_days.append({
-                    "day": day.isoformat(),
-                    "raw_order_inversions": item["raw_order_inversions"],
-                    "unique_observations": item["unique_observations"],
-                    "timestamp_convention": item["timestamp_convention"],
-                })
+                ordering_only_days.append(
+                    {
+                        "day": day.isoformat(),
+                        "raw_order_inversions": item["raw_order_inversions"],
+                        "unique_observations": item["unique_observations"],
+                        "timestamp_convention": item["timestamp_convention"],
+                    }
+                )
         except Exception as exc:
             errors.append(f"{name}: {type(exc).__name__}: {exc}")
 
@@ -198,9 +197,8 @@ def audit_coverage(config_path: Path, symbol: str = "BTCUSDT") -> dict:
         "quality_anomaly_days": quality_anomaly_days,
         "missing_calendar_days_within_checked_range": missing_days,
         "errors": errors,
-        "coverage_ok_for_checked_days": not (
-            anomaly_days or quality_anomaly_days or missing_days or errors
-        ) and checked > 0,
+        "coverage_ok_for_checked_days": not (anomaly_days or quality_anomaly_days or missing_days or errors)
+        and checked > 0,
     }
 
 

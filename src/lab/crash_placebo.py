@@ -8,6 +8,7 @@ placebo exposures. Since durations arise from the original strategy's
 realized exits, this is a DESCRIPTIVE signal-timing comparator, not a
 tradable stop/target strategy or a valid statistical null distribution.
 """
+
 from __future__ import annotations
 
 import calendar
@@ -26,8 +27,13 @@ MIN_DAY_SEPARATION = 3
 
 
 def matched_placebo(
-    bars: pd.DataFrame, reference: pd.DataFrame, *,
-    side: int, fee_bps: float, slippage_bps: float, seed: int,
+    bars: pd.DataFrame,
+    reference: pd.DataFrame,
+    *,
+    side: int,
+    fee_bps: float,
+    slippage_bps: float,
+    seed: int,
 ) -> pd.DataFrame:
     """One calendar-matched control per original trade, or fail closed."""
     if type(seed) is not int or type(side) is not int or side not in (-1, 1):
@@ -60,7 +66,8 @@ def matched_placebo(
 
         last_day = calendar.monthrange(origin.year, origin.month)[1]
         offsets = [
-            day - origin.day for day in range(1, last_day + 1)
+            day - origin.day
+            for day in range(1, last_day + 1)
             if MIN_DAY_SEPARATION <= abs(day - origin.day) <= MAX_DAY_OFFSET
         ]
         rng.shuffle(offsets)
@@ -68,8 +75,7 @@ def matched_placebo(
         for offset in offsets:
             entry = origin + pd.Timedelta(days=offset)
             exit_ = entry + pd.Timedelta(minutes=minutes)
-            if any(not (exit_ <= previous_entry or entry >= previous_exit)
-                   for previous_entry, previous_exit in chosen):
+            if any(not (exit_ <= previous_entry or entry >= previous_exit) for previous_entry, previous_exit in chosen):
                 continue
             first_bar = entry + pd.Timedelta(minutes=1)
             if first_bar not in bars.index or exit_ not in bars.index:
@@ -89,17 +95,37 @@ def matched_placebo(
         entry, exit_, buy_ref, sell_ref = selected
         account = fill_accounting(side, buy_ref, sell_ref, fee_bps, slippage_bps)
         chosen.append((entry, exit_))
-        rows.append({
-            "signal": entry - delay, "entry": entry, "exit": exit_,
-            "gross": account["reference_gross"], "net": account["net"],
-            "weight": float(original.weight), "reason": "fixed_duration_placebo",
-            "entry_reference": buy_ref, "exit_reference": sell_ref,
-            "fee_cost": account["fee_cost"], "slippage_cost": account["slippage_cost"],
-        })
-    return pd.DataFrame(rows, columns=[
-        "signal", "entry", "exit", "gross", "net", "weight", "reason",
-        "entry_reference", "exit_reference", "fee_cost", "slippage_cost",
-    ])
+        rows.append(
+            {
+                "signal": entry - delay,
+                "entry": entry,
+                "exit": exit_,
+                "gross": account["reference_gross"],
+                "net": account["net"],
+                "weight": float(original.weight),
+                "reason": "fixed_duration_placebo",
+                "entry_reference": buy_ref,
+                "exit_reference": sell_ref,
+                "fee_cost": account["fee_cost"],
+                "slippage_cost": account["slippage_cost"],
+            }
+        )
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "signal",
+            "entry",
+            "exit",
+            "gross",
+            "net",
+            "weight",
+            "reason",
+            "entry_reference",
+            "exit_reference",
+            "fee_cost",
+            "slippage_cost",
+        ],
+    )
 
 
 def comparison(strategy: pd.DataFrame, control: pd.DataFrame) -> dict:
@@ -111,8 +137,10 @@ def comparison(strategy: pd.DataFrame, control: pd.DataFrame) -> dict:
     s_minutes = (strategy["exit"] - strategy["entry"]).dt.total_seconds() / 60
     c_minutes = (control["exit"] - control["entry"]).dt.total_seconds() / 60
     if not np.array_equal(s_minutes.to_numpy(), c_minutes.to_numpy()) or not np.allclose(
-        strategy["weight"].to_numpy(dtype=float), control["weight"].to_numpy(dtype=float),
-        atol=0, rtol=0,
+        strategy["weight"].to_numpy(dtype=float),
+        control["weight"].to_numpy(dtype=float),
+        atol=0,
+        rtol=0,
     ):
         raise ValueError("control is not duration/size matched to strategy")
     return {

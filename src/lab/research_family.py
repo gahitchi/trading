@@ -168,25 +168,18 @@ def _persist_new_generation(root: Path, generation: int, value: dict) -> None:
 
 def _assert_history_chain(chain: list[dict], rows: list[dict]) -> None:
     """A newer plan cannot erase, rewrite or orphan evidence from any generation."""
-    known = {
-        family["family_id"]: family["plan_sha256"] for family in chain
-    }
-    by_id = {
-        row["attempt_id"]: row for row in rows if "attempt_id" in row
-    }
+    known = {family["family_id"]: family["plan_sha256"] for family in chain}
+    by_id = {row["attempt_id"]: row for row in rows if "attempt_id" in row}
     actual = Counter(_digest(row) for row in rows)
     immutable_fields = {"status", "finished_at", "result", "inputs", "window"}
     for row in rows:
         if "family_id" in row and (
-            row["family_id"] not in known
-            or row["family_plan_sha256"] != known[row["family_id"]]
+            row["family_id"] not in known or row["family_plan_sha256"] != known[row["family_id"]]
         ):
             raise ValueError("research family registration is missing or inconsistent with prior trial links")
     for family in chain:
         snapshot = family["prior_history"]
-        frozen_legacy = Counter(
-            _digest(row) for row in snapshot if "attempt_id" not in row
-        )
+        frozen_legacy = Counter(_digest(row) for row in snapshot if "attempt_id" not in row)
         if frozen_legacy - actual:
             raise ValueError("prior research evidence is missing or changed")
         for row in snapshot:
@@ -197,10 +190,7 @@ def _assert_history_chain(chain: list[dict], rows: list[dict]) -> None:
             if current is None:
                 raise ValueError("prior research evidence is missing or changed")
             if row.get("status") == "reserved":
-                if any(
-                    current.get(k) != val for k, val in row.items()
-                    if k not in immutable_fields
-                ):
+                if any(current.get(k) != val for k, val in row.items() if k not in immutable_fields):
                     raise ValueError("earlier reserved trial identity was changed")
             elif current != row:
                 raise ValueError("prior research evidence is missing or changed")
@@ -227,10 +217,7 @@ def register_family(results_dir: Path, plan: dict) -> dict:
             # planned members have not even been attempted. Otherwise
             # repeatedly switching the family could silently abandon
             # losing strategies without an initial trial.
-            attempts_since = [
-                row for row in prior
-                if row.get("family_id") == previous["family_id"]
-            ]
+            attempts_since = [row for row in prior if row.get("family_id") == previous["family_id"]]
             planned = {_digest(m) for m in previous["plan"]["members"]}
             attempted = {_digest(_member(row)) for row in attempts_since}
             if not planned <= attempted:

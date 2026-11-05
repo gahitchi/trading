@@ -19,9 +19,7 @@ from pathlib import Path
 from lab.market_archive import _verify_archive
 from lab.market_journal import _validate_record
 
-_SEGMENT = re.compile(
-    r"^(public|market)-([A-Za-z0-9]+)-([0-9]+)(\.recovered)?\.jsonl(?:\.gz)?$"
-)
+_SEGMENT = re.compile(r"^(public|market)-([A-Za-z0-9]+)-([0-9]+)(\.recovered)?\.jsonl(?:\.gz)?$")
 
 
 def _sources(directory: Path) -> tuple[list[tuple[str, str, int, Path]], list[Path]]:
@@ -136,10 +134,12 @@ def audit_directory(directory: Path, *, require_reconnect: bool = False) -> dict
                             elif event == "connected":
                                 epochs.append(0)
                                 if pending is not None:
-                                    disconnections.append({
-                                        "gap_ms": round((received - pending) / 1e6, 3),
-                                        "closed": True,
-                                    })
+                                    disconnections.append(
+                                        {
+                                            "gap_ms": round((received - pending) / 1e6, 3),
+                                            "closed": True,
+                                        }
+                                    )
                                     pending = None
                             continue
 
@@ -148,9 +148,7 @@ def audit_directory(directory: Path, *, require_reconnect: bool = False) -> dict
                             issues.append(f"{category}: event before connection status in {path.name}:{line_no}")
                         else:
                             epochs[-1] += 1
-                        key = "u" if stream.endswith("@bookTicker") else (
-                            "a" if stream.endswith("@aggTrade") else None
-                        )
+                        key = "u" if stream.endswith("@bookTicker") else ("a" if stream.endswith("@aggTrade") else None)
                         if key is not None:
                             identifier = data.get(key)
                             if not isinstance(identifier, int) or isinstance(identifier, bool):

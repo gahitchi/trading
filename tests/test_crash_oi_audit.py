@@ -33,9 +33,7 @@ def test_audits_all_committed_migrations_and_preserves_original_columns(tmp_path
     assert result["first_verified"] == "2024-01-01.parquet"
     assert result["last_verified"] == "2024-01-02.parquet"
     assert before == {path.name: path.read_bytes() for path in folder.glob("*.parquet")}
-    assert pd.read_parquet(folder / "2024-01-03.parquet").columns.tolist() == [
-        "ts", "oi_value"
-    ]
+    assert pd.read_parquet(folder / "2024-01-03.parquet").columns.tolist() == ["ts", "oi_value"]
 
 
 @pytest.mark.parametrize("which", ["source", "backup"])
@@ -46,10 +44,7 @@ def test_audit_catches_corrupted_content_hashes(tmp_path, which):
         target = folder / "2024-01-01.parquet"
         expected = "updated Parquet SHA-256 mismatch"
     else:
-        target = (
-            tmp_path / "data" / "crash" / "oi-original-backups"
-            / "BTCUSDT" / "2024-01-01.parquet"
-        )
+        target = tmp_path / "data" / "crash" / "oi-original-backups" / "BTCUSDT" / "2024-01-01.parquet"
         expected = "original backup SHA-256 mismatch"
     target.write_bytes(b"tampered")
     result = audit_migrations(cfg)
@@ -59,9 +54,7 @@ def test_audit_catches_corrupted_content_hashes(tmp_path, which):
 
 def test_orphan_backup_is_reported_as_unfinished(tmp_path):
     cfg, _ = setup_cache(tmp_path, with_second=False, with_holdout=False)
-    backup_dir = (
-        tmp_path / "data" / "crash" / "oi-original-backups" / "BTCUSDT"
-    )
+    backup_dir = tmp_path / "data" / "crash" / "oi-original-backups" / "BTCUSDT"
     backup_dir.mkdir(parents=True)
     (backup_dir / "2024-01-01.parquet").write_bytes(b"valid original backup not yet accompanied by manifest")
     result = audit_migrations(cfg)
@@ -72,10 +65,7 @@ def test_orphan_backup_is_reported_as_unfinished(tmp_path):
 def test_prepared_manifest_causes_nonzero_exit_and_remains_unchanged(tmp_path, capsys):
     cfg, _ = setup_cache(tmp_path, with_second=False, with_holdout=False)
     migrate_batch(cfg, apply=True, get=exchange)
-    manifest = (
-        tmp_path / "data" / "crash" / "oi-original-backups"
-        / "BTCUSDT" / "2024-01-01.parquet.migration.json"
-    )
+    manifest = tmp_path / "data" / "crash" / "oi-original-backups" / "BTCUSDT" / "2024-01-01.parquet.migration.json"
     item = json.loads(manifest.read_text())
     item["status"] = "prepared"
     manifest.write_text(json.dumps(item))
@@ -87,9 +77,7 @@ def test_prepared_manifest_causes_nonzero_exit_and_remains_unchanged(tmp_path, c
 
 def test_manifest_targeting_holdout_does_not_open_holdout_file(tmp_path):
     cfg, folder = setup_cache(tmp_path, with_second=False, with_holdout=True)
-    backup_dir = (
-        tmp_path / "data" / "crash" / "oi-original-backups" / "BTCUSDT"
-    )
+    backup_dir = tmp_path / "data" / "crash" / "oi-original-backups" / "BTCUSDT"
     backup_dir.mkdir(parents=True)
     (backup_dir / "2024-01-03.parquet.migration.json").write_text("{}")
     holdout = folder / "2024-01-03.parquet"

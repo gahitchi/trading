@@ -480,8 +480,9 @@ def test_corrupted_successor_chain_blocks_read_and_new_attempts(tmp_path):
     atomic_json(record, modified)
     with pytest.raises(ValueError, match="predecessor chain"):
         rf.load_family(tmp_path)
-    with pytest.raises(ValueError, match="predecessor chain"), trials.trial_run(
-        tmp_path, "fast-backtest", "NEW", {}, (0, 100)
+    with (
+        pytest.raises(ValueError, match="predecessor chain"),
+        trials.trial_run(tmp_path, "fast-backtest", "NEW", {}, (0, 100)),
     ):
         pytest.fail("attempt should not be reserved with corrupted registration")
 
@@ -506,8 +507,9 @@ def test_missing_successor_sequence_blocks_registration_and_attempts(tmp_path):
     (tmp_path / rf.EPOCHS / "000001.json").unlink()
     with pytest.raises(ValueError, match="sequence is missing"):
         rf.load_family(tmp_path)
-    with pytest.raises(ValueError, match="sequence is missing"), trials.trial_run(
-        tmp_path, "fast-backtest", "THIRD", {}, (0, 100)
+    with (
+        pytest.raises(ValueError, match="sequence is missing"),
+        trials.trial_run(tmp_path, "fast-backtest", "THIRD", {}, (0, 100)),
     ):
         pytest.fail("cannot issue after deleting middle generation")
 
@@ -532,8 +534,9 @@ def test_missing_final_generation_cannot_relabel_linked_trials_to_older_plan(tmp
     (tmp_path / rf.EPOCHS / "000001.json").unlink()
     # A removed *last* generation has no sequence gap, so the
     # recorded links are the second independent proof of its existence.
-    with pytest.raises(ValueError, match="registration is missing"), trials.trial_run(
-        tmp_path, "fast-backtest", "THIRD", {}, (0, 100)
+    with (
+        pytest.raises(ValueError, match="registration is missing"),
+        trials.trial_run(tmp_path, "fast-backtest", "THIRD", {}, (0, 100)),
     ):
         pytest.fail("missing last generation must not silently revert active plan")
     with pytest.raises(ValueError, match="registration is missing"):
@@ -552,9 +555,6 @@ def test_prior_reserved_identity_mutation_blocks_later_family(tmp_path):
     tampered["params"]["threshold"] = 0.9
     tampered["fingerprint"] = fr.fingerprint(tampered["params"])
     atomic_json(path, tampered)
-    (tmp_path / fr.TRIALS).write_text(
-        "\n".join(json.dumps(row) for row in [tampered, before[1]])
-        + "\n"
-    )
+    (tmp_path / fr.TRIALS).write_text("\n".join(json.dumps(row) for row in [tampered, before[1]]) + "\n")
     with pytest.raises(ValueError, match="reserved trial identity"):
         rf.register_family(tmp_path, plan(member(instrument="NEXT")))

@@ -79,9 +79,7 @@ def source_survey(
                 return cache[url]
 
             r = inspect_source(config_path, symbol, day=day, get=fetch)
-            if r["archive_rows"] != r["local_rows"] or not (
-                r["timestamp_set_match"] and r["notional_matches_legacy"]
-            ):
+            if r["archive_rows"] != r["local_rows"] or not (r["timestamp_set_match"] and r["notional_matches_legacy"]):
                 raise ValueError("archive timestamps, row count or notionals differ from original cache")
             blob = downloaded[crash_data.url_of("oi", symbol, day)]
             qbad = r["nonpositive_or_nonfinite_quantity"]
@@ -93,18 +91,20 @@ def source_survey(
                 parsed = crash_data.parse_metrics(blob)
                 if len(parsed) != r["local_rows"]:
                     raise ValueError("clean parser row count mismatch")
-                rows.append({
-                    "day": day, "status": "clean", "rows": r["archive_rows"],
-                    "archive_sha256": r["archive_sha256"],
-                    "legacy_sha256": r["legacy_file_sha256"],
-                })
+                rows.append(
+                    {
+                        "day": day,
+                        "status": "clean",
+                        "rows": r["archive_rows"],
+                        "archive_sha256": r["archive_sha256"],
+                        "legacy_sha256": r["legacy_file_sha256"],
+                    }
+                )
                 continue
 
             # Strictly verify every ZIP row and the original notional series;
             # equal per-column nonpositive counts alone are insufficient.
-            upgraded, n = _quantity_from_original(
-                source, blob, quarantine_zero_pairs=True
-            )
+            upgraded, n = _quantity_from_original(source, blob, quarantine_zero_pairs=True)
             invalid = ~upgraded["oi_valid"].to_numpy(dtype=bool)
             quantity = pd.to_numeric(upgraded["oi_qty"], errors="raise").to_numpy(dtype=float)
             if n != r["local_rows"] or not np.array_equal(invalid, np.isnan(quantity)):
@@ -119,17 +119,24 @@ def source_survey(
                 "expect_zero_pairs": count,
             }
             candidates.append(pin)
-            rows.append({
-                "day": day, "status": "exact_zero_pairs",
-                "rows": n, "unavailable_quantity": count,
-                "archive_sha256": r["archive_sha256"],
-                "legacy_sha256": r["legacy_file_sha256"],
-            })
+            rows.append(
+                {
+                    "day": day,
+                    "status": "exact_zero_pairs",
+                    "rows": n,
+                    "unavailable_quantity": count,
+                    "archive_sha256": r["archive_sha256"],
+                    "legacy_sha256": r["legacy_file_sha256"],
+                }
+            )
         except Exception as exc:
-            rows.append({
-                "day": day, "status": "blocked",
-                "reason": f"{type(exc).__name__}: {exc}",
-            })
+            rows.append(
+                {
+                    "day": day,
+                    "status": "blocked",
+                    "reason": f"{type(exc).__name__}: {exc}",
+                }
+            )
 
     blocked = [x["day"] for x in rows if x["status"] == "blocked"]
     clean = [x["day"] for x in rows if x["status"] == "clean"]
@@ -187,22 +194,19 @@ def write_new_manifest(path: Path, report: dict) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(
-        description="Read-only survey of at most 20 pre-holdout legacy OI daily ZIPs"
-    )
+    p = argparse.ArgumentParser(description="Read-only survey of at most 20 pre-holdout legacy OI daily ZIPs")
     p.add_argument("--config", type=Path, required=True)
     p.add_argument("--symbol", default="BTCUSDT")
     p.add_argument("--start", required=True, help="first UTC day (YYYY-MM-DD)")
     p.add_argument("--days", type=int, default=10)
     p.add_argument(
-        "--manifest-out", type=Path,
+        "--manifest-out",
+        type=Path,
         help="EXPLICIT opt-in: create a NEW plan file only when all days are exact zero-pair candidates",
     )
     a = p.parse_args(argv)
     try:
-        report = source_survey(
-            a.config, symbol=a.symbol, start=a.start, days=a.days
-        )
+        report = source_survey(a.config, symbol=a.symbol, start=a.start, days=a.days)
         if a.manifest_out:
             write_new_manifest(a.manifest_out, report)
             report["manifest_created"] = str(a.manifest_out)

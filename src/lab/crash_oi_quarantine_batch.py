@@ -30,9 +30,12 @@ def load_pinned_plan(plan_path: Path, *, holdout_start: date) -> dict:
         raise ValueError(f"unsafe or missing pin manifest: {plan_path}")
     with plan_path.open(encoding="utf-8") as stream:
         plan = json.load(stream)
-    if not isinstance(plan, dict) or set(plan) != {
-        "schema_version", "symbol", "holdout_start", "entries"
-    } or type(plan["schema_version"]) is not int or plan["schema_version"] != 1:
+    if (
+        not isinstance(plan, dict)
+        or set(plan) != {"schema_version", "symbol", "holdout_start", "entries"}
+        or type(plan["schema_version"]) is not int
+        or plan["schema_version"] != 1
+    ):
         raise ValueError("unsupported or malformed historical OI pin manifest")
     symbol = plan["symbol"]
     if not isinstance(symbol, str) or not SYMBOL_RE.fullmatch(symbol):
@@ -86,14 +89,16 @@ def execute_pinned_plan(
     entries = plan["entries"]
     pins = []
     for entry in entries:
-        pins.append({
-            "config_path": config_path,
-            "symbol": symbol,
-            "day": entry["day"],
-            "archive_sha256": entry["archive_sha256"],
-            "legacy_sha256": entry["legacy_sha256"],
-            "expect_zero_pairs": entry["expect_zero_pairs"],
-        })
+        pins.append(
+            {
+                "config_path": config_path,
+                "symbol": symbol,
+                "day": entry["day"],
+                "archive_sha256": entry["archive_sha256"],
+                "legacy_sha256": entry["legacy_sha256"],
+                "expect_zero_pairs": entry["expect_zero_pairs"],
+            }
+        )
     if get is not None:
         for pin in pins:
             pin["get"] = get
@@ -107,17 +112,18 @@ def execute_pinned_plan(
             result = quarantine_day(**pin, apply=False)
         except Exception as exc:
             raise ValueError(
-                f"read-only preflight failed at {pin['day']}; "
-                f"zero days modified: {type(exc).__name__}: {exc}"
+                f"read-only preflight failed at {pin['day']}; zero days modified: {type(exc).__name__}: {exc}"
             ) from exc
         if not result.get("eligible_for_explicit_quarantine"):
             raise ValueError(f"{pin['day']} did not qualify for explicit quarantine")
-        inspected.append({
-            "day": pin["day"],
-            "zero_pairs": result["quarantine_zero_pairs"],
-            "validated_archive_sha256": result["original_archive_sha256"],
-            "validated_legacy_sha256": result["original_legacy_sha256"],
-        })
+        inspected.append(
+            {
+                "day": pin["day"],
+                "zero_pairs": result["quarantine_zero_pairs"],
+                "validated_archive_sha256": result["original_archive_sha256"],
+                "validated_legacy_sha256": result["original_legacy_sha256"],
+            }
+        )
 
     if not apply:
         return {
@@ -139,10 +145,7 @@ def execute_pinned_plan(
             committed.append(pin["day"])
             report = audit_migrations(config_path, symbol)
             if not report["ok"]:
-                raise ValueError(
-                    "post-commit independent audit failed: "
-                    + "; ".join(report["issues"])
-                )
+                raise ValueError("post-commit independent audit failed: " + "; ".join(report["issues"]))
         except Exception as exc:
             raise ValueError(
                 f"batch stopped at {pin['day']} after {len(committed)} "
@@ -173,9 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)
     try:
-        result = execute_pinned_plan(
-            args.config, args.manifest, apply=args.apply
-        )
+        result = execute_pinned_plan(args.config, args.manifest, apply=args.apply)
     except (ValueError, OSError, RuntimeError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, sort_keys=True, indent=2))

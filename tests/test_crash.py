@@ -289,19 +289,12 @@ def test_cli_research_counts_trials_but_blocks_unqualified_holdout(tmp_path, cap
         lab_main(["--config", str(tmp_path / "lab.toml"), "crash", "release", "--reason", "test"])
     trials = [json.loads(x) for x in (tmp_path / "results" / fr.TRIALS).read_text().splitlines()]
     assert [t["holdout"] for t in trials] == [False, False, False]
-    assert all(
-        t["kind"] == "crash-study" and t["status"] == "completed" and "sr_daily" in t["result"]
-        for t in trials
-    )
+    assert all(t["kind"] == "crash-study" and t["status"] == "completed" and "sr_daily" in t["result"] for t in trials)
     assert all(t["params"]["oi_measure"] == "contract-quantity-v1" for t in trials)
-    assert all(
-        t["params"]["execution_model"] == "reference-taker-fixed-base-two-fill-notional-fees-v1"
-        for t in trials
-    )
+    assert all(t["params"]["execution_model"] == "reference-taker-fixed-base-two-fill-notional-fees-v1" for t in trials)
     assert all(t["result"]["funding_status"] == "not_modelled" for t in trials)
     assert all(
-        [s["flat_price_round_trip_bps"] for s in t["result"]["fixed_execution_scenarios"]]
-        == [20, 30, 50]
+        [s["flat_price_round_trip_bps"] for s in t["result"]["fixed_execution_scenarios"]] == [20, 30, 50]
         for t in trials
     )
     assert all(t["attempt_id"] for t in trials)
@@ -311,13 +304,15 @@ def test_cli_research_counts_trials_but_blocks_unqualified_holdout(tmp_path, cap
         streams = trial["inputs"]["streams"]
         assert all(stream["complete"] for stream in streams)
         assert {stream["name"] for stream in streams} == {
-            "klines:AUSDT", "oi:AUSDT",
-            "klines:BUSDT", "oi:BUSDT",
-            "klines:XUSDT", "oi:XUSDT",
+            "klines:AUSDT",
+            "oi:AUSDT",
+            "klines:BUSDT",
+            "oi:BUSDT",
+            "klines:XUSDT",
+            "oi:XUSDT",
         }
         assert next(s for s in streams if s["name"] == "klines:AUSDT")["records"] > 1
     assert trials[0]["params"]["drop_pct"] == 5 and trials[2]["params"]["hold_min"] == 1440  # the preset
-
 
 
 def test_failed_crash_attempt_is_durable_before_reading_market_data(tmp_path, monkeypatch):
@@ -338,10 +333,18 @@ def test_failed_crash_attempt_is_durable_before_reading_market_data(tmp_path, mo
 
     monkeypatch.setattr(cs, "run", simulated_failure)
     with pytest.raises(SystemExit, match="synthetic invalid input"):
-        lab_main([
-            "--config", str(tmp_path / "lab.toml"), "crash", "study",
-            "--symbols", "BTCUSDT", "--mode", "breakdown",
-        ])
+        lab_main(
+            [
+                "--config",
+                str(tmp_path / "lab.toml"),
+                "crash",
+                "study",
+                "--symbols",
+                "BTCUSDT",
+                "--mode",
+                "breakdown",
+            ]
+        )
     attempts = history(results_dir)
     assert len(attempts) == 1
     assert attempts[0]["status"] == "failed"
@@ -361,8 +364,15 @@ def test_blocked_crash_holdout_does_not_reserve_or_read_data(tmp_path, monkeypat
     monkeypatch.setattr(cs, "boundary", unexpected)
     monkeypatch.setattr(cs, "run", unexpected)
     with pytest.raises(SystemExit, match="crash holdout is disabled"):
-        lab_main([
-            "--config", str(tmp_path / "lab.toml"), "crash", "study",
-            "--symbols", "BTCUSDT", "--holdout",
-        ])
+        lab_main(
+            [
+                "--config",
+                str(tmp_path / "lab.toml"),
+                "crash",
+                "study",
+                "--symbols",
+                "BTCUSDT",
+                "--holdout",
+            ]
+        )
     assert history(tmp_path / "results") == []

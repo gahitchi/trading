@@ -83,9 +83,7 @@ def audit_migrations(config_path: Path, symbol: str = "BTCUSDT") -> dict:
             quarantined = meta.get("quality_policy") == "quarantined-original-zero-pairs-v1"
             if meta.get("quality_policy") is not None and not quarantined:
                 raise ValueError("unknown OI quality policy")
-            expected_columns = set(before.columns) | (
-                {"oi_qty", "oi_valid"} if quarantined else {"oi_qty"}
-            )
+            expected_columns = set(before.columns) | ({"oi_qty", "oi_valid"} if quarantined else {"oi_qty"})
             if (
                 "oi_qty" in before
                 or "oi_valid" in before
@@ -96,9 +94,7 @@ def audit_migrations(config_path: Path, symbol: str = "BTCUSDT") -> dict:
                 raise ValueError("original/updated schema or record count differs")
             # Preserve all original timestamps and notional values byte-for-byte
             # at the Parquet level, even when the original OI pair was zero.
-            pd.testing.assert_frame_equal(
-                after[list(before.columns)], before, check_exact=True
-            )
+            pd.testing.assert_frame_equal(after[list(before.columns)], before, check_exact=True)
             crash_data.validate_oi_quantity(after)
             if quarantined:
                 mask = ~after["oi_valid"].to_numpy(dtype=bool)
@@ -106,10 +102,7 @@ def audit_migrations(config_path: Path, symbol: str = "BTCUSDT") -> dict:
                     int(mask.sum()) != meta["quarantined_zero_pairs"]
                 ):
                     raise ValueError("quarantined zero-pair count differs from manifest")
-                stamps = [
-                    pd.Timestamp(ts).isoformat()
-                    for ts in after.loc[mask, "ts"]
-                ]
+                stamps = [pd.Timestamp(ts).isoformat() for ts in after.loc[mask, "ts"]]
                 if stamps != meta.get("quarantine_timestamps"):
                     raise ValueError("quarantine timestamps differ from manifest")
                 if not mask.any():
@@ -163,9 +156,7 @@ def audit_migrations(config_path: Path, symbol: str = "BTCUSDT") -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(
-        description="Read-only SHA-256, schema and content audit of historical OI migrations"
-    )
+    p = argparse.ArgumentParser(description="Read-only SHA-256, schema and content audit of historical OI migrations")
     p.add_argument("--config", required=True, type=Path, help="original research lab.toml")
     p.add_argument("--symbol", default="BTCUSDT")
     args = p.parse_args(argv)

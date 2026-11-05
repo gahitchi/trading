@@ -1,4 +1,5 @@
 """Synthetic crash postmortem and exposure-matched calendar placebo tests."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -11,15 +12,21 @@ from lab import crash_placebo, crash_postmortem
 def minute_bars(start="2026-01-01", days=31):
     idx = pd.date_range(
         pd.Timestamp(start, tz="UTC") + pd.Timedelta(minutes=1),
-        periods=days * 1440, freq="min",
+        periods=days * 1440,
+        freq="min",
     )
     # Synthetic drift is deterministic but never consulted by sampling.
     o = 100 + np.arange(len(idx)) * 0.00002
     c = o + np.sin(np.arange(len(idx)) / 1000) * 0.1
-    return pd.DataFrame({
-        "open": o, "high": np.maximum(o, c) + 0.2,
-        "low": np.minimum(o, c) - 0.2, "close": c,
-    }, index=idx)
+    return pd.DataFrame(
+        {
+            "open": o,
+            "high": np.maximum(o, c) + 0.2,
+            "low": np.minimum(o, c) - 0.2,
+            "close": c,
+        },
+        index=idx,
+    )
 
 
 def original():
@@ -27,15 +34,26 @@ def original():
     end = start + pd.Timedelta(hours=4)
     # Reference gross 5% for short; price-level economics are
     # deliberately independent of the synthetic control bars.
-    return pd.DataFrame([{
-        "signal": start - pd.Timedelta(minutes=2),
-        "entry": start, "exit": end, "gross": 0.05,
-        "net": 0.047, "weight": 1.4, "reason": "stop",
-        "entry_reference": 100.0, "exit_reference": 95.0,
-        "fee_cost": 0.001, "slippage_cost": 0.002,
-        "funding_return": 0.0, "funding_return_upper": 0.0,
-        "funding_ambiguous_events": 0,
-    }])
+    return pd.DataFrame(
+        [
+            {
+                "signal": start - pd.Timedelta(minutes=2),
+                "entry": start,
+                "exit": end,
+                "gross": 0.05,
+                "net": 0.047,
+                "weight": 1.4,
+                "reason": "stop",
+                "entry_reference": 100.0,
+                "exit_reference": 95.0,
+                "fee_cost": 0.001,
+                "slippage_cost": 0.002,
+                "funding_return": 0.0,
+                "funding_return_upper": 0.0,
+                "funding_ambiguous_events": 0,
+            }
+        ]
+    )
 
 
 def test_postmortem_reconciles_cashflows_and_exit_reason():
@@ -76,10 +94,20 @@ def test_postmortem_rejects_missing_candle_without_skip():
 def test_utc_month_and_duration_weight_matched_without_return_optimization():
     bars, ref = minute_bars(), original()
     first = crash_placebo.matched_placebo(
-        bars, ref, side=-1, fee_bps=5.0, slippage_bps=5.0, seed=20261105,
+        bars,
+        ref,
+        side=-1,
+        fee_bps=5.0,
+        slippage_bps=5.0,
+        seed=20261105,
     )
     second = crash_placebo.matched_placebo(
-        bars, ref, side=-1, fee_bps=5.0, slippage_bps=5.0, seed=20261105,
+        bars,
+        ref,
+        side=-1,
+        fee_bps=5.0,
+        slippage_bps=5.0,
+        seed=20261105,
     )
     pd.testing.assert_frame_equal(first, second)
     assert len(first) == len(ref) == 1
@@ -99,14 +127,24 @@ def test_placebo_fails_when_not_enough_complete_same_month_data():
     bars = minute_bars().loc["2026-01-14":"2026-01-16"]
     with pytest.raises(ValueError, match="no valid"):
         crash_placebo.matched_placebo(
-            bars, original(), side=-1, fee_bps=5, slippage_bps=5, seed=42,
+            bars,
+            original(),
+            side=-1,
+            fee_bps=5,
+            slippage_bps=5,
+            seed=42,
         )
 
 
 def test_matched_placebo_refuses_weight_or_exposure_mismatch():
     bars, ref = minute_bars(), original()
     control = crash_placebo.matched_placebo(
-        bars, ref, side=-1, fee_bps=5, slippage_bps=5, seed=17,
+        bars,
+        ref,
+        side=-1,
+        fee_bps=5,
+        slippage_bps=5,
+        seed=17,
     )
     changed = control.copy()
     changed.loc[0, "weight"] *= 1.01

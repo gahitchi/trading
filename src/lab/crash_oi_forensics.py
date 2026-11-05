@@ -105,14 +105,16 @@ def inspect_source(
     samples = []
     for idx in flagged[:12]:
         index = int(idx)
-        samples.append({
-            "archive_row": index,
-            "timestamp": str(archive.iloc[index]["create_time"]),
-            "quantity": str(archive.iloc[index]["sum_open_interest"]),
-            "notional": str(archive.iloc[index]["sum_open_interest_value"]),
-            "quantity_invalid": bool(qty_bad[index]),
-            "notional_invalid": bool(value_bad[index]),
-        })
+        samples.append(
+            {
+                "archive_row": index,
+                "timestamp": str(archive.iloc[index]["create_time"]),
+                "quantity": str(archive.iloc[index]["sum_open_interest"]),
+                "notional": str(archive.iloc[index]["sum_open_interest_value"]),
+                "quantity_invalid": bool(qty_bad[index]),
+                "notional_invalid": bool(value_bad[index]),
+            }
+        )
 
     return {
         "read_only": True,
@@ -129,16 +131,12 @@ def inspect_source(
         "nonpositive_or_nonfinite_quantity": int(qty_bad.sum()),
         "nonpositive_or_nonfinite_notional": int(value_bad.sum()),
         "first_invalid_rows": samples,
-        "safe_to_migrate_under_current_policy": bool(
-            not flagged.size and timestamp_set_match and matching_notional
-        ),
+        "safe_to_migrate_under_current_policy": bool(not flagged.size and timestamp_set_match and matching_notional),
     }
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Read-only investigation of invalid Binance historical OI archives"
-    )
+    parser = argparse.ArgumentParser(description="Read-only investigation of invalid Binance historical OI archives")
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--symbol", default="BTCUSDT")
     parser.add_argument("--day", help="one explicit pre-holdout date (default: first unmigrated day)")

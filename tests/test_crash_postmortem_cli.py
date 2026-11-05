@@ -1,4 +1,5 @@
 """Durable diagnostic replay uses only synthetic data and fixed placebo seeds."""
+
 from __future__ import annotations
 
 import json
@@ -28,6 +29,7 @@ def _mocks(monkeypatch, plan_path, *, bad_bars=False):
     if bad_bars:
         bars = bars.iloc[:1440].copy()
     frame = original()
+
     def run(_root, symbols, s, boundary, holdout=False, evidence=None):
         assert symbols == ["BTCUSDT"] and s.mode == "breakdown"
         assert boundary == pd.Timestamp("2026-05-08T00:00:00Z")
@@ -40,11 +42,14 @@ def _mocks(monkeypatch, plan_path, *, bad_bars=False):
             end=pd.Timestamp("2026-01-31T23:59:00Z"),
             missing=[],
         )
+
     monkeypatch.setattr(study, "run", run)
+
     def load(_root, kind, symbol, *, before):
         assert kind == "klines" and symbol == "BTCUSDT"
         assert before == pd.Timestamp("2026-05-08T00:00:00Z")
         return bars.reset_index(names="ts")
+
     monkeypatch.setattr(crash_data, "load", load)
     plan = json.loads(plan_path.read_text())
     events = [
@@ -53,9 +58,9 @@ def _mocks(monkeypatch, plan_path, *, bad_bars=False):
             "fundingRate": "0.0001",
             "markPrice": "100.0",
         }
-        for t in pd.date_range("2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z",
-                               freq="8h", inclusive="left")
+        for t in pd.date_range("2026-01-01T00:00:00Z", "2026-02-01T00:00:00Z", freq="8h", inclusive="left")
     ]
+
     def load_verified(_config, _plan, symbol):
         assert symbol == "BTCUSDT"
         return {
@@ -63,6 +68,7 @@ def _mocks(monkeypatch, plan_path, *, bad_bars=False):
             "plan": plan,
             "events": events,
         }
+
     monkeypatch.setattr(crash_funding, "load_verified", load_verified)
 
 
@@ -86,11 +92,13 @@ def test_postmortem_cli_records_full_fixed_seed_placebo_and_remains_unqualified(
     assert len(records) == 1 and records[0]["status"] == "completed"
     assert records[0]["result"]["qualified"] is False
     assert records[0]["result"]["analysis_payload_sha256"] == report["analysis_payload_sha256"]
-    assert report["analysis_payload_sha256"] == crash_funding._digest({
-        "failure_analysis": report["failure_analysis"],
-        "matched_placebos": report["matched_placebos"],
-        "per_trade_diagnostics": report["per_trade_diagnostics"],
-    })
+    assert report["analysis_payload_sha256"] == crash_funding._digest(
+        {
+            "failure_analysis": report["failure_analysis"],
+            "matched_placebos": report["matched_placebos"],
+            "per_trade_diagnostics": report["per_trade_diagnostics"],
+        }
+    )
     assert len(records[0]["params"]["placebo_seeds"]) == 16
     assert records[0]["params"]["placebo_seeds"][0] == 20261105
     assert any(s["name"] == "funding:BTCUSDT" for s in records[0]["inputs"]["streams"])

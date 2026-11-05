@@ -2,6 +2,7 @@
 
 No live network or protected holdout market files are accessed.
 """
+
 import json
 
 import pandas as pd
@@ -22,29 +23,28 @@ def evidence():
             "start": "2024-01-01",
             "holdout_start": "2024-01-03",
         },
-        "events": [
-            {key: value for key, value in row.items() if key != "symbol"}
-            for row in source
-        ],
+        "events": [{key: value for key, value in row.items() if key != "symbol"} for row in source],
     }
 
 
 def one_trade(*, entry="2024-01-01T04:00:00Z", exit_="2024-01-01T20:00:00Z", reason="time"):
     entry_ref, exit_ref = 100.0, 95.0
     account = crash_execution.fill_accounting(-1, entry_ref, exit_ref, 5.0, 5.0)
-    return pd.DataFrame({
-        "signal": [pd.Timestamp(entry) - pd.Timedelta(minutes=2)],
-        "entry": [pd.Timestamp(entry)],
-        "exit": [pd.Timestamp(exit_)],
-        "gross": [account["reference_gross"]],
-        "net": [account["net"]],
-        "weight": [1.0],
-        "reason": [reason],
-        "entry_reference": [entry_ref],
-        "exit_reference": [exit_ref],
-        "fee_cost": [account["fee_cost"]],
-        "slippage_cost": [account["slippage_cost"]],
-    })
+    return pd.DataFrame(
+        {
+            "signal": [pd.Timestamp(entry) - pd.Timedelta(minutes=2)],
+            "entry": [pd.Timestamp(entry)],
+            "exit": [pd.Timestamp(exit_)],
+            "gross": [account["reference_gross"]],
+            "net": [account["net"]],
+            "weight": [1.0],
+            "reason": [reason],
+            "entry_reference": [entry_ref],
+            "exit_reference": [exit_ref],
+            "fee_cost": [account["fee_cost"]],
+            "slippage_cost": [account["slippage_cost"]],
+        }
+    )
 
 
 def test_funded_short_receives_and_pays_at_mark_then_stress_preserves_cashflows():
@@ -52,9 +52,7 @@ def test_funded_short_receives_and_pays_at_mark_then_stress_preserves_cashflows(
     paid = ledger.funded_trades(t, -1, evidence())
     assert paid["funding_events"].iloc[0] == 2
     assert paid["funding_return"].iloc[0] == pytest.approx(0.00005)
-    assert paid["net"].iloc[0] == pytest.approx(
-        t["net"].iloc[0] + 0.00005
-    )
+    assert paid["net"].iloc[0] == pytest.approx(t["net"].iloc[0] + 0.00005)
     stressed = crash_execution.rescore(paid, -1, 5.0, 20.0)
     assert stressed["funding_return"].iloc[0] == pytest.approx(0.00005)
     assert stressed["net"].iloc[0] == pytest.approx(
@@ -73,19 +71,13 @@ def test_funding_model_bounds_ambiguous_exit_minute_event_without_trade_selectio
     assert bounded["funding_return"].iloc[0] == pytest.approx(-0.00005)
     assert bounded["funding_return_upper"].iloc[0] == pytest.approx(+0.00005)
     assert bounded["funding_bound_width"].iloc[0] == pytest.approx(0.0001)
-    assert bounded["net"].iloc[0] == pytest.approx(
-        original["net"].iloc[0] - 0.00005
-    )
-    assert bounded["net_upper"].iloc[0] == pytest.approx(
-        original["net"].iloc[0] + 0.00005
-    )
+    assert bounded["net"].iloc[0] == pytest.approx(original["net"].iloc[0] - 0.00005)
+    assert bounded["net_upper"].iloc[0] == pytest.approx(original["net"].iloc[0] + 0.00005)
 
 
 def test_funding_model_rejects_uncovered_holdout_trade():
     with pytest.raises(ValueError, match="outside audited"):
-        ledger.funded_trades(
-            one_trade(exit_="2024-01-03T00:00:00Z"), -1, evidence()
-        )
+        ledger.funded_trades(one_trade(exit_="2024-01-03T00:00:00Z"), -1, evidence())
 
 
 def test_funded_run_values_daily_baseline_as_well_as_strategy():
@@ -115,6 +107,7 @@ def test_cli_funding_adjusted_attempt_references_source_and_records_real_cashflo
 
     frame = one_trade()
     baseline = frame.copy()
+
     def fake_run(_root, _symbols, _settings, _boundary, *, holdout=False, evidence=None):
         assert not holdout
         assert evidence is not None
@@ -128,10 +121,20 @@ def test_cli_funding_adjusted_attempt_references_source_and_records_real_cashflo
         )
 
     monkeypatch.setattr(study, "run", fake_run)
-    rc = lab_main([
-        "--config", str(cfg), "crash", "study", "--mode", "breakdown",
-        "--symbols", "BTCUSDT", "--funding-plan", str(plan_path),
-    ])
+    rc = lab_main(
+        [
+            "--config",
+            str(cfg),
+            "crash",
+            "study",
+            "--mode",
+            "breakdown",
+            "--symbols",
+            "BTCUSDT",
+            "--funding-plan",
+            str(plan_path),
+        ]
+    )
     assert rc == 0
     records = history(tmp_path / "results")
     assert len(records) == 1
@@ -146,10 +149,7 @@ def test_cli_funding_adjusted_attempt_references_source_and_records_real_cashflo
         json.loads(plan_path.read_text())
     )
     streams = recorded["inputs"]["streams"]
-    assert any(
-        s["name"] == "funding:BTCUSDT" and s["records"] == 7 and s["complete"]
-        for s in streams
-    )
+    assert any(s["name"] == "funding:BTCUSDT" and s["records"] == 7 and s["complete"] for s in streams)
     assert len(recorded["result"]["fixed_execution_scenarios"]) == 3
     assert recorded["holdout"] is False
 
@@ -171,10 +171,20 @@ def test_tampered_local_funding_source_blocks_attempt_before_market_study(tmp_pa
 
     monkeypatch.setattr(study, "run", forbidden)
     with pytest.raises(SystemExit, match="funding source audit failed"):
-        lab_main([
-            "--config", str(cfg), "crash", "study", "--mode", "breakdown",
-            "--symbols", "BTCUSDT", "--funding-plan", str(plan_path),
-        ])
+        lab_main(
+            [
+                "--config",
+                str(cfg),
+                "crash",
+                "study",
+                "--mode",
+                "breakdown",
+                "--symbols",
+                "BTCUSDT",
+                "--funding-plan",
+                str(plan_path),
+            ]
+        )
     assert len(history(tmp_path / "results")) == 1
     assert history(tmp_path / "results")[0]["status"] == "failed"
 
@@ -233,7 +243,8 @@ def test_cost_stress_preserves_both_funding_endpoints_and_trade_count():
 
 def test_no_settlements_during_short_trade_validated_zero_without_imputation():
     original = one_trade(
-        entry="2024-01-01T01:00:00Z", exit_="2024-01-01T02:00:00Z",
+        entry="2024-01-01T01:00:00Z",
+        exit_="2024-01-01T02:00:00Z",
     )
     funded = ledger.funded_trades(original, -1, evidence())
     assert funded["funding_events"].iloc[0] == 0

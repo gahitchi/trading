@@ -13,7 +13,9 @@ T0 = datetime(2026, 11, 5, 0, 0, tzinfo=UTC)
 
 
 def policy(**kwargs):
-    fields = dict(currency="USD", initial_capital="1000.00", quantum="0.01", reinvest_fraction="0.5", max_deployable="1500.00")
+    fields = dict(
+        currency="USD", initial_capital="1000.00", quantum="0.01", reinvest_fraction="0.5", max_deployable="1500.00"
+    )
     return AllocationPolicy(**(fields | kwargs))
 
 
@@ -23,20 +25,38 @@ def ledger(**kwargs):
 
 def event(i, kind, amount, *, minutes=1, **kwargs):
     return AllocationEvent(
-        event_id=f"event:{i}", source_id=f"source:{i}", timestamp=T0 + timedelta(minutes=minutes),
-        currency="USD", kind=kind, amount=amount, **kwargs,
+        event_id=f"event:{i}",
+        source_id=f"source:{i}",
+        timestamp=T0 + timedelta(minutes=minutes),
+        currency="USD",
+        kind=kind,
+        amount=amount,
+        **kwargs,
     )
 
 
 def trade(i, net, *, gross=None, fees="0.00", slippage="0.00", funding="0.00", released_mark="0.00", minutes=1):
-    return event(i, "trade", net, minutes=minutes, gross=net if gross is None else gross,
-                 fees=fees, slippage=slippage, funding=funding, released_mark=released_mark)
+    return event(
+        i,
+        "trade",
+        net,
+        minutes=minutes,
+        gross=net if gross is None else gross,
+        fees=fees,
+        slippage=slippage,
+        funding=funding,
+        released_mark=released_mark,
+    )
 
 
 def close(i, day, mark="0.00"):
     return AllocationEvent(
-        f"event:{i}", f"source:{i}", datetime.combine(day + timedelta(days=1), datetime.min.time(), UTC),
-        "USD", "day_close", mark,
+        f"event:{i}",
+        f"source:{i}",
+        datetime.combine(day + timedelta(days=1), datetime.min.time(), UTC),
+        "USD",
+        "day_close",
+        mark,
     )
 
 
@@ -94,9 +114,10 @@ def test_configured_cap_limits_deployable_even_after_repeated_wins():
     assert ledger_state.risk_capacity == D("0")
 
 
-@pytest.mark.parametrize("fraction,expected_deployable,expected_reserve", [
-    ("0", "1000.00", "10.01"), ("1", "1010.01", "0.00"), ("0.333333", "1003.33", "6.68")
-])
+@pytest.mark.parametrize(
+    "fraction,expected_deployable,expected_reserve",
+    [("0", "1000.00", "10.01"), ("1", "1010.01", "0.00"), ("0.333333", "1003.33", "6.68")],
+)
 def test_rounding_conserves_every_cent(fraction, expected_deployable, expected_reserve):
     ledger_state = ledger(reinvest_fraction=fraction)
     ledger_state.apply(trade("win", "10.01"))
@@ -110,10 +131,22 @@ def test_trade_costs_are_reconciled_and_funding_not_double_counted():
     ledger_state.apply(trade("audited", "120.00", gross="121.00", fees="0.40", slippage="0.80", funding="0.20"))
     assert ledger_state.equity == D("1120.00")
     with pytest.raises(ValueError, match="trade net does not reconcile"):
-        ledger_state.apply(trade("broken", "121.00", gross="121.00", fees="0.40", slippage="0.80", funding="0.20", minutes=2))
+        ledger_state.apply(
+            trade("broken", "121.00", gross="121.00", fees="0.40", slippage="0.80", funding="0.20", minutes=2)
+        )
     assert ledger_state.equity == D("1120.00")
     with pytest.raises(ValueError, match="duplicate"):
-        ledger_state.apply(AllocationEvent("event:different", "source:audited", T0 + timedelta(minutes=3), "USD", "adjustment", "0.20", reason="funding"))
+        ledger_state.apply(
+            AllocationEvent(
+                "event:different",
+                "source:audited",
+                T0 + timedelta(minutes=3),
+                "USD",
+                "adjustment",
+                "0.20",
+                reason="funding",
+            )
+        )
 
 
 def test_standalone_funding_adjustment_is_signed_realized_pnl_not_profit_allocation():
@@ -154,7 +187,9 @@ def test_duplicate_source_id_rejected_even_with_new_event_id():
     ledger_state = ledger()
     ledger_state.apply(trade("a", "1.00"))
     other = event("b", "adjustment", "-1.00", minutes=2, reason="fee")
-    other = AllocationEvent(other.event_id, "source:a", other.timestamp, other.currency, other.kind, other.amount, reason="fee")
+    other = AllocationEvent(
+        other.event_id, "source:a", other.timestamp, other.currency, other.kind, other.amount, reason="fee"
+    )
     with pytest.raises(ValueError, match="duplicate"):
         ledger_state.apply(other)
     assert ledger_state.equity == D("1001.00")
@@ -208,7 +243,9 @@ def test_explicit_reserve_release_is_a_capital_transfer_not_pnl():
 
 def test_currency_mismatch_and_imprecise_money_fail_without_mutation():
     ledger_state = ledger()
-    original = event("bad", "trade", "0.001", gross="0.001", fees="0.00", slippage="0.00", funding="0.00", released_mark="0.00")
+    original = event(
+        "bad", "trade", "0.001", gross="0.001", fees="0.00", slippage="0.00", funding="0.00", released_mark="0.00"
+    )
     with pytest.raises(ValueError, match="quantized"):
         ledger_state.apply(original)
     bad_currency = AllocationEvent("event:eur", "source:eur", T0 + timedelta(minutes=2), "EUR", "mark", "2.00")

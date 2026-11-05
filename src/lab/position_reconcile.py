@@ -91,6 +91,7 @@ def _source_digest(row: SimulatedFill | PositionMark | CashAdjustment) -> str:
     not look like the same immutable observation, even if reported
     aggregate P&L coincidentally stays identical.
     """
+
     def primitive(value):
         if isinstance(value, datetime):
             return value.isoformat()
@@ -102,10 +103,15 @@ def _source_digest(row: SimulatedFill | PositionMark | CashAdjustment) -> str:
             return primitive(asdict(value))
         return value
 
-    encoded = json.dumps({
-        "source_type": type(row).__name__,
-        "record": primitive(row),
-    }, allow_nan=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    encoded = json.dumps(
+        {
+            "source_type": type(row).__name__,
+            "record": primitive(row),
+        },
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -144,9 +150,7 @@ def _next_position(old: Position | None, side: str, qty: Decimal, price: Decimal
     if opened and signed_fill * opened < 0:
         closing = min(abs(opened), qty)
         direction = Decimal(1) if opened > 0 else Decimal(-1)
-        realized = (direction * closing * (price - current.average_price)).quantize(
-            quantum, rounding=ROUND_HALF_EVEN
-        )
+        realized = (direction * closing * (price - current.average_price)).quantize(quantum, rounding=ROUND_HALF_EVEN)
     remaining = opened + signed_fill
     if remaining == 0:
         return None, realized
@@ -155,14 +159,13 @@ def _next_position(old: Position | None, side: str, qty: Decimal, price: Decimal
     elif opened * signed_fill < 0:
         average = current.average_price
     else:
-        average = (
-            abs(opened) * current.average_price + abs(signed_fill) * price
-        ) / abs(remaining)
+        average = (abs(opened) * current.average_price + abs(signed_fill) * price) / abs(remaining)
     return Position(remaining, average), realized
 
 
 def compile_source(
-    policy: AllocationPolicy, start_day: date,
+    policy: AllocationPolicy,
+    start_day: date,
     records: list[SimulatedFill | PositionMark | CashAdjustment],
 ) -> tuple[list[list[AllocationEvent]], dict[str, Position]]:
     """Compile a frozen, chronologically ordered simulated market-event source.
@@ -211,30 +214,54 @@ def compile_source(
             net = gross - fee - slip
             batch = [
                 AllocationEvent(
-                    f"e.{fingerprint}.fill", f"{row.source_id}.fill", row.timestamp,
-                    policy.currency, "trade", str(net), gross=str(gross),
-                    fees=str(fee), slippage=str(slip), funding="0",
+                    f"e.{fingerprint}.fill",
+                    f"{row.source_id}.fill",
+                    row.timestamp,
+                    policy.currency,
+                    "trade",
+                    str(net),
+                    gross=str(gross),
+                    fees=str(fee),
+                    slippage=str(slip),
+                    funding="0",
                     released_mark="0",
                 ),
                 AllocationEvent(
-                    f"e.{fingerprint}.mark", f"{row.source_id}.mark", row.timestamp,
-                    policy.currency, "mark", str(mark_value),
+                    f"e.{fingerprint}.mark",
+                    f"{row.source_id}.mark",
+                    row.timestamp,
+                    policy.currency,
+                    "mark",
+                    str(mark_value),
                 ),
             ]
         elif isinstance(row, PositionMark):
             amount = _mark_total(positions, row.marks, q, row.timestamp)
-            batch = [AllocationEvent(
-                f"e.{fingerprint}.mark", f"{row.source_id}.mark", row.timestamp,
-                policy.currency, "day_close" if row.close_day else "mark", str(amount),
-            )]
+            batch = [
+                AllocationEvent(
+                    f"e.{fingerprint}.mark",
+                    f"{row.source_id}.mark",
+                    row.timestamp,
+                    policy.currency,
+                    "day_close" if row.close_day else "mark",
+                    str(amount),
+                )
+            ]
         else:
             amount = _exact(row.amount, "cash adjustment")
             if amount != amount.quantize(q):
                 raise ValueError("cash settlement must be quantized")
-            batch = [AllocationEvent(
-                f"e.{fingerprint}.settle", f"{row.source_id}.settle", row.timestamp,
-                policy.currency, "adjustment", str(amount), reason=row.reason,
-            )]
+            batch = [
+                AllocationEvent(
+                    f"e.{fingerprint}.settle",
+                    f"{row.source_id}.settle",
+                    row.timestamp,
+                    policy.currency,
+                    "adjustment",
+                    str(amount),
+                    reason=row.reason,
+                )
+            ]
         for event in batch:
             ledger.apply(event)  # strategy-free, fail-closed economic validation
         batches.append(batch)

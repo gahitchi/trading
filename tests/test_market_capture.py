@@ -101,7 +101,11 @@ def test_capture_records_connection_loss_and_recovers(tmp_path):
 
     result = asyncio.run(
         capture_feed(
-            "market", "fake://market", tmp_path, "session", 6.0,
+            "market",
+            "fake://market",
+            tmp_path,
+            "session",
+            6.0,
             connector=connector,
             clock=clock,
             timestamp=lambda: 1_000_000,
@@ -126,7 +130,11 @@ def test_invalid_message_logged_without_breaking_capture(tmp_path):
 
     result = asyncio.run(
         capture_feed(
-            "market", "fake://market", tmp_path, "session", 4.0,
+            "market",
+            "fake://market",
+            tmp_path,
+            "session",
+            4.0,
             connector=connector,
             clock=FakeClock(),
             timestamp=lambda: 123,
@@ -172,7 +180,11 @@ def test_deliberate_disconnect_reconnects_and_logs_gap(tmp_path):
 
     result = asyncio.run(
         capture_feed(
-            "market", "fake://market", tmp_path, "session", 12.0,
+            "market",
+            "fake://market",
+            tmp_path,
+            "session",
+            12.0,
             connector=connector,
             clock=FakeClock(),
             timestamp=lambda: 123,
@@ -194,9 +206,7 @@ def test_deliberate_disconnect_reconnects_and_logs_gap(tmp_path):
 
 def test_invalid_injection_threshold_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="fault_disconnect_after"):
-        asyncio.run(run_capture(
-            tmp_path, ["BTCUSDT"], 1, connector=lambda _: None, fault_disconnect_after=0
-        ))
+        asyncio.run(run_capture(tmp_path, ["BTCUSDT"], 1, connector=lambda _: None, fault_disconnect_after=0))
 
 
 def test_insufficient_disk_blocks_before_opening_connection(tmp_path):
@@ -209,7 +219,9 @@ def test_insufficient_disk_blocks_before_opening_connection(tmp_path):
     with pytest.raises(LowDiskSpace, match="recording stopped"):
         asyncio.run(
             run_capture(
-                tmp_path, ["BTCUSDT"], 10,
+                tmp_path,
+                ["BTCUSDT"],
+                10,
                 connector=connector,
                 min_free_mib=512,
                 free_bytes=lambda _: 0,
@@ -229,8 +241,11 @@ def test_disk_guard_polls_only_after_interval_and_then_fails(tmp_path):
         return free[0]
 
     guard = DiskSpaceGuard(
-        tmp_path, min_free_mib=512, interval_s=2.0,
-        clock=lambda: now[0], free_bytes=available_bytes,
+        tmp_path,
+        min_free_mib=512,
+        interval_s=2.0,
+        clock=lambda: now[0],
+        free_bytes=available_bytes,
     )
     guard.check(force=True)
     assert len(checks) == 1
@@ -262,7 +277,11 @@ def test_disk_exhaustion_is_fatal_but_finalizes_existing_journal(tmp_path):
     with pytest.raises(LowDiskSpace, match="simulated full"):
         asyncio.run(
             capture_feed(
-                "market", "fake://market", tmp_path, "session", 10.0,
+                "market",
+                "fake://market",
+                tmp_path,
+                "session",
+                10.0,
                 connector=connector,
                 clock=FakeClock(),
                 timestamp=lambda: 123,
@@ -279,8 +298,12 @@ def test_disk_reserve_cannot_be_disabled_below_minimum(tmp_path):
     with pytest.raises(ValueError, match="at least 64"):
         DiskSpaceGuard(tmp_path, min_free_mib=0)
     with pytest.raises(ValueError, match="at least 64"):
-        asyncio.run(run_capture(
-            tmp_path, ["BTCUSDT"], 1,
-            connector=lambda _: FakeSession([]),
-            min_free_mib=32,
-        ))
+        asyncio.run(
+            run_capture(
+                tmp_path,
+                ["BTCUSDT"],
+                1,
+                connector=lambda _: FakeSession([]),
+                min_free_mib=32,
+            )
+        )

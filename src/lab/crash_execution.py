@@ -24,8 +24,11 @@ STRESS = (
 
 
 def fill_accounting(
-    side: int, entry_reference: float, exit_reference: float,
-    fee_bps: float, slippage_bps: float,
+    side: int,
+    entry_reference: float,
+    exit_reference: float,
+    fee_bps: float,
+    slippage_bps: float,
 ) -> dict:
     """Returns fractions of entry-reference notional, for one fixed-base trade.
 
@@ -36,10 +39,7 @@ def fill_accounting(
     if type(side) is not int or side not in (-1, 1):
         raise ValueError("execution side must be +1 or -1")
     values = (entry_reference, exit_reference, fee_bps, slippage_bps)
-    if any(
-        isinstance(x, bool) or not isinstance(x, (int, float))
-        or not math.isfinite(x) for x in values
-    ):
+    if any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in values):
         raise ValueError("all execution prices and costs must be finite numbers")
     if entry_reference <= 0 or exit_reference <= 0:
         raise ValueError("execution reference prices must be positive")
@@ -77,8 +77,11 @@ def rescore(trades: pd.DataFrame, side: int, fee_bps: float, slippage_bps: float
     for index in updated.index:
         row = updated.loc[index]
         result = fill_accounting(
-            side, float(row["entry_reference"]), float(row["exit_reference"]),
-            fee_bps, slippage_bps,
+            side,
+            float(row["entry_reference"]),
+            float(row["exit_reference"]),
+            fee_bps,
+            slippage_bps,
         )
         if not math.isclose(float(row["gross"]), result["reference_gross"], rel_tol=1e-10, abs_tol=1e-12):
             raise ValueError("trade gross return and reference fill prices disagree")
@@ -104,20 +107,19 @@ def stress_summary(trades_by_symbol: dict[str, pd.DataFrame], side: int, start, 
 
     results = []
     for name, fee, slip in STRESS:
-        modified = {
-            symbol: rescore(frame, side, fee, slip)
-            for symbol, frame in trades_by_symbol.items()
-        }
+        modified = {symbol: rescore(frame, side, fee, slip) for symbol, frame in trades_by_symbol.items()}
         st = summarize(modified, start, end)
-        results.append({
-            "name": name,
-            "fee_bps_each_side": fee,
-            "slippage_bps_each_side": slip,
-            "flat_price_round_trip_bps": 2 * (fee + slip),
-            "trades": st["trades"],
-            "mean_net_bps": nullable_numbers(st["mean_bps"]),
-            "apr_pct": nullable_numbers(st["apr"]),
-            "sharpe": nullable_numbers(st["sharpe"]),
-            "newey_west_daily_t": nullable_numbers(st["t_nw"]),
-        })
+        results.append(
+            {
+                "name": name,
+                "fee_bps_each_side": fee,
+                "slippage_bps_each_side": slip,
+                "flat_price_round_trip_bps": 2 * (fee + slip),
+                "trades": st["trades"],
+                "mean_net_bps": nullable_numbers(st["mean_bps"]),
+                "apr_pct": nullable_numbers(st["apr"]),
+                "sharpe": nullable_numbers(st["sharpe"]),
+                "newey_west_daily_t": nullable_numbers(st["t_nw"]),
+            }
+        )
     return results

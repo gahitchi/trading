@@ -64,10 +64,7 @@ def _holdout_boundary(cfg) -> date:
 def _headroom(directory: Path, minimum_mib: int) -> None:
     free = shutil.disk_usage(directory).free
     if free < minimum_mib * 1024 * 1024:
-        raise RuntimeError(
-            f"insufficient disk space: {free / 1048576:.0f} MiB free, "
-            f"need at least {minimum_mib} MiB"
-        )
+        raise RuntimeError(f"insufficient disk space: {free / 1048576:.0f} MiB free, need at least {minimum_mib} MiB")
 
 
 def _backup(source: Path, backup: Path) -> str:
@@ -117,9 +114,7 @@ def _quantity_from_original(
         raise ValueError(f"invalid legacy timestamps: {source}")
     new = crash_data.parse_metrics(archive_blob, quarantine_zero_pairs=quarantine_zero_pairs)
     new_ts = pd.to_datetime(new["ts"], utc=True)
-    if len(old) != len(new) or not np.array_equal(
-        np.sort(old_ts.to_numpy()), np.sort(new_ts.to_numpy())
-    ):
+    if len(old) != len(new) or not np.array_equal(np.sort(old_ts.to_numpy()), np.sort(new_ts.to_numpy())):
         raise ValueError(f"original Binance archive timestamps differ: {source}")
     old_values = pd.to_numeric(old["oi_value"], errors="raise").to_numpy(dtype=float)
     if not np.isfinite(old_values).all():
@@ -199,15 +194,10 @@ def _migrate_one(
             raise ValueError("quarantine requires a positive exact zero-pair count")
     elif expected_zero_pairs is not None:
         raise ValueError("zero-pair count supplied without a pinned archive digest")
-    updated, records = _quantity_from_original(
-        source, blob, quarantine_zero_pairs=quarantine
-    )
+    updated, records = _quantity_from_original(source, blob, quarantine_zero_pairs=quarantine)
     count = int((~updated["oi_valid"]).sum()) if quarantine else 0
     if quarantine and count != expected_zero_pairs:
-        raise ValueError(
-            f"unexpected quarantine row count for {source}: "
-            f"found {count}; expected {expected_zero_pairs}"
-        )
+        raise ValueError(f"unexpected quarantine row count for {source}: found {count}; expected {expected_zero_pairs}")
 
     tmp = source.with_name(source.name + ".oi-quantity.tmp")
     if tmp.exists() and (tmp.is_symlink() or not tmp.is_file()):
@@ -234,14 +224,17 @@ def _migrate_one(
             "updated_sha256": updated_sha,
             "binance_archive_sha256": archive_sha,
             "status": "prepared",
-            **({
-                "quality_policy": "quarantined-original-zero-pairs-v1",
-                "quarantined_zero_pairs": count,
-                "quarantine_timestamps": [
-                    pd.Timestamp(ts).isoformat()
-                    for ts in updated.loc[~updated["oi_valid"], "ts"]
-                ],
-            } if quarantine else {}),
+            **(
+                {
+                    "quality_policy": "quarantined-original-zero-pairs-v1",
+                    "quarantined_zero_pairs": count,
+                    "quarantine_timestamps": [
+                        pd.Timestamp(ts).isoformat() for ts in updated.loc[~updated["oi_valid"], "ts"]
+                    ],
+                }
+                if quarantine
+                else {}
+            ),
         }
         atomic_json(manifest, info)
         os.replace(tmp, source)
@@ -253,7 +246,6 @@ def _migrate_one(
         return "migrated"
     finally:
         tmp.unlink(missing_ok=True)
-
 
 
 def _reconcile_prior_transactions(
@@ -304,6 +296,7 @@ def _reconcile_prior_transactions(
             reconciled.append(filename)
     return reconciled
 
+
 def migrate_batch(
     config_path: Path,
     symbol: str = "BTCUSDT",
@@ -342,9 +335,7 @@ def migrate_batch(
     # Live migration serialized with the old migrate_oi_quantity implementation.
     with file_lock(lock_path):
         _headroom(folder, min_free_mib)
-        reconciled = _reconcile_prior_transactions(
-            folder, backup_dir, symbol=symbol, boundary=boundary
-        )
+        reconciled = _reconcile_prior_transactions(folder, backup_dir, symbol=symbol, boundary=boundary)
         old = crash_data.legacy_oi_paths(root, symbol, boundary)
         fetch = crash_data.patient(get)
         migrated = []
@@ -352,8 +343,11 @@ def migrate_batch(
             try:
                 _headroom(folder, min_free_mib)
                 result = _migrate_one(
-                    source, backup_dir / source.name,
-                    symbol=symbol, boundary=boundary, get=fetch,
+                    source,
+                    backup_dir / source.name,
+                    symbol=symbol,
+                    boundary=boundary,
+                    get=fetch,
                 )
             except Exception as exc:
                 # Data parser and Arrow errors may not be ValueError subclasses.

@@ -6,9 +6,7 @@ from lab.market_quality import audit_directory
 
 
 def status(writer, ns, category, event):
-    writer.append(
-        {"received_ns": ns, "stream": "collector.status", "data": {"category": category, "event": event}}
-    )
+    writer.append({"received_ns": ns, "stream": "collector.status", "data": {"category": category, "event": event}})
 
 
 def market_event(writer, ns, category, identifier):
@@ -109,7 +107,4 @@ def test_two_recording_sessions_are_not_silently_treated_as_continuous(tmp_path)
     result = audit_directory(tmp_path)
     assert not result["ok"]
     assert result["categories"]["public"]["sessions"] == 2
-    assert any(
-        gap.get("reason") == "session_boundary"
-        for gap in result["categories"]["public"]["reconnect_gaps"]
-    )
+    assert any(gap.get("reason") == "session_boundary" for gap in result["categories"]["public"]["reconnect_gaps"])

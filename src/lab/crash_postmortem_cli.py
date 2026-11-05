@@ -54,20 +54,33 @@ def execute(config_path: Path, funding_plan_path: Path, *, report_out: Path | No
         "not_a_strategy_parameter_search": True,
     }
     with trial_run(
-        cfg.results_dir, "crash-study", "crash-breakdown", params,
+        cfg.results_dir,
+        "crash-study",
+        "crash-breakdown",
+        params,
         (None, int(boundary.value) - 1),
     ) as attempt:
         funding = crash_funding.load_verified(config_path, funding_plan_path, symbol="BTCUSDT")
         if funding["plan_sha256"] != plan_sha:
             raise ValueError("funding source plan changed after research reservation")
         source = funding["events"]
-        attempt.inputs.frame("funding:BTCUSDT", pd.DataFrame({
-            "ts": pd.to_datetime([e["fundingTime"] for e in source], unit="ms", utc=True),
-            "fundingRate": [e["fundingRate"] for e in source],
-            "markPrice": [e["markPrice"] for e in source],
-        }))
+        attempt.inputs.frame(
+            "funding:BTCUSDT",
+            pd.DataFrame(
+                {
+                    "ts": pd.to_datetime([e["fundingTime"] for e in source], unit="ms", utc=True),
+                    "fundingRate": [e["fundingRate"] for e in source],
+                    "markPrice": [e["markPrice"] for e in source],
+                }
+            ),
+        )
         run = study.run(
-            root, ["BTCUSDT"], settings, boundary, holdout=False, evidence=attempt.inputs,
+            root,
+            ["BTCUSDT"],
+            settings,
+            boundary,
+            holdout=False,
+            evidence=attempt.inputs,
         )
         if "BTCUSDT" not in run.trades or run.trades["BTCUSDT"].empty:
             raise ValueError("no historic BTCUSDT breakdown trades to diagnose")
@@ -84,8 +97,12 @@ def execute(config_path: Path, funding_plan_path: Path, *, report_out: Path | No
         outcomes = []
         for seed in crash_placebo.SEEDS:
             raw = crash_placebo.matched_placebo(
-                candles, original, side=-1, fee_bps=settings.fee_bps,
-                slippage_bps=settings.slippage_bps, seed=seed,
+                candles,
+                original,
+                side=-1,
+                fee_bps=settings.fee_bps,
+                slippage_bps=settings.slippage_bps,
+                seed=seed,
             )
             valued = crash_funding_ledger.funded_trades(raw, -1, funding)
             matched = crash_placebo.comparison(original, valued)
@@ -111,21 +128,20 @@ def execute(config_path: Path, funding_plan_path: Path, *, report_out: Path | No
             "matched_placebos": placebos,
             "qualification": qualification,
             "per_trade_diagnostics": [
-                {
-                    k: (v.isoformat() if isinstance(v, pd.Timestamp) else v)
-                    for k, v in row.items()
-                }
+                {k: (v.isoformat() if isinstance(v, pd.Timestamp) else v) for k, v in row.items()}
                 for row in detail.to_dict("records")
             ],
         }
         report = nullable_numbers(report)
         # Bind every per-trade diagnostic and all sixteen placebo
         # scenarios to the durable attempt, not only their aggregate.
-        report["analysis_payload_sha256"] = crash_funding._digest({
-            "failure_analysis": report["failure_analysis"],
-            "matched_placebos": report["matched_placebos"],
-            "per_trade_diagnostics": report["per_trade_diagnostics"],
-        })
+        report["analysis_payload_sha256"] = crash_funding._digest(
+            {
+                "failure_analysis": report["failure_analysis"],
+                "matched_placebos": report["matched_placebos"],
+                "per_trade_diagnostics": report["per_trade_diagnostics"],
+            }
+        )
         attempt.result = {
             "analysis": VERSION,
             "trades": len(original),
@@ -153,18 +169,21 @@ def main(argv: list[str] | None = None) -> int:
         result = execute(a.config, a.funding_plan, report_out=a.report_out)
     except (OSError, ValueError, TypeError, KeyError) as exc:
         p.error(str(exc))
-    print(json.dumps({
-        "kind": result["kind"],
-        "scope": result["scope"],
-        "original_trades": result["original_trade_count"],
-        "failure_analysis": result["failure_analysis"],
-        "placebo_ensemble": {
-            k: v for k, v in result["matched_placebos"].items()
-            if k != "scenarios"
-        },
-        "qualification": result["qualification"],
-        "report_out": str(a.report_out) if a.report_out else None,
-    }, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "kind": result["kind"],
+                "scope": result["scope"],
+                "original_trades": result["original_trade_count"],
+                "failure_analysis": result["failure_analysis"],
+                "placebo_ensemble": {k: v for k, v in result["matched_placebos"].items() if k != "scenarios"},
+                "qualification": result["qualification"],
+                "report_out": str(a.report_out) if a.report_out else None,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

@@ -32,17 +32,12 @@ def setup(tmp_path):
     cfg.write_text('[paths]\ndata = "data"\nresults = "results"\n')
     result = tmp_path / "results"
     result.mkdir()
-    (result / "crash_partition.json").write_text(
-        json.dumps({"version": 1, "holdout_start": "2026-05-03T00:00:00Z"})
-    )
+    (result / "crash_partition.json").write_text(json.dumps({"version": 1, "holdout_start": "2026-05-03T00:00:00Z"}))
     folder = tmp_path / "data" / "crash" / "klines" / "BTCUSDT"
     folder.mkdir(parents=True)
     (folder / "2026-05.parquet").write_bytes(b"monthly-holdout-is-protected")
     (folder / "2026-05-03.parquet").write_bytes(b"daily-holdout-is-protected")
-    blobs = {
-        crash_data.url_of("klines", "BTCUSDT", day): zipped_day(day)
-        for day in ("2026-05-01", "2026-05-02")
-    }
+    blobs = {crash_data.url_of("klines", "BTCUSDT", day): zipped_day(day) for day in ("2026-05-01", "2026-05-02")}
     return cfg, folder, blobs
 
 
@@ -76,12 +71,12 @@ def test_pinned_apply_is_append_only_recoverable_and_independently_auditable(tmp
     assert [x["status"] for x in report["days"]] == ["committed", "committed"]
     assert audit(cfg, source_plan)["ok"]
     again = apply(cfg, source_plan, get=blobs.__getitem__)
-    assert [x["status"] for x in again["days"]] == [
-        "verified-existing", "verified-existing"
-    ]
+    assert [x["status"] for x in again["days"]] == ["verified-existing", "verified-existing"]
     assert protected == {name: (folder / name).read_bytes() for name in protected}
     frame = crash_data.load(
-        cfg.parent / "data" / "crash", "klines", "BTCUSDT",
+        cfg.parent / "data" / "crash",
+        "klines",
+        "BTCUSDT",
         before=pd.Timestamp("2026-05-03T00:00:00Z"),
     )
     assert len(frame) == 2880
@@ -172,11 +167,13 @@ def test_tail_boundary_candle_dropped_from_research_quality_report(tmp_path):
     oi_dir = cfg.parent / "data" / "crash" / "oi" / "BTCUSDT"
     oi_dir.mkdir(parents=True)
     ts = pd.date_range("2026-05-01", periods=576, freq="5min", tz="UTC")
-    pd.DataFrame({
-        "ts": ts,
-        "oi_qty": [1000.0] * len(ts),
-        "oi_value": [500000.0] * len(ts),
-    }).to_parquet(oi_dir / "2026-05-01.parquet", index=False)
+    pd.DataFrame(
+        {
+            "ts": ts,
+            "oi_qty": [1000.0] * len(ts),
+            "oi_value": [500000.0] * len(ts),
+        }
+    ).to_parquet(oi_dir / "2026-05-01.parquet", index=False)
 
     report = audit_quality(cfg, window_min=60)
     assert report["klines"]["boundary_stamped_source_rows_excluded"] == 1

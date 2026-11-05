@@ -69,10 +69,15 @@ def _daily_candles(blob: bytes, day: date) -> pd.DataFrame:
         raise ValueError(f"{day}: nonfinite candle input")
     o, h, lo, c, volume, taker = raw.T
     if (
-        (o <= 0).any() or (h <= 0).any() or (lo <= 0).any()
-        or (c <= 0).any() or (volume < 0).any() or (taker < 0).any()
+        (o <= 0).any()
+        or (h <= 0).any()
+        or (lo <= 0).any()
+        or (c <= 0).any()
+        or (volume < 0).any()
+        or (taker < 0).any()
         or (h < np.maximum(o, c)).any()
-        or (lo > np.minimum(o, c)).any() or (lo > h).any()
+        or (lo > np.minimum(o, c)).any()
+        or (lo > h).any()
     ):
         raise ValueError(f"{day}: invalid candle OHLC or volume")
     return frame
@@ -85,11 +90,13 @@ def _plan(symbol: str, boundary: date, get) -> tuple[dict, list[pd.DataFrame]]:
         url = crash_data.url_of("klines", symbol, day.isoformat())
         blob = get(url)
         frame = _daily_candles(blob, day)
-        items.append({
-            "day": day.isoformat(),
-            "archive_sha256": hashlib.sha256(blob).hexdigest(),
-            "rows": len(frame),
-        })
+        items.append(
+            {
+                "day": day.isoformat(),
+                "archive_sha256": hashlib.sha256(blob).hexdigest(),
+                "rows": len(frame),
+            }
+        )
         data.append(frame)
     return {
         "version": PLAN_VERSION,
@@ -102,13 +109,13 @@ def _plan(symbol: str, boundary: date, get) -> tuple[dict, list[pd.DataFrame]]:
 
 def _validate_plan(plan: dict, symbol: str, boundary: date) -> None:
     expected = [d.isoformat() for d in _days(boundary)]
-    if not isinstance(plan, dict) or {
-        "version", "kind", "symbol", "holdout_start", "archives"
-    } != set(plan):
+    if not isinstance(plan, dict) or {"version", "kind", "symbol", "holdout_start", "archives"} != set(plan):
         raise ValueError("invalid daily tail source plan schema")
     if (
-        plan["version"] != PLAN_VERSION or plan["kind"] != KIND
-        or plan["symbol"] != symbol or plan["holdout_start"] != boundary.isoformat()
+        plan["version"] != PLAN_VERSION
+        or plan["kind"] != KIND
+        or plan["symbol"] != symbol
+        or plan["holdout_start"] != boundary.isoformat()
     ):
         raise ValueError("tail source plan differs from existing protected holdout")
     if not isinstance(plan["archives"], list) or len(plan["archives"]) != len(expected):
@@ -253,7 +260,8 @@ def audit(config_path: Path, plan_path: Path, symbol: str = "BTCUSDT") -> dict:
 def _daily_candles_from_frame(frame: pd.DataFrame, day: date) -> None:
     expected = pd.date_range(
         pd.Timestamp(day, tz="UTC") + MINUTE,
-        periods=1440, freq=MINUTE,
+        periods=1440,
+        freq=MINUTE,
     )
     ts = pd.DatetimeIndex(frame["ts"])
     if not ts.equals(expected):
@@ -263,10 +271,15 @@ def _daily_candles_from_frame(frame: pd.DataFrame, day: date) -> None:
         raise ValueError("nonfinite candle cache values")
     o, h, lo, c, v, taker = raw.T
     if (
-        (o <= 0).any() or (h <= 0).any() or (lo <= 0).any()
-        or (c <= 0).any() or (v < 0).any() or (taker < 0).any()
+        (o <= 0).any()
+        or (h <= 0).any()
+        or (lo <= 0).any()
+        or (c <= 0).any()
+        or (v < 0).any()
+        or (taker < 0).any()
         or (h < np.maximum(o, c)).any()
-        or (lo > np.minimum(o, c)).any() or (lo > h).any()
+        or (lo > np.minimum(o, c)).any()
+        or (lo > h).any()
     ):
         raise ValueError("invalid candle source values")
 

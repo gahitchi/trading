@@ -74,6 +74,7 @@ def quarantine_day(
         # Capture exactly one download, then pass the identical bytes to the
         # transactional migration. The original ZIP hash is pinned by input.
         captured: dict[str, bytes] = {}
+
         def fetch(url: str) -> bytes:
             if url not in captured:
                 captured[url] = get(url)
@@ -97,9 +98,7 @@ def quarantine_day(
         # Enforce matching (0,0) pairs, exact row alignment and the quality
         # schema in memory even for the read-only dry run.
         archive_url = crash_data.url_of("oi", symbol, day)
-        preview, _ = _quantity_from_original(
-            source, captured[archive_url], quarantine_zero_pairs=True
-        )
+        preview, _ = _quantity_from_original(source, captured[archive_url], quarantine_zero_pairs=True)
         exact_zeros = int((~preview["oi_valid"]).sum())
         if exact_zeros != expect_zero_pairs:
             raise ValueError(f"quarantine mask count differs: {exact_zeros}")
@@ -116,9 +115,12 @@ def quarantine_day(
                 "eligible_for_explicit_quarantine": True,
             }
         result = _migrate_one(
-            source, backup_dir / source.name,
-            symbol=symbol, boundary=boundary,
-            get=fetch, quarantine_archive_sha256=archive_sha256,
+            source,
+            backup_dir / source.name,
+            symbol=symbol,
+            boundary=boundary,
+            get=fetch,
+            quarantine_archive_sha256=archive_sha256,
             expected_zero_pairs=expect_zero_pairs,
         )
         if result != "migrated":
@@ -140,9 +142,7 @@ def quarantine_day(
         return perform()
     with file_lock(lock):
         _headroom(folder, MIN_FREE_MIB)
-        _reconcile_prior_transactions(
-            folder, backup_dir, symbol=symbol, boundary=boundary
-        )
+        _reconcile_prior_transactions(folder, backup_dir, symbol=symbol, boundary=boundary)
         return perform()
 
 
@@ -156,11 +156,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--archive-sha256", required=True)
     parser.add_argument("--legacy-sha256", required=True)
     parser.add_argument("--expect-zero-pairs", type=int, required=True)
-    parser.add_argument("--apply", action="store_true", help="write verified backup and explicit quality-mask transaction")
+    parser.add_argument(
+        "--apply", action="store_true", help="write verified backup and explicit quality-mask transaction"
+    )
     a = parser.parse_args(argv)
     try:
         result = quarantine_day(
-            a.config, a.symbol, a.day,
+            a.config,
+            a.symbol,
+            a.day,
             archive_sha256=a.archive_sha256,
             legacy_sha256=a.legacy_sha256,
             expect_zero_pairs=a.expect_zero_pairs,

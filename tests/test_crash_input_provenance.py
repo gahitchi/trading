@@ -1,4 +1,5 @@
 """Crash input content fingerprints and pre-access holdout isolation."""
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -8,11 +9,13 @@ from lab.trials import InputEvidence
 
 
 def sample():
-    return pd.DataFrame({
-        "ts": pd.date_range("2026-05-07", periods=3, freq="min", tz="UTC"),
-        "close": [100.0, float("nan"), -0.0],
-        "quote_volume": [100, 200, 300],
-    })
+    return pd.DataFrame(
+        {
+            "ts": pd.date_range("2026-05-07", periods=3, freq="min", tz="UTC"),
+            "close": [100.0, float("nan"), -0.0],
+            "quote_volume": [100, 200, 300],
+        }
+    )
 
 
 def test_canonical_fingerprint_is_deterministic_and_content_sensitive():
@@ -87,7 +90,9 @@ def test_research_candle_cutoff_never_opens_holdout_daily_or_monthly_file(tmp_pa
 
     monkeypatch.setattr(pd, "read_parquet", guarded)
     checked = crash_data.load(
-        tmp_path, "klines", "BTCUSDT",
+        tmp_path,
+        "klines",
+        "BTCUSDT",
         before=pd.Timestamp("2026-05-08T00:00:00Z"),
     )
     assert checked.equals(before)
@@ -99,14 +104,16 @@ def test_crash_run_fingerprints_pre_holdout_inputs_without_reading_holdout(tmp_p
     directory.mkdir(parents=True)
     for day in ("2026-05-06", "2026-05-07"):
         ts = pd.date_range(day, periods=1440, freq="min", tz="UTC")
-        k = pd.DataFrame({
-            "ts": ts,
-            "open": [100.0] * len(ts),
-            "high": [101.0] * len(ts),
-            "low": [99.0] * len(ts),
-            "close": [100.0] * len(ts),
-            "quote_volume": [100.0] * len(ts),
-        })
+        k = pd.DataFrame(
+            {
+                "ts": ts,
+                "open": [100.0] * len(ts),
+                "high": [101.0] * len(ts),
+                "low": [99.0] * len(ts),
+                "close": [100.0] * len(ts),
+                "quote_volume": [100.0] * len(ts),
+            }
+        )
         k.to_parquet(directory / f"{day}.parquet", index=False)
     (directory / "2026-05-08.parquet").write_bytes(b"protected holdout")
     original = pd.read_parquet
@@ -118,8 +125,11 @@ def test_crash_run_fingerprints_pre_holdout_inputs_without_reading_holdout(tmp_p
     monkeypatch.setattr(pd, "read_parquet", guarded)
     evidence = InputEvidence()
     crash_study.run(
-        root, ["BTCUSDT"], crash_study.CrashSettings.preset("breakdown"),
-        pd.Timestamp("2026-05-08T00:00:00Z"), evidence=evidence,
+        root,
+        ["BTCUSDT"],
+        crash_study.CrashSettings.preset("breakdown"),
+        pd.Timestamp("2026-05-08T00:00:00Z"),
+        evidence=evidence,
     )
     streams = evidence.snapshot()["streams"]
     assert [s["name"] for s in streams] == ["klines:BTCUSDT", "oi:BTCUSDT"]

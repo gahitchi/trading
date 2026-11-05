@@ -82,8 +82,7 @@ def _event(row: dict, symbol: str, first_ms: int, end_ms: int) -> dict:
     offset = ts % 3_600_000
     if min(offset, 3_600_000 - offset) > MAX_SETTLEMENT_OFFSET_MS:
         raise ValueError(
-            f"funding event unexpectedly far from UTC funding hour: "
-            f"{pd.Timestamp(ts, unit='ms', tz=UTC).isoformat()}"
+            f"funding event unexpectedly far from UTC funding hour: {pd.Timestamp(ts, unit='ms', tz=UTC).isoformat()}"
         )
     if row.get("rateType", "Regular") != "Regular":
         raise ValueError("unsupported funding rate type")
@@ -114,28 +113,30 @@ def _fetch(symbol: str, start: date, boundary: date, get) -> dict:
     pages = []
     previous_ms = None
     for _ in range(MAX_PAGES):
-        params = urlencode({
-            "symbol": symbol,
-            "startTime": cursor,
-            "endTime": end_ms,
-            "limit": LIMIT,
-        })
+        params = urlencode(
+            {
+                "symbol": symbol,
+                "startTime": cursor,
+                "endTime": end_ms,
+                "limit": LIMIT,
+            }
+        )
         url = f"{ENDPOINT}?{params}"
         raw = get(url)
         if not isinstance(raw, list) or len(raw) > LIMIT:
             raise ValueError("invalid funding API page")
         normalized = [_event(row, symbol, cursor, end_ms) for row in raw]
         times = [item["fundingTime"] for item in normalized]
-        if any(a >= b for a, b in pairwise(times)) or (
-            previous_ms is not None and times and times[0] <= previous_ms
-        ):
+        if any(a >= b for a, b in pairwise(times)) or (previous_ms is not None and times and times[0] <= previous_ms):
             raise ValueError("duplicate or unordered funding source timestamps")
-        pages.append({
-            "start_ms": cursor,
-            "end_ms": end_ms,
-            "rows": len(normalized),
-            "source_sha256": _digest(raw),
-        })
+        pages.append(
+            {
+                "start_ms": cursor,
+                "end_ms": end_ms,
+                "rows": len(normalized),
+                "source_sha256": _digest(raw),
+            }
+        )
         events.extend(normalized)
         if not normalized or len(normalized) < LIMIT:
             break
@@ -157,9 +158,13 @@ def _fetch(symbol: str, start: date, boundary: date, get) -> dict:
         raise ValueError("historical funding settlement gap exceeds eight hours")
 
     source = {
-        "version": 2, "kind": KIND, "symbol": symbol,
-        "start": start.isoformat(), "holdout_start": boundary.isoformat(),
-        "pages": pages, "event_count": len(events),
+        "version": 2,
+        "kind": KIND,
+        "symbol": symbol,
+        "start": start.isoformat(),
+        "holdout_start": boundary.isoformat(),
+        "pages": pages,
+        "event_count": len(events),
         "events_sha256": _digest(events),
     }
     return {"plan": source, "events": events}
@@ -169,8 +174,14 @@ def _validate_plan(plan: dict, symbol: str, boundary: date) -> None:
     if not SYMBOL_RE.fullmatch(symbol):
         raise ValueError("invalid funding perpetual symbol")
     if not isinstance(plan, dict) or set(plan) != {
-        "version", "kind", "symbol", "start", "holdout_start",
-        "pages", "event_count", "events_sha256",
+        "version",
+        "kind",
+        "symbol",
+        "start",
+        "holdout_start",
+        "pages",
+        "event_count",
+        "events_sha256",
     }:
         raise ValueError("invalid source plan")
     if plan["version"] != 2 or plan["kind"] != KIND or plan["symbol"] != symbol:
@@ -188,7 +199,10 @@ def _validate_plan(plan: dict, symbol: str, boundary: date) -> None:
         raise ValueError("funding page row count differs from source event count")
     for entry in plan["pages"]:
         if set(entry) != {
-            "start_ms", "end_ms", "rows", "source_sha256",
+            "start_ms",
+            "end_ms",
+            "rows",
+            "source_sha256",
         }:
             raise ValueError("invalid funding source page manifest")
         if any(type(entry[x]) is not int for x in ("start_ms", "end_ms", "rows")):
@@ -258,6 +272,7 @@ def apply(config_path: Path, plan_path: Path, *, symbol: str = "BTCUSDT", get=No
             os.fsync(out.fileno())
         os.link(tmp, target)
         from lab.crash_oi_migration import _sync_directory
+
         _sync_directory(directory)
     finally:
         tmp.unlink(missing_ok=True)
@@ -333,8 +348,11 @@ def _check_coverage(times_ms: list[int], start: str, stop: str) -> None:
 
 
 def settlement_return(
-    side: int, entry_reference: float, entry_time: pd.Timestamp,
-    exit_time: pd.Timestamp, events: list[dict],
+    side: int,
+    entry_reference: float,
+    entry_time: pd.Timestamp,
+    exit_time: pd.Timestamp,
+    events: list[dict],
 ) -> dict:
     """USDT-M fixed-base funding return relative to entry-reference notional.
 
@@ -363,10 +381,9 @@ def settlement_return(
         if previous is not None and event_time <= previous:
             raise ValueError("funding events must be unique and chronologically ordered")
         previous = event_time
-        if (
-            abs(event_time - entry) <= pd.Timedelta(milliseconds=MAX_SETTLEMENT_OFFSET_MS)
-            or abs(event_time - exit_) <= pd.Timedelta(milliseconds=MAX_SETTLEMENT_OFFSET_MS)
-        ):
+        if abs(event_time - entry) <= pd.Timedelta(milliseconds=MAX_SETTLEMENT_OFFSET_MS) or abs(
+            event_time - exit_
+        ) <= pd.Timedelta(milliseconds=MAX_SETTLEMENT_OFFSET_MS):
             raise ValueError("funding settlement coincides with ambiguous entry/exit boundary")
         if entry < event_time < exit_:
             rate = Decimal(_decimal(event["fundingRate"]))
@@ -398,7 +415,8 @@ def main(argv: list[str] | None = None) -> int:
                 p.error("--apply/--audit require a source-pinned --plan")
             result = (
                 apply(args.config, args.plan, symbol=args.symbol)
-                if args.apply else audit(args.config, args.plan, symbol=args.symbol)
+                if args.apply
+                else audit(args.config, args.plan, symbol=args.symbol)
             )
         else:
             if args.plan is not None:

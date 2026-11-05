@@ -34,17 +34,25 @@ def _gaps(missing: pd.DatetimeIndex, *, limit: int = 12) -> list[dict]:
             last = stamp
             n += 1
         else:
-            result.append({
-                "start": beginning.isoformat(), "end": last.isoformat(), "minutes": n,
-            })
+            result.append(
+                {
+                    "start": beginning.isoformat(),
+                    "end": last.isoformat(),
+                    "minutes": n,
+                }
+            )
             beginning = last = stamp
             n = 1
             if len(result) >= limit:
                 return result
     if len(result) < limit:
-        result.append({
-            "start": beginning.isoformat(), "end": last.isoformat(), "minutes": n,
-        })
+        result.append(
+            {
+                "start": beginning.isoformat(),
+                "end": last.isoformat(),
+                "minutes": n,
+            }
+        )
     return result
 
 
@@ -57,7 +65,8 @@ def _validate_klines(frame: pd.DataFrame, boundary: pd.Timestamp) -> pd.Datetime
         raise ValueError("candle timestamps must be timezone-aware")
     # tz.utcoffset(None) is None for some fixed-offset timezone implementations.
     if (ts.dt.tz is None or ts.dt.tz.utcoffset(None) != pd.Timedelta(0)) and str(ts.dt.tz) not in (
-        "UTC", "datetime.timezone.utc"
+        "UTC",
+        "datetime.timezone.utc",
     ):
         raise ValueError("candle timestamps must be UTC")
     stamps = pd.DatetimeIndex(ts)
@@ -72,8 +81,11 @@ def _validate_klines(frame: pd.DataFrame, boundary: pd.Timestamp) -> pd.Datetime
         raise ValueError("nonfinite candle prices or quote volume")
     o, h, low, c, v = numeric.T
     if (
-        (o <= 0).any() or (h <= 0).any() or (low <= 0).any()
-        or (c <= 0).any() or (v < 0).any()
+        (o <= 0).any()
+        or (h <= 0).any()
+        or (low <= 0).any()
+        or (c <= 0).any()
+        or (v < 0).any()
         or (h < np.maximum(o, c)).any()
         or (low > np.minimum(o, c)).any()
         or (low > h).any()
@@ -95,7 +107,10 @@ def _validate_source_paths(root: Path, symbol: str) -> None:
 
 
 def audit_quality(
-    config_path: Path, symbol: str = "BTCUSDT", *, window_min: int = 60,
+    config_path: Path,
+    symbol: str = "BTCUSDT",
+    *,
+    window_min: int = 60,
 ) -> dict:
     """Evaluate potential one-minute decision windows on pre-holdout data."""
     if not SYMBOL_RE.fullmatch(symbol):
@@ -144,9 +159,7 @@ def audit_quality(
     # The crash detector uses a current-window sum and a seven-day
     # pre-window median, each requiring at least 1440 observations.
     vol_current = quote.rolling(w, min_periods=w).count().eq(w)
-    vol_baseline = quote.rolling(
-        crash_study.BASE_DAYS * 1440, min_periods=1440
-    ).count().shift(w).ge(1440)
+    vol_baseline = quote.rolling(crash_study.BASE_DAYS * 1440, min_periods=1440).count().shift(w).ge(1440)
     oi_ready = b["oi"].notna() & b["oi"].shift(w).notna()
     candidate = price_ready & vol_current & vol_baseline & oi_ready
     dropped = candidate & banned
@@ -168,9 +181,7 @@ def audit_quality(
             "missing_ranges_first_12": _gaps(absent_candles),
             "first": first.isoformat(),
             "last": last.isoformat(),
-            "trailing_to_boundary_minutes": max(
-                0, int((boundary - last) / pd.Timedelta(minutes=1)) - 1
-            ),
+            "trailing_to_boundary_minutes": max(0, int((boundary - last) / pd.Timedelta(minutes=1)) - 1),
         },
         "oi": {
             "loaded_rows": len(o),
@@ -202,9 +213,7 @@ def audit_quality(
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(
-        description="Read-only pre-holdout crash candle/OI eligibility gate; no trading P&L"
-    )
+    p = argparse.ArgumentParser(description="Read-only pre-holdout crash candle/OI eligibility gate; no trading P&L")
     p.add_argument("--config", type=Path, required=True)
     p.add_argument("--symbol", default="BTCUSDT")
     p.add_argument("--window-min", type=int, default=60)

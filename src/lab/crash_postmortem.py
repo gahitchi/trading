@@ -12,8 +12,7 @@ import numpy as np
 import pandas as pd
 
 POLICY = "crash-trade-cost-prior-trend-and-fullbar-excursion-v1"
-FIELDS = ("signal", "entry", "exit", "reason", "gross", "net", "weight",
-          "entry_reference", "fee_cost", "slippage_cost")
+FIELDS = ("signal", "entry", "exit", "reason", "gross", "net", "weight", "entry_reference", "fee_cost", "slippage_cost")
 
 
 def _utc(value):
@@ -49,8 +48,9 @@ def attribution(trades: pd.DataFrame, bars: pd.DataFrame, side: int) -> pd.DataF
         gross, net = float(trade.gross), float(trade.net)
         fees, slip = float(trade.fee_cost), float(trade.slippage_cost)
         weight = float(trade.weight)
-        if not all(math.isfinite(v) for v in (entry_ref, high, low, funding, funding_upper,
-                                              gross, net, fees, slip, weight)):
+        if not all(
+            math.isfinite(v) for v in (entry_ref, high, low, funding, funding_upper, gross, net, fees, slip, weight)
+        ):
             raise ValueError("nonfinite trade economics")
         if min(entry_ref, low, weight) <= 0 or funding_upper < funding:
             raise ValueError("invalid reference price, exposure or funding bounds")
@@ -61,18 +61,28 @@ def attribution(trades: pd.DataFrame, bars: pd.DataFrame, side: int) -> pd.DataF
         prev = bars["close"].get(signal - pd.Timedelta(days=1), float("nan"))
         spot = bars["close"].get(signal, float("nan"))
         trend = float((spot / prev - 1) * 1e4) if np.isfinite(prev) and np.isfinite(spot) and prev > 0 else None
-        out.append({
-            "signal": signal, "entry": entry, "exit": exit_, "reason": str(trade.reason),
-            "duration_min": minutes, "weight": weight, "gross_bps": gross * 1e4,
-            "net_bps": net * 1e4, "fee_bps": fees * 1e4,
-            "slippage_bps": slip * 1e4, "funding_bps": funding * 1e4,
-            "funding_upper_bps": funding_upper * 1e4,
-            "fullbar_favorable_bps": favorable * 1e4,
-            "fullbar_adverse_bps": adverse * 1e4,
-            "pre_signal_24h_return_bps": trend,
-            "year": signal.year, "hour": signal.hour,
-            "ambiguous_funding_events": int(getattr(trade, "funding_ambiguous_events", 0)),
-        })
+        out.append(
+            {
+                "signal": signal,
+                "entry": entry,
+                "exit": exit_,
+                "reason": str(trade.reason),
+                "duration_min": minutes,
+                "weight": weight,
+                "gross_bps": gross * 1e4,
+                "net_bps": net * 1e4,
+                "fee_bps": fees * 1e4,
+                "slippage_bps": slip * 1e4,
+                "funding_bps": funding * 1e4,
+                "funding_upper_bps": funding_upper * 1e4,
+                "fullbar_favorable_bps": favorable * 1e4,
+                "fullbar_adverse_bps": adverse * 1e4,
+                "pre_signal_24h_return_bps": trend,
+                "year": signal.year,
+                "hour": signal.hour,
+                "ambiguous_funding_events": int(getattr(trade, "funding_ambiguous_events", 0)),
+            }
+        )
     return pd.DataFrame(out)
 
 
@@ -80,6 +90,7 @@ def describe(rows: pd.DataFrame) -> dict:
     """Descriptive cost decomposition. Never returns a significance claim."""
     if rows.empty:
         return {"trades": 0, "status": "no_trades"}
+
     def stats(part):
         return {
             "trades": len(part),
@@ -87,13 +98,14 @@ def describe(rows: pd.DataFrame) -> dict:
             "sum_weighted_net_bps": float((part.net_bps * part.weight).sum()),
             "mean_duration_min": float(part.duration_min.mean()),
         }
+
     result = {
-        **stats(rows), "status": "descriptive_only",
+        **stats(rows),
+        "status": "descriptive_only",
         "weighted_exposure_minutes": float((rows.weight * rows.duration_min).sum()),
         "cost_decomposition_bps": {
             col: float(rows[col].sum())
-            for col in ("gross_bps", "fee_bps", "slippage_bps", "funding_bps",
-                        "funding_upper_bps", "net_bps")
+            for col in ("gross_bps", "fee_bps", "slippage_bps", "funding_bps", "funding_upper_bps", "net_bps")
         },
         "ambiguous_funding_events": int(rows.ambiguous_funding_events.sum()),
         "fullbar_extrema_are_not_executable": True,

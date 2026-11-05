@@ -814,9 +814,7 @@ def cmd_crash_study(cfg, a):
     # Crash research on the maintenance branch is exploratory only.
     # Holdout runs and releases remain disabled until independently qualified.
     if a.holdout:
-        raise SystemExit(
-            "crash holdout is disabled on this branch until reservation/qualification is complete"
-        )
+        raise SystemExit("crash holdout is disabled on this branch until reservation/qualification is complete")
     if a.again:
         raise SystemExit("--again only applies with --holdout")
 
@@ -859,80 +857,81 @@ def cmd_crash_study(cfg, a):
         "oi_measure": "contract-quantity-v1",
         "oi_quality_policy": "source-pinned-zero-pair-and-absent-5m-window-veto-v2",
         "execution_model": crash_execution.MODEL,
-        "funding_model": (
-            crash_funding_ledger.MODEL if funding_plan else
-            "not-modelled-no-funding-adjusted-claim"
+        "funding_model": (crash_funding_ledger.MODEL if funding_plan else "not-modelled-no-funding-adjusted-claim"),
+        "funding_source": (
+            {
+                "kind": funding_plan_metadata.get("kind"),
+                "start": funding_plan_metadata.get("start"),
+                "holdout_start": funding_plan_metadata.get("holdout_start"),
+                "events_sha256": funding_plan_metadata.get("events_sha256"),
+                "plan_sha256": crash_funding._digest(funding_plan_metadata),
+            }
+            if funding_plan
+            else None
         ),
-        "funding_source": ({
-            "kind": funding_plan_metadata.get("kind"),
-            "start": funding_plan_metadata.get("start"),
-            "holdout_start": funding_plan_metadata.get("holdout_start"),
-            "events_sha256": funding_plan_metadata.get("events_sha256"),
-            "plan_sha256": crash_funding._digest(funding_plan_metadata),
-        } if funding_plan else None),
     }
     try:
         # Durable attempt is reserved BEFORE reading historical candle / OI data.
-        with trial_run(
-            cfg.results_dir, "crash-study", key, params, (None, int(boundary.value) - 1)
-        ) as attempt:
+        with trial_run(cfg.results_dir, "crash-study", key, params, (None, int(boundary.value) - 1)) as attempt:
             funding_evidence = None
             if funding_plan:
                 # Once the attempt is durable, independently audit the
                 # local funding evidence before using any market data.
                 funding_evidence = crash_funding.load_verified(
                     a.config or cfg.root / "lab.toml",
-                    funding_plan, symbol="BTCUSDT",
+                    funding_plan,
+                    symbol="BTCUSDT",
                 )
             r = cs.run(root, symbols, settings, boundary, holdout=False, evidence=attempt.inputs)
             if not r.trades:
                 raise ValueError(f"no pre-holdout crash data for {' '.join(symbols)} before {boundary:%Y-%m-%d}")
             if funding_evidence is not None:
                 plan = funding_evidence["plan"]
-                if (
-                    funding_evidence["plan_sha256"] != params["funding_source"]["plan_sha256"]
-                    or any(
-                        plan.get(key) != funding_plan_metadata.get(key)
-                        for key in ("kind", "start", "holdout_start", "events_sha256")
-                    )
+                if funding_evidence["plan_sha256"] != params["funding_source"]["plan_sha256"] or any(
+                    plan.get(key) != funding_plan_metadata.get(key)
+                    for key in ("kind", "start", "holdout_start", "events_sha256")
                 ):
                     raise ValueError("funding source plan changed between reservation and load")
                 events = funding_evidence["events"]
-                attempt.inputs.frame("funding:BTCUSDT", pd.DataFrame({
-                    "ts": pd.to_datetime([event["fundingTime"] for event in events], unit="ms", utc=True),
-                    "fundingRate": [event["fundingRate"] for event in events],
-                    "markPrice": [event["markPrice"] for event in events],
-                }))
+                attempt.inputs.frame(
+                    "funding:BTCUSDT",
+                    pd.DataFrame(
+                        {
+                            "ts": pd.to_datetime([event["fundingTime"] for event in events], unit="ms", utc=True),
+                            "fundingRate": [event["fundingRate"] for event in events],
+                            "markPrice": [event["markPrice"] for event in events],
+                        }
+                    ),
+                )
                 r = crash_funding_ledger.funded_run(r, settings.side, funding_evidence)
             st = cs.summary(r.trades, r.start, r.end)
             sensitivity = crash_execution.stress_summary(
-                r.trades, settings.side, r.start, r.end, cs.summary,
+                r.trades,
+                settings.side,
+                r.start,
+                r.end,
+                cs.summary,
             )
             optimistic = None
             if funding_evidence is not None:
-                upper = {
-                    symbol: frame.assign(net=frame["net_upper"])
-                    for symbol, frame in r.trades.items()
-                }
+                upper = {symbol: frame.assign(net=frame["net_upper"]) for symbol, frame in r.trades.items()}
                 upper_summary = cs.summary(upper, r.start, r.end)
-                optimistic = nullable_numbers({
-                    "mean_bps": upper_summary["mean_bps"],
-                    "apr": upper_summary["apr"],
-                    "sharpe": upper_summary["sharpe"],
-                    "t_nw": upper_summary["t_nw"],
-                })
+                optimistic = nullable_numbers(
+                    {
+                        "mean_bps": upper_summary["mean_bps"],
+                        "apr": upper_summary["apr"],
+                        "sharpe": upper_summary["sharpe"],
+                        "t_nw": upper_summary["t_nw"],
+                    }
+                )
             keys = ("days", "trades", "mean_bps", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")
             attempt.result = {
                 **nullable_numbers({k: st[k] for k in keys}),
                 "execution_model": crash_execution.MODEL,
                 "funding_status": "audited_pessimistic_minute_fill_bound" if funding_evidence else "not_modelled",
                 "funding_upper_scenario": optimistic,
-                "funding_evidence_sha256": (
-                    funding_evidence["plan"]["events_sha256"] if funding_evidence else None
-                ),
-                "funding_totals": (
-                    crash_funding_ledger.funding_totals(r.trades) if funding_evidence else None
-                ),
+                "funding_evidence_sha256": (funding_evidence["plan"]["events_sha256"] if funding_evidence else None),
+                "funding_totals": (crash_funding_ledger.funding_totals(r.trades) if funding_evidence else None),
                 "fixed_execution_scenarios": sensitivity,
             }
             attempt.window = (int(r.start.value), int(r.end.value))
@@ -966,10 +965,7 @@ def cmd_crash_study(cfg, a):
         f"  baseline, same exits entered daily at 00:00 UTC: {bs['trades']} trades, "
         f"mean {bs['mean_bps']:+.1f} bps net, {bs['apr']:+.2f}% a year, Sharpe {bs['sharpe']:+.2f}"
     )
-    fwd = "  ".join(
-        f"{m}m {np.mean(x) * 1e4:+.0f} (n {len(x)})" if len(x) else f"{m}m -"
-        for m, x in r.forward.items()
-    )
+    fwd = "  ".join(f"{m}m {np.mean(x) * 1e4:+.0f} (n {len(x)})" if len(x) else f"{m}m -" for m, x in r.forward.items())
     print(f"  gross move after each crash's first signal, bps in trade direction, before costs: {fwd}")
     print(cs.per_symbol(r.trades).to_string(index=False, float_format=lambda x: f"{x:.1f}"))
     print("  fixed-cost sensitivity on identical trade signals/exits (not additional parameter searches):")
@@ -991,7 +987,8 @@ def cmd_crash_study(cfg, a):
         )
     funding_note = (
         "Audited funding is included at its pessimistic minute-fill bound"
-        if funding_plan else "Funding is NOT modelled"
+        if funding_plan
+        else "Funding is NOT modelled"
     )
     print(
         "Fixed-base reference-price fills and per-fill notional fees are modelled; "
@@ -1003,9 +1000,7 @@ def cmd_crash_study(cfg, a):
 
 
 def cmd_crash_release(cfg, a):
-    raise SystemExit(
-        "crash holdout release is disabled on this branch until qualification is complete"
-    )
+    raise SystemExit("crash holdout release is disabled on this branch until qualification is complete")
 
 
 def cmd_kill(cfg, a):
@@ -1226,7 +1221,11 @@ def build_parser() -> argparse.ArgumentParser:
     xs.add_argument("--mode", choices=CRASH_MODES, default="wick", help="wick: buy the flush; breakdown: short it")
     xs.add_argument("--symbols", nargs="+", default=list(CRASH_SYMBOLS), help="Binance USD-M perpetuals")
     xs.add_argument("--all", action="store_true", help="every symbol fetched (instead of --symbols)")
-    xs.add_argument("--funding-plan", type=Path, help="audited pre-holdout BTCUSDT funding source plan; enables funding-adjusted accounting")
+    xs.add_argument(
+        "--funding-plan",
+        type=Path,
+        help="audited pre-holdout BTCUSDT funding source plan; enables funding-adjusted accounting",
+    )
     xs.add_argument("--drop-pct", type=float, help="fall that makes a crash, %% (preset per mode)")
     xs.add_argument("--window-min", type=int, help="minutes the fall happens in (preset: 60)")
     xs.add_argument("--vol-mult", type=float, help="volume of the window vs usual, times (preset: 3)")

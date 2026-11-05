@@ -29,12 +29,14 @@ def sample_plan(tmp_path):
         old = pd.read_parquet(p)
         old.loc[1, "oi_value"] = 0.0
         old.to_parquet(p, index=False)
-        entries.append({
-            "day": day,
-            "archive_sha256": hashlib.sha256(blob).hexdigest(),
-            "legacy_sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
-            "expect_zero_pairs": 1,
-        })
+        entries.append(
+            {
+                "day": day,
+                "archive_sha256": hashlib.sha256(blob).hexdigest(),
+                "legacy_sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+                "expect_zero_pairs": 1,
+            }
+        )
     plan = {
         "schema_version": 1,
         "symbol": "BTCUSDT",
@@ -43,11 +45,13 @@ def sample_plan(tmp_path):
     }
     plan_path = tmp_path / "pinned.json"
     plan_path.write_text(json.dumps(plan))
+
     def fetch(url):
         for day, blob in archives.items():
             if day in url:
                 return blob
         raise AssertionError("protected holdout must never be fetched")
+
     return cfg, folder, plan_path, plan, fetch
 
 
@@ -94,14 +98,17 @@ def test_apply_audits_each_commit_and_preserves_holdout(tmp_path):
     assert audit_migrations(cfg)["ok"]
 
 
-@pytest.mark.parametrize("invalid", [
-    "duplicate",
-    "out_of_order",
-    "wrong_holdout",
-    "wrong_schema",
-    "missing_sha",
-    "too_many",
-])
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "duplicate",
+        "out_of_order",
+        "wrong_holdout",
+        "wrong_schema",
+        "missing_sha",
+        "too_many",
+    ],
+)
 def test_malformed_pin_manifest_fails_closed_before_archive_fetch(tmp_path, invalid):
     cfg, folder, path, plan, _get = sample_plan(tmp_path)
     if invalid == "duplicate":
@@ -120,7 +127,9 @@ def test_malformed_pin_manifest_fails_closed_before_archive_fetch(tmp_path, inva
     before = {p.name: p.read_bytes() for p in folder.glob("*.parquet")}
     with pytest.raises(ValueError):
         execute_pinned_plan(
-            cfg, path, apply=True,
+            cfg,
+            path,
+            apply=True,
             get=lambda url: (_ for _ in ()).throw(AssertionError("no downloads before plan validated")),
         )
     assert before == {p.name: p.read_bytes() for p in folder.glob("*.parquet")}
@@ -152,14 +161,9 @@ def test_post_commit_audit_failure_stops_before_second_day(tmp_path):
     cfg, folder, path, _, get = sample_plan(tmp_path)
     # A future-day orphan backup is not ignored by the audit. The
     # first day commits, then audit correctly aborts before the second.
-    backup = (
-        tmp_path / "data" / "crash" / "oi-original-backups"
-        / "BTCUSDT"
-    )
+    backup = tmp_path / "data" / "crash" / "oi-original-backups" / "BTCUSDT"
     backup.mkdir(parents=True)
-    (backup / "2024-01-02.parquet").write_bytes(
-        (folder / "2024-01-02.parquet").read_bytes()
-    )
+    (backup / "2024-01-02.parquet").write_bytes((folder / "2024-01-02.parquet").read_bytes())
     with pytest.raises(ValueError, match="batch stopped at 2024-01-01 after 1 committed"):
         execute_pinned_plan(cfg, path, apply=True, get=get)
     assert pd.read_parquet(folder / "2024-01-01.parquet")["oi_valid"].tolist() == [True, False]

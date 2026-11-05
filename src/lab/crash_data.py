@@ -89,9 +89,7 @@ def parse_metrics(blob: bytes, *, quarantine_zero_pairs: bool = False) -> pd.Dat
     if not (np.isfinite(qty).all() and np.isfinite(notional).all()):
         raise ValueError("nonfinite Binance open-interest snapshot")
     zero_pair = (qty == 0) & (notional == 0)
-    if (qty < 0).any() or (notional < 0).any() or (
-        ((qty <= 0) | (notional <= 0)) & ~zero_pair
-    ).any():
+    if (qty < 0).any() or (notional < 0).any() or (((qty <= 0) | (notional <= 0)) & ~zero_pair).any():
         raise ValueError("open-interest quantity and notional must be positive")
     if zero_pair.any() and not quarantine_zero_pairs:
         raise ValueError("open-interest quantity and notional must be positive")
@@ -103,9 +101,14 @@ def parse_metrics(blob: bytes, *, quarantine_zero_pairs: bool = False) -> pd.Dat
             raise ValueError("zero-pair quarantine requested without invalid zero-pair observations")
         qty = qty.copy()
         qty[zero_pair] = np.nan
-        return pd.DataFrame({
-            "ts": ts, "oi_qty": qty, "oi_value": notional, "oi_valid": ~zero_pair,
-        })
+        return pd.DataFrame(
+            {
+                "ts": ts,
+                "oi_qty": qty,
+                "oi_value": notional,
+                "oi_valid": ~zero_pair,
+            }
+        )
     return pd.DataFrame({"ts": ts, "oi_qty": qty, "oi_value": notional})
 
 
@@ -131,7 +134,6 @@ def validate_oi_quantity(frame: pd.DataFrame) -> None:
         raise ValueError("invalid positive OI quality-mask row")
     if ((~valid) & (~np.isnan(qty) | (value != 0))).any():
         raise ValueError("quarantined OI must be NaN contract quantity and original zero notional")
-
 
 
 def periods(kind: str, since: date, today: date) -> list[str]:
@@ -234,10 +236,7 @@ def load(root: Path, kind: str, symbol: str, *, before: pd.Timestamp | None = No
         # A quality-marked day may coexist with ordinary fully valid days.
         # Explicitly mark the latter True before concatenation; otherwise
         # pandas introduces null mask flags that invalidate the whole study.
-        parts = [
-            part if "oi_valid" in part else part.assign(oi_valid=True)
-            for part in parts
-        ]
+        parts = [part if "oi_valid" in part else part.assign(oi_valid=True) for part in parts]
     df = pd.concat(parts, ignore_index=True)
     df = df.drop_duplicates("ts", keep="last").sort_values("ts").reset_index(drop=True)
     if kind == "oi":
@@ -256,7 +255,6 @@ def last_cached(root: Path) -> pd.Timestamp | None:
         end = pd.Timestamp(_end_of(p.stem), tz="UTC")
         last = end if last is None else max(last, end)
     return last
-
 
 
 def legacy_oi_paths(root: Path, symbol: str, before: date) -> list[Path]:

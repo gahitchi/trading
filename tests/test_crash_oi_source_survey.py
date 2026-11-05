@@ -17,8 +17,10 @@ def fixtures(tmp_path, *, zero_first=True, zero_second=True):
     originals = (DATA, SECOND)
     blobs = {}
     for day, plain, flagged in zip(
-        ("2024-01-01", "2024-01-02"), originals,
-        (zero_first, zero_second), strict=True,
+        ("2024-01-01", "2024-01-02"),
+        originals,
+        (zero_first, zero_second),
+        strict=True,
     ):
         archive = plain
         if flagged:
@@ -33,12 +35,14 @@ def fixtures(tmp_path, *, zero_first=True, zero_second=True):
         blobs[day] = zipped(HEADER + archive)
 
     calls = []
+
     def fetch(url):
         calls.append(url)
         for day, blob in blobs.items():
             if day in url:
                 return blob
         raise AssertionError("out-of-range or holdout archive fetched")
+
     return cfg, folder, blobs, fetch, calls
 
 
@@ -52,11 +56,13 @@ def test_two_anomalous_days_produce_fully_verified_plan_without_writes(tmp_path)
     assert result["clean_days"] == 0
     assert result["invalid_zero_pairs"] == 2
     assert [x["status"] for x in result["observations"]] == [
-        "exact_zero_pairs", "exact_zero_pairs",
+        "exact_zero_pairs",
+        "exact_zero_pairs",
     ]
     plan = result["candidate_manifest"]
     assert [x["day"] for x in plan["entries"]] == [
-        "2024-01-01", "2024-01-02",
+        "2024-01-01",
+        "2024-01-02",
     ]
     assert plan["entries"][0]["archive_sha256"] == hashlib.sha256(blobs["2024-01-01"]).hexdigest()
     assert len(calls) == 2
@@ -70,9 +76,7 @@ def test_explicit_plan_file_is_new_only_and_accepted_by_existing_batch_parser(tm
     result = source_survey(cfg, start="2024-01-01", days=2, get=get)
     target = tmp_path / "operator-review.json"
     write_new_manifest(target, result)
-    plan = load_pinned_plan(
-        target, holdout_start=pd.Timestamp("2024-01-03").date()
-    )
+    plan = load_pinned_plan(target, holdout_start=pd.Timestamp("2024-01-03").date())
     assert len(plan["entries"]) == 2
     assert json.loads(target.read_text()) == result["candidate_manifest"]
     with pytest.raises(ValueError, match="refusing to overwrite"):
@@ -117,7 +121,9 @@ def test_holdout_range_is_rejected_before_fetch_or_open(tmp_path):
     original = (folder / "2024-01-03.parquet").read_bytes()
     with pytest.raises(ValueError, match="protected holdout"):
         source_survey(
-            cfg, start="2024-01-02", days=2,
+            cfg,
+            start="2024-01-02",
+            days=2,
             get=lambda _: (_ for _ in ()).throw(AssertionError("no fetch permitted")),
         )
     assert (folder / "2024-01-03.parquet").read_bytes() == original
