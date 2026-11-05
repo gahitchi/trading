@@ -118,6 +118,52 @@ class InputEvidence:
             raise
         entry.update(sha256=digest.hexdigest(), complete=True)
 
+    def frame(self, name, values):
+        """Fingerprint a loaded candle/OI frame using exact typed row values.
+
+        A schema record precedes the rows so dropping/reordering columns
+        changes the digest. Numeric values use lossless float.hex or integer
+        strings; timestamps are represented as UTC nanoseconds. No files are
+        opened by this method. None records an explicitly absent stream.
+        """
+        import numpy as np
+        import pandas as pd
+
+        if values is None:
+            self._stream(name, [(None, {"absent": True})])
+            return
+        columns = values.columns.tolist()
+        if "ts" not in columns or len(set(columns)) != len(columns):
+            raise ValueError("research input frame needs unique columns including ts")
+        i_ts = columns.index("ts")
+
+        def typed(v):
+            if isinstance(v, pd.Timestamp):
+                if v.tzinfo is None:
+                    raise ValueError("research timestamp must be timezone-aware")
+                return ["timestamp_ns", int(v.value)]
+            if v is None or v is pd.NA:
+                return ["null"]
+            if isinstance(v, (bool, np.bool_)):
+                return ["bool", bool(v)]
+            if isinstance(v, (int, np.integer)):
+                return ["int", str(int(v))]
+            if isinstance(v, (float, np.floating)):
+                return ["float_hex", float(v).hex()]
+            if isinstance(v, str):
+                return ["str", v]
+            raise ValueError(f"unsupported research input value type: {type(v).__name__}")
+
+        def records():
+            yield None, {"schema": [[c, str(values[c].dtype)] for c in columns]}
+            for row in values.itertuples(index=False, name=None):
+                ts = pd.Timestamp(row[i_ts])
+                if ts.tzinfo is None:
+                    raise ValueError("research timestamp must be timezone-aware")
+                yield int(ts.value), [typed(v) for v in row]
+
+        self._stream(name, records())
+
     def objects(self, name, values):
         self._stream(name, ((int(v.ts_init), v.to_dict()) for v in values))
 
