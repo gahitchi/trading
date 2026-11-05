@@ -241,3 +241,37 @@ def test_reconciliation_exact_trade_economics_after_multiple_partial_closures(tm
     reconcile_to_journal(j, data)
     assert j.report(START)["net_pnl"] == "7.00"
     assert j.report(START)["reserve"] == "3.50"
+
+
+def test_atomic_batch_validation_rejects_entire_invalid_fill_revaluation(tmp_path):
+    from lab.profit_allocation import AllocationEvent
+
+    j = journal(tmp_path)
+    initial = j.path.read_bytes()
+    cash = AllocationEvent("fill.cash", "fill.cash", T + timedelta(minutes=1),
+                           "USD", "trade", "-1.00", gross="0.00", fees="1.00",
+                           slippage="0.00", funding="0.00", released_mark="0.00")
+    invalid_mark = AllocationEvent("fill.mark", "fill.mark", T + timedelta(minutes=2),
+                                   "USD", "mark", "bad")
+    with pytest.raises(ValueError, match="invalid decimal"):
+        j.append_batch([cash, invalid_mark])
+    assert j.path.read_bytes() == initial
+    assert j.events() == ()
+
+
+def test_batch_checkpoint_failure_never_claims_successful_fill(tmp_path, monkeypatch):
+    import lab.profit_journal as mod
+    j = journal(tmp_path)
+    original = mod.atomic_json
+
+    def fail_checkpoint(*args, **kwargs):
+        raise OSError("head disk failure")
+
+    monkeypatch.setattr(mod, "atomic_json", fail_checkpoint)
+    with pytest.raises(OSError, match="head disk failure"):
+        reconcile_to_journal(
+            j, [fill("one", 1, "BTCUSDT", "BUY", "1", "100", {"BTCUSDT": "100"})]
+        )
+    monkeypatch.setattr(mod, "atomic_json", original)
+    with pytest.raises(ValueError, match="journal/checkpoint mismatch"):
+        j.replay()
