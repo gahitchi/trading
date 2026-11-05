@@ -518,3 +518,38 @@ def test_successor_cannot_reclassify_missing_prior_attempt_as_retrospective(tmp_
     with pytest.raises(ValueError, match="unattempted planned members"):
         rf.register_family(tmp_path, plan(member(instrument="NEXT")))
     assert not (tmp_path / rf.EPOCHS / "000001.json").exists()
+
+
+def test_missing_final_generation_cannot_relabel_linked_trials_to_older_plan(tmp_path):
+    rf.register_family(tmp_path, plan())
+    evaluate(tmp_path)
+    new_plan = plan(member(instrument="NEW"))
+    rf.register_family(tmp_path, new_plan)
+    evaluate(tmp_path, new_plan["members"][0])
+    (tmp_path / rf.EPOCHS / "000001.json").unlink()
+    # A removed *last* generation has no sequence gap, so the
+    # recorded links are the second independent proof of its existence.
+    with pytest.raises(ValueError, match="registration is missing"):
+        with trials.trial_run(tmp_path, "fast-backtest", "THIRD", {}, (0, 100)):
+            pytest.fail("missing last generation must not silently revert active plan")
+    with pytest.raises(ValueError, match="registration is missing"):
+        rf.family_report(tmp_path)
+
+
+def test_prior_reserved_identity_mutation_blocks_later_family(tmp_path):
+    with trials.trial_run(tmp_path, "fast-backtest", IID, member()["params"], (0, 100)) as running:
+        rf.register_family(tmp_path, plan())
+        running.result = {"pnl": -1}
+    evaluate(tmp_path)
+    attempt = trials.history(tmp_path)[0]
+    path = tmp_path / trials.ATTEMPTS / f"{attempt['attempt_id']}.json"
+    tampered = read_json(path)
+    tampered["params"]["threshold"] = 0.9
+    tampered["fingerprint"] = fr.fingerprint(tampered["params"])
+    atomic_json(path, tampered)
+    (tmp_path / fr.TRIALS).write_text(
+        "\n".join(json.dumps(row) for row in [tampered, trials.history(tmp_path)[1]])
+        + "\n"
+    )
+    with pytest.raises(ValueError, match="reserved trial identity"):
+        rf.register_family(tmp_path, plan(member(instrument="NEXT")))
