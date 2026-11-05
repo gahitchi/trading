@@ -9,20 +9,39 @@ or the 2026-05-08 UTC protected BTC holdout.
 ## Actual goal
 
 Build a short-horizon, institutionally disciplined, **paper-first**
-crypto perpetual trading/research system that can discover opportunities
-on most active days, with an ultimate objective of **positive net
-daily P&L over a sufficiently large, independently validated sample**.
-The operator's explicit practical benchmark is **even €0.20–€0.50
-of net profit in a day is worthwhile**. Therefore prioritize
-**consistency of positive daily outcomes** above large individual
-winners, yearly APR, or total volume of trades. Track both
-`net_daily_pnl_eur > 0` (a profitable day of any size) and the
-**illustrative €0.20 and €0.50 net/day milestones**; these numbers
-are *targets to report*, not minimum order sizes, risk budgets,
-signals, expected returns or guaranteed payouts.
+crypto perpetual trading/research system that seeks **positive
+compounded net equity growth across profitable, losing and flat
+UTC days**. The user is comfortable with a highly variable daily
+return distribution: one day might earn €0.20, a later day $120,
+and another day lose $80. These are **illustrative net outcomes,
+not a promised frequency, minimum daily profit or risk budget**.
+Reconcile currency differences at documented, timestamped FX rates
+and disclose conversion friction before aggregating returns.
 
-Daily profit is a target for *expected performance*, **not** a
-contractual guarantee of gains every day. A profitable day is
+**Performance priority:** first ensure that the aggregate of net
+profits is greater than the aggregate of net losses and costs
+over independently evaluated periods, while losses and drawdowns
+remain within a precommitted risk budget. Second, evaluate how
+often opportunities arise and how consistently cumulative equity
+recovers from setbacks. Winning-day fraction, €0.20/€0.50
+milestones, daily mean and median returns are useful secondary
+distributions, **not hard success quotas**. An isolated large
+winning day must not conceal unacceptable downside or sparse
+market participation.
+
+**Partial reinvestment:** a user-configurable fraction of
+**audited, realized net profits** is allocated to future
+deployable trading capital, with the remainder assigned to a
+separate retained-profit reserve. Reinvestment changes future
+position-sizing capacity, **not the historical P&L, total equity,
+or quality of the trading edge**. The percentage is unspecified
+until the operator sets it; do not silently default to 50%, 100%,
+or any other live policy. See
+[profit allocation and compounding contract](profit-reinvestment-accounting.md).
+
+Positive long-run net expectancy and controlled capital growth
+are research objectives, **not** contractual guarantees of
+profit or recovery after a losing day. A profitable day is
 counted only after all actual modeled trading frictions, marked
 inventory, margin/funding effects and any required currency
 conversion. A zero-trade day has zero net trading P&L (unless
@@ -34,10 +53,12 @@ leverage or artificial daily trade quotas to try to guarantee
 a positive calendar-day close.
 
 Annual percentage return, funding carry and multi-day holding
-performance are **secondary diagnostics**, not the optimization target
-for the main fast track. One positive annualized return can conceal
-prolonged periods without trades, excessive drawdown, or poor
-performance on ordinary trading days.
+performance are **secondary diagnostics** for the main fast
+track. Daily equity curves, cumulative net P&L, loss
+distributions, drawdown and recovery matter most. A positive
+headline return can conceal prolonged inactive periods,
+unacceptable interim losses or a strategy whose rare winners
+cannot be reproduced.
 
 ## Trading speed and position-holding horizon
 
@@ -87,20 +108,24 @@ Daily scorecard fields:
 1. **Net P&L per UTC day** in account currency and percent of
    start-of-day allocated capital, with an unambiguous choice of
    open/close valuation marks and daily capital denominator.
-2. **Mean and median net daily return** across *all eligible days*,
-   plus fraction of **positive/negative/flat days**, including days
-   that produced zero trades. Explicitly report days with
-   **net profit >= €0.20** and **>= €0.50** as illustrative
-   milestones (in the native ledger's denomination with a
-   traceable EUR conversion where necessary); do not round a
-   small negative or a zero to a successful day.
+2. **Mean, median and distribution of net daily returns** across
+   *all eligible days*, including positive/negative/flat days and
+   zero-trade days. Optionally report days with **net profit
+   >= €0.20** and **>= €0.50** as illustrative milestones
+   after a traceable FX conversion; they are not acceptance
+   quotas. Track both small and large positive and negative days.
 3. **Active-day incidence**, trades/day (all days and active days),
    number of independent active dates, and max consecutive
    zero-trade days. An isolated winner cannot make a strategy
    look like a daily-income system.
-4. **Risk:** largest loss day, daily and cumulative maximum drawdown,
-   tail losses, stops, leverage/margin use, adverse price excursions
-   and exposures carried across midnight.
+4. **Risk and recovery:** total cumulative net P&L, compounded
+   marked equity, gross winning-day gains, absolute losing-day
+   losses, profit factor (when defined), maximum drawdown,
+   largest loss day, negative-tail quantiles, duration to
+   recover prior equity highs, and leverage/margin exposure.
+   Include costs, unrealized P&L, positions carried across
+   midnight and the gap between actual equity and available
+   risk/deployable capital.
 5. **Execution:** round-trip net bps after fees/spread/slippage,
    maker vs taker fill rate, adverse selection, rejected/partial
    fills, live-feed age, order acknowledgement/cancel latencies,
@@ -110,12 +135,17 @@ Daily scorecard fields:
    unreconciled positions, order/state restart tests and
    whether the strategy is adequately active when the user's
    computer is actually online.
-7. **Evidence:** source, code and runtime SHA provenance, all
-   attempted parameters/configurations, exact trial/horizon
-   family registration, study window, UTC time boundaries,
-   protected holdout state and inference qualification.
+7. **Capital allocation and evidence:** realized net profit
+   available for reinvestment, configured reinvestment fraction,
+   amount reallocated to deployable capital, amount reserved,
+   daily transfers/withdrawals, mark-to-market total equity,
+   and precommitted risk/exposure limits. Retain source, code,
+   runtime and allocation-policy hashes; all attempted
+   settings, study windows, boundaries and qualification state.
 
-Display **daily** returns and loss distributions first. Annualized
+Display **daily net P&L and the cumulative marked-equity curve**
+together, followed by the winning/losing-day distributions,
+drawdown, recovery and capital allocation breakdown. Annualized
 figures, conventional Sharpe and funding yield may appear as
 secondary diagnostics only, clearly labeled as statistical
 projections from the full daily sample.
@@ -127,32 +157,34 @@ been discovered. Before admitting a proposed strategy into a
 protected holdout or a supervised paper campaign:
 
 - **Daily-relevance gate:** opportunity and executed round-trip
-  counts must be sufficient to characterize *ordinary days*,
-  not simply a handful of rare crashes. **The primary diagnostic
-  is the observed profitable-day percentage** and distribution
-  of net daily P&L, not maximum dollars won on exceptional
-  moves. Report the fraction of days reaching the operator's
-  **€0.20 and €0.50** illustrative net milestones, with
-  confidence intervals across independent days and the full
-  losing-day/tail-loss record. Report active-day and zero-trade-day
-  distributions honestly; no artificial quota can force trades
-  when signals are absent.
-- **Net profitability gate:** positive **mean net UTC-day P&L**
-  across *all eligible days*, after realistic funding, fees,
-  adverse fills and partial-fill accounting; positive net return
-  must survive plausible home-network latency and cost stresses.
-  Also require an independently justified positive-day consistency
-  threshold and separately assessed loss-tail budget before
-  qualification: **do not invent a 100% winning-day acceptance
-  criterion** or claim €0.20/day is obtainable without first
-  knowing starting capital, notional, minimum order size, spread,
-  fees, slippage and time online. Retain losing days, nontrading
-  days and all failed research configurations. A positive point
-  estimate alone is insufficient.
-- **Risk gate:** measured drawdown, worst-day loss, leverage, open
-  position exposure, kill switch and collateral/liquidation
-  scenarios meet a separately precommitted capital risk budget.
-  No risk budget is implied by this document.
+  counts must characterize normal days rather than only rare
+  crashes. Report active-day frequency, positive/negative/flat
+  day rates, all-day daily net expectancy, variable profit/loss
+  magnitudes and coverage-adjusted inactivity. Small winning
+  days count, but are not worth a forced trade; no artificial
+  frequency quota can manufacture opportunities.
+- **Net profitability gate:** positive **cumulative net
+  marked-equity growth and positive mean net UTC-day P&L**
+  across *all eligible days* after fees, funding, adverse fills
+  and partial-fill accounting. Record whether **aggregate
+  winning-day gains exceed aggregate losing-day losses**,
+  and whether the edge survives feasible latency and cost
+  stresses. The magnitude and tail of the losing days, plus
+  recovery duration, matter more than attaining a fixed
+  winning-day percentage. No 100%-winning-day requirement,
+  forced trade, loss-chasing or automatic risk increase is
+  allowed. Retain flat and failed days in the denominator;
+  a positive point estimate alone is insufficient.
+- **Risk and reinvestment gate:** measured drawdown, worst-day
+  loss, leverage, open exposure, kill switch and liquidation
+  stress stay inside separately precommitted capital limits.
+  Profit allocation is applied **only to realized net profits**;
+  portfolio losses decrease actual equity, and reinvestment
+  cannot bypass order, exposure, leverage, daily-loss or
+  maximum-deployable-capital limits. Test both fixed-capital
+  and fractional-reinvestment baselines against identical
+  signals and fills to isolate sizing effects. No reinvestment
+  fraction or risk budget is implied by this document.
 - **Statistical gate:** correct for multiple searched strategies,
   serially dependent daily outcomes and cross-symbol correlation;
   an *independently calibrated* inference method must pass the
@@ -194,10 +226,15 @@ protected holdout or a supervised paper campaign:
 
 ## Recommended development sequence
 
-1. **Coverage and daily accounting:** establish one daily UTC
-   realized/unrealized net P&L schema shared by replay and paper,
-   a reconciled mark/funding/fee ledger, explicit zero-trade
-   days, completeness/availability statuses and source hashes.
+1. **Coverage, daily equity and reinvestment accounting:**
+   establish one UTC-day realized/unrealized net-P&L schema
+   shared by replay and paper, reconcile funding/fee/FX flows,
+   explicit zero-trade days, complete equity snapshots,
+   deployable-versus-reserved cash, configurable partial
+   realized-profit allocation, loss debit, risk caps and
+   auditable transfer events. Add ledger invariants and
+   fixed-capital versus compounding tests before running
+   a new candidate.
 2. **Feasible market selection:** survey highly liquid shortable
    contracts and spread/fee structure; choose a small research
    universe based on ex ante liquidity and reliability, not
