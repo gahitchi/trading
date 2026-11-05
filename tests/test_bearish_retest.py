@@ -241,3 +241,26 @@ def test_quality_veto_applies_to_confirmation_to_entry_delay():
     result = run(b)
     assert result.trades.empty
     assert result.event_counts["untrusted_oi_before_entry"] == 1
+
+
+def test_entry_candle_quality_is_not_consulted_before_its_close():
+    b, t0 = setup()
+    # Confirmation is t0+2, the complete intervening candle
+    # is t0+3, and entry executes at the OPEN of t0+4.
+    # The OI marker for t0+4 belongs to that candle's end;
+    # using it to cancel the already-open entry is lookahead.
+    b.loc[b.index[t0+4], "oi_invalid"] = True
+    result = run(b)
+    assert len(result.trades) == 1
+    assert result.event_counts["trade"] == 1
+
+
+def test_initial_seven_day_and_24h_lookbacks_are_concurrent():
+    # Strategy should not impose a spurious extra full day
+    # of warmup just because the 24h support lookback
+    # overlaps the seven-day volume reference.
+    assert br.PRIOR_HOURS * 60 > br.SUPPORT_MINUTES
+    b = sample()
+    b = b.iloc[:(br.PRIOR_HOURS + 1) * 60 + br.SUPPORT_MINUTES - 1]
+    result = br.simulate(b, boundary=pd.Timestamp("2026-02-01T00:00:00Z"))
+    assert result.model == br.MODEL
