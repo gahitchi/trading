@@ -26,7 +26,7 @@ from lab.trials import _code_identity, code_provenance, trial_run
 
 KEY = "btc-failed-retest-v1"
 PLAN_NAME = "BTCUSDT failed-support-retest frozen v1 retrospective development study"
-POLICY = "guarded-preregistered-funding-adjusted-btc-retest-study-v1"
+POLICY = "guarded-preregistered-funding-adjusted-btc-retest-study-v2-archive-endstamp"
 BOUNDARY = pd.Timestamp("2026-05-08T00:00:00Z")
 
 
@@ -75,7 +75,7 @@ def _params(plan: dict) -> dict:
         "funding_model": crash_funding_ledger.MODEL,
         "funding_plan_sha256": crash_funding._digest(plan),
         "funding_events_sha256": plan["events_sha256"],
-        "data_policy": "source-validated-contract-quantity-oi-veto-minute-bars",
+        "data_policy": "preholdout-archive-minutebar-endstamp-cutoff-and-source-veto-v2",
         "holdout_start": BOUNDARY.isoformat(),
         "research_status": "retrospective-development-only",
     }
@@ -138,14 +138,30 @@ def evaluate(config_path: Path, funding_plan_path: Path) -> dict:
         # The data loader filters out boundary-overlapping archives
         # BEFORE opening any parquet file.
         k = crash_data.load(root, "klines", "BTCUSDT", before=BOUNDARY)
-        if k is None or k.empty or (k["ts"] >= BOUNDARY).any():
-            raise ValueError("missing or boundary-overlapping pre-holdout candle data")
+        if k is None or k.empty:
+            raise ValueError("missing pre-holdout candle data")
+        # Binance daily archives use a minute-END timestamp: the
+        # 2026-05-07 daily file may legitimately end at 2026-05-08
+        # 00:00 UTC (the 23:59-00:00 bar). Its data is still
+        # from before the protected holdout, but the old crash
+        # study excludes boundary-labelled observations. Mirror
+        # that rule rather than rejecting the entire source file.
+        # Files containing a timestamp strictly AFTER the cutoff
+        # are malformed and fail closed, never silently truncated.
+        if (k["ts"] > BOUNDARY).any():
+            raise ValueError("pre-holdout candle archive contains timestamp beyond protected boundary")
+        k = k.loc[k["ts"] < BOUNDARY].copy()
+        if k.empty:
+            raise ValueError("no eligible pre-holdout candle data after UTC end-stamp cutoff")
         attempt.inputs.frame("klines:BTCUSDT", k)
         oi = crash_data.load(root, "oi", "BTCUSDT", before=BOUNDARY)
         if oi is None or oi.empty or "oi_qty" not in oi or "oi_valid" not in oi:
             raise ValueError("accepted OI contract quantity/quality source is missing")
-        if (oi["ts"] >= BOUNDARY).any():
-            raise ValueError("OI source overlaps protected holdout")
+        if (oi["ts"] > BOUNDARY).any():
+            raise ValueError("pre-holdout OI archive contains timestamp beyond protected boundary")
+        oi = oi.loc[oi["ts"] < BOUNDARY].copy()
+        if oi.empty:
+            raise ValueError("no eligible pre-holdout OI source after UTC cutoff")
         attempt.inputs.frame("oi:BTCUSDT", oi)
         grid = crash_study.bars(k, oi)
         outcome = candidate.simulate(grid, boundary=BOUNDARY)
