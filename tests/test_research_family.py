@@ -151,8 +151,15 @@ def test_registration_retains_earlier_outcomes_and_cannot_make_them_prospective(
     report = rf.family_report(tmp_path)
     assert report["prior_entries"] == 1 and not report["prospective_coverage_complete"]
     assert any("retrospective" in reason for reason in report["reasons"])
-    with pytest.raises(ValueError, match="already registered"):
-        rf.register_family(tmp_path, plan(member(params={"threshold": 0.9})))
+    initial = read_json(tmp_path / rf.FAMILY)
+    successor = rf.register_family(tmp_path, plan(member(params={"threshold": 0.9})))
+    assert read_json(tmp_path / rf.FAMILY) == initial  # immutable original
+    assert successor["previous_registration_sha256"] == registered["sha256"]
+    assert successor["prior_history"] == trials.history(tmp_path)
+    report_after = rf.family_report(tmp_path)
+    assert report_after["prior_entries"] == 2
+    assert not report_after["prospective_coverage_complete"]
+    assert any("retrospective" in reason for reason in report_after["reasons"])
 
 
 def test_prior_evidence_deletion_is_detected_even_after_both_original_copies_are_removed(tmp_path):
@@ -207,7 +214,7 @@ def test_competing_registrations_cannot_replace_the_first_plan(tmp_path):
         try:
             return rf.register_family(tmp_path, plan(member(params={"threshold": i})))
         except ValueError as e:
-            assert "already registered" in str(e)
+            assert "unattempted planned members" in str(e)
             return None
 
     with ThreadPoolExecutor(max_workers=4) as pool:
