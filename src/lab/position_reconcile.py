@@ -9,8 +9,10 @@ No API keys, exchange orders, or unqualified live execution.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
 
@@ -80,6 +82,31 @@ class CashAdjustment:
 class Position:
     quantity: Decimal  # signed, BUY positive and SELL negative
     average_price: Decimal
+
+
+def _source_digest(row: SimulatedFill | PositionMark | CashAdjustment) -> str:
+    """Bind economic journal IDs to the *complete* raw source record.
+
+    A reissued fill with changed fee, quantity or quote provenance must
+    not look like the same immutable observation, even if reported
+    aggregate P&L coincidentally stays identical.
+    """
+    def primitive(value):
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {key: primitive(v) for key, v in sorted(value.items())}
+        if isinstance(value, (list, tuple)):
+            return [primitive(v) for v in value]
+        if hasattr(value, "__dataclass_fields__"):
+            return primitive(asdict(value))
+        return value
+
+    encoded = json.dumps({
+        "source_type": type(row).__name__,
+        "record": primitive(row),
+    }, allow_nan=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _mark_total(
@@ -164,6 +191,7 @@ def compile_source(
             raise ValueError("source events are out of chronological order")
         seen.add(row.source_id)
         last_time = row.timestamp
+        fingerprint = _source_digest(row)
         if isinstance(row, SimulatedFill):
             if not _SYMBOL.fullmatch(row.symbol) or row.side not in {"BUY", "SELL"}:
                 raise ValueError("invalid linear-contract symbol or fill side")
@@ -183,20 +211,20 @@ def compile_source(
             net = gross - fee - slip
             batch = [
                 AllocationEvent(
-                    f"{row.source_id}.fill", f"{row.source_id}.fill", row.timestamp,
+                    f"e.{fingerprint}.fill", f"{row.source_id}.fill", row.timestamp,
                     policy.currency, "trade", str(net), gross=str(gross),
                     fees=str(fee), slippage=str(slip), funding="0",
                     released_mark="0",
                 ),
                 AllocationEvent(
-                    f"{row.source_id}.mark", f"{row.source_id}.mark", row.timestamp,
+                    f"e.{fingerprint}.mark", f"{row.source_id}.mark", row.timestamp,
                     policy.currency, "mark", str(mark_value),
                 ),
             ]
         elif isinstance(row, PositionMark):
             amount = _mark_total(positions, row.marks, q)
             batch = [AllocationEvent(
-                f"{row.source_id}.mark", f"{row.source_id}.mark", row.timestamp,
+                f"e.{fingerprint}.mark", f"{row.source_id}.mark", row.timestamp,
                 policy.currency, "day_close" if row.close_day else "mark", str(amount),
             )]
         else:
@@ -204,7 +232,7 @@ def compile_source(
             if amount != amount.quantize(q):
                 raise ValueError("cash settlement must be quantized")
             batch = [AllocationEvent(
-                f"{row.source_id}.settle", f"{row.source_id}.settle", row.timestamp,
+                f"e.{fingerprint}.settle", f"{row.source_id}.settle", row.timestamp,
                 policy.currency, "adjustment", str(amount), reason=row.reason,
             )]
         for event in batch:
