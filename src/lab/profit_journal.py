@@ -254,5 +254,50 @@ class ProfitJournal:
             self._publish_head(sequence=sequence + 1, last=record["sha256"], header=self._checkpoint_header_unlocked())
             return day
 
+    def append_batch(self, events: list[AllocationEvent]) -> list[DayClose]:
+        """Commit a dependent set of economic events under ONE durable checkpoint.
+
+        Intended for a fill's realized-cash entry and its complete
+        post-fill position mark. The full batch must validate against the
+        current replay before any bytes are written. Interrupted writes
+        fail closed on next replay via the head sequence/hash mismatch.
+        This is logical atomic visibility, not a claim of disk transaction
+        rollback or broker acknowledgement.
+        """
+        if not isinstance(events, list) or not events:
+            raise ValueError("journal batch must contain at least one event")
+        with file_lock(self._lock):
+            ledger, sequence, previous = self._load_unlocked()
+            simulated = deepcopy(ledger)
+            records: list[dict] = []
+            closed: list[DayClose] = []
+            chain = previous
+            for event in events:
+                result = simulated.apply(event)
+                if result is not None:
+                    closed.append(result)
+                row = _sealed({
+                    "version": _VERSION,
+                    "type": _ENTRY,
+                    "sequence": sequence + len(records) + 1,
+                    "previous_sha256": chain,
+                    "event": _event_data(event),
+                })
+                records.append(row)
+                chain = row["sha256"]
+            raw = b"".join(_canonical(row) + b"\n" for row in records)
+            fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CLOEXEC)
+            try:
+                _write_all(fd, raw)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            self._publish_head(
+                sequence=sequence + len(records),
+                last=chain,
+                header=self._checkpoint_header_unlocked(),
+            )
+            return closed
+
     def report(self, through: date) -> dict:
         return self.replay().report(through)
