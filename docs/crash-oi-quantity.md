@@ -469,6 +469,43 @@ These tests cover the two-row October gap, 125-row February gap,
 quarantine-plus-gap conjunction, complete OI cadence and the
 short-side breakdown lookback veto before/after the gap.
 
+## BTCUSDT pre-holdout migration completed (Termux acceptance, 2026-11-05)
+
+Operator-run migration and independent read-only audit output establish this
+**dataset migration checkpoint** (not strategy qualification):
+
+- Scope: all 858 daily BTCUSDT OI Parquet caches, 2024-01-01 through
+  2026-05-07 UTC; protected holdout starts 2026-05-08 UTC.
+- The migration auditor: ok=true, verified_files=858,
+  verified_records=246974, legacy_remaining=0, issues=[].
+- The coverage auditor: checked_days=858,
+  full_day_count_benchmark=247104, observations=246974,
+  count_shortfall=130, errors=[].
+- Missing source timestamps (not filled):
+  - 2024-02-16 13:35–23:55 UTC: 125;
+  - 2024-10-28 16:25–16:30 UTC: 2;
+  - 2025-08-29 06:20–06:30 UTC: 3.
+- A separate 330 source (0,0) OI rows were explicitly quarantined;
+  these remain timestamped but unavailable for quantity-based signals.
+- The full-period OI cadence/quality report intentionally remains
+  coverage_ok_for_checked_days=false: incomplete source coverage and
+  quarantined observations are reported, not silently accepted as valid.
+  The coverage checker does not independently certify transactional
+  integrity; use the two auditors together.
+
+These figures are taken from the external Termux acceptance transcript;
+they are not a claim that GitHub CI had access to the operator's dataset.
+Do not edit, interpolate, backfill, or inspect the protected holdout to
+make coverage appear complete.
+
+**Next qualification gates:** re-run behavioral regression tests;
+audit minute-bar availability and causal time alignment; quantify eligible
+signal windows excluded by gaps and quarantines; freeze an immutable
+content/provenance fingerprint; stress taker costs and realistic short-side
+execution; complete trial accounting and prospective statistical
+qualification. Holdout studies and releases remain disabled. Historical
+migration completion is not evidence of profitability.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
