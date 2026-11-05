@@ -98,7 +98,10 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
         "entry_reference", "exit_reference", "fee_cost", "slippage_cost",
         "breakout", "retest", "support", "stop_reference", "target_reference",
     ]
-    if len(b) < (PRIOR_HOURS + 1) * 60 + SUPPORT_MINUTES:
+    # The seven-day volume baseline and one-day support lookback
+    # overlap in time; they are not sequential warm-up periods.
+    warmup = max((PRIOR_HOURS + 2) * 60, SUPPORT_MINUTES + 1)
+    if len(b) < warmup:
         return Result(pd.DataFrame(columns=empty_cols), {}, boundary)
 
     # Source bars are indexed by their END time. Group hourly
@@ -129,7 +132,7 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
     weights = np.minimum(VOL_TARGET / eligible_sigma, MAX_WEIGHT).fillna(0).to_numpy()
     o, h, l, c = (b[key].to_numpy(dtype=float) for key in ("open", "high", "low", "close"))
     rows = []
-    i = (PRIOR_HOURS + 1) * 60 + SUPPORT_MINUTES
+    i = warmup
     n = len(b)
     while i < n:
         L = float(support.iloc[i])
@@ -203,7 +206,10 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
             break
         # Publication/quality failures during the delayed order period
         # must not become invisible just because confirmation passed.
-        if oi_bad[confirm_i + 1:entry_i + 1].any():
+        # The entry candle's OI-quality marker is published only
+        # when that candle completes. Checking it now would peek
+        # one minute beyond the modeled opening fill.
+        if oi_bad[confirm_i + 1:entry_i].any():
             count["untrusted_oi_before_entry"] += 1
             i = entry_i + 1
             continue
