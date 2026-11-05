@@ -53,11 +53,55 @@ Current implemented behavior:
   from filled position quantities; the upstream reconciler
   must provide a correctly attributed value.
 
-The next engineering step is a durable source-validated event
-journal, replay/paper order and position reconciliation, and
-independent tests for restart, duplicate economic inputs,
-partial fills, margin exposure and multi-position mark releases.
-Only then can the risk engine use verified risk capacity.
+## Durable journal implementation (2026-11-05)
+
+`src/lab/profit_journal.py` now implements an append-only
+accounting **event journal** for paper/research use, with a separate
+`tests/test_profit_journal.py` regression suite. **These new
+journal tests and their integration with the prior 33 passing
+kernel tests are awaiting Termux/Arch qualification.**
+
+- An exclusive process lock serializes writer operations. Each
+  append reconstructs and validates the exact ledger state before
+  admitting an event. Persisted JSONL records contain monotonic
+  sequence numbers, stable event/source IDs, an exact frozen
+  reinvestment policy, a predecessor SHA-256, and the record
+  SHA-256. Duplicate economic sources cannot be rebooked merely
+  under a different event ID.
+- A separate fsynced `.head.json` checkpoint records the
+  latest committed sequence/hash; the JSONL file alone is not
+  allowed to silently lose a complete trailing event. Checkpoint
+  and record disagreeing after interruption **fail closed**;
+  the system does not autonomously truncate, regenerate the
+  checkpoint, or discard source evidence.
+- Incomplete JSON, a deleted checkpoint, a missing journal,
+  different policy, altered record, duplicate source,
+  missing UTC day mark, reversed time or financial
+  reconciliation failures all block subsequent writes.
+  Correct recovery requires an audited external restore
+  policy and should not fabricate P&L.
+- Disk writes are fsynced before a confirmed append; a crash
+  between the fsynced event and fsynced checkpoint may leave an
+  **unavailable** journal, requiring operator review. No
+  filesystem event journal can promise to recover from total
+  device loss without redundant backups.
+- The SHA-256 chain and checkpoint detect accidental changes,
+  truncation and inconsistencies; they are **not authenticated
+  exchange receipts** and do not protect against an adversary
+  with access to rewrite both files. Independently authenticated
+  upstream fill and settlement evidence is still required.
+- The design intentionally replays all recorded events on
+  each append. This bounds the first implementation's
+  complexity and prioritizes auditability, but is **not**
+  suitable for an ultra-low-latency hot loop without a
+  measured, independently verified snapshot/index mechanism.
+
+**Next dependency:** connect real replay/paper executions and
+position/mark/funding attribution to these events, then test
+partial fills, restart with open orders, margin claims, and
+multi-position mark releases. The ledger must remain isolated
+from exchange-order permissions until the risk engine and
+source provenance checks are qualified.
 
 ## Economic objective and attribution
 
