@@ -1,6 +1,6 @@
 # Research proposal — failed-retest bearish structure break (v1)
 
-**Status: specified in source control, NOT implemented, NOT evaluated, NOT statistically qualified.**
+**Status: pure candidate state machine implemented and unit tests written (`src/lab/bearish_retest.py`, `tests/test_bearish_retest.py`); NOT externally tested, NOT run on BTC history, NOT prospectively registered, and NOT statistically qualified.**
 2026-11-05. This idea is documented after inspecting the losing BTCUSDT
 `crash breakdown` result. **It is not a prospectively independent
 discovery relative to that inspected dataset.** Neither the former
@@ -67,6 +67,32 @@ recording a new candidate and expanding the search family.
    settlement-mark funding, with the frozen holdout never accessed
    during implementation or exploratory selection. All inputs
    and software versions require durable fingerprints.
+
+## Execution timestamp and source-grid convention
+
+The archived `lab.crash_data` Binance klines use `ts = open_time + 60 s`,
+i.e. their index is the **END of each candle**, not its open.
+The frozen engine enforces a complete UTC one-minute end-stamped
+grid, rejects nonfinite/inconsistent OHLC and unsourced
+`oi_invalid` quality flags, uses exactly the previous completed
+24 hours for support, and delays entry until the opening of
+the second candle after the completed confirmation bar.
+
+The historical volatility reference must be positive, finite and
+entirely lagged before the breakout. An unavailable or zero-volatility
+reference cancels the candidate rather than silently allocating its
+maximum position weight. Missing candles cause a fail-closed result.
+The seven-day reference quote-volume hours are grouped by candle
+*start* time and end strictly before the first minute in the
+latest 60-minute breakout window, to avoid lookahead or overlap.
+
+The engine has **no live-market ingestion, no optimization interface,
+and no CLI command capable of reading historical research data**.
+Only injected bars whose last timestamp is strictly before an
+explicit UTC holdout boundary are accepted. The 2026-05-08 protected
+holdout is not touched by unit tests. Source pinning, safe registration,
+and a durable dedicated evaluation CLI must be completed and
+validated separately before any historical research run.
 
 ## Qualification rules to freeze before the first test
 
