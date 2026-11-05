@@ -10,8 +10,22 @@ merely because its supporting code is implemented.
 ## 1. Goal
 
 An automated, independent trading system with institutional-grade research and risk discipline, able to trade
-any asset class through the right broker or exchange. Fast (low-latency) trading comes first. Longer-horizon
-trading with an AI strategist comes later.
+any asset class through the right broker or exchange. **The primary fast-track objective is short-duration
+trading whose net results are evaluated per UTC day, not annualized returns.** Aim for recurring daily
+opportunities and a positive mean net *daily* P&L across all trading and zero-trade days, with drawdown
+contained and every execution cost counted. No strategy can promise profit on every calendar day,
+and no trade is preferable to a forced low-quality fill.
+
+Start with a one-minute signal clock and positions lasting approximately 1–15 minutes,
+then explore 30–60-second decisions only with high-quality tick/L2 replay and an independently
+qualified execution model. Submillisecond market making/latency arbitrage is not an initial target:
+home internet cannot compete with the fastest colocated participants. Measured feasible
+latency, pessimistic fills, fee/spread costs and reliable risk controls take precedence over
+theoretical speed. Rust is the target live hot path; Python remains suitable for offline research.
+
+The full [daily P&L and short-horizon research policy](docs/short-horizon-daily-profit-objective.md)
+sets the reporting contract, experiment-registration rules and the order of work.
+Longer-horizon carry and AI proposals remain secondary tracks, not substitutes for fast daily P&L.
 
 Crypto perpetual futures are the test bed: the market never closes, the data is free, and every module can be
 run and tested at any hour.
@@ -23,7 +37,7 @@ run and tested at any hour.
 | No money spent | Free public data only (exchange websockets, `data.binance.vision`-style REST history). No paid feeds, no VPS, no co-location. Interactive Brokers is out for now: minute data is behind a paywall. |
 | Paper only | Nothing places exchange orders or holds API keys until Gabriel decides otherwise (`AGENTS.md`). Execution is NautilusTrader's sandbox: live data, simulated fills. |
 | The PC is not always on | Recordings have holes and paper runs are sessions of hours, not weeks. Every study must accept gappy data; every track record must add up across sessions. |
-| Home latency | Execution studies and backtests are run at 50, 150 and 300 ms (`--latency-ms`). `micro-study` is a signal screen without execution and cannot qualify latency performance. An edge that only exists below 50 ms is noted and parked for Phase 4. |
+| Home latency | Existing execution studies exercise 50, 150 and 300 ms; add a 1,000 ms stress scenario before qualifying a new daily-profit candidate. Record actual end-to-end feed-to-decision-to-fill latency and cancel acknowledgement. `micro-study` is a signal screen without execution and cannot qualify latency performance. An edge that only exists below feasible latency is rejected or parked. |
 
 ## 3. How the software fits together today
 
@@ -57,20 +71,24 @@ run and tested at any hour.
 | BTCUSDT bearish crash breakdown (predefined) | `lab crash study --mode breakdown --symbols BTCUSDT --funding-plan ...` | **Rejected for this configuration on research data (2026-11-05).** 32 trades, −106.4 bps mean net, −8.38% modeled APR, −0.99 daily Sharpe, 17 stops / 1 target; 20/30/50-bps cost sensitivity −106.4/−116.4/−136.5 bps mean net. Audited 2,574-event BTCUSDT funding history contributed +30.89 bps summed across the 32 trades (62 certain, 0 ambiguous). Pre-holdout ends 2026-05-07; **no qualified inference and no holdout evaluation**. The 479-trade daily-entry baseline is not exposure/trade-count matched. See `docs/crash-oi-quantity.md`. |
 | BTC crash postmortem + matched placebo | `python -m lab.crash_postmortem_cli` | **Termux accepted 2026-11-05.** Original short −106.4 bps/trade; all 16 predetermined matched-descriptive comparisons outperformed original, original-minus-placebo median −95.0 bps. 10 total attempt records, seven legacy provenance gaps, inference NOT_QUALIFIED. No holdout use. See `docs/crash-postmortem.md`. |
 | Alternative bearish failed-retest hypothesis | `src/lab/bearish_retest.py`, `lab.bearish_retest_research` | **Retired from qualification after completed 2026-11-05 v2 historical research run.** 190 portable regression tests passed; one initial v1 replay failed and remains in evidence, then corrected v2 was registered separately. **15 completed BTCUSDT shorts, -47.0794 net bps/trade, 20% wins, modeled annual return -3.5406%, Sharpe -1.2735, max drawdown 8.5442%; 127 breakout events and 15 confirmations.** The fixed negative-net stop criterion triggered. Prior 10 trials, the failed v1 attempt and completed v2 attempt are retained in durable research history; no tuning, holdout access, qualified statistical edge or trading promotion. See `docs/bearish-failed-retest-result-v1.md`. |
+| Short-horizon daily-P&L research pivot | [Daily/short-horizon policy](docs/short-horizon-daily-profit-objective.md) | **Objective documented; implementation and empirical gates pending.** The 15-trade/858-day failed-retest BTC strategy is both negative and far too sparse for daily opportunities. Priority: 1-minute decision clock, 1–15-minute holding horizons, independently registered subminute cohorts only with L2/trades, shared UTC-day mark-to-market net-P&L ledger, real maker/taker execution sensitivity and daily activity/flat-day distributions. This is **not a new backtested edge**. |
 
 ## 5. Phases
 
 | Phase | Name | State | Exit gate (summary) |
 |---|---|---|---|
 | 0 | Foundation | ✅ done | — |
-| 1 | Find an edge | 🔄 now | One strategy passes its holdout after costs at 150 ms |
+| 1 | Find a short-horizon daily edge | 🔄 now | Independently qualified positive **mean net UTC-day P&L** after costs and attainable latency, sufficient active-day evidence, acceptable risk, then one protected holdout evaluation |
 | 2 | Paper trading | ⏳ next | ≥ 300 paper trades over ≥ 14 session-days, net profitable, t ≥ 2, matches backtest |
 | 3 | Small live trading | 💤 | Funding decision by Gabriel; 4 weeks live within risk limits |
-| 4 | Speed: co-location and Rust hot paths | 💤 | Measured latency budget met |
+| 4 | Advanced execution speed / optional colocated infrastructure | 💤 | Only pursue speed upgrades justified by measured latency/cost benefit; keep Rust hot-path measurement in Phase 1 |
 | 5 | More venues and asset classes | 💤 | Each new market repeats steps 1–2 |
 | 6 | AI strategist (longer horizons) | 💤 | AI proposals pass the same gates as human research |
 
 Markers: ✅ done on `main` · 🔄 in progress · ⏳ next · 💤 later.
+
+The phase table describes the **research target**, not an assertion that daily profits exist. A day with
+no trades must not be removed from P&L statistics or compensated for by mandatory entries.
 
 ---
 
@@ -94,6 +112,19 @@ Markers: ✅ done on `main` · 🔄 in progress · ⏳ next · 💤 later.
 ---
 
 ## Phase 1: Find an edge 🔄
+
+**Priority update (2026-11-05):** daily net P&L and feasible trade frequency are the lead criteria for
+the fast track. Before another short-entry experiment, implement the
+[daily scorecard and short-horizon evidence contract](docs/short-horizon-daily-profit-objective.md):
+count all eligible UTC days including zero-trade days; reconcile mark-to-market
+daily net equity changes to trade, funding, fee and inventory ledgers; report
+winning/losing/flat-day frequency, daily drawdown/tails, filled trades per
+active day and latency/cost stress. Test 1–15-minute horizons using recorded
+book/trade replay, not OHLC assumptions about instantaneous fills.
+Preserve the losing BTC strategies without parameter salvage.
+At least one candidate must have positive cost-adjusted daily expectancy
+and validated statistical/execution evidence before considering a protected
+holdout. A positive average alone is insufficient.
 
 Three tracks run in parallel because they need different data: the maker track needs recorded books, the carry
 track needs only REST history, the lead-lag track needs both venues recorded at the same time.
