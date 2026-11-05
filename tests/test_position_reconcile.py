@@ -335,3 +335,34 @@ def test_unsourced_string_price_is_rejected_and_not_silently_assumed_fresh(tmp_p
     with pytest.raises(ValueError, match="timestamped MarkQuote"):
         reconcile_to_journal(j, [source])
     assert j.events() == ()
+
+
+def test_changed_quote_provenance_with_same_pnl_cannot_replay_as_old_source(tmp_path):
+    j = journal(tmp_path)
+    initial = fill("open", 1, "BTCUSDT", "BUY", "1", "100", {"BTCUSDT": "100"})
+    reconcile_to_journal(j, [initial])
+    before = j.path.read_bytes()
+    same_economics_changed_quote = SimulatedFill(
+        "open", initial.timestamp, initial.symbol, initial.side, initial.quantity,
+        initial.fill_price, initial.fee, initial.additional_slippage,
+        {"BTCUSDT": MarkQuote("100", initial.timestamp - timedelta(seconds=1), "new:source")},
+    )
+    with pytest.raises(ValueError, match="source/journal economic event mismatch"):
+        reconcile_to_journal(j, [same_economics_changed_quote])
+    assert j.path.read_bytes() == before
+
+
+def test_changed_fee_source_with_same_net_value_fails_immutable_evidence_binding(tmp_path):
+    j = journal(tmp_path)
+    initial = fill("open", 1, "BTCUSDT", "BUY", "1", "100", {"BTCUSDT": "100"}, fee="0.10")
+    reconcile_to_journal(j, [initial])
+    before = j.path.read_bytes()
+    # Fee changes while an additional slippage cost decreases equally:
+    # net P&L is identical, but economic provenance must NOT match.
+    modified = SimulatedFill(
+        "open", initial.timestamp, "BTCUSDT", "BUY", "1", "100", "0.05", "0.05",
+        initial.marks,
+    )
+    with pytest.raises(ValueError, match="source/journal economic event mismatch"):
+        reconcile_to_journal(j, [modified])
+    assert j.path.read_bytes() == before
