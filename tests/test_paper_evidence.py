@@ -43,7 +43,14 @@ def report(event, receipt=None, captured_at=None):
 def open_short():
     timestamp = TIME + timedelta(minutes=1)
     return SimulatedFill(
-        "fill:open", timestamp, "BTCUSDT", "SELL", "2", "100", "0.10", "0",
+        "fill:open",
+        timestamp,
+        "BTCUSDT",
+        "SELL",
+        "2",
+        "100",
+        "0.10",
+        "0",
         {"BTCUSDT": MarkQuote("100", timestamp, "quote:open")},
     )
 
@@ -107,9 +114,7 @@ def test_invalid_quote_and_future_receipt_fail_before_archive_write(tmp_path):
     archive, _ = setup(tmp_path)
     before = archive.path.read_bytes()
     source = open_short()
-    bad_mark = replace(
-        source, marks={"BTCUSDT": MarkQuote("100", source.timestamp - timedelta(seconds=6), "old")}
-    )
+    bad_mark = replace(source, marks={"BTCUSDT": MarkQuote("100", source.timestamp - timedelta(seconds=6), "old")})
     with pytest.raises(ValueError, match="stale"):
         archive.append(report(bad_mark))
     with pytest.raises(ValueError, match="cannot precede"):
@@ -175,9 +180,7 @@ def test_checkpoint_io_failure_never_claims_success(tmp_path, monkeypatch):
 def test_archive_policy_and_source_cannot_be_reinterpreted(tmp_path):
     archive, journal = setup(tmp_path)
     with pytest.raises(ValueError, match="policy or origin"):
-        PaperEvidenceArchive(
-            archive.path, policy(), DAY, origin="offline-replay"
-        )
+        PaperEvidenceArchive(archive.path, policy(), DAY, origin="offline-replay")
     other_policy = replace(policy(), reinvest_fraction="0.25")
     with pytest.raises(ValueError, match="policy or origin"):
         PaperEvidenceArchive(archive.path, other_policy, DAY)
@@ -189,9 +192,7 @@ def test_archive_policy_and_source_cannot_be_reinterpreted(tmp_path):
 
 def test_empty_paper_day_preserved_and_funding_adjustment_once(tmp_path):
     archive, journal = setup(tmp_path)
-    archive.append(report(CashAdjustment(
-        "funding:0", TIME + timedelta(minutes=1), "-0.10", "funding"
-    )))
+    archive.append(report(CashAdjustment("funding:0", TIME + timedelta(minutes=1), "-0.10", "funding")))
     archive.append(report(day_close()))
     archive.reconcile(journal)
     assert journal.report(DAY)["net_pnl"] == "-0.10"

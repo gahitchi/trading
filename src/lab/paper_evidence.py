@@ -39,9 +39,7 @@ _EVENT_TYPES = {
 
 
 def _canonical(obj: dict) -> bytes:
-    return json.dumps(
-        obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
-    ).encode("utf-8")
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8")
 
 
 def _hash(obj: dict) -> str:
@@ -89,8 +87,9 @@ def _primitive(value):
     return value
 
 
-def paper_report(event: SimulatedFill | PositionMark | CashAdjustment, *,
-                 origin: str, captured_at: datetime, raw_receipt: dict) -> dict:
+def paper_report(
+    event: SimulatedFill | PositionMark | CashAdjustment, *, origin: str, captured_at: datetime, raw_receipt: dict
+) -> dict:
     """Wrap a normalized paper event with its *unverified* original receipt.
 
     The producer must supply the original report and independent mark quotes,
@@ -110,9 +109,7 @@ def paper_report(event: SimulatedFill | PositionMark | CashAdjustment, *,
 
 
 def _decode(report: object, origin: str):
-    if not isinstance(report, dict) or set(report) != {
-        "origin", "captured_at", "kind", "event", "raw_receipt"
-    }:
+    if not isinstance(report, dict) or set(report) != {"origin", "captured_at", "kind", "event", "raw_receipt"}:
         raise ValueError("invalid paper report envelope")
     if report["origin"] != origin:
         raise ValueError("paper evidence origin mismatch")
@@ -133,9 +130,11 @@ def _decode(report: object, origin: str):
             raise ValueError("invalid paper mark sources")
         parsed = {}
         for symbol, quote in quotes.items():
-            if not isinstance(symbol, str) or not isinstance(quote, dict) or set(quote) != {
-                "price", "observed_at", "source_id"
-            }:
+            if (
+                not isinstance(symbol, str)
+                or not isinstance(quote, dict)
+                or set(quote) != {"price", "observed_at", "source_id"}
+            ):
                 raise ValueError("invalid paper mark quote")
             parsed[symbol] = MarkQuote(
                 price=quote["price"],
@@ -180,8 +179,7 @@ class PaperEvidenceArchive:
     economic policy before writing. This deliberately is not a fast path.
     """
 
-    def __init__(self, path: Path, policy: AllocationPolicy, start_day: date, *,
-                 origin: str = "nautilus-sandbox"):
+    def __init__(self, path: Path, policy: AllocationPolicy, start_day: date, *, origin: str = "nautilus-sandbox"):
         if origin not in _ORIGINS:
             raise ValueError("only named simulated paper evidence sources are allowed")
         ProfitAllocationLedger(policy, start_day)
@@ -198,9 +196,7 @@ class PaperEvidenceArchive:
                 if self._head.exists():
                     raise ValueError("paper archive missing but checkpoint present")
                 header = _seal(self._header())
-                fd = os.open(
-                    self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600
-                )
+                fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
                 try:
                     _write_all(fd, _canonical(header) + b"\n")
                     os.fsync(fd)
@@ -224,12 +220,17 @@ class PaperEvidenceArchive:
         }
 
     def _publish_head(self, sequence: int, last: str, header: str) -> None:
-        atomic_json(self._head, _seal({
-            "version": _VERSION,
-            "sequence": sequence,
-            "last_sha256": last,
-            "header_sha256": header,
-        }))
+        atomic_json(
+            self._head,
+            _seal(
+                {
+                    "version": _VERSION,
+                    "sequence": sequence,
+                    "last_sha256": last,
+                    "header_sha256": header,
+                }
+            ),
+        )
 
     def _read_locked(self) -> tuple[list[dict], list, str, str]:
         self._check_paths()
@@ -286,16 +287,16 @@ class PaperEvidenceArchive:
         with file_lock(self._lock):
             _receipts, events, last, header = self._read_locked()
             compile_source(self.policy, self.start_day, [*events, source])
-            record = _seal({
-                "version": _VERSION,
-                "type": "paper-evidence-record",
-                "sequence": len(events) + 1,
-                "previous_sha256": last,
-                "report": canonical_report,
-            })
-            fd = os.open(
-                self.path, os.O_WRONLY | os.O_APPEND | os.O_CLOEXEC | os.O_NOFOLLOW
+            record = _seal(
+                {
+                    "version": _VERSION,
+                    "type": "paper-evidence-record",
+                    "sequence": len(events) + 1,
+                    "previous_sha256": last,
+                    "report": canonical_report,
+                }
             )
+            fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CLOEXEC | os.O_NOFOLLOW)
             try:
                 _write_all(fd, _canonical(record) + b"\n")
                 os.fsync(fd)
