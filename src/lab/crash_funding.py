@@ -292,6 +292,33 @@ def audit(config_path: Path, plan_path: Path, *, symbol: str = "BTCUSDT") -> dic
     return {"ok": not issues, "read_only": True, "issues": issues, "events": plan["event_count"]}
 
 
+def load_verified(config_path: Path, plan_path: Path, *, symbol: str = "BTCUSDT") -> dict:
+    """Read audited local pre-holdout settlement evidence; never query Binance.
+
+    Re-check content after the audit to guard against a source changing
+    between validation and use. A successful return is an immutable
+    in-memory snapshot, including the exact source-plan hash.
+    """
+    report = audit(config_path, plan_path, symbol=symbol)
+    if not report["ok"]:
+        raise ValueError("funding source audit failed: " + "; ".join(report["issues"]))
+    plan = read_json(plan_path)
+    cfg = load_config(config_path)
+    boundary = _holdout_boundary(cfg)
+    _validate_plan(plan, symbol, boundary)
+    path = _path(_directory(config_path, symbol), plan)
+    if path.is_symlink():
+        raise ValueError("funding evidence cache is a symlink")
+    cache = read_json(path)
+    if (
+        cache.get("plan") != plan
+        or cache.get("plan_sha256") != _digest(plan)
+        or _digest(cache.get("events")) != plan["events_sha256"]
+    ):
+        raise ValueError("funding evidence changed after audit")
+    return {"plan": plan, "plan_sha256": _digest(plan), "events": cache["events"]}
+
+
 def _check_coverage(times_ms: list[int], start: str, stop: str) -> None:
     if not times_ms:
         raise ValueError("empty funding event timeline")
