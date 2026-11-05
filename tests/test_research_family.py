@@ -14,7 +14,9 @@ from lab import fast_research as fr
 from lab import research_family as rf
 from lab import trials
 from lab.persistence import atomic_json, read_json
-from tests.test_fast import IID
+# Test-only identifier. Importing tests.test_fast would also import NautilusTrader,
+# which is unrelated to research-family persistence and unavailable in Termux.
+IID = "BTCUSDT-PERP.BINANCE"
 
 
 def member(**changes):
