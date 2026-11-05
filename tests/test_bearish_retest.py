@@ -216,3 +216,14 @@ def test_near_holdout_trade_does_not_read_after_boundary():
     result = br.simulate(b, boundary=pd.Timestamp("2026-01-11T00:00:00Z"))
     assert len(result.trades) == 1
     assert all(result.trades["exit"] < result.boundary)
+
+
+def test_quality_veto_applies_to_confirmation_to_entry_delay():
+    b, t0 = setup()
+    # There is a full candle between the confirmation and the
+    # second-subsequent candle opening. Bad source quality there
+    # must cancel before any position is opened.
+    b.loc[b.index[t0+3], "oi_invalid"] = True
+    result = run(b)
+    assert result.trades.empty
+    assert result.event_counts["untrusted_oi_before_entry"] == 1
