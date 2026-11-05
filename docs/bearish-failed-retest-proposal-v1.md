@@ -1,6 +1,6 @@
 # Research proposal — failed-retest bearish structure break (v1)
 
-**Status: frozen candidate logic accepted in 17/17 focused Termux tests on commit `7c14cb0`. Further causality fixes, guarded plan/register/evaluate CLI and integration tests are committed but awaiting Termux validation. NOT run on historical BTC, NOT registered in the user's research family, and NOT statistically qualified.**
+**Status: 28/28 focused strategy and guarded-research Termux tests and the full 177/177 portable regression suite passed at commit `6317966`. New append-only research-family generation safeguards are pending fresh Termux validation. NOT run on historical BTC, NOT registered in the user's research family, and NOT statistically qualified.**
 2026-11-05. This idea is documented after inspecting the losing BTCUSDT
 `crash breakdown` result. **It is not a prospectively independent
 discovery relative to that inspected dataset.** Neither the former
@@ -116,14 +116,18 @@ distinct operations:
   applies the pessimistic funding model, and reports trade counts
   and fixed-cost stresses. No optimization/parameter controls exist.
 
-**Do not register a plan automatically:** `lab research register`
-is a one-time immutable registration for the whole results directory,
-not a strategy-only setting. It retains earlier completed and failed
-evidence as retrospective, which blocks clean prospectivity. If the
-directory already contains another research family, do not replace
-or bypass it. A registered new candidate is still being diagnosed
-retrospectively on the viewed BTC research period; passing it cannot
-qualify protected holdout access or declare a profitable edge.
+**Do not register a plan automatically.** `lab research register`
+now freezes an append-only registration generation after external
+validation of the registry upgrade; it does not replace or amend a
+prior registration. Any later generation is permitted only after all
+members of the previous generation have been attempted and no
+research attempt remains reserved. The old plan and complete trial
+history remain retained, linked, and blocking as appropriate.
+In this user's case, **10 historical attempts** predate the new
+BTC retest plan, so this registration and any run on inspected
+BTC research history remain retrospective and not statistically
+qualified. A positive result cannot qualify protected holdout
+access or authorize live/paper trading.
 
 After the new Termux tests pass, generate and inspect a plan first:
 
@@ -133,8 +137,9 @@ After the new Termux tests pass, generate and inspect a plan first:
       --plan-out ~/trading-termux-tests/btc-failed-retest-plan-v1.json
 
 Registration and `--evaluate` should be separate deliberate operator
-actions only after verifying the plan, the existing family status and
-the complete 177-test regression run. This new pathway has not
+actions only after validating the new append-only generation tests,
+verifying the plan, confirming existing family status, and rerunning
+the expanded portable regression suite. This new pathway has not
 been externally tested or used against historical BTCUSDT yet.
 
 ## Qualification rules to freeze before the first test
