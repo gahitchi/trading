@@ -116,3 +116,25 @@ def test_qualification_never_upgrades_from_descriptive_results(tmp_path):
     assert report["all_historical_attempts"] == 0
     assert report["distinct_configurations_or_code_versions"] == 0
     assert report["blocked_on"]
+
+
+def test_changed_holdout_midnight_is_rejected_before_evaluation(tmp_path):
+    cfg = _config(tmp_path)
+    (tmp_path / "results" / "crash_partition.json").write_text(
+        json.dumps({"version": 1, "holdout_start": "2026-05-08T12:00:00+00:00"})
+    )
+    plan = tmp_path / "unused-funding.json"
+    plan.write_text(json.dumps({"events_sha256": "c" * 64}))
+    with pytest.raises(ValueError, match="accepted BTC research boundary"):
+        cli.execute(cfg, plan)
+    assert history(tmp_path / "results") == []
+
+
+def test_existing_report_cannot_be_overwritten_or_counted_as_a_new_trial(tmp_path):
+    cfg = _config(tmp_path)
+    destination = tmp_path / "prior-report.json"
+    destination.write_text("protected report")
+    with pytest.raises(ValueError, match="refusing to overwrite"):
+        cli.execute(cfg, tmp_path / "unused-plan.json", report_out=destination)
+    assert destination.read_text() == "protected report"
+    assert history(tmp_path / "results") == []
