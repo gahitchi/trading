@@ -839,10 +839,11 @@ The optional `lab crash study --mode breakdown --symbols BTCUSDT
 - Adjusts both the breakdown strategy and its daily-entry baseline,
   and carries identical audited funding cashflows through the fixed
   20/30/50-bps execution-cost stress scenarios.
-- Fails closed on settlements whose ownership cannot be established
-  using minute-resolution OHLC fills, including a settlement in the
-  minute containing the modeled exit. It does not drop ambiguous
-  trades selectively or substitute an assumed payment.
+- With the v2 funding-bound correction documented above, does not
+  drop trades at ambiguous exit-minute settlements. It instead books
+  the pessimistic settlement bound in the primary research result
+  and retains a separate optimistic bound with uncertainty counts.
+  Neither bound is claimed to be the exact realized cashflow.
 
 The ordinary no-`--funding-plan` crash study remains explicitly
 `funding_status=not_modelled` and cannot be called funding-adjusted.
@@ -866,9 +867,12 @@ be invoked with:
       --mode breakdown --symbols BTCUSDT \
       --funding-plan ~/trading-termux-tests/btc-funding-preholdout-plan.json
 
-**The funded integration has not yet been regression-accepted on
-Termux.** This is research-only, generates a durable trial attempt,
-and is not a paper-trading, live-execution or holdout authorization.
+**The original funding integration passed 92 Termux regression tests.**
+The subsequent real-data run encountered an ambiguous settlement and
+did not publish a funded performance result. The v2 bounded-settlement
+correction above is pending its own external regression test. This
+remains research-only, logs durable attempts, and is not a
+paper-trading, live-execution or holdout authorization.
 
 ## Research attempt provenance
 
