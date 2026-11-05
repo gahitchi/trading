@@ -1,12 +1,16 @@
-"""Prospective search plans and whole-directory coverage, never a statistical gate.
+"""Append-only research-family generations, whole-history coverage, no inference gate.
 
-One immutable plan covers every research attempt in a results directory. There is no filter,
-replacement plan or recovery option that could quietly discard an unsuccessful search.
+Every registered plan and all past trial attempts remain immutable evidence.
+A successor plan may be frozen only after all members of its predecessor
+have been attempted and no evaluation is still reserved. Earlier attempts
+remain retrospective; a new family never resets the search count.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 from collections import Counter
 from pathlib import Path
 from uuid import uuid4
@@ -14,7 +18,8 @@ from uuid import uuid4
 from lab.persistence import atomic_json, file_lock, read_json
 from lab.trials import _code_identity, _encoded, _frozen, _now, code_provenance, history
 
-FAMILY = "research_family.json"
+FAMILY = "research_family.json"  # first, permanently frozen generation
+EPOCHS = "research_family_epochs"  # numbered immutable successor plans
 LOCK = "research_family.lock"
 REPORT = "research_family_report.json"
 KINDS = {"micro-study", "maker-study", "fast-backtest", "carry-study", "crash-study"}
@@ -74,21 +79,21 @@ def _hex(value, size):
     return isinstance(value, str) and len(value) == size and all(c in "0123456789abcdef" for c in value)
 
 
-def load_family(results_dir: Path):
-    """Read the authoritative registration. Callers serialize registration/reservation with LOCK."""
-    path = Path(results_dir) / FAMILY
-    if not path.exists():
-        return None
-    value = read_json(path)
+def _validate_registration(value: dict, *, prior_sha: str | None) -> dict:
+    """Validate a registration's own digest and its predecessor chain."""
     if (
         not isinstance(value, dict)
         or value.get("version") != 1
         or not _hex(value.get("family_id"), 32)
         or not isinstance(value.get("registered_at"), str)
-        or "sha256" not in value
-        or value["sha256"] != _digest({k: v for k, v in value.items() if k != "sha256"})
+        or value.get("sha256") != _digest({k: v for k, v in value.items() if k != "sha256"})
     ):
         raise ValueError("invalid research family registration or digest")
+    if prior_sha is None:
+        if "previous_registration_sha256" in value:
+            raise ValueError("initial research family has an unexpected predecessor")
+    elif value.get("previous_registration_sha256") != prior_sha:
+        raise ValueError("research family registration predecessor chain changed")
     if _digest(_plan(value["plan"])) != value.get("plan_sha256"):
         raise ValueError("invalid research family plan digest")
     code = value.get("code", {})
@@ -101,15 +106,110 @@ def load_family(results_dir: Path):
     return value
 
 
+def _generations(results_dir: Path) -> list[dict]:
+    """Read every immutable plan in order; reject gaps, edits and orphan generations."""
+    root = Path(results_dir)
+    first = root / FAMILY
+    directory = root / EPOCHS
+    if directory.is_symlink() or first.is_symlink():
+        raise ValueError("research family registration storage must not be a symlink")
+    epochs = sorted(directory.glob("*.json")) if directory.exists() else []
+    if any(not path.is_file() or path.is_symlink() for path in epochs):
+        raise ValueError("invalid research family generation record")
+    if not first.exists():
+        if epochs:
+            raise ValueError("original research family registration is missing")
+        return []
+    out = [_validate_registration(read_json(first), prior_sha=None)]
+    for number, path in enumerate(epochs, start=1):
+        if path.name != f"{number:06d}.json":
+            raise ValueError("research family generation sequence is missing or reordered")
+        value = _validate_registration(read_json(path), prior_sha=out[-1]["sha256"])
+        if value["family_id"] in {row["family_id"] for row in out}:
+            raise ValueError("repeated research family ID in generation chain")
+        out.append(value)
+    return out
+
+
+def load_family(results_dir: Path):
+    """Return the current plan after verifying the entire immutable generation chain."""
+    generations = _generations(results_dir)
+    return generations[-1] if generations else None
+
+
+def _persist_new_generation(root: Path, generation: int, value: dict) -> None:
+    """Exclusive, fsynced publication: never replace an older frozen plan."""
+    directory = root / EPOCHS
+    if directory.is_symlink():
+        raise ValueError("unsafe research family generation directory")
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{generation:06d}.json"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    fd = os.open(path, flags, 0o600)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(json.dumps(value, sort_keys=True, allow_nan=False, indent=1))
+            stream.flush()
+            os.fsync(stream.fileno())
+        directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        # A partial creation must never be mistaken for a completed
+        # registration. Attempt removal; filesystem write failure still
+        # leaves a blocking visible artifact for manual recovery.
+        path.unlink(missing_ok=True)
+        raise
+
+
 def register_family(results_dir: Path, plan: dict) -> dict:
-    """Freeze plan, code and all earlier research evidence before further reservations can begin."""
+    """Freeze a single successor plan, preserving prior plans and all attempts.
+
+    A new family does not make old search evidence prospective. Its
+    prior_history snapshot includes all failures, legacy rows and past
+    generation attempts. Frozen earlier registration files stay untouched.
+    """
     root = Path(results_dir)
     plan = _plan(plan)
     with file_lock(root / LOCK):
-        if load_family(root) is not None:
-            raise ValueError("research family already registered; replacement or amendment is not allowed")
+        chain = _generations(root)
+        previous = chain[-1] if chain else None
         prior = [r for r in history(root) if not r["holdout"]]
-        if any("family_id" in r for r in prior):
+        if previous is not None:
+            if _digest(plan) == previous["plan_sha256"]:
+                raise ValueError("research family plan already registered; identical replacement prohibited")
+            # Never open a new family while a predecessor's listed
+            # planned members have not even been attempted. Otherwise
+            # repeatedly switching the family could silently abandon
+            # losing strategies without an initial trial.
+            attempts_since = [
+                row for row in prior
+                if row.get("family_id") == previous["family_id"]
+            ]
+            planned = {_digest(m) for m in previous["plan"]["members"]}
+            attempted = {_digest(_member(row)) for row in attempts_since}
+            if not planned <= attempted:
+                raise ValueError("previous research family has unattempted planned members")
+            if any(row.get("status") == "reserved" for row in prior):
+                raise ValueError("reserved research attempts block a successor family")
+            # All linked prior trials must be covered by an existing
+            # immutable generation; unknown links signal a missing
+            # archived registration, never a fresh starting point.
+            known_ids = {row["family_id"] for row in chain}
+            if any("family_id" in row and row["family_id"] not in known_ids for row in prior):
+                raise ValueError("research history links to a missing family registration")
+            # Verify the current historical evidence still contains
+            # everything the predecessor froze before advancing.
+            prior_rows = previous["prior_history"]
+            ids = {row.get("attempt_id") for row in prior}
+            if any(row.get("attempt_id") not in ids for row in prior_rows):
+                raise ValueError("prior research evidence is missing or changed")
+            fixed = Counter(_digest(row) for row in prior_rows if row.get("status") != "reserved")
+            if fixed - Counter(_digest(row) for row in prior):
+                raise ValueError("prior research evidence is missing or changed")
+        elif any("family_id" in row for row in prior):
             raise ValueError("linked attempts exist but their research family registration is missing")
         value = {
             "version": 1,
@@ -121,8 +221,13 @@ def register_family(results_dir: Path, plan: dict) -> dict:
             "prior_history": prior,
             "prior_history_sha256": _digest(prior),
         }
+        if previous is not None:
+            value["previous_registration_sha256"] = previous["sha256"]
         value["sha256"] = _digest(value)
-        atomic_json(root / FAMILY, value)
+        if previous is None:
+            atomic_json(root / FAMILY, value)
+        else:
+            _persist_new_generation(root, len(chain), value)
     return value
 
 
