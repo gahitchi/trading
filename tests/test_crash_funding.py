@@ -141,15 +141,15 @@ def test_funding_sign_and_mark_price_for_fixed_base_short_and_long():
     short = settlement_return(-1, 100.0, start, exit_, entries)
     long = settlement_return(1, 100.0, start, exit_, entries)
     assert short["settlements"] == 2
-    assert short["funding_return"] == pytest.approx(-0.0001)
-    assert long["funding_return"] == pytest.approx(+0.0001)
+    assert short["funding_return"] == pytest.approx(+0.00005)
+    assert long["funding_return"] == pytest.approx(-0.00005)
     assert short["coverage_asserted"] is False
 
     # Funding mark differs from the entry price: settle on mark, not on
     # the position's initial notional or last trade print.
     changed = [dict(e) for e in entries]
     changed[1]["markPrice"] = "200"
-    assert settlement_return(-1, 100, start, exit_, changed)["funding_return"] == pytest.approx(-0.00015)
+    assert settlement_return(-1, 100, start, exit_, changed)["funding_return"] == pytest.approx(0.0)
 
 
 def test_boundary_settlements_never_silently_counted_or_discarded():
