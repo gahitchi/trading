@@ -658,6 +658,34 @@ strategy results used an older cost model and may not be compared as
 if their results used identical execution assumptions. Protected
 holdout testing and release remain blocked.
 
+## BTCUSDT funding source survey accepted on Termux (2026-11-05)
+
+Operator acceptance of exact-millisecond funding validator v2:
+
+- The offline crash regression suite completed with **86 passed**.
+- The real BTCUSDT historical public funding survey returned
+  **2,574** events across **3** Binance USD-M API pages
+  (1,000 / 1,000 / 574), bounded from 2024-01-01 UTC to
+  strictly before the protected 2026-05-08 UTC holdout.
+- The source-plan kind is
+  `binance-usdm-funding-history-preholdout-v2`.
+- Saved event digest:
+  `dc2d1b10da620664285fd0b25a45a1522214bf8af52d257ab36e2bc348eb2a8c`.
+- Page SHA-256 fingerprints and exact page cursors are present in the
+  operator-held plan:
+  `~/trading-termux-tests/btc-funding-preholdout-plan.json`.
+- Three settlement events per 858 research days is consistent with the
+  count, but cannot by itself establish correct rate, mark-price, and
+  event-time assignments.
+
+**Next gate:** apply the saved plan only via the source-hash-verified
+`lab.crash_funding --apply --plan ...` path, followed by the
+independent read-only `--audit --plan ...` check. Neither step
+enables funding-adjusted crash research automatically. Do not claim
+strategy P&L incorporates funding until the trade ledger explicitly
+joins accepted settlement evidence. Existing OI and candle caches and
+the protected holdout must remain unchanged.
+
 ## Historical funding timestamp validator correction (2026-11-05)
 
 The initial live BTCUSDT funding survey failed before creating its
