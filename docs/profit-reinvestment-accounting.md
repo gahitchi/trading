@@ -126,10 +126,14 @@ a qualified execution model.
   The journal now supports `append_batch` and a verified
   `events()` history for this purpose.
 - Historical source records must be **supplied in full** on
-  every restart. Source IDs and derived journal events must
-  match the entire stored prefix exactly; changed fills,
-  missing original fills, duplicate source IDs, missing
-  open-position marks and missing UTC day closes fail closed.
+  every restart. Generated journal event identities bind a
+  SHA-256 fingerprint of the **complete input source record**
+  (fill economics, source ID, quote price, quote origin/time),
+  so changing an observation is detected even when the
+  calculated P&L remains numerically identical. The
+  journal prefix must match exactly; changed fills, missing
+  original fills, duplicate source IDs, missing open-position
+  marks and missing UTC day closes fail closed.
   No implicit backfill, order placement or auto-repair.
 - Every open-position valuation must use a source-identified
   `MarkQuote(price, observed_at, source_id)` with a UTC-aware
