@@ -580,6 +580,25 @@ Verify before trusting the report:
 
 No external Termux acceptance has yet been received for this change.
 
+## Daily candle tail qualification (pending external validation)
+
+The completed BTCUSDT quality audit revealed 10,079 trailing minute
+timestamps absent from research because the overlapping May 2026
+monthly archive is excluded. The append-only daily-tail command can
+preflight the seven May 1-7 source ZIPs, verify full one-minute grids,
+and pin ZIP SHA-256s before adding separate daily Parquet caches.
+It does not read the overlapping monthly archive.
+
+Use the new tests/test_crash_kline_tail.py suite first. The tool's
+default survey is read-only; --plan-out explicitly saves a source plan.
+Only --apply --plan permits adding source-pinned files; --audit --plan
+independently verifies the committed files. The research quality gate
+now removes any period-end record stamped at the boundary.
+
+Neither this change nor the original quality report authorizes
+holdout evaluation or establishes profitability. Termux acceptance
+and archive preflight remain pending.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
