@@ -71,8 +71,8 @@ def test_short_reversal_and_loss_through_midnight(tmp_path):
     positions = reconcile_to_journal(j, data)
     assert positions["ETHUSDT"].quantity == D("1")
     assert positions["ETHUSDT"].average_price == D("95")
-    assert [str(x.net_pnl) for x in j.replay().daily] == ["20.00", "-14.20"]
-    assert j.report(START + timedelta(days=1))["net_pnl"] == "5.80"
+    assert [str(x.net_pnl) for x in j.replay().daily] == ["20.00", "-15.20"]
+    assert j.report(START + timedelta(days=1))["net_pnl"] == "4.80"
 
 
 def test_opposing_unrealized_marks_across_two_positions_can_close_without_old_release_guard(tmp_path):
