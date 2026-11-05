@@ -113,8 +113,10 @@ def _generations(results_dir: Path) -> list[dict]:
     directory = root / EPOCHS
     if directory.is_symlink() or first.is_symlink():
         raise ValueError("research family registration storage must not be a symlink")
-    epochs = sorted(directory.glob("*.json")) if directory.exists() else []
-    if any(not path.is_file() or path.is_symlink() for path in epochs):
+    if directory.exists() and not directory.is_dir():
+        raise ValueError("research family generation storage is not a directory")
+    epochs = sorted(directory.iterdir()) if directory.exists() else []
+    if any(not path.is_file() or path.is_symlink() or path.suffix != ".json" for path in epochs):
         raise ValueError("invalid research family generation record")
     if not first.exists():
         if epochs:
@@ -164,6 +166,45 @@ def _persist_new_generation(root: Path, generation: int, value: dict) -> None:
         raise
 
 
+def _assert_history_chain(chain: list[dict], rows: list[dict]) -> None:
+    """A newer plan cannot erase, rewrite or orphan evidence from any generation."""
+    known = {
+        family["family_id"]: family["plan_sha256"] for family in chain
+    }
+    by_id = {
+        row["attempt_id"]: row for row in rows if "attempt_id" in row
+    }
+    actual = Counter(_digest(row) for row in rows)
+    immutable_fields = {"status", "finished_at", "result", "inputs", "window"}
+    for row in rows:
+        if "family_id" in row and (
+            row["family_id"] not in known
+            or row["family_plan_sha256"] != known[row["family_id"]]
+        ):
+            raise ValueError("research history links to a missing family registration")
+    for family in chain:
+        snapshot = family["prior_history"]
+        for row in snapshot:
+            ident = row.get("attempt_id")
+            if ident is None:
+                if actual[_digest(row)] < sum(
+                    item == row for item in snapshot
+                ):
+                    raise ValueError("prior research evidence is missing or changed")
+                continue
+            current = by_id.get(ident)
+            if current is None:
+                raise ValueError("prior research evidence is missing or changed")
+            if row.get("status") == "reserved":
+                if any(
+                    current.get(k) != val for k, val in row.items()
+                    if k not in immutable_fields
+                ):
+                    raise ValueError("earlier reserved trial identity was changed")
+            elif current != row:
+                raise ValueError("prior research evidence is missing or changed")
+
+
 def register_family(results_dir: Path, plan: dict) -> dict:
     """Freeze a single successor plan, preserving prior plans and all attempts.
 
@@ -178,6 +219,7 @@ def register_family(results_dir: Path, plan: dict) -> dict:
         previous = chain[-1] if chain else None
         prior = [r for r in history(root) if not r["holdout"]]
         if previous is not None:
+            _assert_history_chain(chain, prior)
             if _digest(plan) == previous["plan_sha256"]:
                 raise ValueError("research family plan already registered; identical replacement prohibited")
             # Never open a new family while a predecessor's listed
@@ -232,8 +274,10 @@ def register_family(results_dir: Path, plan: dict) -> dict:
 
 
 def bind_family(results_dir: Path, entry: dict, rows: list[dict]):
-    """Bind even unplanned research attempts before data access; holdout never enters the family."""
-    family = load_family(results_dir)
+    """Bind attempts, refusing any lost predecessor or archived evidence."""
+    chain = _generations(results_dir)
+    _assert_history_chain(chain, rows)
+    family = chain[-1] if chain else None
     if family is None:
         if any("family_id" in r for r in rows):
             raise ValueError("linked attempts exist but their research family registration is missing")
@@ -245,10 +289,12 @@ def family_report(results_dir: Path) -> dict:
     """Audit every research kind/symbol, including old evidence. Never pool incompatible returns."""
     root = Path(results_dir)
     with file_lock(root / LOCK):
-        family = load_family(root)
-        if family is None:
+        chain = _generations(root)
+        if not chain:
             raise ValueError("no research family registered")
+        family = chain[-1]
         rows = [r for r in history(root) if not r["holdout"]]
+        _assert_history_chain(chain, rows)
         prior = family["prior_history"]
         prior_ids = {r["attempt_id"] for r in prior if "attempt_id" in r}
         current_ids = {r["attempt_id"] for r in rows if "attempt_id" in r}
