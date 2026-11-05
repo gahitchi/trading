@@ -4,7 +4,6 @@ All exchange responses are synthetic and injected; no live HTTP or holdout file 
 """
 
 import json
-from datetime import date
 from urllib.parse import parse_qs, urlsplit
 
 import pandas as pd
