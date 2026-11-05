@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}\Z")
 _CURRENCY = re.compile(r"[A-Z][A-Z0-9]{2,7}\Z")
@@ -204,9 +204,8 @@ class ProfitAllocationLedger:
                 raise ValueError("adjustment requires an audited fee/funding/financing/FX/correction reason")
         elif event.reason is not None:
             raise ValueError("reason is only valid for adjustment events")
-        if event.kind == "reserve_transfer":
-            if amount > self._reserve or -amount > self._deployable:
-                raise ValueError("retained/deployable transfer exceeds available source bucket")
+        if event.kind == "reserve_transfer" and (amount > self._reserve or -amount > self._deployable):
+            raise ValueError("retained/deployable transfer exceeds available source bucket")
         if event.kind == "external_flow" and amount < 0 and -amount > self._deployable:
             raise ValueError("withdrawal cannot silently spend retained reserve")
 

@@ -13,8 +13,8 @@ import hashlib
 import json
 import re
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
+from datetime import date, datetime, timedelta
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 
 from lab.profit_allocation import AllocationEvent, AllocationPolicy, ProfitAllocationLedger
 from lab.profit_journal import ProfitJournal
@@ -150,7 +150,7 @@ def _next_position(old: Position | None, side: str, qty: Decimal, price: Decimal
     remaining = opened + signed_fill
     if remaining == 0:
         return None, realized
-    if not opened or opened * signed_fill < 0 and abs(signed_fill) > abs(opened):
+    if not opened or (opened * signed_fill < 0 and abs(signed_fill) > abs(opened)):
         average = price
     elif opened * signed_fill < 0:
         average = current.average_price

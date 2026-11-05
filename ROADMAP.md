@@ -88,7 +88,7 @@ run and tested at any hour.
 | BTCUSDT bearish crash breakdown (predefined) | `lab crash study --mode breakdown --symbols BTCUSDT --funding-plan ...` | **Rejected for this configuration on research data (2026-11-05).** 32 trades, −106.4 bps mean net, −8.38% modeled APR, −0.99 daily Sharpe, 17 stops / 1 target; 20/30/50-bps cost sensitivity −106.4/−116.4/−136.5 bps mean net. Audited 2,574-event BTCUSDT funding history contributed +30.89 bps summed across the 32 trades (62 certain, 0 ambiguous). Pre-holdout ends 2026-05-07; **no qualified inference and no holdout evaluation**. The 479-trade daily-entry baseline is not exposure/trade-count matched. See `docs/crash-oi-quantity.md`. |
 | BTC crash postmortem + matched placebo | `python -m lab.crash_postmortem_cli` | **Termux accepted 2026-11-05.** Original short −106.4 bps/trade; all 16 predetermined matched-descriptive comparisons outperformed original, original-minus-placebo median −95.0 bps. 10 total attempt records, seven legacy provenance gaps, inference NOT_QUALIFIED. No holdout use. See `docs/crash-postmortem.md`. |
 | Alternative bearish failed-retest hypothesis | `src/lab/bearish_retest.py`, `lab.bearish_retest_research` | **Retired from qualification after completed 2026-11-05 v2 historical research run.** 190 portable regression tests passed; one initial v1 replay failed and remains in evidence, then corrected v2 was registered separately. **15 completed BTCUSDT shorts, -47.0794 net bps/trade, 20% wins, modeled annual return -3.5406%, Sharpe -1.2735, max drawdown 8.5442%; 127 breakout events and 15 confirmations.** The fixed negative-net stop criterion triggered. Prior 10 trials, the failed v1 attempt and completed v2 attempt are retained in durable research history; no tuning, holdout access, qualified statistical edge or trading promotion. See `docs/bearish-failed-retest-result-v1.md`. |
-| Short-horizon daily equity and partial reinvestment | [Short-horizon policy](docs/short-horizon-daily-profit-objective.md), [reinvestment/equity accounting](docs/profit-reinvestment-accounting.md) | **53/53 accounting/journal tests externally accepted on Termux.** Added `lab.position_reconcile` (deterministic signed-position/fill-to-ledger adapter) and atomic cash-plus-mark journal batches. Multi-symbol marked equity, partial close/reversal math, full mark coverage, signed funding adjustment, exact-source restart replay and file-checkpoint failure tests are committed, **awaiting external acceptance**. No reinvestment fraction or live risk policy selected. **Missing:** authenticated raw exchange execution source, broker position reconciliation, per-venue margin/liquidation, FX, full application risk integration and independently profitable trading strategy. Retired BTC evidence preserved. |
+| Short-horizon daily equity and partial reinvestment | [Short-horizon policy](docs/short-horizon-daily-profit-objective.md), [reinvestment/equity accounting](docs/profit-reinvestment-accounting.md) | **81/81 accounting, journal and position-reconciliation tests externally accepted on Termux (2026-11-05), following the earlier 53/53 accounting/journal acceptance.** Added `lab.position_reconcile` (deterministic signed-position/fill-to-ledger adapter) and atomic cash-plus-mark journal batches. Multi-symbol marked equity, partial close/reversal math, full mark coverage, signed funding adjustment, exact-source restart replay and file-checkpoint failure tests are committed and **externally accepted in the 81-test focused suite**. No reinvestment fraction or live risk policy selected. **Missing:** authenticated raw exchange execution source, broker position reconciliation, per-venue margin/liquidation, FX, full application risk integration and independently profitable trading strategy. Retired BTC evidence preserved. |
 
 ## 5. Phases
 
@@ -132,7 +132,7 @@ no trades must not be removed from P&L statistics or compensated for by mandator
 
 **New dependency F1-DAY-LEDGER (2026-11-05):**
 `lab.profit_allocation` and `lab.profit_journal`
-passed **53/53 external Termux tests**. The next step,
+passed **53/53 external Termux tests**, followed by **81/81 external Termux tests** with the position-reconciliation bridge on 2026-11-05. The bridge,
 `lab.position_reconcile`, now compiles immutable,
 chronological simulated partial fills, linear-contract
 position reversals, cash funding and complete position
@@ -142,7 +142,7 @@ through the newly added `ProfitJournal.append_batch`.
 `ProfitJournal.events()` allows restart replay to verify
 the entire source-to-journal prefix, failing closed on
 source edits or missing records. The bridge and batch tests
-are **committed but not yet externally accepted**.
+are **committed and externally accepted in the focused 81-test Termux suite**.
 Remaining dependencies are (1) focused bridge plus prior
 journal acceptance and full regression; (2) independently
 authenticated/durable raw paper execution and mark feeds;

@@ -195,7 +195,7 @@ def test_cross_midnight_mark_and_release_reconciles_after_restart(tmp_path):
 
 
 def test_competing_writers_are_serialized_and_economics_preserved(tmp_path):
-    j = journal(tmp_path)
+    journal(tmp_path)
 
     def publish(i):
         local = journal(tmp_path)

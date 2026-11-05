@@ -139,7 +139,8 @@ def test_replay_restarts_without_duplicate_fills_and_append_only_updates(tmp_pat
     j = journal(tmp_path)
     reconcile_to_journal(j, first)
     assert len(j.events()) == 3
-    next_source = first + [
+    next_source = [
+        *first,
         fill("exit", 3, "BTCUSDT", "SELL", "1", "105", {}),
         mark("day", 1440, {}, close=True),
     ]
