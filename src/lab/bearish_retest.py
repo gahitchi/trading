@@ -68,10 +68,9 @@ def _check(b: pd.DataFrame, boundary: pd.Timestamp) -> pd.Timestamp:
     required = {"open", "high", "low", "close", "quote_volume", "oi_invalid"}
     if not required <= set(b.columns):
         raise ValueError("missing OHLC, quote volume or OI-source-quality column")
-    a = b[list(required - {"oi_invalid"})].to_numpy(dtype=float)
-    if not np.isfinite(a).all() or (a[:, :4] <= 0).any():
-        # Column order is set-based, so validate each price field separately below.
-        raise ValueError("invalid price or volume data")
+    a = b[["open", "high", "low", "close", "quote_volume"]].to_numpy(dtype=float)
+    if not np.isfinite(a).all():
+        raise ValueError("nonfinite price or quote-volume data")
     for col in ("open", "high", "low", "close"):
         if (b[col].to_numpy(dtype=float) <= 0).any():
             raise ValueError("nonpositive candle reference price")
