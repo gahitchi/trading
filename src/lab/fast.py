@@ -19,6 +19,7 @@ client, which fills simulated orders against the live book. No exchange executio
 from __future__ import annotations
 
 import math
+from contextlib import suppress
 from bisect import bisect_right
 from collections import deque
 from datetime import UTC, datetime, timedelta
@@ -242,12 +243,10 @@ class FastStrategy(RiskManagedStrategy):
 
                 from lab.safety import set_kill_switch
 
-                try:
+                # Keep the in-memory governor halted if the durable kill
+                # write fails; never hide the original capture exception.
+                with suppress(OSError):
                     set_kill_switch(Path(self._paper_capture_kill_file), "halt", reason, preserve_existing=True)
-                except OSError:
-                    # The in-memory governor remains halted. Do not suppress
-                    # the original evidence error by returning to trading.
-                    pass
             raise RuntimeError(reason) from exc
 
     def on_order_filled(self, event):
