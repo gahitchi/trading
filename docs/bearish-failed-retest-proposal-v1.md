@@ -1,6 +1,6 @@
 # Research proposal — failed-retest bearish structure break (v1)
 
-**Status: 59/59 focused registry tests and 187/187 portable regression tests accepted in Termux before the first historical attempt. The first frozen v1 research family was registered with 10 prior attempts preserved; its initial evaluation failed at a pre-holdout archive boundary check, before strategy simulation. A code-corrected, separately versioned v2 research replay is committed and awaiting validation and a new append-only research generation. No BTC failed-retest P&L result exists; statistical inference remains NOT_QUALIFIED.**
+**Status: FAILED.** The operator accepted 190/190 portable regression tests, registered the v2 corrected replay (family `5d0b3d91326a489491ea8b0e93d897dc`), and completed the first pre-holdout historical evaluation: **15 trades, -47.0794 net bps/trade, -3.5406% annualized model return, 20% win rate, Sharpe -1.2735, 8.5442% max drawdown**. No holdout use. **NOT_QUALIFIED**; the documented negative-return stop criterion applies. Exact source, sensitivity and interpretation: [v1 completed failure report](bearish-failed-retest-result-v1.md).
 2026-11-05. This idea is documented after inspecting the losing BTCUSDT
 `crash breakdown` result. **It is not a prospectively independent
 discovery relative to that inspected dataset.** Neither the former
@@ -93,7 +93,7 @@ boundary, reserves attempts before input access, and rejects any
 injected strategy bar at or beyond the holdout boundary.
 The 2026-05-08 protected holdout is not used by unit tests.
 
-## Durable guarded research workflow (v1 accepted; v2 boundary correction pending)
+## Durable guarded research workflow (v2 executed; no retuning)
 
 `python -m lab.bearish_retest_research` has two deliberately
 distinct operations:
@@ -153,11 +153,14 @@ After the new Termux tests pass, generate and inspect the
       --funding-plan ~/trading-termux-tests/btc-funding-preholdout-plan.json \
       --plan-out ~/trading-termux-tests/btc-failed-retest-archive-fix-v2.json
 
-Registration and `--evaluate` should be separate deliberate operator
-actions only after validating the new append-only generation tests,
-verifying the plan, confirming existing family status, and rerunning
-the expanded portable regression suite. This new pathway has not
-been externally tested or used against historical BTCUSDT yet.
+The operator completed these steps: v2 plan comparison against v1
+confirmed that only `study_policy` and `data_policy` changed;
+registration succeeded with previous trials retained; the first
+v2 historical run finished with 15 trades and negative net
+returns. The exact outcome and stop decision are archived in
+`docs/bearish-failed-retest-result-v1.md`. The original v1
+registration and failed attempt remain evidence. **Do not
+generate a tuned v3 candidate from this same inspected result.**
 
 ## Qualification rules to freeze before the first test
 
@@ -185,6 +188,11 @@ been externally tested or used against historical BTCUSDT yet.
   descriptive historical backtest is positive.
 
 ## Stop criteria
+
+**Triggered on 2026-11-05:** the first fully evaluated candidate
+had mean net return **-47.0794 bps per trade** across 15 trades.
+The strategy should not advance toward paper trading or
+statistical qualification. See the completed failure report.
 
 If the fixed initial candidate has negative net research returns at
 the base 20-bp nominal round-trip cost, or has inadequate independent
