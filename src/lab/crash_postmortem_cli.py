@@ -33,10 +33,10 @@ def execute(config_path: Path, funding_plan_path: Path, *, report_out: Path | No
     cfg = load_config(config_path)
     root = cfg.data_dir / "crash"
     boundary = study.boundary(cfg.results_dir, root)
-    if str(boundary)[:10] != "2026-05-08":
-        # This protocol is specifically anchored to the accepted
-        # BTCUSDT research partition, not a dynamically chosen cutoff.
-        raise ValueError("diagnostic requires accepted BTC research boundary 2026-05-08 UTC")
+    if boundary != pd.Timestamp("2026-05-08T00:00:00Z"):
+        # Exact UTC midnight, including timezone, prevents a shifted
+        # or malformed partition from silently expanding research.
+        raise ValueError("diagnostic requires accepted BTC research boundary 2026-05-08T00:00Z")
     settings = study.CrashSettings.preset("breakdown")
     plan = read_json(funding_plan_path)
     if not isinstance(plan, dict):
