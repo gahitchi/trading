@@ -60,10 +60,12 @@ journal. Neither operation belongs in a real-time order hot loop.
 
 ## Outstanding qualification
 
-- Build and test the real NautilusTrader sandbox execution-report
-  capture adapter, mapping stable order/fill IDs, raw order lifecycle,
-  cancellation, partial fills, event timestamps and independently timed
-  market-mark observations.
+- The raw NautilusTrader sandbox lifecycle event recorder is now
+  implemented (docs/sandbox-execution-capture.md), including
+  simulated fill/order IDs and timestamps. **Still missing:** a
+  complete externally corroborated account report, independently timed
+  market-mark observations, settlement/fee-currency verification and
+  a validated conversion into this economic source archive.
 - Collect durable, externally auditable producer receipts; establish
   independent provenance or authenticated source checks rather than
   trusting a receipt's self-declared origin.
