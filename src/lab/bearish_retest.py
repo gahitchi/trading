@@ -12,8 +12,8 @@ confirmation bar-end + one full minute. No intrabar signal data.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections import Counter
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -130,7 +130,7 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
     ).std().shift(VOLUME_MINUTES) * np.sqrt(MINUTES_PER_YEAR)
     eligible_sigma = sigma.where(np.isfinite(sigma) & (sigma > 0))
     weights = np.minimum(VOL_TARGET / eligible_sigma, MAX_WEIGHT).fillna(0).to_numpy()
-    o, h, l, c = (b[key].to_numpy(dtype=float) for key in ("open", "high", "low", "close"))
+    o, h, low, c = (b[key].to_numpy(dtype=float) for key in ("open", "high", "low", "close"))
     rows = []
     i = warmup
     n = len(b)
@@ -189,7 +189,7 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
                 cause = "support_reclaimed"
                 confirm_stop_i = k + 1
                 break
-            if c[k] < (1 - CONFIRM_DROP) * l[retest_i]:
+            if c[k] < (1 - CONFIRM_DROP) * low[retest_i]:
                 confirm_i = k
                 break
         if confirm_i is None:
@@ -237,7 +237,7 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
             if h[m] >= stop:  # also wins over a target hit in same minute
                 exit_i, exit_ref, reason = m, max(stop, o[m]), "stop"
                 break
-            if l[m] <= target:
+            if low[m] <= target:
                 exit_i, exit_ref, reason = m, target, "target"
                 break
             if m == entry_i + MAX_HOLD_MINUTES - 1:

@@ -19,8 +19,13 @@ from lab import crash_data
 from lab.config import load_config
 from lab.crash_oi_forensics import inspect_source
 from lab.crash_oi_migration import (
-    _headroom, _holdout_boundary, _migrate_one,
-    _quantity_from_original, _reconcile_prior_transactions, _sha, MIN_FREE_MIB,
+    MIN_FREE_MIB,
+    _headroom,
+    _holdout_boundary,
+    _migrate_one,
+    _quantity_from_original,
+    _reconcile_prior_transactions,
+    _sha,
 )
 from lab.market_symbols import SYMBOL_RE
 from lab.persistence import file_lock

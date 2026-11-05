@@ -280,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--audit", action="store_true")
     args = parser.parse_args(argv)
-    if args.apply and args.audit or args.plan_out and (args.apply or args.audit):
+    if (args.apply and args.audit) or (args.plan_out and (args.apply or args.audit)):
         parser.error("select exactly one of preflight, apply, and audit")
     try:
         if args.apply:

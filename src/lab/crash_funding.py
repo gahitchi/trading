@@ -20,6 +20,7 @@ import os
 import tempfile
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from itertools import pairwise
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -125,7 +126,7 @@ def _fetch(symbol: str, start: date, boundary: date, get) -> dict:
             raise ValueError("invalid funding API page")
         normalized = [_event(row, symbol, cursor, end_ms) for row in raw]
         times = [item["fundingTime"] for item in normalized]
-        if any(a >= b for a, b in zip(times, times[1:])) or (
+        if any(a >= b for a, b in pairwise(times)) or (
             previous_ms is not None and times and times[0] <= previous_ms
         ):
             raise ValueError("duplicate or unordered funding source timestamps")
@@ -197,7 +198,7 @@ def _validate_plan(plan: dict, symbol: str, boundary: date) -> None:
         digest = entry["source_sha256"]
         if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise ValueError("invalid funding page SHA-256")
-    for earlier, later in zip(plan["pages"], plan["pages"][1:]):
+    for earlier, later in pairwise(plan["pages"]):
         if earlier["end_ms"] != later["end_ms"] or earlier["start_ms"] >= later["start_ms"]:
             raise ValueError("funding pagination source cursor not strictly advancing")
     digest = plan["events_sha256"]

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import date, timedelta
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
@@ -176,7 +177,7 @@ def audit_coverage(config_path: Path, symbol: str = "BTCUSDT") -> dict:
     # A missing day between two migrated days is separate from holes
     # inside a particular day's file. Do not inspect that day's contents.
     missing_days = []
-    for before, after in zip(day_names, day_names[1:]):
+    for before, after in pairwise(day_names):
         d = before + timedelta(days=1)
         while d < after:
             missing_days.append(d.isoformat())

@@ -17,11 +17,10 @@ from pathlib import Path
 import pandas as pd
 
 from lab import bearish_retest as candidate
-from lab import crash_data, crash_execution, crash_funding, crash_funding_ledger
-from lab import crash_study
+from lab import crash_data, crash_execution, crash_funding, crash_funding_ledger, crash_study
 from lab.config import load_config
 from lab.persistence import nullable_numbers, read_json
-from lab.research_family import _digest, _member, load_family
+from lab.research_family import _digest, load_family
 from lab.trials import _code_identity, code_provenance, trial_run
 
 KEY = "btc-failed-retest-v1"
@@ -179,7 +178,7 @@ def evaluate(config_path: Path, funding_plan_path: Path) -> dict:
             "status": "RETROSPECTIVE_UNQUALIFIED",
             "qualified": False,
             "holdout_used": False,
-            "trade_count": int(len(funded)),
+            "trade_count": len(funded),
             "events": outcome.event_counts,
             "summary": summary,
             "funding": totals,
