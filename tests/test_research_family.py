@@ -49,14 +49,14 @@ def test_frozen_plan_covers_all_study_kinds_and_symbols_without_pooling_returns(
     original = plan(*members)
     registered = rf.register_family(tmp_path, original)
     original["members"].clear()
-    assert len(read_json(tmp_path / rf.FAMILY)["plan"]["members"]) == 4
+    assert len(read_json(tmp_path / rf.FAMILY)["plan"]["members"]) == len(rf.KINDS)
     initial = rf.family_report(tmp_path)
-    assert len(initial["missing_members"]) == 4 and not initial["prospective_coverage_complete"]
+    assert len(initial["missing_members"]) == len(rf.KINDS) and not initial["prospective_coverage_complete"]
     for spec in members:
         evaluate(tmp_path, spec)
     report = rf.family_report(tmp_path)
     assert report["prospective_coverage_complete"] and not report["qualified"]
-    assert report["research_entries"] == report["configurations"] == 4
+    assert report["research_entries"] == report["configurations"] == len(rf.KINDS)
     assert report["plan_sha256"] == registered["plan_sha256"] and not report["reasons"]
     assert read_json(tmp_path / rf.REPORT) == report
     assert all(r["family_id"] == registered["family_id"] for r in trials.history(tmp_path))
