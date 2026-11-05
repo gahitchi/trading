@@ -131,6 +131,13 @@ a qualified execution model.
   missing original fills, duplicate source IDs, missing
   open-position marks and missing UTC day closes fail closed.
   No implicit backfill, order placement or auto-repair.
+- Every open-position valuation must use a source-identified
+  `MarkQuote(price, observed_at, source_id)` with a UTC-aware
+  observation timestamp. **Future quotes fail**, and quotes
+  more than five seconds old at the fill/mark event **fail
+  closed**, including midnight close. The source identity and
+  time are validated for causality, but neither observation
+  authenticity nor exchange provenance is established yet.
 - A close-day event supplies the complete absolute UTC
   midnight valuation for all open positions, including
   zero-trade days. Funding/financing adjustments are
