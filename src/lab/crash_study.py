@@ -338,19 +338,29 @@ class Run:
     missing: list[str]
 
 
-def run(root: Path, symbols: list[str], s: CrashSettings, boundary: pd.Timestamp, holdout: bool = False) -> Run:
-    """Trades per symbol on research data (before the boundary) or, with holdout, those signalled from it on."""
+def run(
+    root: Path, symbols: list[str], s: CrashSettings, boundary: pd.Timestamp,
+    holdout: bool = False, evidence=None,
+) -> Run:
+    """Crash research; optional evidence fingerprints only the inputs actually used."""
     out, base, fwd, missing = {}, {}, {m: [] for m in FORWARD_MIN}, []
     start = end = None
     for sym in symbols:
-        k = crash_data.load(root, "klines", sym)
-        if k is not None and not holdout:
-            k = k[k["ts"] < boundary]
+        # Exclude overlapping candle archives BEFORE reading them, not
+        # after reading and slicing rows. The same boundary protects OI.
+        k = crash_data.load(
+            root, "klines", sym, before=boundary if not holdout else None
+        )
+        if evidence is not None:
+            evidence.frame(f"klines:{sym}", k)
         if k is None or len(k) < 2 * 1440:
+            if evidence is not None:
+                evidence.frame(f"oi:{sym}", None)
             missing.append(sym)
             continue
-        # Never open holdout OI files while tuning research configurations.
         oi_frame = crash_data.load(root, "oi", sym, before=boundary if not holdout else None)
+        if evidence is not None:
+            evidence.frame(f"oi:{sym}", oi_frame)
         b = bars(k, oi_frame)
         keep = b.index >= boundary if holdout else np.ones(len(b), dtype=bool)
         if not keep.any():
