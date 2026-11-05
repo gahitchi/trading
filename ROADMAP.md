@@ -54,6 +54,7 @@ run and tested at any hour.
 | Funding carry, majors | `lab carry study --mode cash/cross` | **Cash-like.** 2023-01 to 2026-04, 10 majors: cash-and-carry +5.5%/yr (always-in +6.3%), about the risk-free rate. Cross-venue funding −0.4%/yr after fees. The 10% APR entry filter hurts. |
 | Funding carry, altcoins | `lab carry study --all --top 10 --min-turnover 20` | **Pending.** Pre-registered first run: top 10 slots, 20 M USDT/day turnover, 5 bps slippage. |
 | Cross-venue lead-lag | `lab micro-study --leader` | **Not studied.** Feature built; needs overlapping Binance and Bybit recordings. |
+| BTCUSDT bearish crash breakdown (predefined) | `lab crash study --mode breakdown --symbols BTCUSDT --funding-plan ...` | **Rejected for this configuration on research data (2026-11-05).** 32 trades, −106.4 bps mean net, −8.38% modeled APR, −0.99 daily Sharpe, 17 stops / 1 target; 20/30/50-bps cost sensitivity −106.4/−116.4/−136.5 bps mean net. Audited 2,574-event BTCUSDT funding history contributed +30.89 bps summed across the 32 trades (62 certain, 0 ambiguous). Pre-holdout ends 2026-05-07; **no qualified inference and no holdout evaluation**. The 479-trade daily-entry baseline is not exposure/trade-count matched. See `docs/crash-oi-quantity.md`. |
 
 ## 5. Phases
 
