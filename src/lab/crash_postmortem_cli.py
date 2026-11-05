@@ -119,6 +119,13 @@ def execute(config_path: Path, funding_plan_path: Path, *, report_out: Path | No
             ],
         }
         report = nullable_numbers(report)
+        # Bind every per-trade diagnostic and all sixteen placebo
+        # scenarios to the durable attempt, not only their aggregate.
+        report["analysis_payload_sha256"] = crash_funding._digest({
+            "failure_analysis": report["failure_analysis"],
+            "matched_placebos": report["matched_placebos"],
+            "per_trade_diagnostics": report["per_trade_diagnostics"],
+        })
         attempt.result = {
             "analysis": VERSION,
             "trades": len(original),
@@ -126,6 +133,7 @@ def execute(config_path: Path, funding_plan_path: Path, *, report_out: Path | No
             "placebo_median_difference_bps": placebos["median_paired_difference_bps"],
             "qualified": False,
             "funding_source_plan_sha256": plan_sha,
+            "analysis_payload_sha256": report["analysis_payload_sha256"],
         }
         attempt.window = (int(run.start.value), int(run.end.value))
     # Recount the completed diagnostic without excluding historical failures.
