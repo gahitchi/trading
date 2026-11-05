@@ -72,12 +72,13 @@ def mocked_history(monkeypatch, plan):
         "fundingRate": "0.0001",
         "markPrice": "100",
     } for ts in pd.date_range("2024-01-01T08:00:00Z", periods=5, freq="8h")]
-    monkeypatch.setattr(crash_funding, "load_verified",
+    monkeypatch.setattr(
+        crash_funding, "load_verified",
         lambda _config, _plan, *, symbol: {
             "plan": source_plan,
             "plan_sha256": crash_funding._digest(source_plan),
             "events": events,
-        })
+        },
     )
     return calls
 
