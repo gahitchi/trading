@@ -88,7 +88,7 @@ run and tested at any hour.
 | BTCUSDT bearish crash breakdown (predefined) | `lab crash study --mode breakdown --symbols BTCUSDT --funding-plan ...` | **Rejected for this configuration on research data (2026-11-05).** 32 trades, −106.4 bps mean net, −8.38% modeled APR, −0.99 daily Sharpe, 17 stops / 1 target; 20/30/50-bps cost sensitivity −106.4/−116.4/−136.5 bps mean net. Audited 2,574-event BTCUSDT funding history contributed +30.89 bps summed across the 32 trades (62 certain, 0 ambiguous). Pre-holdout ends 2026-05-07; **no qualified inference and no holdout evaluation**. The 479-trade daily-entry baseline is not exposure/trade-count matched. See `docs/crash-oi-quantity.md`. |
 | BTC crash postmortem + matched placebo | `python -m lab.crash_postmortem_cli` | **Termux accepted 2026-11-05.** Original short −106.4 bps/trade; all 16 predetermined matched-descriptive comparisons outperformed original, original-minus-placebo median −95.0 bps. 10 total attempt records, seven legacy provenance gaps, inference NOT_QUALIFIED. No holdout use. See `docs/crash-postmortem.md`. |
 | Alternative bearish failed-retest hypothesis | `src/lab/bearish_retest.py`, `lab.bearish_retest_research` | **Retired from qualification after completed 2026-11-05 v2 historical research run.** 190 portable regression tests passed; one initial v1 replay failed and remains in evidence, then corrected v2 was registered separately. **15 completed BTCUSDT shorts, -47.0794 net bps/trade, 20% wins, modeled annual return -3.5406%, Sharpe -1.2735, max drawdown 8.5442%; 127 breakout events and 15 confirmations.** The fixed negative-net stop criterion triggered. Prior 10 trials, the failed v1 attempt and completed v2 attempt are retained in durable research history; no tuning, holdout access, qualified statistical edge or trading promotion. See `docs/bearish-failed-retest-result-v1.md`. |
-| Short-horizon daily equity and partial reinvestment | [Short-horizon policy](docs/short-horizon-daily-profit-objective.md), [reinvestment/equity accounting](docs/profit-reinvestment-accounting.md) | **First pure accounting kernel implemented** in `src/lab/profit_allocation.py`; 33 focused tests passed locally on Python 3.13, **pending external Termux acceptance**. Exact-decimal funds, configurable per-trade reinvestment, reserve/deployable separation, cost/funding reconciliation, UTC-daily realized/unrealized marked equity, external cash-flow exclusion, replay source uniqueness, missing-day fences and drawdown/risk-capacity diagnostics. No fraction or live risk policy chosen. **Still missing:** durable source-authenticated event journal, actual position/broker wallet integration, realistic multi-position margin/mark release, full app and regression qualification. Daily €0.20, $120 winner, $80 loser are illustrative only; the failed BTC strategies remain retired. |
+| Short-horizon daily equity and partial reinvestment | [Short-horizon policy](docs/short-horizon-daily-profit-objective.md), [reinvestment/equity accounting](docs/profit-reinvestment-accounting.md) | **Exact-decimal allocation kernel externally accepted: 33/33 Termux tests.** Durable append-only `lab.profit_journal` with a separately fsynced head checkpoint, crash-conservative full replay, unique economic source IDs, UTC daily mark/settlement ordering, corruption and torn-write fences is now committed with a new focused suite **awaiting external execution**. Marked equity, reserve/deployable funds, per-trade reinvestment, cost/funding reconciliation and net daily summaries remain isolated research components. No fraction or live risk policy selected. **Missing:** exchange-authenticated source events, broker/position reconciliation, partial fills, actual margin isolation, risk-manager integration and independent profitability. Retired BTC strategies remain retired. |
 
 ## 5. Phases
 
@@ -130,15 +130,20 @@ no trades must not be removed from P&L statistics or compensated for by mandator
 
 ## Phase 1: Find an edge 🔄
 
-**New dependency F1-DAY-LEDGER (2026-11-05):** pure exact-decimal equity and
-fractional-profit allocation in `lab.profit_allocation` is committed
-with 33 local tests passing. The next steps are (1) external
-Termux validation; (2) durable unique-source event persistence;
-(3) replay/paper position and fee/funding reconciliation;
-(4) account/risk-manager authorization over verified deployable
-capital and marked equity. The pure module **cannot place orders**
-and is not evidence of a profitable strategy. Only advance
-these dependencies in order, before a fresh short-horizon trial.
+**New dependency F1-DAY-LEDGER (2026-11-05):** exact-decimal
+equity and fractional-profit allocation `lab.profit_allocation`
+passed **33/33 external Termux tests**. The second step,
+`lab.profit_journal`, now persists a monotonic, source-ID-
+deduplicated, SHA-256-linked event log and independently fsynced
+head checkpoint, with full restart replay, missing/altered event
+fences and no automated evidence reset. Its new tests are
+**committed but not yet externally accepted**. Remaining steps
+are (1) journal acceptance on Termux and full regression;
+(2) replay/paper position and fee/funding reconciliation;
+(3) strict risk-engine authorization over verified
+deployable capital and marked equity. These modules
+**cannot place orders** and do not establish any strategy
+profitability. Follow dependencies in order.
 
 **Priority update (2026-11-05):** a time-series of **net daily P&L and cumulative
 equity growth**, not a target winning-day percentage, is the primary short-horizon
