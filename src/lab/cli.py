@@ -908,11 +908,25 @@ def cmd_crash_study(cfg, a):
             sensitivity = crash_execution.stress_summary(
                 r.trades, settings.side, r.start, r.end, cs.summary,
             )
+            optimistic = None
+            if funding_evidence is not None:
+                upper = {
+                    symbol: frame.assign(net=frame["net_upper"])
+                    for symbol, frame in r.trades.items()
+                }
+                upper_summary = cs.summary(upper, r.start, r.end)
+                optimistic = nullable_numbers({
+                    "mean_bps": upper_summary["mean_bps"],
+                    "apr": upper_summary["apr"],
+                    "sharpe": upper_summary["sharpe"],
+                    "t_nw": upper_summary["t_nw"],
+                })
             keys = ("days", "trades", "mean_bps", "apr", "sharpe", "sr_daily", "t_nw", "max_dd")
             attempt.result = {
                 **nullable_numbers({k: st[k] for k in keys}),
                 "execution_model": crash_execution.MODEL,
-                "funding_status": "audited_settlements" if funding_evidence else "not_modelled",
+                "funding_status": "audited_pessimistic_minute_fill_bound" if funding_evidence else "not_modelled",
+                "funding_upper_scenario": optimistic,
                 "funding_evidence_sha256": (
                     funding_evidence["plan"]["events_sha256"] if funding_evidence else None
                 ),
@@ -969,11 +983,16 @@ def cmd_crash_study(cfg, a):
     if funding_plan:
         total = crash_funding_ledger.funding_totals(r.trades)
         print(
-            f"  audited funding: {total['funded_settlements']} settlements across "
-            f"{total['trades']} trades; net funding "
-            f"{total['funding_return_sum_bps']:+.2f} bps summed across trade entry notionals"
+            f"  audited funding: {total['funded_settlements']} certain and "
+            f"{total['ambiguous_settlements']} ambiguous settlements across "
+            f"{total['trades']} trades; pessimistic funding "
+            f"{total['funding_return_sum_bps']:+.2f} bps, upper bound "
+            f"{total['funding_return_upper_sum_bps']:+.2f} bps (sums across trade entry notionals)"
         )
-    funding_note = "Audited funding is included" if funding_plan else "Funding is NOT modelled"
+    funding_note = (
+        "Audited funding is included at its pessimistic minute-fill bound"
+        if funding_plan else "Funding is NOT modelled"
+    )
     print(
         "Fixed-base reference-price fills and per-fill notional fees are modelled; "
         f"slippage is assumed, not measured. {funding_note}; "
