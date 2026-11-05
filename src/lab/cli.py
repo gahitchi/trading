@@ -880,7 +880,7 @@ def cmd_crash_study(cfg, a):
         f"volume >= {settings.vol_mult:g}x usual, {oi_rule.strip()}; "
         f"enter {settings.delay_min} min later; target {settings.tp_pct:g}%, "
         f"stop {settings.sl_pct:g}%, hold <= {settings.hold_min} min; "
-        f"costs {settings.cost * 1e4:g} bps a round trip; sized to {settings.vol_target:.0%} vol"
+        f"nominal flat-price costs {settings.cost * 1e4:g} bps round trip; sized to {settings.vol_target:.0%} vol"
     )
     print(
         f"  research data only (holdout from {boundary:%Y-%m-%d}); configurations tried: {n}; "
