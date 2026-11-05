@@ -154,17 +154,22 @@ def bars(klines: pd.DataFrame, oi: pd.DataFrame | None) -> pd.DataFrame:
             freq=pd.Timedelta(minutes=5),
         )
         absent = expected.difference(source_index)
-        unavailable_at = absent + OI_DELAY
+        missing_at = absent + OI_DELAY
+        quarantined_at = pd.DatetimeIndex([], tz="UTC")
         if "oi_valid" in oi:
             # Explicit zero-pair quality markers are equally unavailable.
             quality = oi.set_index("ts")["oi_valid"]
             quality = quality[~quality.index.duplicated(keep="last")].sort_index()
-            unavailable_at = unavailable_at.union(
-                quality.index[~quality] + OI_DELAY
-            )
-        b["oi_invalid"] = grid.isin(unavailable_at)
+            quarantined_at = quality.index[~quality] + OI_DELAY
+        # Separate observability: short missing snapshots and (0,0)
+        # quarantine masks can overlap in their subsequent lookback bans.
+        b["oi_absent_source"] = grid.isin(missing_at)
+        b["oi_quarantined_source"] = grid.isin(quarantined_at)
+        b["oi_invalid"] = b["oi_absent_source"] | b["oi_quarantined_source"]
     else:
         b["oi"] = np.nan
+        b["oi_absent_source"] = False
+        b["oi_quarantined_source"] = False
         b["oi_invalid"] = False
     return b
 
