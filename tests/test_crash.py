@@ -293,6 +293,17 @@ def test_cli_research_counts_trials_but_blocks_unqualified_holdout(tmp_path, cap
     )
     assert all(t["params"]["oi_measure"] == "contract-quantity-v1" for t in trials)
     assert all(t["attempt_id"] for t in trials)
+    # The authoritative trial ledger must retain complete content
+    # evidence for every requested symbol, even the unavailable one.
+    for trial in trials:
+        streams = trial["inputs"]["streams"]
+        assert all(stream["complete"] for stream in streams)
+        assert {stream["name"] for stream in streams} == {
+            "klines:AUSDT", "oi:AUSDT",
+            "klines:BUSDT", "oi:BUSDT",
+            "klines:XUSDT", "oi:XUSDT",
+        }
+        assert next(s for s in streams if s["name"] == "klines:AUSDT")["records"] > 1
     assert trials[0]["params"]["drop_pct"] == 5 and trials[2]["params"]["hold_min"] == 1440  # the preset
 
 
