@@ -139,15 +139,30 @@ def bars(klines: pd.DataFrame, oi: pd.DataFrame | None) -> pd.DataFrame:
         o = o[~o.index.duplicated(keep="last")].sort_index()
         o.index = o.index + OI_DELAY
         b["oi"] = o.reindex(grid, method="ffill", tolerance=pd.Timedelta(minutes=OI_STALE_MIN))
+        # The ZIP can omit entire five-minute snapshots, independently of
+        # explicit (0,0) quarantined rows. Stale forward-filling alone does
+        # not prohibit a change computed across a *short* missing interval:
+        # both OI endpoints can be populated while an intervening sample
+        # was never observed. Mark every absent expected snapshot at its
+        # earliest assumed publication time, never at its timestamp.
+        #
+        # Bound the expected cadence to observed endpoints: pre-history or
+        # the uninspected protected holdout cannot be inferred from here.
+        source_index = o.index - OI_DELAY
+        expected = pd.date_range(
+            start=source_index[0], end=source_index[-1],
+            freq=pd.Timedelta(minutes=5),
+        )
+        absent = expected.difference(source_index)
+        unavailable_at = absent + OI_DELAY
         if "oi_valid" in oi:
-            # Missing OI becomes known only after the archive's publication
-            # delay; prohibit signals that compare across such a gap.
+            # Explicit zero-pair quality markers are equally unavailable.
             quality = oi.set_index("ts")["oi_valid"]
             quality = quality[~quality.index.duplicated(keep="last")].sort_index()
-            unavailable_at = quality.index[~quality] + OI_DELAY
-            b["oi_invalid"] = grid.isin(unavailable_at)
-        else:
-            b["oi_invalid"] = False
+            unavailable_at = unavailable_at.union(
+                quality.index[~quality] + OI_DELAY
+            )
+        b["oi_invalid"] = grid.isin(unavailable_at)
     else:
         b["oi"] = np.nan
         b["oi_invalid"] = False
@@ -168,9 +183,9 @@ def signals(b: pd.DataFrame, s: CrashSettings) -> np.ndarray:
         oi_ok = oi_chg >= s.oi_pct / 100 if s.oi_pct else oi_chg > 0
     hit = (ret <= -s.drop_pct / 100) & (vol >= s.vol_mult * base) & oi_ok
     if "oi_invalid" in b:
-        # Exclude the signal and its entire OI-comparison lookback after
-        # a zero-pair exchange artifact. Do not fill a missing snapshot
-        # with zero, interpolate it or bridge across it.
+        # Exclude the signal and its OI-comparison lookback if any
+        # archived snapshot is missing or explicitly quarantined. Never
+        # infer quantity by interpolation or bridge an unseen observation.
         untrusted = b["oi_invalid"].rolling(w + 1, min_periods=1).max().fillna(0).astype(bool)
         hit &= ~untrusted
     return hit.fillna(False).to_numpy(dtype=bool)
