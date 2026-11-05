@@ -17,7 +17,7 @@ from lab.trials import _code_identity, _encoded, _frozen, _now, code_provenance,
 FAMILY = "research_family.json"
 LOCK = "research_family.lock"
 REPORT = "research_family_report.json"
-KINDS = {"micro-study", "maker-study", "fast-backtest", "carry-study"}
+KINDS = {"micro-study", "maker-study", "fast-backtest", "carry-study", "crash-study"}
 
 
 def _digest(value):
