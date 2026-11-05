@@ -65,7 +65,7 @@ def _validate_klines(frame: pd.DataFrame, boundary: pd.Timestamp) -> pd.Datetime
         raise ValueError("candle timestamps must be nonempty, sorted, unique")
     if (stamps >= boundary).any():
         raise ValueError("pre-holdout candle frame contains protected timestamp")
-    if np.any(stamps.asi8 % pd.Timedelta(minutes=1).value):
+    if np.any(stamps.as_unit("ns").asi8 % pd.Timedelta(minutes=1).value):
         raise ValueError("off-grid one-minute candle timestamp")
     numeric = frame[["open", "high", "low", "close", "quote_volume"]].to_numpy(dtype=float)
     if not np.isfinite(numeric).all():
