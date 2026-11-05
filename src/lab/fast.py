@@ -125,6 +125,8 @@ class FastStrategy(RiskManagedStrategy):
         self.equity_curve = deque(maxlen=EQUITY_KEEP)
         self.daily_equity = None  # enabled by the backtest; no extra per-book valuation in paper trading
         self.replay = False  # replay results stop at the last observed event, before shutdown execution
+        self.paper_capture = None  # only set for explicit sandbox/replay receipt capture
+        self._paper_capture_kill_file = None
 
     def on_start(self):
         self._sample_equity()
@@ -221,6 +223,32 @@ class FastStrategy(RiskManagedStrategy):
             self.entry_orders.discard(str(order.client_order_id))
             return None
         return order
+
+    def on_order_event(self, event):
+        """Capture sandbox order lifecycle events; any archive failure halts risk."""
+        if self.paper_capture is None:
+            return
+        try:
+            self.paper_capture.append(event, received_ns=self.clock.timestamp_ns())
+        except Exception as exc:
+            reason = f"paper order evidence capture failed: {type(exc).__name__}: {exc}"
+            # Persist the halt in the normal risk governor, even when Nautilus
+            # catches a strategy callback exception and continues its event loop.
+            self.risk._state_error = reason
+            self.risk.state = TradingState.HALTED
+            self.risk.reason = reason
+            if self._paper_capture_kill_file is not None:
+                from pathlib import Path
+
+                from lab.safety import set_kill_switch
+
+                try:
+                    set_kill_switch(Path(self._paper_capture_kill_file), "halt", reason, preserve_existing=True)
+                except OSError:
+                    # The in-memory governor remains halted. Do not suppress
+                    # the original evidence error by returning to trading.
+                    pass
+            raise RuntimeError(reason) from exc
 
     def on_order_filled(self, event):
         coid = str(event.client_order_id)
@@ -354,6 +382,8 @@ def backtest(
     latency_ms: float = 50.0,
     cancel_latency_ms: float | None = None,
     evidence=None,
+    capture_path: str | None = None,
+    capture_session: str | None = None,
 ) -> dict:
     """Replays recorded order-book deltas and trades through NautilusTrader's matching engine (L2 book, queue
     position, consumed liquidity) with a fixed order latency, through the same risk manager as paper trading (its
@@ -417,6 +447,16 @@ def backtest(
         strategy = make_strategy(config, risk)
         strategy.daily_equity = {}
         strategy.replay = True
+        if (capture_path is None) != (capture_session is None):
+            raise ValueError("replay capture requires both capture_path and capture_session")
+        if capture_path is not None:
+            from pathlib import Path
+
+            from lab.sandbox_capture import PaperOrderEventCapture
+
+            strategy.paper_capture = PaperOrderEventCapture(
+                Path(capture_path), session_id=capture_session, instrument_id=str(strategy.iid)
+            )
         add_strategy(engine, strategy, risk)
         for index, (book_data, trade_data) in enumerate(batches):
             if index:
@@ -480,6 +520,8 @@ def build_paper_node(
     kill_file: str | None = None,
     state_path: str | None = None,
     audit_path: str | None = None,
+    capture_path: str | None = None,
+    capture_session: str | None = None,
 ):
     """Binance USD-M public data + NautilusTrader's sandbox execution: simulated fills on the live book. The risk
     manager's state (the day's starting equity and any daily-loss stop) persists in state_path across restarts."""
@@ -532,5 +574,18 @@ def build_paper_node(
         .build()
     )
     strategy = make_strategy(config, risk)
+    if (capture_path is None) != (capture_session is None):
+        raise ValueError("paper capture requires both capture_path and capture_session")
+    if capture_path is not None:
+        if not kill_file:
+            raise ValueError("paper capture requires a persistent kill_file for fail-closed operation")
+        from pathlib import Path
+
+        from lab.sandbox_capture import PaperOrderEventCapture
+
+        strategy.paper_capture = PaperOrderEventCapture(
+            Path(capture_path), session_id=capture_session, instrument_id=str(strategy.iid)
+        )
+        strategy._paper_capture_kill_file = kill_file
     add_strategy(node, strategy, risk)
     return node, strategy
