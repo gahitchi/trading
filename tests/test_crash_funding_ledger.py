@@ -132,6 +132,9 @@ def test_cli_funding_adjusted_attempt_references_source_and_records_real_cashflo
     assert recorded["result"]["funding_status"] == "audited_settlements"
     assert recorded["result"]["funding_totals"]["funded_settlements"] == 2
     assert recorded["result"]["funding_evidence_sha256"] == recorded["params"]["funding_source"]["events_sha256"]
+    assert recorded["params"]["funding_source"]["plan_sha256"] == crash_funding._digest(
+        json.loads(plan_path.read_text())
+    )
     streams = recorded["inputs"]["streams"]
     assert any(
         s["name"] == "funding:BTCUSDT" and s["records"] == 7 and s["complete"]
