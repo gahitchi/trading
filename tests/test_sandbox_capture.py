@@ -166,8 +166,12 @@ def test_real_nautilus_backtest_captures_order_events_without_network(tmp_path):
     path = catalog(tmp_path / "catalog", *ranging_market(steps=6))
     target = tmp_path / "orders.jsonl"
     result = backtest(
-        path, cfg(), latency_ms=0, maker_bps=0,
-        capture_path=str(target), capture_session="synthetic-run",
+        path,
+        cfg(),
+        latency_ms=0,
+        maker_bps=0,
+        capture_path=str(target),
+        capture_session="synthetic-run",
     )
     archive = PaperOrderEventCapture(target, session_id="synthetic-run", instrument_id=IID)
     order_events = archive.receipts()

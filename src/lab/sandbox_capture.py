@@ -20,15 +20,34 @@ from lab.persistence import atomic_json, file_lock, parse_json, read_json
 _VERSION = 1
 _SESSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 _KIND = {
-    "OrderInitialized", "OrderSubmitted", "OrderAccepted", "OrderRejected",
-    "OrderDenied", "OrderCanceled", "OrderExpired", "OrderPendingCancel",
-    "OrderCancelRejected", "OrderUpdated", "OrderPendingUpdate",
-    "OrderModifyRejected", "OrderFilled", "OrderFillVoided",
+    "OrderInitialized",
+    "OrderSubmitted",
+    "OrderAccepted",
+    "OrderRejected",
+    "OrderDenied",
+    "OrderCanceled",
+    "OrderExpired",
+    "OrderPendingCancel",
+    "OrderCancelRejected",
+    "OrderUpdated",
+    "OrderPendingUpdate",
+    "OrderModifyRejected",
+    "OrderFilled",
+    "OrderFillVoided",
 }
 _FILL_FIELDS = (
-    "trade_id", "venue_order_id", "account_id", "order_side", "order_type",
-    "last_qty", "last_px", "currency", "liquidity_side", "commission",
-    "position_id", "reconciliation",
+    "trade_id",
+    "venue_order_id",
+    "account_id",
+    "order_side",
+    "order_type",
+    "last_qty",
+    "last_px",
+    "currency",
+    "liquidity_side",
+    "commission",
+    "position_id",
+    "reconciliation",
 )
 
 
@@ -167,9 +186,9 @@ class PaperOrderEventCapture:
             raise ValueError("capture paths must not be symlinks")
 
     def _head_write(self, count: int, last: str, header: str) -> None:
-        atomic_json(self._head, _seal({
-            "version": _VERSION, "count": count, "last_sha256": last, "header_sha256": header
-        }))
+        atomic_json(
+            self._head, _seal({"version": _VERSION, "count": count, "last_sha256": last, "header_sha256": header})
+        )
 
     def _read_locked(self) -> tuple[list[dict], str, str]:
         self._check_paths()
@@ -190,8 +209,10 @@ class PaperOrderEventCapture:
         for index, row in enumerate(rows[1:], 1):
             _verify(row, {"type", "version", "sequence", "previous_sha256", "receipt"})
             if (
-                row["type"] != "sandbox-order-event" or row["version"] != _VERSION
-                or type(row["sequence"]) is not int or row["sequence"] != index
+                row["type"] != "sandbox-order-event"
+                or row["version"] != _VERSION
+                or type(row["sequence"]) is not int
+                or row["sequence"] != index
                 or row["previous_sha256"] != last
             ):
                 raise ValueError("sandbox capture order/sequence mismatch")
@@ -225,13 +246,15 @@ class PaperOrderEventCapture:
             receipts, last, header = self._read_locked()
             if any(row["event_id"] == receipt["event_id"] for row in receipts):
                 raise ValueError("duplicate sandbox event ID")
-            record = _seal({
-                "type": "sandbox-order-event",
-                "version": _VERSION,
-                "sequence": len(receipts) + 1,
-                "previous_sha256": last,
-                "receipt": receipt,
-            })
+            record = _seal(
+                {
+                    "type": "sandbox-order-event",
+                    "version": _VERSION,
+                    "sequence": len(receipts) + 1,
+                    "previous_sha256": last,
+                    "receipt": receipt,
+                }
+            )
             fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CLOEXEC | os.O_NOFOLLOW)
             try:
                 _write(fd, _canonical(record) + b"\n")
@@ -270,8 +293,7 @@ class PaperOrderEventCapture:
                 quantity if receipt["order_side"] == "BUY" else -quantity
             )
         if not isinstance(position_quantities, dict) or any(
-            not isinstance(symbol, str) or not isinstance(qty, str)
-            for symbol, qty in position_quantities.items()
+            not isinstance(symbol, str) or not isinstance(qty, str) for symbol, qty in position_quantities.items()
         ):
             raise ValueError("independent position snapshot must use exact decimal strings")
         try:

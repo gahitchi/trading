@@ -467,9 +467,7 @@ def cmd_fast_paper(cfg, a):
     from lab.fast import build_paper_node
 
     risk_dir = cfg.results_dir / "fast"
-    capture_path = (
-        str(risk_dir / f"paper-orders-{a.capture_session}.jsonl") if a.capture_session else None
-    )
+    capture_path = str(risk_dir / f"paper-orders-{a.capture_session}.jsonl") if a.capture_session else None
     try:
         node, _ = build_paper_node(
             _fast_config(cfg, a, report=str(risk_dir / "paper.json")),
@@ -1148,7 +1146,8 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             fp.add_argument("--check-only", action="store_true", help="validate the setup without connecting")
             fp.add_argument(
-                "--capture-session", metavar="ID",
+                "--capture-session",
+                metavar="ID",
                 help="archive sandbox order events to results/fast/paper-orders-ID.jsonl; new ID each run",
             )
 
