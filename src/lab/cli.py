@@ -844,14 +844,14 @@ def cmd_crash_study(cfg, a):
     params = {
         **cs.params_of(settings, symbols),
         "oi_measure": "contract-quantity-v1",
-        "oi_quality_policy": "source-pinned-zero-pair-null-and-window-veto-v1",
+        "oi_quality_policy": "source-pinned-zero-pair-and-absent-5m-window-veto-v2",
     }
     try:
         # Durable attempt is reserved BEFORE reading historical candle / OI data.
         with trial_run(
             cfg.results_dir, "crash-study", key, params, (None, int(boundary.value) - 1)
         ) as attempt:
-            r = cs.run(root, symbols, settings, boundary, holdout=False)
+            r = cs.run(root, symbols, settings, boundary, holdout=False, evidence=attempt.inputs)
             if not r.trades:
                 raise ValueError(f"no pre-holdout crash data for {' '.join(symbols)} before {boundary:%Y-%m-%d}")
             st = cs.summary(r.trades, r.start, r.end)
@@ -874,7 +874,7 @@ def cmd_crash_study(cfg, a):
     )
     print(
         f"  research data only (holdout from {boundary:%Y-%m-%d}); configurations tried: {n}; "
-        "deflated Sharpe unavailable until complete, comparable input provenance is verified"
+        "deflated Sharpe unavailable until comparable-trial inference is qualified"
     )
     if r.missing:
         print(f"  no data, left out: {' '.join(r.missing)}")
