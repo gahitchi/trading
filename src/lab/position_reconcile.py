@@ -20,6 +20,7 @@ from lab.profit_journal import ProfitJournal
 _SYMBOL = re.compile(r"[A-Z][A-Z0-9_-]{1,39}\Z")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,110}\Z")
 _ZERO = Decimal(0)
+MAX_MARK_AGE = timedelta(seconds=5)
 
 
 def _exact(value, name, *, positive=False, nonnegative=False):
@@ -40,6 +41,13 @@ def _check_time(ts):
 
 
 @dataclass(frozen=True)
+class MarkQuote:
+    price: str
+    observed_at: datetime
+    source_id: str
+
+
+@dataclass(frozen=True)
 class SimulatedFill:
     source_id: str
     timestamp: datetime
@@ -49,14 +57,14 @@ class SimulatedFill:
     fill_price: str
     fee: str
     additional_slippage: str
-    marks: dict[str, str]  # complete same-timestamp reference marks for all remaining exposure
+    marks: dict[str, MarkQuote]  # complete independently timestamped source observations
 
 
 @dataclass(frozen=True)
 class PositionMark:
     source_id: str
     timestamp: datetime
-    marks: dict[str, str]
+    marks: dict[str, MarkQuote]
     close_day: bool = False
 
 
@@ -74,13 +82,28 @@ class Position:
     average_price: Decimal
 
 
-def _mark_total(positions: dict[str, Position], marks: dict[str, str], quantum: Decimal) -> Decimal:
+def _mark_total(
+    positions: dict[str, Position],
+    marks: dict[str, MarkQuote],
+    quantum: Decimal,
+    timestamp: datetime,
+) -> Decimal:
     required = {sym for sym, position in positions.items() if position.quantity}
     if not isinstance(marks, dict) or set(marks) != required:
-        raise ValueError("position marks must cover exactly all open symbols; missing/stale marks are not zero")
+        raise ValueError("position marks must cover exactly all open symbols; missing marks are not zero")
     amount = _ZERO
     for symbol in sorted(required):
-        px = _exact(marks[symbol], f"{symbol} mark price", positive=True)
+        quote = marks[symbol]
+        if not isinstance(quote, MarkQuote):
+            raise ValueError("position valuation requires sourced timestamped MarkQuote")
+        _check_time(quote.observed_at)
+        if not isinstance(quote.source_id, str) or not _ID.fullmatch(quote.source_id):
+            raise ValueError("invalid mark observation source identity")
+        if quote.observed_at > timestamp:
+            raise ValueError("future-dated mark observation is prohibited")
+        if timestamp - quote.observed_at > MAX_MARK_AGE:
+            raise ValueError("stale position mark exceeds the five-second causal tolerance")
+        px = _exact(quote.price, f"{symbol} mark price", positive=True)
         pos = positions[symbol]
         amount += (pos.quantity * (px - pos.average_price)).quantize(quantum, rounding=ROUND_HALF_EVEN)
     return amount
@@ -156,7 +179,7 @@ def compile_source(
                 positions.pop(row.symbol, None)
             else:
                 positions[row.symbol] = new_pos
-            mark_value = _mark_total(positions, row.marks, q)
+            mark_value = _mark_total(positions, row.marks, q, row.timestamp)
             net = gross - fee - slip
             batch = [
                 AllocationEvent(
