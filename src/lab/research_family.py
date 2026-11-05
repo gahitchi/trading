@@ -181,7 +181,7 @@ def _assert_history_chain(chain: list[dict], rows: list[dict]) -> None:
             row["family_id"] not in known
             or row["family_plan_sha256"] != known[row["family_id"]]
         ):
-            raise ValueError("research history links to a missing family registration")
+            raise ValueError("research family registration is missing or inconsistent with prior trial links")
     for family in chain:
         snapshot = family["prior_history"]
         for row in snapshot:
