@@ -11,15 +11,27 @@ merely because its supporting code is implemented.
 
 An automated, independent trading system with institutional-grade research and risk discipline, able to trade
 any asset class through the right broker or exchange. **The primary fast-track objective is short-duration
-trading whose net results are evaluated per UTC day, not annualized returns.** Aim for recurring daily
-opportunities and a positive mean net *daily* P&L across all trading and zero-trade days, with drawdown
-contained and every execution cost counted. The user explicitly values **even €0.20–€0.50 net
-profit in a day**, rather than waiting for occasional large gains: prioritize observed
-**profitable-day frequency**, then net average, negative-day tails and execution realism.
-The €0.20 and €0.50 figures are reporting milestones, not guaranteed outcomes,
-a daily trading quota, a minimum order return or permission to increase risk.
-No strategy can promise profit on every calendar day,
-and no trade is preferable to a forced low-quality fill.
+trading with net results marked **every UTC day** and evaluated on **cumulative net
+equity growth after fees and funding**, not annualized returns alone.**
+The operator accepts **variable daily P&L**: a small positive day (€0.20),
+a much larger gain (e.g., $120), a meaningful loss (e.g., $80), or a flat
+day. These are examples **in different currencies**; results must be
+converted/reconciled consistently before aggregation. The goal is for
+profit days, **in aggregate**, to outweigh loss days while drawdown,
+tail risk and liquidation exposure stay within separately approved
+limits. Profitable-day percentage is descriptive, **not** the primary
+criterion or a daily quota.
+
+**Partial compounding is part of the capital plan:** each fully
+reconciled, profitable closed trade allocates a *configurable*
+fraction of its realized **net** profit to next-period
+**deployable trading capital** and the rest to a retained-profit
+reserve. Losses reduce capital; bucket transfers are not new
+returns, cannot create equity and cannot bypass risk caps.
+The reinvestment fraction is not set or activated by this roadmap.
+See the [compounding/equity specification](docs/profit-reinvestment-accounting.md).
+A future winning day is never guaranteed to compensate for a past
+losing day; no forced trades or loss-chasing are allowed.
 
 Start with a one-minute signal clock and positions lasting approximately 1–15 minutes,
 then explore 30–60-second decisions only with high-quality tick/L2 replay and an independently
@@ -76,14 +88,14 @@ run and tested at any hour.
 | BTCUSDT bearish crash breakdown (predefined) | `lab crash study --mode breakdown --symbols BTCUSDT --funding-plan ...` | **Rejected for this configuration on research data (2026-11-05).** 32 trades, −106.4 bps mean net, −8.38% modeled APR, −0.99 daily Sharpe, 17 stops / 1 target; 20/30/50-bps cost sensitivity −106.4/−116.4/−136.5 bps mean net. Audited 2,574-event BTCUSDT funding history contributed +30.89 bps summed across the 32 trades (62 certain, 0 ambiguous). Pre-holdout ends 2026-05-07; **no qualified inference and no holdout evaluation**. The 479-trade daily-entry baseline is not exposure/trade-count matched. See `docs/crash-oi-quantity.md`. |
 | BTC crash postmortem + matched placebo | `python -m lab.crash_postmortem_cli` | **Termux accepted 2026-11-05.** Original short −106.4 bps/trade; all 16 predetermined matched-descriptive comparisons outperformed original, original-minus-placebo median −95.0 bps. 10 total attempt records, seven legacy provenance gaps, inference NOT_QUALIFIED. No holdout use. See `docs/crash-postmortem.md`. |
 | Alternative bearish failed-retest hypothesis | `src/lab/bearish_retest.py`, `lab.bearish_retest_research` | **Retired from qualification after completed 2026-11-05 v2 historical research run.** 190 portable regression tests passed; one initial v1 replay failed and remains in evidence, then corrected v2 was registered separately. **15 completed BTCUSDT shorts, -47.0794 net bps/trade, 20% wins, modeled annual return -3.5406%, Sharpe -1.2735, max drawdown 8.5442%; 127 breakout events and 15 confirmations.** The fixed negative-net stop criterion triggered. Prior 10 trials, the failed v1 attempt and completed v2 attempt are retained in durable research history; no tuning, holdout access, qualified statistical edge or trading promotion. See `docs/bearish-failed-retest-result-v1.md`. |
-| Short-horizon daily-P&L research pivot | [Daily/short-horizon policy](docs/short-horizon-daily-profit-objective.md) | **Objective documented; implementation and empirical gates pending.** The user prioritizes the fraction of calendar days with **positive net P&L**, even as little as **€0.20 or €0.50** after full costs; these are reporting targets, **not guaranteed income**. The 15-trade/858-day failed-retest BTC strategy is both negative and far too sparse for daily opportunities. Priority: 1-minute decision clock, 1–15-minute holding horizons, independently registered subminute cohorts only with L2/trades, shared UTC-day mark-to-market net-P&L ledger, real maker/taker execution sensitivity and daily activity/flat-day distributions. This is **not a new backtested edge**. |
+| Short-horizon daily equity and partial reinvestment | [Short-horizon policy](docs/short-horizon-daily-profit-objective.md), [reinvestment/equity accounting](docs/profit-reinvestment-accounting.md) | **Objective and ledger contract documented; implementation/evidence gates pending.** Variable positive/negative days are acceptable when cumulative net marked equity grows with bounded downside. Every fully reconciled positive realized trade may allocate a configurable percentage to future deployable capital and the remainder to retained profit; losses reduce actual capital. No percentage or live setting chosen. A daily €0.20 gain counts, a $120 gain and $80 losing day are possible examples, not a profit floor. Primary work: mark-to-market daily ledger, full-cost reconciliation, segregated allocation buckets, safe sizing, zero-trade-day accounting, and independent fixed-capital vs compounding validation. The retired 15-trade/858-day BTC strategy remains failed, not tuned for frequency. |
 
 ## 5. Phases
 
 | Phase | Name | State | Exit gate (summary) |
 |---|---|---|---|
 | 0 | Foundation | ✅ done | — |
-| 1 | Find a short-horizon daily edge | 🔄 now | Independently qualified positive **mean net UTC-day P&L** after costs and attainable latency, sufficient active-day evidence, acceptable risk, then one protected holdout evaluation |
+| 1 | Find a short-horizon, compounding-capable edge | 🔄 now | Independently qualified **positive cumulative net marked-equity growth** and daily net expectancy after costs/latency, with bounded drawdowns and audited reinvestment policy, then one protected holdout evaluation |
 | 2 | Paper trading | ⏳ next | ≥ 300 paper trades over ≥ 14 session-days, net profitable, t ≥ 2, matches backtest |
 | 3 | Small live trading | 💤 | Funding decision by Gabriel; 4 weeks live within risk limits |
 | 4 | Advanced execution speed / optional colocated infrastructure | 💤 | Only pursue speed upgrades justified by measured latency/cost benefit; keep Rust hot-path measurement in Phase 1 |
@@ -118,12 +130,16 @@ no trades must not be removed from P&L statistics or compensated for by mandator
 
 ## Phase 1: Find an edge 🔄
 
-**Priority update (2026-11-05):** daily net P&L, **positive-day consistency** and feasible
-trade frequency are the lead criteria for the fast track. Count and display days with
-net gains of any size, at least **€0.20** and at least **€0.50**; all losses and
-flat days remain in the denominator. No strategy is required or permitted to
-manufacture a profitable trade on an otherwise unfavorable day. Before another
-short-entry experiment, implement the
+**Priority update (2026-11-05):** a time-series of **net daily P&L and cumulative
+equity growth**, not a target winning-day percentage, is the primary short-horizon
+business measure. Small and large winners may offset losing days; report their
+magnitude, frequency, recovery time and drawdown without ignoring flat days.
+Apply only **fractional reinvestment of reconciled realized profits**, with the
+unallocated portion tracked as retained profit and losses reducing actual
+equity; cap risk separately from the reinvestment fraction. See
+[profit reinvestment accounting](docs/profit-reinvestment-accounting.md).
+No guarantee of recovering any loss or making daily profits is assumed.
+Before another short-entry experiment, implement the
 [daily scorecard and short-horizon evidence contract](docs/short-horizon-daily-profit-objective.md):
 count all eligible UTC days including zero-trade days; reconcile mark-to-market
 daily net equity changes to trade, funding, fee and inventory ledgers; report
@@ -131,9 +147,11 @@ winning/losing/flat-day frequency, daily drawdown/tails, filled trades per
 active day and latency/cost stress. Test 1–15-minute horizons using recorded
 book/trade replay, not OHLC assumptions about instantaneous fills.
 Preserve the losing BTC strategies without parameter salvage.
-At least one candidate must have positive cost-adjusted daily expectancy
-and validated statistical/execution evidence before considering a protected
-holdout. A positive average alone is insufficient.
+At least one candidate must show cost-adjusted, positive **cumulative
+net equity growth** and daily expectancy under a versioned
+capital-allocation policy, without unacceptable drawdown, and
+must meet validated statistical/execution gates before a
+protected holdout. A positive average alone is insufficient.
 
 Three tracks run in parallel because they need different data: the maker track needs recorded books, the carry
 track needs only REST history, the lead-lag track needs both venues recorded at the same time.
