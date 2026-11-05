@@ -658,6 +658,33 @@ strategy results used an older cost model and may not be compared as
 if their results used identical execution assumptions. Protected
 holdout testing and release remain blocked.
 
+## Historical funding timestamp validator correction (2026-11-05)
+
+The initial live BTCUSDT funding survey failed before creating its
+source plan. The prior validator incorrectly required Binance API
+`fundingTime` to be divisible by 60,000 milliseconds. Funding history
+reports **exact event milliseconds**; the API does not promise exact
+UTC-minute alignment. The original combined error could also mean an
+out-of-bound event, so the actual cause is **not yet established**.
+
+The v2 source validation now:
+- Preserves raw millisecond funding timestamps and pins them unchanged.
+- Separately rejects events outside the explicit [start, holdout) bounds.
+- Accepts only events within 30 seconds of a UTC clock hour for this
+  BTCUSDT research protocol. Events beyond that tolerance fail with an
+  exact timestamp for investigation; no rounding or interpolation occurs.
+- Allows up to 30 seconds of source clock jitter on the conservative
+  eight-hour coverage check. It still rejects source gaps and missing
+  event evidence.
+- Treats funding events within 30 seconds of a modeled trade's entry or
+  exit timestamp as ambiguous, disallowing false settlement attribution.
+
+All plans now use version 2 so historical v1 plans cannot be accepted
+as equivalent provenance. This is a boundary/clock-validation correction,
+**not evidence that any actual funding survey has passed**. The exact
+root cause must be confirmed by the next read-only Termux preflight.
+The on-disk OI/candle data and holdout are unaffected.
+
 ## Pre-holdout funding history qualification (pending external acceptance)
 
 The USD-M perpetual short strategy needs settlement-time funding payments.
@@ -671,7 +698,7 @@ The new standalone `lab.crash_funding` module queries
 bound of exactly one millisecond before the existing crash holdout**.
 It validates symbol, strictly increasing settlement timestamps,
 positive settlement mark prices, finite rates, and continuity with a
-conservative maximum eight-hour gap for this BTCUSDT research protocol.
+conservative eight-hour-plus-30-second gap tolerance for this BTCUSDT research protocol.
 Funding intervals may change; no one is entitled to assume all symbols
 always settle exactly every eight hours. Gaps fail closed. The source
 plan pins each canonical JSON response page and the normalized event
