@@ -154,36 +154,44 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
         breakout_index = i
         retest_i = None
         cause = "no_retest"
-        for j in range(i + 1, min(n, i + RETEST_MINUTES + 1)):
+        # The candidate ends upon explicit cancellation or expiry;
+        # do not add an unregistered cooldown after early cancellation.
+        retest_stop_i = min(n, i + RETEST_MINUTES + 1)
+        for j in range(i + 1, retest_stop_i):
             if oi_bad[j]:
                 cause = "untrusted_oi"
+                retest_stop_i = j + 1
                 break
             if c[j] > L:
                 cause = "support_reclaimed"
+                retest_stop_i = j + 1
                 break
             if h[j] >= (1 - RETEST_DISTANCE) * L:
                 retest_i = j
                 break
         if retest_i is None:
             count[cause] += 1
-            i = max(i + 1, min(n, i + RETEST_MINUTES + 1))
+            i = max(i + 1, retest_stop_i)
             continue
         count["retest"] += 1
         confirm_i = None
         cause = "no_confirmation"
-        for k in range(retest_i + 1, min(n, retest_i + CONFIRM_MINUTES + 1)):
+        confirm_stop_i = min(n, retest_i + CONFIRM_MINUTES + 1)
+        for k in range(retest_i + 1, confirm_stop_i):
             if oi_bad[k]:
                 cause = "untrusted_oi"
+                confirm_stop_i = k + 1
                 break
             if c[k] > L:
                 cause = "support_reclaimed"
+                confirm_stop_i = k + 1
                 break
             if c[k] < (1 - CONFIRM_DROP) * l[retest_i]:
                 confirm_i = k
                 break
         if confirm_i is None:
             count[cause] += 1
-            i = max(i + 1, min(n, retest_i + CONFIRM_MINUTES + 1))
+            i = max(i + 1, confirm_stop_i)
             continue
         count["confirmation"] += 1
         # Bar k is complete at its index timestamp. Bar k+1 opens
