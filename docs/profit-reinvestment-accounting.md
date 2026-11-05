@@ -12,6 +12,53 @@ strategy, live-trading authorization, profit forecast or registered
 research family. The existing BTC holdout and all previous
 registrations remain unchanged.
 
+## Implementation checkpoint — 2026-11-05
+
+A **pure, dependency-free research accounting kernel** is implemented
+at `src/lab/profit_allocation.py` with `33` focused tests
+(`tests/test_profit_allocation.py`), all passing under local Python
+3.13. It has been committed on `chatgpt/codex-maintenance` but
+**Termux acceptance, repository-wide regression and downstream
+replay/paper integration are still pending**.
+
+Current implemented behavior:
+
+- Decimal-string money and strict currency/precision checks (no floats);
+  frozen, explicitly supplied reinvestment fraction and currency unit.
+- Every completed, audited trade asserts
+  `net = gross - fees - slippage + funding`; only *positive
+  realized net trade profit* can be fractionally reallocated.
+  Costs/funding booked in the trade must not be booked again
+  as standalone adjustments. Stable source IDs prevent exact
+  event-source replay under a different event ID.
+- Losses reduce deployable capital and equity; retained profits
+  do not automatically become trading capital. Explicit reserve
+  transfers preserve total equity; withdrawals cannot spend
+  retained reserves implicitly.
+- UTC day close requires an explicit midnight **absolute
+  unrealized-P&L mark** for every day. Missing days, non-UTC
+  timestamps, reversed events, invalid economics and non-quantized
+  amounts fail closed. Across-midnight releases of already
+  marked profit/loss are accounted for without double counting.
+- Reports show daily realized and unrealized deltas, net P&L
+  (excluding external flows), cumulative wins/losses, equity,
+  drawdown, deployable and retained capital and an absolute
+  risk-capacity bound. Without a configured deployable cap,
+  risk capacity is **unavailable**, not unconstrained.
+- Isolated research kernel only: **no durable event journal yet,
+  no exchange wallet position ledger, per-instrument margin
+  engine, actual custody segregation, broker connectivity,
+  trade execution, FX conversion or live order permission**.
+  It does not automatically derive a reliable `released_mark`
+  from filled position quantities; the upstream reconciler
+  must provide a correctly attributed value.
+
+The next engineering step is a durable source-validated event
+journal, replay/paper order and position reconciliation, and
+independent tests for restart, duplicate economic inputs,
+partial fills, margin exposure and multi-position mark releases.
+Only then can the risk engine use verified risk capacity.
+
 ## Economic objective and attribution
 
 The primary objective is **net cumulative marked-equity growth**
