@@ -16,6 +16,8 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import tempfile
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -214,11 +216,22 @@ def apply(config_path: Path, plan_path: Path, *, symbol: str = "BTCUSDT", get=No
             raise ValueError("existing funding evidence differs from source-pinned plan")
         return {"status": "verified-existing", "events": len(fetched["events"]), "read_only": False}
     directory.mkdir(parents=True, exist_ok=True)
-    # Atomic JSON replacement is safe for interruption, but enforce
-    # append-only semantics: the target must never be intentionally overwritten.
-    if target.exists():
-        raise ValueError("funding evidence destination appeared during preflight")
-    atomic_json(target, data)
+    # No-clobber publish: stage/fsync a temporary file, then hard-link it
+    # into place. os.link fails atomically if another writer created target.
+    # Never invoke os.replace on an already-present funding evidence file.
+    raw = json.dumps(data, sort_keys=True, allow_nan=False, indent=2)
+    fd, name = tempfile.mkstemp(prefix=target.name + ".partial-", dir=directory)
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w") as out:
+            out.write(raw)
+            out.flush()
+            os.fsync(out.fileno())
+        os.link(tmp, target)
+        from lab.crash_oi_migration import _sync_directory
+        _sync_directory(directory)
+    finally:
+        tmp.unlink(missing_ok=True)
     return {"status": "committed", "events": len(fetched["events"]), "read_only": False}
 
 
@@ -282,10 +295,16 @@ def settlement_return(
     exit_ = pd.Timestamp(exit_time)
     if entry.tzinfo is None or exit_.tzinfo is None or entry >= exit_:
         raise ValueError("funding position interval must be ordered and timezone-aware")
+    if not events:
+        raise ValueError("no funding settlement evidence; cannot assume zero funding")
     paid = Decimal("0")
     count = 0
+    previous = None
     for event in events:
         event_time = pd.Timestamp(event["fundingTime"], unit="ms", tz=UTC)
+        if previous is not None and event_time <= previous:
+            raise ValueError("funding events must be unique and chronologically ordered")
+        previous = event_time
         if event_time == entry or event_time == exit_:
             raise ValueError("funding settlement coincides with ambiguous entry/exit boundary")
         if entry < event_time < exit_:
