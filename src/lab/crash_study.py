@@ -126,7 +126,7 @@ class CrashSettings:
 
     @property
     def cost(self) -> float:
-        """Round trip, fraction of notional."""
+        """Indicative round trip at unchanged price; actual fill fees vary with exit notional."""
         return 2 * (self.fee_bps + self.slippage_bps) / 1e4
 
 
