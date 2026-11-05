@@ -121,7 +121,8 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
     sigma = log_return.rolling(
         PRIOR_HOURS * 60, min_periods=PRIOR_HOURS * 60,
     ).std().shift(VOLUME_MINUTES) * np.sqrt(MINUTES_PER_YEAR)
-    weights = np.minimum(VOL_TARGET / sigma, MAX_WEIGHT).fillna(0).to_numpy()
+    eligible_sigma = sigma.where(np.isfinite(sigma) & (sigma > 0))
+    weights = np.minimum(VOL_TARGET / eligible_sigma, MAX_WEIGHT).fillna(0).to_numpy()
     o, h, l, c = (b[key].to_numpy(dtype=float) for key in ("open", "high", "low", "close"))
     rows = []
     i = (PRIOR_HOURS + 1) * 60 + SUPPORT_MINUTES
