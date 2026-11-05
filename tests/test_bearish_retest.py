@@ -57,11 +57,11 @@ def test_frozen_candidate_waits_for_completed_confirmation_plus_a_full_bar_delay
     assert result.model == br.MODEL
     assert len(result.trades) == 1
     row = result.trades.iloc[0]
-    assert row["breakout"] == b.index[t0]+pd.Timedelta(minutes=1)
-    assert row["retest"] == b.index[t0+1]+pd.Timedelta(minutes=1)
-    assert row["signal"] == b.index[t0+2]+pd.Timedelta(minutes=1)
-    assert row["entry"] == b.index[t0+4]
-    assert row["exit"] == b.index[t0+5]+pd.Timedelta(minutes=1)
+    assert row["breakout"] == b.index[t0]
+    assert row["retest"] == b.index[t0+1]
+    assert row["signal"] == b.index[t0+2]
+    assert row["entry"] == b.index[t0+4]-pd.Timedelta(minutes=1)
+    assert row["exit"] == b.index[t0+5]
     assert row["reason"] == "stop"
     assert result.event_counts["breakout"] == 1
     assert result.event_counts["trade"] == 1
@@ -146,7 +146,7 @@ def test_invalid_candle_or_nonfinite_source_fails_closed():
 def test_stop_reference_and_target_are_frozen_two_to_one_not_parameters():
     b, _ = setup()
     row = run(b).trades.iloc[0]
-    stop = 1.001 * max(row["support"], b.loc[row["retest"] - pd.Timedelta(minutes=1), "high"])
+    stop = 1.001 * max(row["support"], b.loc[row["retest"], "high"])
     assert row["stop_reference"] == pytest.approx(stop)
     assert row["target_reference"] == pytest.approx(3 * row["entry_reference"] - 2 * stop)
     assert br.REWARD_TO_RISK == 2.0
