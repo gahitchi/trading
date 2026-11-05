@@ -153,14 +153,25 @@ The Python 3.13 and 3.14 full CI test suites pass with this
 additional regression coverage. This source envelope is **not
 independent authentication** of an exchange or sandbox receipt.
 
-Remaining dependencies are (1) the actual NautilusTrader
-sandbox event-capture adapter and independently sourced/verified
-raw order, mark and funding evidence; (2) account-level broker
-inventory, outstanding order, margin/liquidation and
-partial-fill reconciliation; (3) pre-trade risk-manager
-gating and operational drill evidence. This is accounting
-infrastructure, **not** a backtested profitable strategy
-or an order-routing permission.
+A separate optional **raw NautilusTrader sandbox order-event**
+capture now records simulated order lifecycle callbacks, exact fill
+identifiers, fee/source metadata and timestamps in a durable
+sequence/checkpoint log. The synthetic engine-to-callback integration
+is regression tested; a capture write failure halts the strategy's
+risk governor and signals the persistent kill switch. See
+[sandbox execution capture](docs/sandbox-execution-capture.md).
+This is an **unverified local simulation trace**, NOT a
+complete authenticated account or qualified P&L ledger.
+
+Remaining dependencies are (1) independent sourced/verified
+market marks, full order reports, funding and cash evidence plus
+validated conversion to the economic paper archive; (2)
+account-level independent position, outstanding order,
+margin/liquidation and partial-fill reconciliation across
+restart and corrections; (3) pre-trade risk-manager integration
+and operational drill evidence. This is accounting infrastructure,
+**not** a backtested profitable strategy or an order-routing
+permission.
 
 **Priority update (2026-11-05):** a time-series of **net daily P&L and cumulative
 equity growth**, not a target winning-day percentage, is the primary short-horizon
