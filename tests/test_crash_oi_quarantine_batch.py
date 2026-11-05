@@ -7,11 +7,13 @@ import pandas as pd
 import pytest
 
 from lab.crash_oi_audit import audit_migrations
-from lab.crash_oi_quarantine_batch import (
-    execute_pinned_plan, load_pinned_plan, main,
-)
+from lab.crash_oi_quarantine_batch import execute_pinned_plan, main
 from tests.test_crash_oi_migration import (
-    DATA, HEADER, SECOND, setup_cache, zipped,
+    DATA,
+    HEADER,
+    SECOND,
+    setup_cache,
+    zipped,
 )
 
 
@@ -101,7 +103,7 @@ def test_apply_audits_each_commit_and_preserves_holdout(tmp_path):
     "too_many",
 ])
 def test_malformed_pin_manifest_fails_closed_before_archive_fetch(tmp_path, invalid):
-    cfg, folder, path, plan, get = sample_plan(tmp_path)
+    cfg, folder, path, plan, _get = sample_plan(tmp_path)
     if invalid == "duplicate":
         plan["entries"][1] = dict(plan["entries"][0])
     elif invalid == "out_of_order":

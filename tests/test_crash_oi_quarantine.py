@@ -64,7 +64,7 @@ def test_failed_normal_migration_then_quarantine_retains_original_backup_and_aud
     cfg, folder, blob, args = anomaly(tmp_path)
     source = folder / "2024-01-01.parquet"
     original = source.read_bytes()
-    with pytest.raises(ValueError, match="stopped at 2024-01-01.parquet"):
+    with pytest.raises(ValueError, match=r"stopped at 2024-01-01.parquet"):
         migrate_batch(cfg, limit=1, apply=True, get=lambda _: blob)
     backup = (
         tmp_path / "data" / "crash" / "oi-original-backups"
@@ -96,13 +96,13 @@ def test_quarantine_refuses_mismatched_pair_even_with_pinned_zip(tmp_path):
     args["get"] = lambda _: bad
     args["archive_sha256"] = hashlib.sha256(bad).hexdigest()
     old = (folder / "2024-01-01.parquet").read_bytes()
-    with pytest.raises(ValueError, match="unexpected number|must be positive"):
+    with pytest.raises(ValueError, match=r"unexpected number|must be positive"):
         quarantine_day(**args)
     assert (folder / "2024-01-01.parquet").read_bytes() == old
 
 
 def test_quality_mask_cannot_hide_positive_or_unrelated_missing_oi(tmp_path):
-    cfg, folder, _, args = anomaly(tmp_path)
+    _cfg, folder, _, args = anomaly(tmp_path)
     quarantine_day(**args, apply=True)
     file = folder / "2024-01-01.parquet"
     frame = pd.read_parquet(file)
@@ -130,7 +130,7 @@ def test_quality_mask_cannot_hide_positive_or_unrelated_missing_oi(tmp_path):
 
 
 def test_quarantined_missing_quantity_is_preserved_by_research_loader(tmp_path):
-    cfg, _, _, args = anomaly(tmp_path)
+    _cfg, _, _, args = anomaly(tmp_path)
     quarantine_day(**args, apply=True)
     root = tmp_path / "data" / "crash"
     restored = crash_data.load(
@@ -180,7 +180,7 @@ def test_quality_quarantine_rejects_holdout_even_with_correct_hashes(tmp_path):
 
 
 def test_mixed_valid_and_quarantined_daily_sources_load_without_mask_nulls(tmp_path):
-    cfg, folder, _, args = anomaly(tmp_path)
+    _cfg, folder, _, args = anomaly(tmp_path)
     valid_day = crash_data.parse_metrics(zipped(HEADER + SECOND))
     valid_day.to_parquet(folder / "2024-01-02.parquet", index=False)
     quarantine_day(**args, apply=True)

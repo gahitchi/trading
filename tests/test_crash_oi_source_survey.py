@@ -9,7 +9,7 @@ import pytest
 from lab import crash_data
 from lab.crash_oi_quarantine_batch import load_pinned_plan
 from lab.crash_oi_source_survey import source_survey, write_new_manifest
-from tests.test_crash_oi_migration import DATA, HEADER, SECOND, zipped, setup_cache
+from tests.test_crash_oi_migration import DATA, HEADER, SECOND, setup_cache, zipped
 
 
 def fixtures(tmp_path, *, zero_first=True, zero_second=True):
@@ -96,7 +96,7 @@ def test_clean_days_are_distinguished_from_candidate_quarantine(tmp_path):
 
 @pytest.mark.parametrize("case", ["asymmetric_zero", "negative_pair", "notional_mismatch"])
 def test_unsafe_archive_never_becomes_an_exception_candidate(tmp_path, case):
-    cfg, folder, blobs, get, calls = fixtures(tmp_path, zero_first=True, zero_second=False)
+    cfg, folder, blobs, get, _calls = fixtures(tmp_path, zero_first=True, zero_second=False)
     if case == "asymmetric_zero":
         text = DATA.replace(",105,3990000", ",0,0").replace(",0,0", ",105,0")
     elif case == "negative_pair":

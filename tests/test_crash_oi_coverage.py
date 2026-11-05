@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from lab.crash_oi_coverage import audit_coverage, main
 
@@ -46,7 +45,7 @@ def make_cache(tmp_path, *, days=(1, 2), lengths=None):
 
 
 def test_complete_migrated_days_pass_even_with_unmigrated_holdout(tmp_path, monkeypatch):
-    cfg, folder, _ = make_cache(tmp_path)
+    cfg, _, _ = make_cache(tmp_path)
     original = pd.read_parquet
 
     def guarded_read(path, *args, **kwargs):

@@ -37,10 +37,10 @@ def test_october_two_missing_snapshots_become_explicit_delayed_quality_events():
         minute_klines("2024-10-27T15:00:00Z", "2024-10-28T18:00:00Z"),
         oi,
     )
-    assert b.loc[pd.Timestamp("2024-10-28T16:25:00Z"), "oi_invalid"] == False
-    assert b.loc[pd.Timestamp("2024-10-28T16:30:00Z"), "oi_invalid"] == True
-    assert b.loc[pd.Timestamp("2024-10-28T16:35:00Z"), "oi_invalid"] == True
-    assert b.loc[pd.Timestamp("2024-10-28T16:40:00Z"), "oi_invalid"] == False
+    assert not bool(b.loc[pd.Timestamp("2024-10-28T16:25:00Z"), "oi_invalid"])
+    assert bool(b.loc[pd.Timestamp("2024-10-28T16:30:00Z"), "oi_invalid"])
+    assert bool(b.loc[pd.Timestamp("2024-10-28T16:35:00Z"), "oi_invalid"])
+    assert not bool(b.loc[pd.Timestamp("2024-10-28T16:40:00Z"), "oi_invalid"])
     # The ffill tolerance itself cannot detect both lost observations:
     # the most recent published observation can still be non-NaN.
     assert pd.notna(b.loc[pd.Timestamp("2024-10-28T16:35:00Z"), "oi"])
@@ -75,10 +75,10 @@ def test_february_125_missing_snapshots_have_no_invented_values():
     oi = source_oi(start, end, missing=missing)
     b = bars(minute_klines(start, end), oi)
     assert b["oi_invalid"].sum() == 125
-    assert b.loc[pd.Timestamp("2024-02-16T13:35:00Z"), "oi_invalid"] == False
-    assert b.loc[pd.Timestamp("2024-02-16T13:40:00Z"), "oi_invalid"] == True
-    assert b.loc[pd.Timestamp("2024-02-17T00:00:00Z"), "oi_invalid"] == True
-    assert b.loc[pd.Timestamp("2024-02-17T00:05:00Z"), "oi_invalid"] == False
+    assert not bool(b.loc[pd.Timestamp("2024-02-16T13:35:00Z"), "oi_invalid"])
+    assert bool(b.loc[pd.Timestamp("2024-02-16T13:40:00Z"), "oi_invalid"])
+    assert bool(b.loc[pd.Timestamp("2024-02-17T00:00:00Z"), "oi_invalid"])
+    assert not bool(b.loc[pd.Timestamp("2024-02-17T00:05:00Z"), "oi_invalid"])
     assert pd.isna(b.loc[pd.Timestamp("2024-02-16T14:10:00Z"), "oi"])
 
 

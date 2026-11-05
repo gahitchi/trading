@@ -8,7 +8,12 @@ import pytest
 from lab.crash_oi_forensics import inspect_source
 from lab.crash_oi_migration import migrate_batch
 from tests.test_crash_oi_migration import (
-    DATA, HEADER, SECOND, exchange, setup_cache, zipped,
+    DATA,
+    HEADER,
+    SECOND,
+    exchange,
+    setup_cache,
+    zipped,
 )
 
 

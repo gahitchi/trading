@@ -4,7 +4,6 @@ import hashlib
 import io
 import json
 import zipfile
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -12,7 +11,6 @@ import pytest
 from lab import crash_data
 from lab.crash_oi_migration import _migrate_one, migrate_batch
 from lab.persistence import read_json
-
 
 HEADER = "create_time,symbol,sum_open_interest,sum_open_interest_value\n"
 DATA = (
@@ -47,8 +45,8 @@ def setup_cache(tmp_path, *, with_second=True, with_holdout=True):
     folder.mkdir(parents=True)
     for day, data in [
         ("2024-01-01", DATA),
-        *(([("2024-01-02", SECOND)] if with_second else [])),
-        *(([("2024-01-03", HOLDOUT)] if with_holdout else [])),
+        *([("2024-01-02", SECOND)] if with_second else []),
+        *([("2024-01-03", HOLDOUT)] if with_holdout else []),
     ]:
         file = folder / (day + ".parquet")
         crash_data.parse_metrics(zipped(HEADER + data)).drop(columns="oi_qty").to_parquet(file, index=False)
