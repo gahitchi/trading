@@ -134,7 +134,7 @@ After the new Termux tests pass, generate and inspect a plan first:
 
 Registration and `--evaluate` should be separate deliberate operator
 actions only after verifying the plan, the existing family status and
-the complete 175-test regression run. This new pathway has not
+the complete 177-test regression run. This new pathway has not
 been externally tested or used against historical BTCUSDT yet.
 
 ## Qualification rules to freeze before the first test
