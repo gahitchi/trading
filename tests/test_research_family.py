@@ -541,14 +541,15 @@ def test_prior_reserved_identity_mutation_blocks_later_family(tmp_path):
         rf.register_family(tmp_path, plan())
         running.result = {"pnl": -1}
     evaluate(tmp_path)
-    attempt = trials.history(tmp_path)[0]
+    before = trials.history(tmp_path)
+    attempt = before[0]
     path = tmp_path / trials.ATTEMPTS / f"{attempt['attempt_id']}.json"
     tampered = read_json(path)
     tampered["params"]["threshold"] = 0.9
     tampered["fingerprint"] = fr.fingerprint(tampered["params"])
     atomic_json(path, tampered)
     (tmp_path / fr.TRIALS).write_text(
-        "\n".join(json.dumps(row) for row in [tampered, trials.history(tmp_path)[1]])
+        "\n".join(json.dumps(row) for row in [tampered, before[1]])
         + "\n"
     )
     with pytest.raises(ValueError, match="reserved trial identity"):
