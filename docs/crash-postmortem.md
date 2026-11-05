@@ -42,10 +42,13 @@ checkpoint reports:
 not funding or execution fees alone, explain the losing setup.
 These data do **not** demonstrate an optimal exit revision.
 The outcome supports retiring this particular initial-crash
-entry rule from the qualified-candidate path. The
-`docs/bearish-failed-retest-proposal-v1.md` concept
-remains a *new, untested hypothesis*, not a tuned retest of
-the unsuccessful preset.
+entry rule from the qualified-candidate path. The distinct,
+subsequently registered `docs/bearish-failed-retest-proposal-v1.md`
+candidate has now also been evaluated and failed:
+15 trades, **-47.0794 bps net per trade**; see
+`docs/bearish-failed-retest-result-v1.md`. That second strategy
+also generated only one trade per ~57 days, far too few for the
+new short-horizon daily-P&L mandate.
 
 
 
@@ -116,13 +119,18 @@ fixed seed set to improve an outcome. If any placebo cannot
 be matched safely, the attempt fails rather than relaxing its
 research protocol.
 
-## Next hypothesis
+## Subsequent candidate and daily-trading objective
 
-A distinct, **untested** bearish failed-retest idea is specified
-in [bearish-failed-retest-proposal-v1.md](bearish-failed-retest-proposal-v1.md).
-Its design followed inspection of losing BTC history. It cannot
-qualify as prospective evidence on that previously viewed period.
-It is not yet an executable strategy or registered in the user's
-local prospective research-family ledger.
+The failed-retest idea was implemented, separately frozen, and
+retrospectively evaluated after the breakdown postmortem. The
+[completed failure report](bearish-failed-retest-result-v1.md)
+preserves negative net returns, 15 trades and a non-qualified
+inference status; no threshold retuning was performed.
+
+The project is now prioritizing the
+[short-horizon daily net-P&L goal](short-horizon-daily-profit-objective.md).
+Neither retired BTC signal is sufficiently profitable or frequent.
+The next research plan must be independently registered rather
+than inferred from the same observed BTC history.
 
 Protected BTC holdout: **2026-05-08 UTC onward, untouched**.
