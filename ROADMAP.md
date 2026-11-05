@@ -13,7 +13,12 @@ An automated, independent trading system with institutional-grade research and r
 any asset class through the right broker or exchange. **The primary fast-track objective is short-duration
 trading whose net results are evaluated per UTC day, not annualized returns.** Aim for recurring daily
 opportunities and a positive mean net *daily* P&L across all trading and zero-trade days, with drawdown
-contained and every execution cost counted. No strategy can promise profit on every calendar day,
+contained and every execution cost counted. The user explicitly values **even €0.20–€0.50 net
+profit in a day**, rather than waiting for occasional large gains: prioritize observed
+**profitable-day frequency**, then net average, negative-day tails and execution realism.
+The €0.20 and €0.50 figures are reporting milestones, not guaranteed outcomes,
+a daily trading quota, a minimum order return or permission to increase risk.
+No strategy can promise profit on every calendar day,
 and no trade is preferable to a forced low-quality fill.
 
 Start with a one-minute signal clock and positions lasting approximately 1–15 minutes,
@@ -71,7 +76,7 @@ run and tested at any hour.
 | BTCUSDT bearish crash breakdown (predefined) | `lab crash study --mode breakdown --symbols BTCUSDT --funding-plan ...` | **Rejected for this configuration on research data (2026-11-05).** 32 trades, −106.4 bps mean net, −8.38% modeled APR, −0.99 daily Sharpe, 17 stops / 1 target; 20/30/50-bps cost sensitivity −106.4/−116.4/−136.5 bps mean net. Audited 2,574-event BTCUSDT funding history contributed +30.89 bps summed across the 32 trades (62 certain, 0 ambiguous). Pre-holdout ends 2026-05-07; **no qualified inference and no holdout evaluation**. The 479-trade daily-entry baseline is not exposure/trade-count matched. See `docs/crash-oi-quantity.md`. |
 | BTC crash postmortem + matched placebo | `python -m lab.crash_postmortem_cli` | **Termux accepted 2026-11-05.** Original short −106.4 bps/trade; all 16 predetermined matched-descriptive comparisons outperformed original, original-minus-placebo median −95.0 bps. 10 total attempt records, seven legacy provenance gaps, inference NOT_QUALIFIED. No holdout use. See `docs/crash-postmortem.md`. |
 | Alternative bearish failed-retest hypothesis | `src/lab/bearish_retest.py`, `lab.bearish_retest_research` | **Retired from qualification after completed 2026-11-05 v2 historical research run.** 190 portable regression tests passed; one initial v1 replay failed and remains in evidence, then corrected v2 was registered separately. **15 completed BTCUSDT shorts, -47.0794 net bps/trade, 20% wins, modeled annual return -3.5406%, Sharpe -1.2735, max drawdown 8.5442%; 127 breakout events and 15 confirmations.** The fixed negative-net stop criterion triggered. Prior 10 trials, the failed v1 attempt and completed v2 attempt are retained in durable research history; no tuning, holdout access, qualified statistical edge or trading promotion. See `docs/bearish-failed-retest-result-v1.md`. |
-| Short-horizon daily-P&L research pivot | [Daily/short-horizon policy](docs/short-horizon-daily-profit-objective.md) | **Objective documented; implementation and empirical gates pending.** The 15-trade/858-day failed-retest BTC strategy is both negative and far too sparse for daily opportunities. Priority: 1-minute decision clock, 1–15-minute holding horizons, independently registered subminute cohorts only with L2/trades, shared UTC-day mark-to-market net-P&L ledger, real maker/taker execution sensitivity and daily activity/flat-day distributions. This is **not a new backtested edge**. |
+| Short-horizon daily-P&L research pivot | [Daily/short-horizon policy](docs/short-horizon-daily-profit-objective.md) | **Objective documented; implementation and empirical gates pending.** The user prioritizes the fraction of calendar days with **positive net P&L**, even as little as **€0.20 or €0.50** after full costs; these are reporting targets, **not guaranteed income**. The 15-trade/858-day failed-retest BTC strategy is both negative and far too sparse for daily opportunities. Priority: 1-minute decision clock, 1–15-minute holding horizons, independently registered subminute cohorts only with L2/trades, shared UTC-day mark-to-market net-P&L ledger, real maker/taker execution sensitivity and daily activity/flat-day distributions. This is **not a new backtested edge**. |
 
 ## 5. Phases
 
@@ -113,8 +118,12 @@ no trades must not be removed from P&L statistics or compensated for by mandator
 
 ## Phase 1: Find an edge 🔄
 
-**Priority update (2026-11-05):** daily net P&L and feasible trade frequency are the lead criteria for
-the fast track. Before another short-entry experiment, implement the
+**Priority update (2026-11-05):** daily net P&L, **positive-day consistency** and feasible
+trade frequency are the lead criteria for the fast track. Count and display days with
+net gains of any size, at least **€0.20** and at least **€0.50**; all losses and
+flat days remain in the denominator. No strategy is required or permitted to
+manufacture a profitable trade on an otherwise unfavorable day. Before another
+short-entry experiment, implement the
 [daily scorecard and short-horizon evidence contract](docs/short-horizon-daily-profit-objective.md):
 count all eligible UTC days including zero-trade days; reconcile mark-to-market
 daily net equity changes to trade, funding, fee and inventory ledgers; report
