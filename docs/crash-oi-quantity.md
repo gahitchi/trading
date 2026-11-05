@@ -658,6 +658,59 @@ strategy results used an older cost model and may not be compared as
 if their results used identical execution assumptions. Protected
 holdout testing and release remain blocked.
 
+## Pre-holdout funding history qualification (pending external acceptance)
+
+The USD-M perpetual short strategy needs settlement-time funding payments.
+A positive Binance funding rate means the short side receives funding;
+a negative rate means the short side pays. A fixed-base contract quantity
+earns -side * rate * settlement_mark / entry_reference per event.
+We cannot substitute 1-minute trade closes for exchange settlement marks.
+
+The new standalone `lab.crash_funding` module queries
+`GET /fapi/v1/fundingRate` with an **inclusive lower bound and an upper
+bound of exactly one millisecond before the existing crash holdout**.
+It validates symbol, strictly increasing settlement timestamps,
+positive settlement mark prices, finite rates, and continuity with a
+conservative maximum eight-hour gap for this BTCUSDT research protocol.
+Funding intervals may change; no one is entitled to assume all symbols
+always settle exactly every eight hours. Gaps fail closed. The source
+plan pins each canonical JSON response page and the normalized event
+sequence by SHA-256; funding history is not a market-data repair.
+
+The initial survey is read-only. `--plan-out` explicitly saves the source
+manifest; an explicit `--apply --plan` re-fetches and verifies all pages
+before **append-only** publication of a separate event cache. `--audit
+--plan` independently verifies cached event/manifest digests with no
+network access. Nothing touches migrated OI files, candle archives or
+protected holdout data.
+
+The pure `settlement_return` accounting function values funding at
+each validated settlement's *exchange-reported mark price*, relative
+to the entry reference notional. An event falling exactly at an
+entry/exit timestamp is ambiguous at minute resolution and fails
+closed rather than assigning a fabricated payment or receipt.
+**This function is not yet wired into crash strategy P&L**: historical
+event coverage must first be independently demonstrated and accepted.
+The current strategy trial still explicitly declares funding
+`not_modelled`. No new strategy results or holdout tests are authorized.
+
+First run the offline tests:
+
+    PYTHONPATH=src:. python -m pytest \
+      tests/test_crash_funding.py tests/test_crash_execution.py \
+      tests/test_crash.py -v
+
+Then perform only a bounded public-source survey in Termux:
+
+    PYTHONPATH=src:. python -m lab.crash_funding \
+      --config ~/trading-termux-tests/lab.toml \
+      --symbol BTCUSDT --start 2024-01-01 \
+      --plan-out ~/trading-termux-tests/btc-funding-preholdout-plan.json
+
+The source plan must be inspected before any apply. This new
+functionality is **not yet externally validated** and funding is not
+yet reflected in strategy returns.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
