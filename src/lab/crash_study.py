@@ -60,7 +60,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from lab import crash_data
+from lab import crash_data, crash_execution
 from lab.carry_study import (
     DEFAULT_SYMBOLS,
     expected_max_sharpe,
@@ -108,11 +108,16 @@ class CrashSettings:
             raise ValueError(f"mode must be one of {', '.join(MODES)}")
         if self.drop_pct <= 0 or self.window_min < 1 or self.hold_min < 1 or self.delay_min < 0:
             raise ValueError("drop_pct > 0, window_min >= 1, hold_min >= 1 and delay_min >= 0 are required")
-        if (
-            min(self.vol_target, self.vol_mult, self.oi_pct, self.tp_pct, self.sl_pct, self.fee_bps, self.slippage_bps)
-            < 0
-        ):
+        numeric = (
+            self.drop_pct, self.vol_mult, self.oi_pct, self.tp_pct, self.sl_pct,
+            self.fee_bps, self.slippage_bps, self.vol_target,
+        )
+        if any(not math.isfinite(x) for x in numeric):
+            raise ValueError("crash thresholds, costs and sizing must be finite")
+        if min(numeric[1:]) < 0:
             raise ValueError("thresholds, fees and slippage can't be negative")
+        if max(self.fee_bps, self.slippage_bps) >= 10_000:
+            raise ValueError("fees/slippage must each be below 10000 bps")
         object.__setattr__(self, "side", 1 if self.mode == "wick" else -1)
 
     @classmethod
@@ -237,9 +242,21 @@ def trades(b: pd.DataFrame, s: CrashSettings, entries: np.ndarray | None = None)
         if done is None:
             continue
         k, gross, why = done
-        rows.append((b.index[i], b.index[j] - pd.Timedelta(minutes=1), b.index[k], gross, gross - s.cost, wt[i], why))
+        entry_reference = float(o[j])
+        exit_reference = float(entry_reference * (1 + s.side * gross))
+        account = crash_execution.fill_accounting(
+            s.side, entry_reference, exit_reference, s.fee_bps, s.slippage_bps
+        )
+        rows.append((
+            b.index[i], b.index[j] - pd.Timedelta(minutes=1), b.index[k],
+            gross, account["net"], wt[i], why,
+            entry_reference, exit_reference, account["fee_cost"], account["slippage_cost"],
+        ))
         free_from = k + s.window_min
-    return pd.DataFrame(rows, columns=["signal", "entry", "exit", "gross", "net", "weight", "reason"])
+    return pd.DataFrame(rows, columns=[
+        "signal", "entry", "exit", "gross", "net", "weight", "reason",
+        "entry_reference", "exit_reference", "fee_cost", "slippage_cost",
+    ])
 
 
 def weights(b: pd.DataFrame, s: CrashSettings) -> np.ndarray:
