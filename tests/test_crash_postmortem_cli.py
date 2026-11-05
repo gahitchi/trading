@@ -85,6 +85,12 @@ def test_postmortem_cli_records_full_fixed_seed_placebo_and_remains_unqualified(
     records = history(tmp_path / "results")
     assert len(records) == 1 and records[0]["status"] == "completed"
     assert records[0]["result"]["qualified"] is False
+    assert records[0]["result"]["analysis_payload_sha256"] == report["analysis_payload_sha256"]
+    assert report["analysis_payload_sha256"] == crash_funding._digest({
+        "failure_analysis": report["failure_analysis"],
+        "matched_placebos": report["matched_placebos"],
+        "per_trade_diagnostics": report["per_trade_diagnostics"],
+    })
     assert len(records[0]["params"]["placebo_seeds"]) == 16
     assert records[0]["params"]["placebo_seeds"][0] == 20261105
     assert any(s["name"] == "funding:BTCUSDT" for s in records[0]["inputs"]["streams"])
