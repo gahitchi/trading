@@ -26,6 +26,10 @@ VERSION = "btc-breakdown-postmortem-and-month-hour-exposure-placebo-v1"
 def execute(config_path: Path, funding_plan_path: Path, *, report_out: Path | None = None) -> dict:
     """Reserve a durable diagnostic attempt before any actual market-data read."""
     config_path, funding_plan_path = Path(config_path), Path(funding_plan_path)
+    if report_out is not None:
+        report_out = Path(report_out)
+        if report_out.exists() or report_out.is_symlink():
+            raise ValueError("refusing to overwrite existing diagnostic report")
     cfg = load_config(config_path)
     root = cfg.data_dir / "crash"
     boundary = study.boundary(cfg.results_dir, root)
@@ -127,9 +131,6 @@ def execute(config_path: Path, funding_plan_path: Path, *, report_out: Path | No
     # Recount the completed diagnostic without excluding historical failures.
     report["qualification"] = crash_qualification.inventory(cfg.results_dir)
     if report_out is not None:
-        report_out = Path(report_out)
-        if report_out.exists() or report_out.is_symlink():
-            raise ValueError("refusing to overwrite existing diagnostic report")
         atomic_json(report_out, report)
     return report
 
