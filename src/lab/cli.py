@@ -868,6 +868,7 @@ def cmd_crash_study(cfg, a):
             "start": funding_plan_metadata.get("start"),
             "holdout_start": funding_plan_metadata.get("holdout_start"),
             "events_sha256": funding_plan_metadata.get("events_sha256"),
+            "plan_sha256": crash_funding._digest(funding_plan_metadata),
         } if funding_plan else None),
     }
     try:
@@ -888,9 +889,12 @@ def cmd_crash_study(cfg, a):
                 raise ValueError(f"no pre-holdout crash data for {' '.join(symbols)} before {boundary:%Y-%m-%d}")
             if funding_evidence is not None:
                 plan = funding_evidence["plan"]
-                if any(
-                    plan.get(key) != funding_plan_metadata.get(key)
-                    for key in ("kind", "start", "holdout_start", "events_sha256")
+                if (
+                    funding_evidence["plan_sha256"] != params["funding_source"]["plan_sha256"]
+                    or any(
+                        plan.get(key) != funding_plan_metadata.get(key)
+                        for key in ("kind", "start", "holdout_start", "events_sha256")
+                    )
                 ):
                     raise ValueError("funding source plan changed between reservation and load")
                 from pandas import to_datetime, DataFrame
