@@ -201,6 +201,12 @@ def simulate(b: pd.DataFrame, *, boundary: pd.Timestamp) -> Result:
         if entry_i >= n:
             count["late_entry"] += 1
             break
+        # Publication/quality failures during the delayed order period
+        # must not become invisible just because confirmation passed.
+        if oi_bad[confirm_i + 1:entry_i + 1].any():
+            count["untrusted_oi_before_entry"] += 1
+            i = entry_i + 1
+            continue
         P = o[entry_i]
         stop = (1 + STOP_BUFFER) * max(L, h[retest_i])
         target = P - REWARD_TO_RISK * (stop - P)
