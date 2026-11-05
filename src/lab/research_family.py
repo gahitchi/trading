@@ -184,13 +184,14 @@ def _assert_history_chain(chain: list[dict], rows: list[dict]) -> None:
             raise ValueError("research family registration is missing or inconsistent with prior trial links")
     for family in chain:
         snapshot = family["prior_history"]
+        frozen_legacy = Counter(
+            _digest(row) for row in snapshot if "attempt_id" not in row
+        )
+        if frozen_legacy - actual:
+            raise ValueError("prior research evidence is missing or changed")
         for row in snapshot:
             ident = row.get("attempt_id")
             if ident is None:
-                if actual[_digest(row)] < sum(
-                    item == row for item in snapshot
-                ):
-                    raise ValueError("prior research evidence is missing or changed")
                 continue
             current = by_id.get(ident)
             if current is None:
