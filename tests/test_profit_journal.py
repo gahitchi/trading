@@ -4,6 +4,7 @@ import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -28,9 +29,9 @@ def _rewrite(path, rows):
 def test_durable_restart_preserves_partial_compounding_and_losses(tmp_path):
     first = journal(tmp_path)
     first.append(trade("d1", "0.20"))
-    assert first.append(close("one", START)).net_pnl == 0.20
+    assert first.append(close("one", START)).net_pnl == Decimal("0.20")
     second = journal(tmp_path)
-    assert second.replay().equity == 1000.20
+    assert second.replay().equity == Decimal("1000.20")
     second.append(trade("d2", "120.00", minutes=1441))
     second.append(close("two", START + timedelta(days=1)))
     third = journal(tmp_path)
