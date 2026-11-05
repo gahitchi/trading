@@ -18,12 +18,13 @@ from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from lab.persistence import file_lock, parse_json
+from lab.persistence import atomic_json, file_lock, parse_json, read_json
 from lab.profit_allocation import AllocationEvent, AllocationPolicy, DayClose, ProfitAllocationLedger
 
 _VERSION = 1
 _HEADER = "profit-allocation-header"
 _ENTRY = "profit-allocation-event"
+_HEAD = "profit-allocation-checkpoint"
 _EVENT_FIELDS = {field.name for field in fields(AllocationEvent)}
 _POLICY_FIELDS = {field.name for field in fields(AllocationPolicy)}
 
@@ -132,10 +133,13 @@ class ProfitJournal:
         # Policy and date are validated before publishing the journal header.
         ProfitAllocationLedger(policy, start_day)
         self._lock = self.path.with_name(self.path.name + ".lock")
-        if self.path.is_symlink() or self._lock.is_symlink():
-            raise ValueError("journal and lock must not be symbolic links")
+        self._head = self.path.with_name(self.path.name + ".head.json")
+        if self.path.is_symlink() or self._lock.is_symlink() or self._head.is_symlink():
+            raise ValueError("journal, checkpoint and lock must not be symbolic links")
         with file_lock(self._lock):
             if not self.path.exists():
+                if self._head.exists():
+                    raise ValueError("journal is missing but its durable checkpoint exists")
                 self.path.parent.mkdir(parents=True, exist_ok=True)
                 header = _sealed({
                     "version": _VERSION,
@@ -155,7 +159,28 @@ class ProfitJournal:
                 finally:
                     os.close(fd)
                 _sync_dir(self.path.parent)
+                self._publish_head(sequence=0, last=header["sha256"], header=header["sha256"])
             self._load_unlocked()
+
+    def _publish_head(self, *, sequence: int, last: str, header: str) -> None:
+        # This separately fsynced head seals the journal suffix: truncating
+        # a complete trailing record cannot silently lose a settled event.
+        atomic_json(self._head, _sealed({
+            "version": _VERSION,
+            "type": _HEAD,
+            "sequence": sequence,
+            "last_sha256": last,
+            "header_sha256": header,
+        }))
+
+    def _checkpoint_header_unlocked(self) -> str:
+        # The current validated checkpoint already binds the header digest.
+        # No additional reader opens external market input or source files.
+        checkpoint = read_json(self._head)
+        _verify_seal(checkpoint, {
+            "version", "type", "sequence", "last_sha256", "header_sha256"
+        })
+        return checkpoint["header_sha256"]
 
     def _load_unlocked(self) -> tuple[ProfitAllocationLedger, int, str]:
         rows = _read_records(self.path)
@@ -179,6 +204,18 @@ class ProfitJournal:
                 raise ValueError("broken journal predecessor hash chain")
             ledger.apply(_deserialize_event(row["event"]))
             previous = row["sha256"]
+        if not self._head.exists():
+            raise ValueError("journal durable checkpoint is missing")
+        checkpoint = read_json(self._head)
+        _verify_seal(checkpoint, {
+            "version", "type", "sequence", "last_sha256", "header_sha256"
+        })
+        if (checkpoint["version"] != _VERSION or checkpoint["type"] != _HEAD
+                or type(checkpoint["sequence"]) is not int
+                or checkpoint["sequence"] != len(rows) - 1
+                or checkpoint["last_sha256"] != previous
+                or checkpoint["header_sha256"] != header["sha256"]):
+            raise ValueError("journal/checkpoint mismatch: missing committed event or incomplete write")
         return ledger, len(rows) - 1, previous
 
     def replay(self) -> ProfitAllocationLedger:
@@ -212,6 +249,9 @@ class ProfitJournal:
                 os.fsync(fd)
             finally:
                 os.close(fd)
+            # A crash between the event append and this checkpoint update
+            # must stop future writes until evidence is audited manually.
+            self._publish_head(sequence=sequence + 1, last=record["sha256"], header=self._checkpoint_header_unlocked())
             return day
 
     def report(self, through: date) -> dict:
