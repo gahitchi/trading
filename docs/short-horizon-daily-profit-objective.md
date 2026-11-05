@@ -12,9 +12,26 @@ Build a short-horizon, institutionally disciplined, **paper-first**
 crypto perpetual trading/research system that can discover opportunities
 on most active days, with an ultimate objective of **positive net
 daily P&L over a sufficiently large, independently validated sample**.
+The operator's explicit practical benchmark is **even €0.20–€0.50
+of net profit in a day is worthwhile**. Therefore prioritize
+**consistency of positive daily outcomes** above large individual
+winners, yearly APR, or total volume of trades. Track both
+`net_daily_pnl_eur > 0` (a profitable day of any size) and the
+**illustrative €0.20 and €0.50 net/day milestones**; these numbers
+are *targets to report*, not minimum order sizes, risk budgets,
+signals, expected returns or guaranteed payouts.
+
 Daily profit is a target for *expected performance*, **not** a
-contractual guarantee of gains every day. Cash loss limits may stop a
-session, and the correct decision may be to make no trade.
+contractual guarantee of gains every day. A profitable day is
+counted only after all actual modeled trading frictions, marked
+inventory, margin/funding effects and any required currency
+conversion. A zero-trade day has zero net trading P&L (unless
+open inventory, carrying cost or fees remain), never a fictional
+daily gain. Cash loss limits may stop a session, and the correct
+decision may be to make no trade rather than force low-edge fills.
+The system must not use martingale sizing, loss-chasing, increasing
+leverage or artificial daily trade quotas to try to guarantee
+a positive calendar-day close.
 
 Annual percentage return, funding carry and multi-day holding
 performance are **secondary diagnostics**, not the optimization target
@@ -72,7 +89,11 @@ Daily scorecard fields:
    open/close valuation marks and daily capital denominator.
 2. **Mean and median net daily return** across *all eligible days*,
    plus fraction of **positive/negative/flat days**, including days
-   that produced zero trades.
+   that produced zero trades. Explicitly report days with
+   **net profit >= €0.20** and **>= €0.50** as illustrative
+   milestones (in the native ledger's denomination with a
+   traceable EUR conversion where necessary); do not round a
+   small negative or a zero to a successful day.
 3. **Active-day incidence**, trades/day (all days and active days),
    number of independent active dates, and max consecutive
    zero-trade days. An isolated winner cannot make a strategy
@@ -107,15 +128,27 @@ protected holdout or a supervised paper campaign:
 
 - **Daily-relevance gate:** opportunity and executed round-trip
   counts must be sufficient to characterize *ordinary days*,
-  not simply a handful of rare crashes. Evaluate active-day and
-  zero-trade-day distributions honestly; no artificial quota
-  can force trades when signals are absent.
+  not simply a handful of rare crashes. **The primary diagnostic
+  is the observed profitable-day percentage** and distribution
+  of net daily P&L, not maximum dollars won on exceptional
+  moves. Report the fraction of days reaching the operator's
+  **€0.20 and €0.50** illustrative net milestones, with
+  confidence intervals across independent days and the full
+  losing-day/tail-loss record. Report active-day and zero-trade-day
+  distributions honestly; no artificial quota can force trades
+  when signals are absent.
 - **Net profitability gate:** positive **mean net UTC-day P&L**
   across *all eligible days*, after realistic funding, fees,
   adverse fills and partial-fill accounting; positive net return
   must survive plausible home-network latency and cost stresses.
-  Retain losing days, nontrading days and all failed research
-  configurations. A positive point estimate alone is insufficient.
+  Also require an independently justified positive-day consistency
+  threshold and separately assessed loss-tail budget before
+  qualification: **do not invent a 100% winning-day acceptance
+  criterion** or claim €0.20/day is obtainable without first
+  knowing starting capital, notional, minimum order size, spread,
+  fees, slippage and time online. Retain losing days, nontrading
+  days and all failed research configurations. A positive point
+  estimate alone is insufficient.
 - **Risk gate:** measured drawdown, worst-day loss, leverage, open
   position exposure, kill switch and collateral/liquidation
   scenarios meet a separately precommitted capital risk budget.
