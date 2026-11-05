@@ -434,6 +434,41 @@ Never assume that the 2024-08-12 anomaly matches July's source quality.
 Do not globally relax the OI positivity constraint or silently
 interpret archived (0,0) values as genuine market-wide open interest.
 
+
+### Short-source-gap signal gate: 2024-10-28 audit
+
+A later independent coverage check identified **127 missing five-minute
+source rows** across 433 migrated days, exactly:
+- 2024-02-16 13:35–23:55 UTC: 125 contiguous absent timestamps;
+- 2024-10-28 16:25–16:30 UTC: 2 contiguous absent timestamps.
+
+This is *in addition to* 311 explicitly quarantined (0,0) OI rows
+through 2025-03-08. The checksum/transaction audit remains clean: a
+correctly preserved source gap is not an integrity-failure claim.
+
+The crash strategy formerly used a 15-minute forward-fill staleness
+limit and explicitly vetoed quarantined zero-pair publication events,
+but a **short missing archive interval** could still produce valid
+endpoint values and create a false OI-change signal. It now marks each
+absent expected five-minute source timestamp as unavailable starting
+at the source timestamp + the configured five-minute publication delay.
+Its signal gating then vetoes any crash trigger whose OI comparison
+window includes that absence. No interpolation, substitution or price
+lookahead is permitted; the source gap and raw files remain unchanged.
+Historical coverage is still *not complete*, and eligible-signal
+statistics must reflect these excluded windows.
+
+Test independently:
+
+    PYTHONPATH=src:. python -m pytest \
+      tests/test_crash_oi_missing_gap_signals.py \
+      tests/test_crash_oi_quarantine.py \
+      tests/test_crash_oi_coverage.py -v
+
+These tests cover the two-row October gap, 125-row February gap,
+quarantine-plus-gap conjunction, complete OI cadence and the
+short-side breakdown lookback veto before/after the gap.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
