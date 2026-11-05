@@ -619,6 +619,45 @@ taken from operator-provided Termux outputs, not CI access to
 operator-local market data. Full strategy cost, funding and
 statistical qualification remain pending.
 
+## Crash short-side execution assumption upgrade (external tests pending)
+
+Exploratory crash trades now retain both reference prices and calculate
+side-aware entry/exit taker fills. For a fixed BASE quantity, assumed
+adverse slippage changes **both** entry and exit prices; the fee applies
+to each *executed* notional, not a flat 2 x fee subtraction from initial
+notional. Long and short sides share the same explicit fill formula.
+
+A research attempt's parameters now identify the revised model as
+`reference-taker-fixed-base-two-fill-notional-fees-v1`. The same
+already-generated trade signals, entries, exits, and weights are then
+repriced using three **fixed** stress assumptions (fee 5 bps each
+side, with slippage 5 / 10 / 20 bps each side), corresponding to
+20 / 30 / 50 bps at unchanged price. The stress results are attached
+to the **same reserved trial** alongside SHA-256 input fingerprints.
+They do not silently add optimised strategies or bypass trial logging.
+Fee costs now reflect both executed prices and therefore differ slightly
+from a nominal flat-round-trip rate on large moves.
+
+This remains a **reference-price taker approximation**: slippage is
+assumed rather than empirically measured, and it has no funding,
+exchange mark-to-market settlement, spread calibration, partial fills,
+queue estimates, market impact, liquidation, borrow/margin interest,
+or exchange-specific tiered commission schedule. A positive return
+under any scenario would *not* qualify profitability. In particular,
+short funding may be positive or negative; it must not be assumed to
+benefit the strategy.
+
+Regression command:
+
+    PYTHONPATH=src:. python -m pytest \
+      tests/test_crash_execution.py tests/test_crash.py \
+      tests/test_crash_input_provenance.py -v
+
+**External Termux test acceptance is pending.** Existing historical
+strategy results used an older cost model and may not be compared as
+if their results used identical execution assumptions. Protected
+holdout testing and release remain blocked.
+
 ## Research attempt provenance
 
 The ported `lab crash study` CLI now reserves each research attempt durably
