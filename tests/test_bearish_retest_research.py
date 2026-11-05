@@ -187,3 +187,29 @@ def test_explicit_plan_writes_exclusively_and_never_overwrites(tmp_path):
     with pytest.raises(FileExistsError):
         rs._write_exclusive(path, rs.proposed_plan(cfg, plan))
     assert path.read_text() == saved
+
+
+def test_registered_code_drift_refuses_evaluation_before_market_read(tmp_path, monkeypatch):
+    cfg, plan = configured(tmp_path)
+    register_family(tmp_path / "results", rs.proposed_plan(cfg, plan))
+    real_identity = rs.code_provenance()
+    changed = {**real_identity, "python": "different-runtime"}
+    monkeypatch.setattr(rs, "code_provenance", lambda: changed)
+    monkeypatch.setattr(crash_data, "load",
+        lambda *args, **kwargs: pytest.fail("read source after registration mismatch"))
+    with pytest.raises(ValueError, match="registered research code/runtime differs"):
+        rs.evaluate(cfg, plan)
+    assert history(tmp_path / "results") == []
+
+
+def test_source_plan_change_after_registration_refuses_before_market_read(tmp_path, monkeypatch):
+    cfg, plan = configured(tmp_path)
+    register_family(tmp_path / "results", rs.proposed_plan(cfg, plan))
+    altered = json.loads(plan.read_text())
+    altered["events_sha256"] = "c" * 64
+    plan.write_text(json.dumps(altered))
+    monkeypatch.setattr(crash_data, "load",
+        lambda *args, **kwargs: pytest.fail("read market after funding plan mismatch"))
+    with pytest.raises(ValueError, match="not an exact member"):
+        rs.evaluate(cfg, plan)
+    assert history(tmp_path / "results") == []
