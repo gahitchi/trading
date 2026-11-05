@@ -1,6 +1,6 @@
 # Research proposal — failed-retest bearish structure break (v1)
 
-**Status: pure candidate state machine implemented and unit tests written (`src/lab/bearish_retest.py`, `tests/test_bearish_retest.py`); NOT externally tested, NOT run on BTC history, NOT prospectively registered, and NOT statistically qualified.**
+**Status: frozen candidate logic accepted in 17/17 focused Termux tests on commit `7c14cb0`. Further causality fixes, guarded plan/register/evaluate CLI and integration tests are committed but awaiting Termux validation. NOT run on historical BTC, NOT registered in the user's research family, and NOT statistically qualified.**
 2026-11-05. This idea is documented after inspecting the losing BTCUSDT
 `crash breakdown` result. **It is not a prospectively independent
 discovery relative to that inspected dataset.** Neither the former
@@ -93,6 +93,49 @@ explicit UTC holdout boundary are accepted. The 2026-05-08 protected
 holdout is not touched by unit tests. Source pinning, safe registration,
 and a durable dedicated evaluation CLI must be completed and
 validated separately before any historical research run.
+
+## Durable guarded research workflow (not yet user-accepted)
+
+`python -m lab.bearish_retest_research` has two deliberately
+distinct operations:
+
+- `--plan-out /new/path.json` validates the existing UTC holdout
+  and the v2 audited funding source **metadata** and writes exactly
+  one frozen prospective family member in a non-overwriting file.
+  It does not open minute candles or OI Parquet archives, simulate
+  signals, create a new partition or log a research attempt.
+- `--evaluate` requires the precise frozen member to already be
+  registered through `python -m lab.cli --config ... research
+  register --plan /new/path.json`. It checks the entire registered
+  source/runtime identity; if the member is missing or the code
+  changed, it fails before opening historical source archives.
+  Upon authorization it durably reserves a new `crash-study`
+  attempt, then audits pinned Binance funding, loads only
+  pre-boundary candles/OI, checks the OI quantity/quality schema,
+  fingerprints all three input streams, runs the frozen candidate,
+  applies the pessimistic funding model, and reports trade counts
+  and fixed-cost stresses. No optimization/parameter controls exist.
+
+**Do not register a plan automatically:** `lab research register`
+is a one-time immutable registration for the whole results directory,
+not a strategy-only setting. It retains earlier completed and failed
+evidence as retrospective, which blocks clean prospectivity. If the
+directory already contains another research family, do not replace
+or bypass it. A registered new candidate is still being diagnosed
+retrospectively on the viewed BTC research period; passing it cannot
+qualify protected holdout access or declare a profitable edge.
+
+After the new Termux tests pass, generate and inspect a plan first:
+
+    PYTHONPATH=src:. python -m lab.bearish_retest_research \
+      --config ~/trading-termux-tests/lab.toml \
+      --funding-plan ~/trading-termux-tests/btc-funding-preholdout-plan.json \
+      --plan-out ~/trading-termux-tests/btc-failed-retest-plan-v1.json
+
+Registration and `--evaluate` should be separate deliberate operator
+actions only after verifying the plan, the existing family status and
+the complete 175-test regression run. This new pathway has not
+been externally tested or used against historical BTCUSDT yet.
 
 ## Qualification rules to freeze before the first test
 
