@@ -138,8 +138,10 @@ def test_cli_read_only_output_and_window_bounds(tmp_path, capsys):
     report = json.loads(capsys.readouterr().out)
     assert report["window_min"] == 1
     assert report["read_only"] is True
-    with pytest.raises(SystemExit, match="between 1 and 240"):
+    with pytest.raises(SystemExit) as exc:
         main(["--config", str(cfg), "--window-min", "0"])
+    assert exc.value.code == 2
+    assert "between 1 and 240" in capsys.readouterr().err
 
 
 def test_reject_symlinks_before_reading_caches(tmp_path):
