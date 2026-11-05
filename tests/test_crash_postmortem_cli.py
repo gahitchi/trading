@@ -65,7 +65,7 @@ def _mocks(monkeypatch, plan_path, *, bad_bars=False):
 def test_postmortem_cli_records_full_fixed_seed_placebo_and_remains_unqualified(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     plan = tmp_path / "funding.json"
-    plan.write_text(json.dumps({"events_sha256": "a" * 64, "start": "2026-01-01"}))
+    plan.write_text(json.dumps({"events_sha256": "a" * 64, "start": "2026-01-01", "holdout_start": "2026-05-08"}))
     _mocks(monkeypatch, plan)
     out_path = tmp_path / "postmortem.json"
     report = cli.execute(cfg, plan, report_out=out_path)
@@ -90,7 +90,7 @@ def test_postmortem_cli_records_full_fixed_seed_placebo_and_remains_unqualified(
 def test_postmortem_failure_remains_in_attempt_history(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     plan = tmp_path / "funding.json"
-    plan.write_text(json.dumps({"events_sha256": "b" * 64, "start": "2026-01-01"}))
+    plan.write_text(json.dumps({"events_sha256": "b" * 64, "start": "2026-01-01", "holdout_start": "2026-05-08"}))
     _mocks(monkeypatch, plan, bad_bars=True)
     with pytest.raises(ValueError, match="missing"):
         cli.execute(cfg, plan)
