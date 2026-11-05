@@ -57,7 +57,7 @@ def test_survey_only_pre_holdout_queried_and_no_artifacts_created(tmp_path):
     r = survey(cfg, get=fake_get(source, seen))
     assert r["event_count"] == 6
     assert r["holdout_start"] == "2024-01-03"
-    assert r["kind"].endswith("-v1")
+    assert r["kind"].endswith("-v2")
     assert len(r["pages"]) == 1 and len(r["pages"][0]["source_sha256"]) == 64
     assert len(seen) == 1
     assert not (tmp_path / "data").exists()
@@ -99,7 +99,7 @@ def test_source_change_rejected_before_any_cache_write(tmp_path):
 
 
 @pytest.mark.parametrize("issue", [
-    "duplicate", "future", "off_grid", "wrong_symbol", "missing_mark",
+    "duplicate", "future", "off_hour", "wrong_symbol", "missing_mark",
     "nan", "large_rate", "missing_event", "out_of_order",
 ])
 def test_invalid_exchange_history_fails_closed(tmp_path, issue):
@@ -115,8 +115,8 @@ def test_invalid_exchange_history_fails_closed(tmp_path, issue):
         with pytest.raises(ValueError, match="outside"):
             survey(cfg, get=invalid_get)
         return
-    elif issue == "off_grid":
-        source[0] = {**source[0], "fundingTime": source[0]["fundingTime"] + 5}
+    elif issue == "off_hour":
+        source[0] = {**source[0], "fundingTime": source[0]["fundingTime"] + 1_800_000}
     elif issue == "wrong_symbol":
         source[0] = {**source[0], "symbol": "ETHUSDT"}
     elif issue == "missing_mark":
@@ -200,3 +200,68 @@ def test_survey_validates_all_paginated_pages_and_bounds(tmp_path):
     assert len(plan["pages"]) == 2
     assert [p["rows"] for p in plan["pages"]] == [1000, 8]
     assert plan["event_count"] == 1008
+
+
+def test_exchange_subminute_settlements_preserve_milliseconds_and_pass_audit(tmp_path):
+    cfg = setup(tmp_path)
+    source = events()
+    # The endpoint returns exact milliseconds; a fundingTime need not be
+    # divisible by 60000. Keep the original timestamp in the source pin.
+    for i, row in enumerate(source):
+        source[i] = {**row, "fundingTime": row["fundingTime"] + 1 + (i % 4)}
+    plan_data = survey(cfg, get=fake_get(source, []))
+    assert plan_data["version"] == 2
+    plan = tmp_path / "pinned-ms.json"
+    plan.write_text(json.dumps(plan_data))
+    assert apply(cfg, plan, get=fake_get(source, []))["status"] == "committed"
+    assert audit(cfg, plan)["ok"]
+    # Ensure the persisted source event time was not rounded or truncated.
+    cached = next((tmp_path / "data" / "crash" / "funding-pinned" / "BTCUSDT").glob("*.json"))
+    saved = json.loads(cached.read_text())
+    assert [e["fundingTime"] for e in saved["events"]] == [
+        e["fundingTime"] for e in source
+    ]
+
+
+def test_subminute_funding_near_entry_or_exit_is_ambiguous():
+    source = events(hours=24)
+    source[1] = {**source[1], "fundingTime": source[1]["fundingTime"] + 10}
+    with pytest.raises(ValueError, match="ambiguous"):
+        settlement_return(
+            -1, 100.0,
+            pd.Timestamp("2024-01-01T08:00:00Z"),
+            pd.Timestamp("2024-01-01T20:00:00Z"), source,
+        )
+    with pytest.raises(ValueError, match="ambiguous"):
+        settlement_return(
+            -1, 100.0,
+            pd.Timestamp("2024-01-01T01:00:00Z"),
+            pd.Timestamp("2024-01-01T16:00:00Z"), source,
+        )
+
+
+def test_one_full_hour_funding_timestamp_anomaly_fails_diagnostic(tmp_path):
+    cfg = setup(tmp_path)
+    source = events()
+    # A timestamp one minute beyond the documented conservative
+    # settlement-hour tolerance must be investigated, not silently fixed.
+    source[1] = {**source[1], "fundingTime": source[1]["fundingTime"] + 60_000}
+    with pytest.raises(ValueError, match="unexpectedly far"):
+        survey(cfg, get=fake_get(source, []))
+
+
+def test_source_limit_still_excludes_holdout_even_with_jitter(tmp_path):
+    cfg = setup(tmp_path)
+    source = events()
+    last = int(pd.Timestamp("2024-01-03T00:00:00Z").value // 1_000_000)
+    source.append({
+        "symbol": "BTCUSDT", "fundingTime": last + 3,
+        "fundingRate": "0.0001", "markPrice": "100.0",
+    })
+
+    def unbounded_response(_url):
+        # Defective provider ignores endTime: fail rather than truncating.
+        return source
+
+    with pytest.raises(ValueError, match="outside protected research time"):
+        survey(cfg, get=unbounded_response)
