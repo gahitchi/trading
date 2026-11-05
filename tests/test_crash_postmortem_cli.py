@@ -41,7 +41,11 @@ def _mocks(monkeypatch, plan_path, *, bad_bars=False):
             missing=[],
         )
     monkeypatch.setattr(study, "run", run)
-    monkeypatch.setattr(crash_data, "load", lambda *_a, **_kw: bars.reset_index(names="ts"))
+    def load(_root, kind, symbol, *, before):
+        assert kind == "klines" and symbol == "BTCUSDT"
+        assert before == pd.Timestamp("2026-05-08T00:00:00Z")
+        return bars.reset_index(names="ts")
+    monkeypatch.setattr(crash_data, "load", load)
     plan = json.loads(plan_path.read_text())
     events = [
         {
