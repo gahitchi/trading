@@ -1,6 +1,6 @@
 # Research proposal — failed-retest bearish structure break (v1)
 
-**Status: 28/28 focused strategy and guarded-research Termux tests and the full 177/177 portable regression suite passed at commit `6317966`. New append-only research-family generation safeguards are pending fresh Termux validation. NOT run on historical BTC, NOT registered in the user's research family, and NOT statistically qualified.**
+**Status: 59/59 focused registry tests and 187/187 portable regression tests accepted in Termux before the first historical attempt. The first frozen v1 research family was registered with 10 prior attempts preserved; its initial evaluation failed at a pre-holdout archive boundary check, before strategy simulation. A code-corrected, separately versioned v2 research replay is committed and awaiting validation and a new append-only research generation. No BTC failed-retest P&L result exists; statistical inference remains NOT_QUALIFIED.**
 2026-11-05. This idea is documented after inspecting the losing BTCUSDT
 `crash breakdown` result. **It is not a prospectively independent
 discovery relative to that inspected dataset.** Neither the former
@@ -86,15 +86,14 @@ The seven-day reference quote-volume hours are grouped by candle
 *start* time and end strictly before the first minute in the
 latest 60-minute breakout window, to avoid lookahead or overlap.
 
-The engine has **no live-market ingestion, no optimization interface,
-and no CLI command capable of reading historical research data**.
-Only injected bars whose last timestamp is strictly before an
-explicit UTC holdout boundary are accepted. The 2026-05-08 protected
-holdout is not touched by unit tests. Source pinning, safe registration,
-and a durable dedicated evaluation CLI must be completed and
-validated separately before any historical research run.
+The **pure strategy engine** has no live-market ingestion or
+optimization interface. Its separate guarded research CLI can open
+only source archives ending no later than the accepted research
+boundary, reserves attempts before input access, and rejects any
+injected strategy bar at or beyond the holdout boundary.
+The 2026-05-08 protected holdout is not used by unit tests.
 
-## Durable guarded research workflow (not yet user-accepted)
+## Durable guarded research workflow (v1 accepted; v2 boundary correction pending)
 
 `python -m lab.bearish_retest_research` has two deliberately
 distinct operations:
@@ -123,18 +122,36 @@ prior registration. Any later generation is permitted only after all
 members of the previous generation have been attempted and no
 research attempt remains reserved. The old plan and complete trial
 history remain retained, linked, and blocking as appropriate.
-In this user's case, **10 historical attempts** predate the new
-BTC retest plan, so this registration and any run on inspected
-BTC research history remain retrospective and not statistically
-qualified. A positive result cannot qualify protected holdout
-access or authorize live/paper trading.
+The first frozen family was registered with **10 historical attempts**
+on 2026-11-05. Its v1 evaluation was durably recorded as a
+**failed 11th attempt** because the loader returned a candle
+labelled exactly `2026-05-08T00:00Z`, which represented the
+final 23:59–00:00 minute of May 7, still stored in the permitted
+May 7 daily archive. Unlike the older crash study, the v1
+research CLI rejected the whole archive instead of dropping
+that single boundary-stamped candle. No failed-retest strategy
+P&L was produced or selected.
 
-After the new Termux tests pass, generate and inspect a plan first:
+The corrected **v2 research replay** retains all strategy thresholds,
+the same data-partition policy and full trial history. It allows
+source archives already approved by the filename-level UTC cutoff
+and drops just the row at exactly the boundary before fingerprinting
+or strategy simulation. A row strictly **after** the boundary
+still aborts. This fix changes the software identity and research
+policy, so the original registered v1 plan must not be rewritten
+or retroactively re-evaluated with modified source. Instead,
+register a successor generation **after** the expanded tests
+pass, preserving the failed v1 attempt as evidence. These
+retrospective attempts cannot statistically qualify the candidate
+or authorize live/paper trading.
+
+After the new Termux tests pass, generate and inspect the
+**separate v2 replay plan**, never overwriting the original v1 plan:
 
     PYTHONPATH=src:. python -m lab.bearish_retest_research \
       --config ~/trading-termux-tests/lab.toml \
       --funding-plan ~/trading-termux-tests/btc-funding-preholdout-plan.json \
-      --plan-out ~/trading-termux-tests/btc-failed-retest-plan-v1.json
+      --plan-out ~/trading-termux-tests/btc-failed-retest-archive-fix-v2.json
 
 Registration and `--evaluate` should be separate deliberate operator
 actions only after validating the new append-only generation tests,
