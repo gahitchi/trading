@@ -254,6 +254,13 @@ class ProfitJournal:
             self._publish_head(sequence=sequence + 1, last=record["sha256"], header=self._checkpoint_header_unlocked())
             return day
 
+    def events(self) -> tuple[AllocationEvent, ...]:
+        """Read only verified committed events for deterministic source reconciliation."""
+        with file_lock(self._lock):
+            self._load_unlocked()  # validates journal, chained events and head
+            rows = _read_records(self.path)
+            return tuple(_deserialize_event(row["event"]) for row in rows[1:])
+
     def append_batch(self, events: list[AllocationEvent]) -> list[DayClose]:
         """Commit a dependent set of economic events under ONE durable checkpoint.
 
