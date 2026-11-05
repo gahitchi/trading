@@ -103,6 +103,62 @@ multi-position mark releases. The ledger must remain isolated
 from exchange-order permissions until the risk engine and
 source provenance checks are qualified.
 
+## Filled-position bridge (new, awaiting external tests)
+
+The next research-only component is `src/lab/position_reconcile.py`.
+It converts a complete, time-ordered stream of **simulated linear
+perpetual fills, full-position valuation snapshots and cash/funding
+settlements** into reconciled economic events in
+`lab.profit_journal`. It is not an exchange connection or
+a qualified execution model.
+
+- Use precise signed position quantities, average entry price,
+  partial closes, flat exits, short-to-long/long-to-short reversals,
+  separately supplied fill fees and *additional* slippage. Do
+  not charge the same slippage both through the fill price and
+  through an extra cash deduction.
+- Every source fill generates two **atomically checkpointed**
+  journal events: a realized trade cash-flow with its fee/cost
+  reconciliation and a **complete, simultaneous revaluation**
+  of all remaining open exposures. This avoids double counting
+  previously marked unrealized profit, even when a positive
+  mark on one position offsets a negative mark on another.
+  The journal now supports `append_batch` and a verified
+  `events()` history for this purpose.
+- Historical source records must be **supplied in full** on
+  every restart. Source IDs and derived journal events must
+  match the entire stored prefix exactly; changed fills,
+  missing original fills, duplicate source IDs, missing
+  open-position marks and missing UTC day closes fail closed.
+  No implicit backfill, order placement or auto-repair.
+- A close-day event supplies the complete absolute UTC
+  midnight valuation for all open positions, including
+  zero-trade days. Funding/financing adjustments are
+  separate auditable signed cash events.
+- Scope is deliberately narrow: **linear contracts, one
+  account/currency, contract multiplier=1**, explicit
+  same-timestamp valuation of every remaining position.
+  No inverse futures, spot financing, FX conversion,
+  collateral/liquidation simulation or broker reconnection.
+  Only *source-supplied* simulated fills are translated; the
+  source is **not yet independently authenticated or
+  durably archived** by this module.
+- This is a first accounting adapter, not a hot-path runtime:
+  the immutable source is replayed and the entire journal
+  prefix checked on each reconciliation, then the remaining
+  batches are committed under the journal lock. External
+  acceptance tests and the existing full suite have not
+  yet been reported.
+
+**Further dependencies:** authenticate and durably persist
+raw paper execution reports and market marks (including
+partial fills and restarts); compare orders/positions with
+the broker sandbox; reconcile cross-currency funding,
+margin, liquidation, and venue minimum sizes; measure
+CPU/latency overhead before any Rust production integration.
+The Rust core and retired registered BTC research
+strategies remain untouched.
+
 ## Economic objective and attribution
 
 The primary objective is **net cumulative marked-equity growth**
