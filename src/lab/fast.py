@@ -19,9 +19,9 @@ client, which fills simulated orders against the live book. No exchange executio
 from __future__ import annotations
 
 import math
-from contextlib import suppress
 from bisect import bisect_right
 from collections import deque
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
