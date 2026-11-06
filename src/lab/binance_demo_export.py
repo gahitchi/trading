@@ -12,7 +12,7 @@ import hashlib
 import os
 import re
 import stat
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 
 from lab.persistence import parse_json
@@ -53,6 +53,18 @@ def _number(raw: object, label: str, *, nonnegative: bool = False) -> Decimal:
     if not amount.is_finite() or (nonnegative and amount < 0):
         raise ValueError(f"invalid {label}")
     return amount
+
+
+def _exact_sum(a: Decimal, b: Decimal) -> Decimal:
+    """Keep every digit permitted by the bounded 25+18 decimal schema.
+
+    The default Decimal context has only 28 significant digits, which
+    can otherwise hide an actual wallet mismatch or silently round a
+    microsettlement when a large account value is present.
+    """
+    with localcontext() as context:
+        context.prec = 80
+        return a + b
 
 
 def _id(value: object, label: str) -> str:
@@ -169,7 +181,7 @@ def normalize_demo_export(bundle: dict, *, source_sha256: str) -> dict:
         totals[field] = _number(
             account.get(field), f"demo account {field}", nonnegative=field in {"totalInitialMargin", "totalMaintMargin"}
         )
-    if totals["totalWalletBalance"] + totals["totalUnrealizedProfit"] != totals["totalMarginBalance"]:
+    if _exact_sum(totals["totalWalletBalance"], totals["totalUnrealizedProfit"]) != totals["totalMarginBalance"]:
         raise ValueError("demo margin balance does not equal wallet plus unrealized PnL")
 
     account_assets = {}
@@ -234,7 +246,7 @@ def normalize_demo_export(bundle: dict, *, source_sha256: str) -> dict:
             raise ValueError("invalid demo open order side")
         original = _number(row.get("origQty"), "demo order original quantity", nonnegative=True)
         executed = _number(row.get("executedQty"), "demo order executed quantity", nonnegative=True)
-        remaining = original - executed
+        remaining = _exact_sum(original, -executed)
         if remaining <= 0:
             raise ValueError("demo open order remaining quantity must be positive")
         orders[key] = {"symbol": symbol, "remaining": str(remaining)}
@@ -261,7 +273,7 @@ def normalize_demo_export(bundle: dict, *, source_sha256: str) -> dict:
         seen_income.add(key)
         _symbol(row["symbol"]) if row.get("symbol") else None
         amount = _number(row.get("income"), "demo income cash amount")
-        totals_income[(income_type, asset)] = totals_income.get((income_type, asset), Decimal(0)) + amount
+        totals_income[(income_type, asset)] = _exact_sum(totals_income.get((income_type, asset), Decimal(0)), amount)
     return {
         "status": "demo_account_export_consistent_unverified",
         "environment": "binance-usdm-demo",
