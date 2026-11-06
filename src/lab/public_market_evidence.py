@@ -120,8 +120,8 @@ def parse_public_market_sample(
         _stamp(after, f"{name} request end")
         if not before <= after <= before + _MAX_QUERY_NS:
             raise ValueError(f"{name} observation took too long or reversed time")
-    if funding_start_ns < mark_start_ns:
-        raise ValueError("funding observation predates mark request")
+    if funding_start_ns < mark_end_ns:
+        raise ValueError("funding observation predates completion of mark request")
 
     mark = _json(mark_raw, "mark")
     history = _json(funding_raw, "funding")
