@@ -301,9 +301,9 @@ class PublicMarketEvidenceJournal:
             raise ValueError("public evidence archive paths must not be symbolic links")
 
     def _head_write(self, count: int, previous: str, header: str):
-        atomic_json(self._head, _seal({
-            "version": _VERSION, "count": count, "last_sha256": previous, "header_sha256": header
-        }))
+        atomic_json(
+            self._head, _seal({"version": _VERSION, "count": count, "last_sha256": previous, "header_sha256": header})
+        )
 
     def _read_locked(self) -> tuple[tuple[PublicMarketSample, ...], str, str]:
         self._check_paths()
@@ -366,13 +366,15 @@ class PublicMarketEvidenceJournal:
             samples, last, header = self._read_locked()
             if samples and sample.mark_start_ns <= samples[-1].funding_end_ns:
                 raise ValueError("overlapping, reordered or repeated public market evidence")
-            record = _seal({
-                "type": "public-market-sample",
-                "version": _VERSION,
-                "sequence": len(samples) + 1,
-                "previous_sha256": last,
-                "sample": asdict(sample),
-            })
+            record = _seal(
+                {
+                    "type": "public-market-sample",
+                    "version": _VERSION,
+                    "sequence": len(samples) + 1,
+                    "previous_sha256": last,
+                    "sample": asdict(sample),
+                }
+            )
             fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CLOEXEC | os.O_NOFOLLOW)
             try:
                 _write(fd, _canonical(record) + b"\n")

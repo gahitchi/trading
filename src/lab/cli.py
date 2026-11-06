@@ -1017,16 +1017,14 @@ def cmd_public_market_sample(cfg, a):
         # Validate and fetch BEFORE constructing the archive; a network or
         # parsing failure must not create apparently qualified evidence.
         sample = fetch_public_market_sample(a.session, a.symbol)
-        path = (
-            Path(a.out)
-            if a.out
-            else cfg.results_dir / "fast" / f"public-mark-{a.session}-{a.symbol}.jsonl"
-        )
+        path = Path(a.out) if a.out else cfg.results_dir / "fast" / f"public-mark-{a.session}-{a.symbol}.jsonl"
         journal = PublicMarketEvidenceJournal(path, session_id=a.session, symbol=a.symbol)
         journal.append(sample)
     except (ValueError, OSError) as exc:
         raise SystemExit(f"public market sample BLOCKED: {exc}") from exc
-    print(f"recorded public USD-M mark for {sample.symbol}: {sample.mark_price} at venue time {sample.venue_mark_time_ms}")
+    print(
+        f"recorded public USD-M mark for {sample.symbol}: {sample.mark_price} at venue time {sample.venue_mark_time_ms}"
+    )
     print(
         "historical funding RATE only: "
         f"{sample.historical_funding_rate} at {sample.historical_funding_time_ms}; "

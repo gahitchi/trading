@@ -59,9 +59,7 @@ def parsed(start=T, mark=None, funding=None):
 
 
 def store(tmp_path):
-    return PublicMarketEvidenceJournal(
-        tmp_path / "market.jsonl", session_id=SESSION, symbol=SYMBOL
-    )
+    return PublicMarketEvidenceJournal(tmp_path / "market.jsonl", session_id=SESSION, symbol=SYMBOL)
 
 
 def test_source_fields_preserve_price_funding_rate_and_exact_responses():
@@ -86,9 +84,7 @@ def test_two_public_gets_are_fixed_and_ordered():
         seen.append(url)
         return json.dumps(mark if len(seen) == 1 else history).encode()
 
-    point = fetch_public_market_sample(
-        SESSION, SYMBOL, get=get, clock=lambda: next(clock_values)
-    )
+    point = fetch_public_market_sample(SESSION, SYMBOL, get=get, clock=lambda: next(clock_values))
     assert seen == [
         "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT",
         "https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1",
@@ -137,7 +133,8 @@ def test_no_arbitrary_symbols_or_sessions():
     for session, symbol in [(SESSION, "../BTCUSDT"), (SESSION, "ETHBTC"), ("../bad", SYMBOL)]:
         with pytest.raises(ValueError):
             fetch_public_market_sample(
-                session, symbol,
+                session,
+                symbol,
                 get=lambda _: (_ for _ in ()).throw(AssertionError("invalid symbol touched network")),
             )
 
@@ -167,10 +164,14 @@ def test_duplicate_source_keys_and_truncated_body_are_denied():
     raw = json.dumps(mark).replace('"markPrice":', '"markPrice": "99", "markPrice":')
     with pytest.raises(ValueError, match="invalid mark API JSON"):
         parse_public_market_sample(
-            session_id=SESSION, symbol=SYMBOL,
-            mark_raw=raw.encode(), funding_raw=json.dumps(history).encode(),
-            mark_start_ns=T, mark_end_ns=T + 2_000_000_000,
-            funding_start_ns=T + 2_000_000_000, funding_end_ns=T + 3_000_000_000,
+            session_id=SESSION,
+            symbol=SYMBOL,
+            mark_raw=raw.encode(),
+            funding_raw=json.dumps(history).encode(),
+            mark_start_ns=T,
+            mark_end_ns=T + 2_000_000_000,
+            funding_start_ns=T + 2_000_000_000,
+            funding_end_ns=T + 3_000_000_000,
         )
 
 
@@ -178,10 +179,14 @@ def test_missing_or_non_list_funding_response_is_rejected():
     mark, _history = responses()
     with pytest.raises(ValueError, match="unexpected public mark or historical funding response shape"):
         parse_public_market_sample(
-            session_id=SESSION, symbol=SYMBOL,
-            mark_raw=json.dumps(mark).encode(), funding_raw=b"{}",
-            mark_start_ns=T, mark_end_ns=T + 2_000_000_000,
-            funding_start_ns=T + 2_000_000_000, funding_end_ns=T + 3_000_000_000,
+            session_id=SESSION,
+            symbol=SYMBOL,
+            mark_raw=json.dumps(mark).encode(),
+            funding_raw=b"{}",
+            mark_start_ns=T,
+            mark_end_ns=T + 2_000_000_000,
+            funding_start_ns=T + 2_000_000_000,
+            funding_end_ns=T + 3_000_000_000,
         )
 
 
@@ -248,6 +253,7 @@ def test_repaired_record_digest_does_not_silently_authorize_cash(tmp_path):
     journal.append(parsed())
     assert "funding_payment" not in json.dumps([s.__dict__ for s in journal.samples()])
     assert "realized_profit" not in json.dumps([s.__dict__ for s in journal.samples()])
+
 
 def test_cli_archives_public_evidence_without_nautilus_trader(tmp_path, monkeypatch, capsys):
     pytest.importorskip("pandas")
