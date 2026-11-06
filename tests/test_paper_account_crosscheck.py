@@ -13,9 +13,7 @@ from tests.test_sandbox_capture import IID, NS, event
 
 
 def setup(tmp_path, *, open_order=True):
-    capture = PaperOrderEventCapture(
-        tmp_path / "orders.jsonl", session_id="paper-session", instrument_id=IID
-    )
+    capture = PaperOrderEventCapture(tmp_path / "orders.jsonl", session_id="paper-session", instrument_id=IID)
     capture.append(event(), received_ns=NS + 2)
     orders = {}
     if open_order:
@@ -33,9 +31,7 @@ def setup(tmp_path, *, open_order=True):
         open_orders=orders,
         balances={"USDT": {"total": "1000.00", "available": "990.00", "locked": "10.00"}},
     )
-    journal = PaperAccountSnapshotJournal(
-        tmp_path / "snapshots.jsonl", capture, account_id="sandbox-1"
-    )
+    journal = PaperAccountSnapshotJournal(tmp_path / "snapshots.jsonl", capture, account_id="sandbox-1")
     journal.append(local)
     report = ReadOnlyAccountReport(
         report_id="read-only-1",
@@ -118,13 +114,12 @@ def test_independent_claim_mismatch_blocks_comparison(tmp_path, field, value, me
 
 def test_skew_boundary_and_absence_of_infinite_override(tmp_path):
     _capture, journal, report = setup(tmp_path)
-    assert compare_read_only_report(
-        journal, replace(report, observed_ns=NS + 10 + 1_000_000_000)
-    )["observation_skew_ns"] == 1_000_000_000
+    assert (
+        compare_read_only_report(journal, replace(report, observed_ns=NS + 10 + 1_000_000_000))["observation_skew_ns"]
+        == 1_000_000_000
+    )
     with pytest.raises(ValueError, match="too far apart"):
-        compare_read_only_report(
-            journal, replace(report, observed_ns=NS + 10 + 1_000_000_001)
-        )
+        compare_read_only_report(journal, replace(report, observed_ns=NS + 10 + 1_000_000_001))
     with pytest.raises(ValueError, match="bounded"):
         compare_read_only_report(journal, report, max_skew_ns=50_000_000_000)
     with pytest.raises(ValueError, match="bounded"):
@@ -175,15 +170,12 @@ def test_two_sources_are_not_automatically_authenticated(tmp_path):
 
 
 def test_no_local_snapshot_or_incomplete_local_snapshot_is_not_qualified(tmp_path):
-    capture = PaperOrderEventCapture(
-        tmp_path / "empty-orders.jsonl", session_id="paper-session", instrument_id=IID
-    )
-    journal = PaperAccountSnapshotJournal(
-        tmp_path / "empty-snapshots.jsonl", capture, account_id="sandbox-1"
-    )
+    capture = PaperOrderEventCapture(tmp_path / "empty-orders.jsonl", session_id="paper-session", instrument_id=IID)
+    journal = PaperAccountSnapshotJournal(tmp_path / "empty-snapshots.jsonl", capture, account_id="sandbox-1")
     _a, _b, report = setup(tmp_path / "fixture")
     with pytest.raises(ValueError, match="no completed"):
         compare_read_only_report(journal, report)
+
 
 def test_load_report_is_strict_json_and_does_not_authenticate_source(tmp_path):
     _capture, journal, report = setup(tmp_path)
@@ -197,14 +189,17 @@ def test_load_report_is_strict_json_and_does_not_authenticate_source(tmp_path):
     assert not result["economic_posting_allowed"]
 
 
-@pytest.mark.parametrize("contents", [
-    '{"report_id":"a","report_id":"b"}',
-    '{"source_kind":"separate-readonly-report"}',
-    '{"account_id":"NaN","quantity":NaN}',
-    '[]',
-    '{broken',
-    '',
-])
+@pytest.mark.parametrize(
+    "contents",
+    [
+        '{"report_id":"a","report_id":"b"}',
+        '{"source_kind":"separate-readonly-report"}',
+        '{"account_id":"NaN","quantity":NaN}',
+        "[]",
+        "{broken",
+        "",
+    ],
+)
 def test_external_report_parser_rejects_incomplete_duplicate_or_invalid_json(tmp_path, contents):
     path = tmp_path / "bad.json"
     path.write_text(contents, encoding="utf-8")
@@ -242,12 +237,18 @@ def test_read_only_paper_crosscheck_cli(tmp_path, capsys):
     path.write_text(json.dumps(asdict(report)), encoding="utf-8")
     argv = [
         "paper-crosscheck",
-        "--orders", str(capture.path),
-        "--snapshots", str(journal.path),
-        "--external-report", str(path),
-        "--session", capture.session_id,
-        "--instrument", capture.instrument_id,
-        "--account", journal.account_id,
+        "--orders",
+        str(capture.path),
+        "--snapshots",
+        str(journal.path),
+        "--external-report",
+        str(path),
+        "--session",
+        capture.session_id,
+        "--instrument",
+        capture.instrument_id,
+        "--account",
+        journal.account_id,
     ]
     args = build_parser().parse_args(argv)
     assert cmd_paper_crosscheck(None, args) == 0
@@ -264,17 +265,26 @@ def test_paper_crosscheck_cli_blocks_mismatched_report(tmp_path, capsys):
     capture, journal, report = setup(tmp_path)
     path = tmp_path / "external.json"
     path.write_text(json.dumps(asdict(replace(report, positions={}))), encoding="utf-8")
-    args = build_parser().parse_args([
-        "paper-crosscheck",
-        "--orders", str(capture.path),
-        "--snapshots", str(journal.path),
-        "--external-report", str(path),
-        "--session", capture.session_id,
-        "--instrument", capture.instrument_id,
-        "--account", journal.account_id,
-    ])
+    args = build_parser().parse_args(
+        [
+            "paper-crosscheck",
+            "--orders",
+            str(capture.path),
+            "--snapshots",
+            str(journal.path),
+            "--external-report",
+            str(path),
+            "--session",
+            capture.session_id,
+            "--instrument",
+            capture.instrument_id,
+            "--account",
+            journal.account_id,
+        ]
+    )
     with pytest.raises(SystemExit, match="BLOCKED"):
         cmd_paper_crosscheck(None, args)
+
 
 def test_cli_must_not_create_missing_evidence_files(tmp_path):
     pytest.importorskip("pandas")
@@ -286,12 +296,18 @@ def test_cli_must_not_create_missing_evidence_files(tmp_path):
     missing = tmp_path / "new-account-log.jsonl"
     arguments = [
         "paper-crosscheck",
-        "--orders", str(capture.path),
-        "--snapshots", str(missing),
-        "--external-report", str(external),
-        "--session", capture.session_id,
-        "--instrument", capture.instrument_id,
-        "--account", journal.account_id,
+        "--orders",
+        str(capture.path),
+        "--snapshots",
+        str(missing),
+        "--external-report",
+        str(external),
+        "--session",
+        capture.session_id,
+        "--instrument",
+        capture.instrument_id,
+        "--account",
+        journal.account_id,
     ]
     with pytest.raises(SystemExit, match="preexisting"):
         cmd_paper_crosscheck(None, build_parser().parse_args(arguments))

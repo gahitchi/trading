@@ -195,9 +195,7 @@ def compare_read_only_report(
         raise ValueError("invalid external capture checkpoint")
     if (report.complete_positions, report.complete_orders, report.complete_balances) != (True, True, True):
         raise ValueError("independent report must explicitly attest complete positions, orders and balances")
-    if any(type(v) is not bool for v in (
-        report.complete_positions, report.complete_orders, report.complete_balances
-    )):
+    if any(type(v) is not bool for v in (report.complete_positions, report.complete_orders, report.complete_balances)):
         raise ValueError("report completeness fields must be booleans")
 
     # This call verifies every source receipt and every stored local
