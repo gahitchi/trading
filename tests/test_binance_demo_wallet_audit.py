@@ -237,6 +237,7 @@ def test_input_is_path_not_nested_arbitrary_object(tmp_path):
     with pytest.raises((TypeError, ValueError)):
         compare_demo_wallet_exports(before, {"after": after})
 
+
 def test_demo_wallet_cli_is_read_only_and_never_posts_pnl(tmp_path, capsys):
     pytest.importorskip("pandas")
     from lab.cli import build_parser, cmd_demo_wallet_audit
