@@ -24,7 +24,7 @@ _MONEY = re.compile(r"-?(?:0|[1-9][0-9]{0,24})(?:\.[0-9]{1,18})?\Z")
 _SYMBOL = re.compile(r"[A-Z0-9]{2,16}USDT\Z")
 _ASSET = re.compile(r"[A-Z][A-Z0-9]{1,9}\Z")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,110}\Z")
-_SENSITIVE_KEYS = {"apikey", "secret", "signature", "privatekey", "authorization", "x-mbx-apikey"}
+_SENSITIVE_KEYS = {"apikey", "apisecret", "secret", "signature", "privatekey", "authorization", "xmbxapikey"}
 _TYPES = {"FUNDING_FEE", "COMMISSION", "REALIZED_PNL", "TRANSFER"}
 _REQUIRED = {
     "schema_version", "source", "scope", "session_id",
