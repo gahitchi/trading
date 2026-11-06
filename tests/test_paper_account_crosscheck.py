@@ -275,3 +275,30 @@ def test_paper_crosscheck_cli_blocks_mismatched_report(tmp_path, capsys):
     ])
     with pytest.raises(SystemExit, match="BLOCKED"):
         cmd_paper_crosscheck(None, args)
+
+def test_cli_must_not_create_missing_evidence_files(tmp_path):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_paper_crosscheck
+
+    capture, journal, report = setup(tmp_path)
+    external = tmp_path / "external.json"
+    external.write_text(json.dumps(asdict(report)), encoding="utf-8")
+    missing = tmp_path / "new-account-log.jsonl"
+    arguments = [
+        "paper-crosscheck",
+        "--orders", str(capture.path),
+        "--snapshots", str(missing),
+        "--external-report", str(external),
+        "--session", capture.session_id,
+        "--instrument", capture.instrument_id,
+        "--account", journal.account_id,
+    ]
+    with pytest.raises(SystemExit, match="preexisting"):
+        cmd_paper_crosscheck(None, build_parser().parse_args(arguments))
+    assert not missing.exists()
+    assert not missing.with_name(missing.name + ".head.json").exists()
+    journal._head.unlink()
+    arguments[arguments.index(str(missing))] = str(journal.path)
+    with pytest.raises(SystemExit, match="preexisting"):
+        cmd_paper_crosscheck(None, build_parser().parse_args(arguments))
+    assert not journal._head.exists()
