@@ -56,7 +56,9 @@ class Position:
     instrument_id = Instrument()
 
     def __init__(self, signed_qty):
-        self.signed_qty = Decimal(signed_qty)
+        signed = Decimal(signed_qty)
+        self.side = type("PositionSide", (), {"name": "LONG" if signed > 0 else "SHORT"})()
+        self.quantity = type("Quantity", (), {"as_decimal": lambda self: abs(signed)})()
 
 
 class Order:
