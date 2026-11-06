@@ -268,6 +268,30 @@ class PaperOrderEventCapture:
             rows, _last, _header = self._read_locked()
             return tuple(rows)
 
+    def evidence_prefix(self, count: int) -> tuple[tuple[dict, ...], str]:
+        """A verified receipt prefix and its hash, including an empty prefix.
+
+        Unlike a current-head comparison, a historical snapshot remains
+        verifiable after additional source receipts have been appended.
+        All data and hashes are derived within the same capture lock.
+        """
+        with file_lock(self._lock):
+            receipts, _last, header = self._read_locked()
+            if type(count) is not int or not 0 <= count <= len(receipts):
+                raise ValueError("snapshot capture prefix count is outside committed evidence")
+            last = header
+            for index, receipt in enumerate(receipts[:count], 1):
+                last = _seal(
+                    {
+                        "type": "sandbox-order-event",
+                        "version": _VERSION,
+                        "sequence": index,
+                        "previous_sha256": last,
+                        "receipt": receipt,
+                    }
+                )["sha256"]
+            return tuple(receipts[:count]), last
+
     def compare_flat_start_positions(self, position_quantities: dict[str, str]) -> dict[str, str]:
         """Fail on missing fills/ambiguous corrections or position disagreement.
 
