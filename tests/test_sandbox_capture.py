@@ -136,5 +136,3 @@ def test_different_session_and_symlink_are_rejected(tmp_path):
     link.symlink_to(capture.path)
     with pytest.raises(ValueError, match="symlinks"):
         PaperOrderEventCapture(link, session_id="test-20261105", instrument_id=IID)
-
-
