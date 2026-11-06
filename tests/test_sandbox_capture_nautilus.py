@@ -2,6 +2,7 @@
 
 import os
 from decimal import Decimal
+from itertools import pairwise
 from importlib.util import find_spec
 from types import SimpleNamespace
 
@@ -133,6 +134,6 @@ def test_nautilus_snapshot_timer_records_multiple_account_states(tmp_path):
     journal = PaperAccountSnapshotJournal(accounts, capture, account_id=filled[0]["account_id"])
     snapshots = journal.snapshots()
     assert len(snapshots) >= 2
-    assert all(x.captured_ns < y.captured_ns for x, y in zip(snapshots, snapshots[1:], strict=False))
-    assert all(x.capture_count <= y.capture_count for x, y in zip(snapshots, snapshots[1:], strict=False))
+    assert all(x.captured_ns < y.captured_ns for x, y in pairwise(snapshots))
+    assert all(x.capture_count <= y.capture_count for x, y in pairwise(snapshots))
     assert not journal.latest_report()["risk_ready"]
