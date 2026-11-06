@@ -21,7 +21,10 @@ HOLDOUT = "2024-01-03 00:05:00,BTCUSDT,120,4700000\n"
 def zipped(text: str) -> bytes:
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as file:
-        file.writestr("data.csv", text)
+        # Archive digests are asserted across independent calls. ZipFile
+        # otherwise inserts the current wall-clock timestamp into ZIP bytes.
+        info = zipfile.ZipInfo("data.csv", date_time=(2024, 1, 1, 0, 0, 0))
+        file.writestr(info, text)
     return out.getvalue()
 
 
