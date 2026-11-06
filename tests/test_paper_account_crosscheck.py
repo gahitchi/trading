@@ -1,10 +1,11 @@
 """Portable, fail-closed cross-source paper account claim comparisons."""
 
-from dataclasses import replace
+import json
+from dataclasses import asdict, replace
 
 import pytest
 
-from lab.paper_account_crosscheck import ReadOnlyAccountReport, compare_read_only_report
+from lab.paper_account_crosscheck import ReadOnlyAccountReport, compare_read_only_report, load_read_only_report
 from lab.paper_account_snapshot import PaperAccountSnapshotJournal
 from lab.sandbox_capture import PaperOrderEventCapture
 from tests.test_paper_account_snapshot import snapshot
@@ -183,3 +184,94 @@ def test_no_local_snapshot_or_incomplete_local_snapshot_is_not_qualified(tmp_pat
     _a, _b, report = setup(tmp_path / "fixture")
     with pytest.raises(ValueError, match="no completed"):
         compare_read_only_report(journal, report)
+
+def test_load_report_is_strict_json_and_does_not_authenticate_source(tmp_path):
+    _capture, journal, report = setup(tmp_path)
+    path = tmp_path / "read-only.json"
+    path.write_text(json.dumps(asdict(report)), encoding="utf-8")
+    loaded = load_read_only_report(path)
+    assert loaded == report
+    result = compare_read_only_report(journal, loaded)
+    assert result["status"] == "match_unverified_source"
+    assert not result["source_authenticated"]
+    assert not result["economic_posting_allowed"]
+
+
+@pytest.mark.parametrize("contents", [
+    '{"report_id":"a","report_id":"b"}',
+    '{"source_kind":"separate-readonly-report"}',
+    '{"account_id":"NaN","quantity":NaN}',
+    '[]',
+    '{broken',
+    '',
+])
+def test_external_report_parser_rejects_incomplete_duplicate_or_invalid_json(tmp_path, contents):
+    path = tmp_path / "bad.json"
+    path.write_text(contents, encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_read_only_report(path)
+
+
+def test_external_report_reader_rejects_symlinks_and_oversize(tmp_path):
+    path = tmp_path / "report.json"
+    path.write_bytes(b"x" * 1_048_577)
+    with pytest.raises(ValueError, match="bounded regular file"):
+        load_read_only_report(path)
+    link = tmp_path / "alias.json"
+    link.symlink_to(path)
+    with pytest.raises(ValueError, match="symbolic link"):
+        load_read_only_report(link)
+
+
+def test_external_report_reader_rejects_duplicate_nested_currency_balance(tmp_path):
+    _capture, _journal, report = setup(tmp_path)
+    path = tmp_path / "report.json"
+    text = json.dumps(asdict(report))
+    text = text.replace('"total": "1000"', '"total": "1000", "total": "1000"')
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate"):
+        load_read_only_report(path)
+
+
+def test_read_only_paper_crosscheck_cli(tmp_path, capsys):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_paper_crosscheck
+
+    capture, journal, report = setup(tmp_path)
+    path = tmp_path / "external.json"
+    path.write_text(json.dumps(asdict(report)), encoding="utf-8")
+    argv = [
+        "paper-crosscheck",
+        "--orders", str(capture.path),
+        "--snapshots", str(journal.path),
+        "--external-report", str(path),
+        "--session", capture.session_id,
+        "--instrument", capture.instrument_id,
+        "--account", journal.account_id,
+    ]
+    args = build_parser().parse_args(argv)
+    assert cmd_paper_crosscheck(None, args) == 0
+    output = capsys.readouterr().out
+    assert "match_unverified_source" in output
+    assert "NOT qualified" in output
+    assert '"risk_ready": false' in output
+
+
+def test_paper_crosscheck_cli_blocks_mismatched_report(tmp_path, capsys):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_paper_crosscheck
+
+    capture, journal, report = setup(tmp_path)
+    path = tmp_path / "external.json"
+    path.write_text(json.dumps(asdict(replace(report, positions={}))), encoding="utf-8")
+    args = build_parser().parse_args([
+        "paper-crosscheck",
+        "--orders", str(capture.path),
+        "--snapshots", str(journal.path),
+        "--external-report", str(path),
+        "--session", capture.session_id,
+        "--instrument", capture.instrument_id,
+        "--account", journal.account_id,
+    ])
+    with pytest.raises(SystemExit, match="BLOCKED"):
+        cmd_paper_crosscheck(None, args)
