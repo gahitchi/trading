@@ -103,7 +103,5 @@ def test_real_nautilus_cache_account_snapshot_adapter_without_network(tmp_path):
     snapshots = store.snapshots()
     assert len(snapshots) == 1
     assert snapshots[0].account_id == source_account
-    assert store.latest_report()["signed_quantity"] == str(
-        Decimal(str(result["terminal"]["net_qty"]))
-    )
+    assert Decimal(store.latest_report()["signed_quantity"]) == Decimal(str(result["terminal"]["net_qty"]))
     assert store.latest_report()["risk_ready"] is False
