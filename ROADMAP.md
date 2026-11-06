@@ -184,14 +184,26 @@ These are still **self-consistent local sandbox sources**, not
 independently authenticated broker statements, complete order
 reconciliation, qualified marked equity, or risk authorization.
 
-Remaining dependencies are (1) an independent sandbox
-account-report source, verified market marks and fully accounted
-order/remaining-quantity, funding/cash evidence, followed by
-validated conversion to the economic paper journal; (2)
-cross-source and cross-restart position, margin/liquidation, fee
-and partial-fill reconciliation; (3) operational risk-gate drills
-and strategy qualification. This is research infrastructure,
-**not** a demonstrated profitable edge or live-order permission.
+A **separate, read-only two-source comparison interface** now checks
+a caller-supplied external paper account report against the latest
+hash-verified Nautilus sandbox snapshot. It blocks mismatches in
+session/account, fill-event prefix, observation timestamp, signed
+inventory, outstanding order identifiers/remaining quantities and
+multi-currency cash arithmetic. The CLI refuses missing archives.
+See [paper account crosscheck](docs/paper-account-crosscheck.md).
+Its collector identity is an **unverified label**; no independent
+broker report, margin/equity proof or economic promotion exists yet.
+The response always has `risk_ready=false` and no live-order permission.
+
+Remaining dependencies are (1) an **actually independent read-only
+account-report producer**, separately corroborated market marks,
+complete order/remaining-quantity, funding/cash and settlement
+evidence, followed by validated conversion into the economic
+paper journal; (2) cross-source and cross-restart margin/liquidation,
+fee and partial-fill reconciliation; (3) operational risk-gate drills
+and a statistically qualified bearish short-horizon trading edge.
+This is research infrastructure, **not** a demonstrated profitable
+strategy or live-order authorization.
 
 **Priority update (2026-11-05):** a time-series of **net daily P&L and cumulative
 equity growth**, not a target winning-day percentage, is the primary short-horizon
