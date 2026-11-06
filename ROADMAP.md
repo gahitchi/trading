@@ -219,14 +219,28 @@ clock-domain assumption is **not independently verified**,
 historical funding rate is not a cash payment, and all matching
 reports still have `risk_ready=false` and economic posting disabled.
 
-Remaining dependencies are (1) an **actually independent read-only
-account-report producer**, deployed and independently synchronized
-mark/book observations and *account-specific executed* funding/cash
-settlements with complete order/remaining-quantity history;
-(2) qualified contract/multiplier, fee and margin/liquidation
-data and validated conversion bridge into the economic journal,
-including cross-restart evidence; (3) operational risk-gate
-drills and a statistically qualified bearish short-horizon edge.
+A new *read-only* account-specific settlement comparison contract
+(`lab.paper_settlement_claims`) now compares an explicitly supplied
+fee/funding report with the latest replay-verified account snapshot
+and every captured fill's exact commission, currency and timestamp.
+It rejects missing and duplicate fill fees, malformed and
+out-of-coverage funding-payment claims, stale/mismatched account
+identities, unbounded decimals and source/hash divergence. Its
+`lab paper-settlement-check` CLI does not initialize evidence or
+post any economic event. See
+[fee/funding settlement claims](docs/paper-settlement-claims.md).
+The separate collector is **not implemented or authenticated**:
+neither claimed funding payments nor fee identities constitute
+independent broker cash settlement proof, and `risk_ready=false`.
+
+Remaining dependencies are (1) a genuinely **independent,
+authorized, read-only account report producer**, deployed and
+independently synchronized market observations and *actual*
+account-specific funding/cash settlements with complete order
+lifecycle; (2) per-venue contract/multiplier/fee/margin
+specifications, cross-restart and cash-delta reconciliation before
+any economic journal bridge; (3) operational risk drills and a
+statistically qualified bearish short-horizon edge.
 This is research infrastructure, **not** a demonstrated
 profitable strategy or live-order authorization.
 
