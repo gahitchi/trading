@@ -1,0 +1,30 @@
+name: One-time format offline wallet discrepancy audit
+on:
+  push:
+    branches:
+      - chatgpt/codex-maintenance
+    paths:
+      - .github/workflows/format-wallet-audit.yml
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Format only offline demo wallet-audit files
+        run: |
+          uvx ruff format src/lab/binance_demo_wallet_audit.py tests/test_binance_demo_wallet_audit.py
+          uvx ruff check src/lab/binance_demo_wallet_audit.py tests/test_binance_demo_wallet_audit.py
+          git diff --check
+      - name: Commit our isolated mechanical formatting
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lab/binance_demo_wallet_audit.py tests/test_binance_demo_wallet_audit.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'style: format standalone offline wallet discrepancy audit'
+            git pull --rebase origin chatgpt/codex-maintenance
+            git push origin HEAD:chatgpt/codex-maintenance
+          fi
