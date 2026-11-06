@@ -344,3 +344,58 @@ def test_client_order_ids_are_scoped_by_symbol_not_globally():
     result = normalize_demo_export(d, source_sha256=HASH)
     assert set(result["open_orders"]) == {"BTCUSDT:co-1", "ETHUSDT:co-1"}
     assert not result["risk_ready"]
+
+def test_large_wallet_subcent_mismatch_never_rounds_into_fake_margin_equality():
+    d = bundle()
+    precise_wallet = "1000000000000000000000000.000000000000000001"
+    rounded_wallet = "1000000000000000000000000.000000000000000000"
+    d["account"]["totalWalletBalance"] = precise_wallet
+    d["account"]["totalUnrealizedProfit"] = "0.000000000000000000"
+    d["account"]["totalMarginBalance"] = rounded_wallet
+    d["account"]["assets"][0]["walletBalance"] = precise_wallet
+    d["balances"][0]["balance"] = precise_wallet
+    with pytest.raises(ValueError, match="wallet plus unrealized"):
+        normalize_demo_export(d, source_sha256=HASH)
+
+
+def test_large_wallet_and_tiny_unrealized_balance_reconcile_exactly():
+    d = bundle()
+    huge = "1000000000000000000000000.000000000000000000"
+    combined = "1000000000000000000000000.000000000000000001"
+    d["account"]["totalWalletBalance"] = huge
+    d["account"]["totalUnrealizedProfit"] = "0.000000000000000001"
+    d["account"]["totalMarginBalance"] = combined
+    d["account"]["assets"][0]["walletBalance"] = huge
+    d["balances"][0]["balance"] = huge
+    result = normalize_demo_export(d, source_sha256=HASH)
+    assert result["wallet_balances"]["USDT"] == huge
+    assert result["equity_reconciled"] is False
+
+
+def test_large_order_remaining_quantity_retains_every_decimal_place():
+    d = bundle()
+    original = "1000000000000000000000000.000000000000000001"
+    d["open_orders"][0]["origQty"] = original
+    d["open_orders"][0]["executedQty"] = "0"
+    result = normalize_demo_export(d, source_sha256=HASH)
+    assert Decimal(result["open_orders"]["BTCUSDT:co-1"]["remaining"]) == Decimal(original)
+
+
+def test_large_income_totals_do_not_hide_microsettlement():
+    d = bundle()
+    d["income"][1]["income"] = "1000000000000000000000000.000000000000000000"
+    d["income"].append({
+        "symbol": "BTCUSDT",
+        "incomeType": "COMMISSION",
+        "income": "0.000000000000000001",
+        "asset": "USDT",
+        "time": T_MS - 500,
+        "tranId": 102,
+    })
+    result = normalize_demo_export(d, source_sha256=HASH)
+    assert Decimal(result["income_claims_by_type_currency"]["COMMISSION:USDT"]) == Decimal(
+        "1000000000000000000000000.000000000000000001"
+    )
+    assert result["actual_cash_settlements_verified"] is False if "actual_cash_settlements_verified" in result else (
+        result["economic_posting_allowed"] is False
+    )
