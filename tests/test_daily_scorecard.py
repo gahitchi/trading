@@ -188,3 +188,54 @@ def test_missing_journal_checkpoint_blocks_scorecard(tmp_path):
     j._head.unlink()
     with pytest.raises(ValueError, match="checkpoint is missing"):
         daily_scorecard(j, START)
+
+def test_scorecard_cli_is_read_only_and_requires_matching_frozen_policy(tmp_path, capsys):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_daily_scorecard
+
+    j = opened(tmp_path)
+    j.append(trade("win", "10.00"))
+    close_day(j, "d1", 0)
+    initial = j.path.read_bytes()
+    argv = [
+        "daily-scorecard",
+        "--journal", str(j.path),
+        "--start-day", START.isoformat(),
+        "--through", START.isoformat(),
+        "--currency", "USD",
+        "--initial-capital", "1000.00",
+        "--quantum", "0.01",
+        "--reinvest-fraction", "0.5",
+        "--max-deployable", "1500.00",
+    ]
+    args = build_parser().parse_args(argv)
+    assert cmd_daily_scorecard(None, args) == 0
+    out = capsys.readouterr().out
+    assert '"total_net_pnl": "10.00"' in out
+    assert '"daily_edge_qualified": false' in out
+    assert "RESEARCH ACCOUNTING ONLY" in out
+    assert j.path.read_bytes() == initial
+    argv[argv.index("0.5")] = "0.4"
+    with pytest.raises(SystemExit, match="BLOCKED"):
+        cmd_daily_scorecard(None, build_parser().parse_args(argv))
+
+
+def test_scorecard_cli_never_constructs_missing_economic_journal(tmp_path):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_daily_scorecard
+
+    missing = tmp_path / "does-not-exist.jsonl"
+    argv = [
+        "daily-scorecard",
+        "--journal", str(missing),
+        "--start-day", START.isoformat(),
+        "--through", START.isoformat(),
+        "--currency", "USD",
+        "--initial-capital", "1000.00",
+        "--quantum", "0.01",
+        "--reinvest-fraction", "0.5",
+    ]
+    with pytest.raises(SystemExit, match="preexisting"):
+        cmd_daily_scorecard(None, build_parser().parse_args(argv))
+    assert not missing.exists()
+    assert not missing.with_name(missing.name + ".head.json").exists()
