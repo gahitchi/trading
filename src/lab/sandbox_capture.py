@@ -68,8 +68,10 @@ def _verify(value: dict, fields: set[str]) -> None:
 
 
 def _positive_ns(value, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ValueError(f"{name} must be a positive integer nanosecond timestamp")
+    # Epoch 0 is a valid event instant for deterministic replay. Unlike
+    # missing/negative timestamps, it must not be fabricated or discarded.
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a nonnegative integer nanosecond timestamp")
     return value
 
 
