@@ -346,6 +346,7 @@ def test_client_order_ids_are_scoped_by_symbol_not_globally():
     assert set(result["open_orders"]) == {"BTCUSDT:co-1", "ETHUSDT:co-1"}
     assert not result["risk_ready"]
 
+
 def test_large_wallet_subcent_mismatch_never_rounds_into_fake_margin_equality():
     d = bundle()
     precise_wallet = "1000000000000000000000000.000000000000000001"
@@ -385,14 +386,16 @@ def test_large_order_remaining_quantity_retains_every_decimal_place():
 def test_large_income_totals_do_not_hide_microsettlement():
     d = bundle()
     d["income"][1]["income"] = "1000000000000000000000000.000000000000000000"
-    d["income"].append({
-        "symbol": "BTCUSDT",
-        "incomeType": "COMMISSION",
-        "income": "0.000000000000000001",
-        "asset": "USDT",
-        "time": T_MS - 500,
-        "tranId": 102,
-    })
+    d["income"].append(
+        {
+            "symbol": "BTCUSDT",
+            "incomeType": "COMMISSION",
+            "income": "0.000000000000000001",
+            "asset": "USDT",
+            "time": T_MS - 500,
+            "tranId": 102,
+        }
+    )
     result = normalize_demo_export(d, source_sha256=HASH)
     assert Decimal(result["income_claims_by_type_currency"]["COMMISSION:USDT"]) == Decimal(
         "1000000000000000000000000.000000000000000001"
