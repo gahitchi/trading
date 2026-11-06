@@ -195,15 +195,27 @@ Its collector identity is an **unverified label**; no independent
 broker report, margin/equity proof or economic promotion exists yet.
 The response always has `risk_ready=false` and no live-order permission.
 
+A new **public USD-M market evidence archive** now records the
+Binance mark/index price and historical funding-rate public REST
+responses as separate raw, timestamped, SHA-256-linked observations
+with a durable checkpoint. It is portable to Termux and has
+network-free regression tests. See
+[public market evidence](docs/public-market-evidence.md).
+These are **market observations** (including historical funding
+rates), NOT an authenticated account snapshot, an executed funding
+cash transfer, qualified equity, order authorization or proof of
+any profitable strategy. A supervised external fetch remains
+unverified, and no P&L is posted from this archive.
+
 Remaining dependencies are (1) an **actually independent read-only
-account-report producer**, separately corroborated market marks,
-complete order/remaining-quantity, funding/cash and settlement
-evidence, followed by validated conversion into the economic
-paper journal; (2) cross-source and cross-restart margin/liquidation,
-fee and partial-fill reconciliation; (3) operational risk-gate drills
-and a statistically qualified bearish short-horizon trading edge.
-This is research infrastructure, **not** a demonstrated profitable
-strategy or live-order authorization.
+account-report producer**, independently synchronized mark/book
+observations and *account-specific executed* funding/cash settlements
+with complete order/remaining-quantity history; (2) a validated
+conversion bridge to the economic journal only after contract,
+multiplier, fee, margin/liquidation and cross-restart reconciliation;
+(3) operational risk-gate drills and statistically qualified bearish
+short-horizon trading edge. This is research infrastructure, **not**
+a demonstrated profitable strategy or live-order authorization.
 
 **Priority update (2026-11-05):** a time-series of **net daily P&L and cumulative
 equity growth**, not a target winning-day percentage, is the primary short-horizon
