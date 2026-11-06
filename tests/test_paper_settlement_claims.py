@@ -226,7 +226,7 @@ def test_report_is_strict_json_and_does_not_authenticate_collector(tmp_path):
 def test_report_parser_rejects_duplicates_unknown_fields_and_nonfinite_json(tmp_path, blob):
     p = tmp_path / "bad.json"
     p.write_text(blob, encoding="utf-8")
-    with pytest.raises(ValueError, match="JSON|schema|bounded"):
+    with pytest.raises(ValueError, match=r"JSON|schema|bounded"):
         load_read_only_settlement(p)
 
 
