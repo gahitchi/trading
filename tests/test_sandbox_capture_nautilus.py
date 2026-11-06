@@ -72,3 +72,38 @@ def test_real_nautilus_backtest_captures_order_events_without_network(tmp_path):
     # for fill-delta comparison, not real margin/cash reconciliation.
     expected_qty = Decimal(str(result["terminal"]["net_qty"]))
     assert Decimal(archive.compare_flat_start_positions({IID: str(expected_qty)})[IID]) == expected_qty
+
+def test_real_nautilus_cache_account_snapshot_adapter_without_network(tmp_path):
+    require_nautilus()
+
+    from lab.fast import backtest
+    from lab.paper_account_snapshot import PaperAccountSnapshotJournal
+    from tests.test_maker import catalog, cfg, ranging_market
+
+    path = catalog(tmp_path / "catalog", *ranging_market(steps=12))
+    raw = tmp_path / "sandbox-orders.jsonl"
+    accounts = tmp_path / "sandbox-accounts.jsonl"
+    result = backtest(
+        path,
+        cfg(),
+        latency_ms=0,
+        maker_bps=0,
+        capture_path=str(raw),
+        capture_session="cache-integration",
+        snapshot_path=str(accounts),
+    )
+    capture = PaperOrderEventCapture(
+        raw, session_id="cache-integration", instrument_id=IID
+    )
+    fills = [r for r in capture.receipts() if r["kind"] == "OrderFilled"]
+    assert len(fills) == result["fills"]
+    assert fills
+    source_account = fills[0]["account_id"]
+    store = PaperAccountSnapshotJournal(accounts, capture, account_id=source_account)
+    snapshots = store.snapshots()
+    assert len(snapshots) == 1
+    assert snapshots[0].account_id == source_account
+    assert store.latest_report()["signed_quantity"] == str(
+        Decimal(str(result["terminal"]["net_qty"]))
+    )
+    assert store.latest_report()["risk_ready"] is False
