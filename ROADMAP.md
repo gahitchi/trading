@@ -267,6 +267,19 @@ unallocated portion tracked as retained profit and losses reducing actual
 equity; cap risk separately from the reinvestment fraction. See
 [profit reinvestment accounting](docs/profit-reinvestment-accounting.md).
 No guarantee of recovering any loss or making daily profits is assumed.
+
+A **read-only UTC daily scorecard** now consumes a fully replay-verified,
+frozen-policy `ProfitJournal` and reports *every closed calendar day*,
+including no-trade days, marked-equity net P&L, cost and funding
+breakdowns, reinvested/retained capital, daily distributions,
+flow-neutral drawdown, inactivity and recovery duration.
+It refuses missing UTC closes, corrupt journal checkpoints and
+policy changes. See [daily scorecard](docs/daily-scorecard.md).
+This is **research accounting only**: the scorecard cannot verify
+outside-market data, realistic fills, latency stress, margin
+protection or an independent profitable bearish strategy.
+Those qualification gates remain open.
+
 Before another short-entry experiment, implement the
 [daily scorecard and short-horizon evidence contract](docs/short-horizon-daily-profit-objective.md):
 count all eligible UTC days including zero-trade days; reconcile mark-to-market
