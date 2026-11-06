@@ -1,7 +1,6 @@
 """Nautilus-compatible account-cache adapter checks without native dependencies."""
 
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
@@ -162,7 +161,7 @@ def test_unreconciled_sandbox_balances_block_production(tmp_path, balance):
             record_sandbox_snapshot(cache, Instrument(), source, store, at_ns=NS + 3, initial_account_id=aid)
         assert store.snapshots() == ()
     else:
-        with pytest.raises(ValueError, match="nonfinite|finite"):
+        with pytest.raises(ValueError, match=r"nonfinite|finite"):
             verify_fresh_sandbox_start(cache, Instrument(), source)
 
 
