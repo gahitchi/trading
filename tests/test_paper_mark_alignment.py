@@ -137,10 +137,12 @@ def test_historical_rate_fetch_after_snapshot_must_not_be_used(tmp_path):
 
 
 def test_future_venue_mark_timestamp_never_anchors_earlier_account(tmp_path):
-    _orders, account, public = evidence_pair(tmp_path, sample_ns=None)
+    _orders, account, public = evidence_pair(
+        tmp_path, account_ns=NS + 7 * SECOND + 200_000_000, sample_ns=None
+    )
     public.append(public_sample(
         NS + 4 * SECOND,
-        mark_time_ms=(NS + 11 * SECOND) // 1_000_000,
+        mark_time_ms=(NS + 7 * SECOND + 500_000_000) // 1_000_000,
     ))
     with pytest.raises(ValueError, match="no fully observed"):
         align_paper_account_mark(account, public)
