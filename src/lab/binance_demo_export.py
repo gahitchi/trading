@@ -211,8 +211,9 @@ def normalize_demo_export(bundle: dict, *, source_sha256: str) -> dict:
         row = _object(item, "demo order")
         symbol = _symbol(row.get("symbol"))
         order_id = _id(row.get("clientOrderId"), "demo client order ID")
-        if order_id in orders:
-            raise ValueError("duplicate demo client order ID")
+        key = f"{symbol}:{order_id}"
+        if key in orders:
+            raise ValueError("duplicate demo client order ID within symbol")
         if row.get("status") not in {"NEW", "PARTIALLY_FILLED", "PENDING_CANCEL"}:
             raise ValueError("demo open order has unrecognized nonterminal state")
         if row.get("side") not in {"BUY", "SELL"}:
@@ -222,7 +223,7 @@ def normalize_demo_export(bundle: dict, *, source_sha256: str) -> dict:
         remaining = original - executed
         if remaining <= 0:
             raise ValueError("demo open order remaining quantity must be positive")
-        orders[order_id] = {"symbol": symbol, "remaining": str(remaining)}
+        orders[key] = {"symbol": symbol, "remaining": str(remaining)}
     # Income is at best a bounded, asserted single-page export, with no
     # server-side proof of all transactions or completeness.
     income = _list(bundle["income"], "demo income history")
