@@ -21,6 +21,7 @@ from lab.persistence import parse_json
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,110}\Z")
 _CURRENCY = re.compile(r"[A-Z][A-Z0-9]{2,7}\Z")
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
+_EXACT_MONEY = re.compile(r"-?(?:0|[1-9][0-9]{0,23})(?:\.[0-9]{1,18})?\Z")
 _MAX_REPORT_BYTES = 1_048_576
 _MAX_SKEW_NS = 5_000_000_000
 _DEFAULT_SKEW_NS = 1_000_000_000
@@ -64,8 +65,8 @@ def _time(value: object, name: str, *, allow_zero: bool = False):
 
 
 def _money(value: object, name: str, *, nonnegative: bool = False) -> Decimal:
-    if not isinstance(value, str):
-        raise ValueError(f"{name} must be an exact decimal string")
+    if not isinstance(value, str) or not _EXACT_MONEY.fullmatch(value):
+        raise ValueError(f"{name} must be a bounded exact decimal string")
     try:
         amount = Decimal(value)
     except InvalidOperation as exc:
@@ -194,10 +195,10 @@ def compare_settlement_claims(
         received = _time(receipt["received_ns"], "sandbox fill receipt", allow_zero=True)
         if received > local.captured_ns:
             raise ValueError("sandbox fill was received after account snapshot")
-        fills[trade_id] = (
-            _time(receipt["ts_event_ns"], "sandbox fill event", allow_zero=True),
-            *_fee_from_sandbox(receipt),
-        )
+        trade_time = _time(receipt["ts_event_ns"], "sandbox fill event", allow_zero=True)
+        if not report.period_start_ns <= trade_time <= local.captured_ns:
+            raise ValueError("sandbox fill lies outside fee settlement coverage interval")
+        fills[trade_id] = (trade_time, *_fee_from_sandbox(receipt))
     claimed_fees = {}
     for row in report.fee_items:
         if not isinstance(row, dict) or set(row) != {"trade_id", "event_ns", "currency", "amount"}:
@@ -206,8 +207,8 @@ def compare_settlement_claims(
         if trade in claimed_fees:
             raise ValueError("duplicate settlement fee for trade")
         time = _time(row["event_ns"], "fee event", allow_zero=True)
-        if time > report.observed_ns:
-            raise ValueError("fee event is future-dated")
+        if not report.period_start_ns <= time <= min(report.observed_ns, local.captured_ns):
+            raise ValueError("fee event is outside settlement coverage or future-dated")
         claimed_fees[trade] = (
             time,
             _money(row["amount"], "fee amount", nonnegative=True),
