@@ -121,7 +121,7 @@ def test_comparisons_do_not_write_to_source_or_account(tmp_path):
         ("complete_fees", 1, "must be booleans"),
         ("period_start_ns", NS + 11, "inverted or empty"),
         ("period_start_ns", NS + 1, "coverage interval"),
-        ("observed_ns", NS + 6_000_000_000, "observation differs"),
+        ("observed_ns", NS + 10 + 6_000_000_000, "observation differs"),
         ("fee_items", [], "do not match"),
         ("fee_items", [{"trade_id": "other", "event_ns": NS, "currency": "USDT", "amount": "0.01"}], "do not match"),
         ("fee_items", "not-list", "complete lists"),
