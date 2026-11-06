@@ -105,3 +105,34 @@ def test_real_nautilus_cache_account_snapshot_adapter_without_network(tmp_path):
     assert snapshots[0].account_id == source_account
     assert Decimal(store.latest_report()["signed_quantity"]) == Decimal(str(result["terminal"]["net_qty"]))
     assert store.latest_report()["risk_ready"] is False
+
+def test_nautilus_snapshot_timer_records_multiple_account_states(tmp_path):
+    require_nautilus()
+
+    from lab.fast import backtest
+    from lab.paper_account_snapshot import PaperAccountSnapshotJournal
+    from tests.test_maker import catalog, cfg, ranging_market
+
+    path = catalog(tmp_path / "catalog", *ranging_market(steps=30))
+    orders = tmp_path / "order-events.jsonl"
+    accounts = tmp_path / "account-events.jsonl"
+    backtest(
+        path,
+        cfg(report=str(tmp_path / "monitor.json"), report_s=0.5),
+        latency_ms=0,
+        maker_bps=0,
+        capture_path=str(orders),
+        capture_session="timed-snapshots",
+        snapshot_path=str(accounts),
+    )
+    capture = PaperOrderEventCapture(
+        orders, session_id="timed-snapshots", instrument_id=IID
+    )
+    filled = [row for row in capture.receipts() if row["kind"] == "OrderFilled"]
+    assert filled
+    journal = PaperAccountSnapshotJournal(accounts, capture, account_id=filled[0]["account_id"])
+    snapshots = journal.snapshots()
+    assert len(snapshots) >= 2
+    assert all(x.captured_ns < y.captured_ns for x, y in zip(snapshots, snapshots[1:], strict=False))
+    assert all(x.capture_count <= y.capture_count for x, y in zip(snapshots, snapshots[1:], strict=False))
+    assert not journal.latest_report()["risk_ready"]
