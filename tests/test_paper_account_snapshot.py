@@ -81,7 +81,10 @@ def test_historical_snapshot_remains_bound_after_new_fills(tmp_path):
         received_ns=NS + 6,
     )
     second = snapshot(
-        source, identifier="snapshot-2", captured_ns=NS + 8, positions={IID: "-0.15"},
+        source,
+        identifier="snapshot-2",
+        captured_ns=NS + 8,
+        positions={IID: "-0.15"},
     )
     store.append(second)
     restarted = journal(tmp_path, source)
@@ -147,13 +150,16 @@ def test_duplicate_or_voided_fill_blocks_snapshot(tmp_path):
         validate_snapshot(other, snapshot(other, captured_ns=NS + 4), "sandbox-1")
 
 
-@pytest.mark.parametrize("balances", [
-    {"USDT": {"total": "1000.00", "available": "991.00", "locked": "10.00"}},
-    {"USDT": {"total": "1000.00", "available": "NaN", "locked": "0.00"}},
-    {"USDT": {"total": "1000.00", "available": "-1.00", "locked": "1001.00"}},
-    {"USDT": {"total": "1000.00", "available": "990.00"}},
-    {},
-])
+@pytest.mark.parametrize(
+    "balances",
+    [
+        {"USDT": {"total": "1000.00", "available": "991.00", "locked": "10.00"}},
+        {"USDT": {"total": "1000.00", "available": "NaN", "locked": "0.00"}},
+        {"USDT": {"total": "1000.00", "available": "-1.00", "locked": "1001.00"}},
+        {"USDT": {"total": "1000.00", "available": "990.00"}},
+        {},
+    ],
+)
 def test_incomplete_or_nonconserving_cash_denied(tmp_path, balances):
     source = capture(tmp_path)
     source.append(event(), received_ns=NS + 2)

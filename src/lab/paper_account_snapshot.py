@@ -58,9 +58,7 @@ def _decimal(value: object, name: str, *, nonnegative: bool = False) -> Decimal:
 
 
 def _canonical(value: dict) -> bytes:
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
-    ).encode("utf-8")
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8")
 
 
 def _seal(value: dict) -> dict:
@@ -98,9 +96,7 @@ def _write(fd: int, raw: bytes) -> None:
         view = view[written:]
 
 
-def validate_snapshot(
-    capture: PaperOrderEventCapture, snapshot: PaperAccountSnapshot, account_id: str
-) -> dict:
+def validate_snapshot(capture: PaperOrderEventCapture, snapshot: PaperAccountSnapshot, account_id: str) -> dict:
     """Verify a snapshot against its exact, cryptographically bound fill prefix.
 
     Requires *externally established* flat start and exclusive account scope.
@@ -119,9 +115,10 @@ def validate_snapshot(
         raise ValueError("snapshot account identity mismatch")
     if snapshot.source_kind != "sandbox-cache":
         raise ValueError("unrecognized or unauthenticated snapshot producer")
-    if any(type(v) is not bool or not v for v in (
-        snapshot.started_flat, snapshot.exclusive_scope, snapshot.complete_snapshot
-    )):
+    if any(
+        type(v) is not bool or not v
+        for v in (snapshot.started_flat, snapshot.exclusive_scope, snapshot.complete_snapshot)
+    ):
         raise ValueError("flat-start, exclusive-scope and complete-snapshot assertions required")
     if type(snapshot.captured_ns) is not int or snapshot.captured_ns <= 0:
         raise ValueError("invalid snapshot capture timestamp")
@@ -135,7 +132,7 @@ def validate_snapshot(
         raise ValueError("snapshot/capture hash mismatch: different evidence prefix")
     # A receipt already seen when the snapshot was taken cannot be omitted
     # from its declared complete prefix, even if it was archived later.
-    later = capture.receipts()[snapshot.capture_count:]
+    later = capture.receipts()[snapshot.capture_count :]
     if any(row["received_ns"] <= snapshot.captured_ns for row in later):
         raise ValueError("snapshot omitted an earlier received order event")
     if prefix and snapshot.captured_ns < max(r["received_ns"] for r in prefix):
@@ -256,12 +253,17 @@ class PaperAccountSnapshotJournal:
             raise ValueError("paper account snapshot paths must not be symlinks")
 
     def _head_write(self, sequence: int, last: str, header: str) -> None:
-        atomic_json(self._head, _seal({
-            "version": _VERSION,
-            "sequence": sequence,
-            "last_sha256": last,
-            "header_sha256": header,
-        }))
+        atomic_json(
+            self._head,
+            _seal(
+                {
+                    "version": _VERSION,
+                    "sequence": sequence,
+                    "last_sha256": last,
+                    "header_sha256": header,
+                }
+            ),
+        )
 
     def _read_locked(self) -> tuple[list[PaperAccountSnapshot], str, str]:
         self._paths()
@@ -296,7 +298,8 @@ class PaperAccountSnapshotJournal:
             snapshot = PaperAccountSnapshot(**body)
             validate_snapshot(self.capture, snapshot, self.account_id)
             if (
-                snapshot.snapshot_id in seen_ids or snapshot.source_id in seen_sources
+                snapshot.snapshot_id in seen_ids
+                or snapshot.source_id in seen_sources
                 or (snapshots and snapshot.captured_ns <= snapshots[-1].captured_ns)
                 or (snapshots and snapshot.capture_count < snapshots[-1].capture_count)
             ):
@@ -333,13 +336,15 @@ class PaperAccountSnapshotJournal:
             # independently locked and never rewritten on successful commits.
             validate_snapshot(self.capture, snapshot, self.account_id)
             data = asdict(snapshot)
-            record = _seal({
-                "version": _VERSION,
-                "type": "paper-account-snapshot",
-                "sequence": len(previous) + 1,
-                "previous_sha256": last,
-                "snapshot": data,
-            })
+            record = _seal(
+                {
+                    "version": _VERSION,
+                    "type": "paper-account-snapshot",
+                    "sequence": len(previous) + 1,
+                    "previous_sha256": last,
+                    "snapshot": data,
+                }
+            )
             fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CLOEXEC | os.O_NOFOLLOW)
             try:
                 _write(fd, _canonical(record) + b"\n")
