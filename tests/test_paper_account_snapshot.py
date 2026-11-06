@@ -157,7 +157,7 @@ def test_duplicate_or_voided_fill_blocks_snapshot(tmp_path):
 def test_incomplete_or_nonconserving_cash_denied(tmp_path, balances):
     source = capture(tmp_path)
     source.append(event(), received_ns=NS + 2)
-    with pytest.raises(ValueError, match="cash balance|cash balances"):
+    with pytest.raises(ValueError, match=r"cash balance|cash balances"):
         validate_snapshot(source, snapshot(source, balances=balances), "sandbox-1")
 
 
