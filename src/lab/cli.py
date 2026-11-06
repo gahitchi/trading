@@ -1009,6 +1009,39 @@ def cmd_crash_release(cfg, a):
     raise SystemExit("crash holdout release is disabled on this branch until qualification is complete")
 
 
+def cmd_daily_scorecard(cfg, a):
+    """Report all UTC days from a preexisting verified research economic journal."""
+    import json
+    from datetime import date
+
+    from lab.daily_scorecard import daily_scorecard
+    from lab.profit_allocation import AllocationPolicy
+    from lab.profit_journal import ProfitJournal
+
+    try:
+        path = Path(a.journal)
+        head = path.with_name(path.name + ".head.json")
+        lock = path.with_name(path.name + ".lock")
+        if any(not file.is_file() or file.is_symlink() for file in (path, head, lock)):
+            raise ValueError("complete preexisting economic journal and checkpoint are required")
+        start = date.fromisoformat(a.start_day)
+        through = date.fromisoformat(a.through)
+        policy = AllocationPolicy(
+            currency=a.currency,
+            initial_capital=a.initial_capital,
+            quantum=a.quantum,
+            reinvest_fraction=a.reinvest_fraction,
+            max_deployable=a.max_deployable,
+        )
+        journal = ProfitJournal(path, policy, start)
+        report = daily_scorecard(journal, through)
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"daily scorecard BLOCKED: {exc}") from exc
+    print(json.dumps(report, indent=2, sort_keys=True))
+    print("RESEARCH ACCOUNTING ONLY: no independently qualified edge, trading permission or economic posting.")
+    return 0
+
+
 def cmd_binance_demo_export(cfg, a):
     """Inspect an offline demo GET export; no API keys, HTTP or journal writes."""
     import json
@@ -1229,6 +1262,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     demo.add_argument("--file", required=True, help="preexisting local demo-account export JSON bundle")
     demo.set_defaults(fn=cmd_binance_demo_export)
+
+    daily = sub.add_parser(
+        "daily-scorecard", help="read-only UTC daily net-PnL scorecard from a verified economic research journal"
+    )
+    daily.add_argument("--journal", required=True, help="existing economic journal JSONL")
+    daily.add_argument("--start-day", required=True, help="original journal start UTC day, YYYY-MM-DD")
+    daily.add_argument("--through", required=True, help="last fully closed UTC day, YYYY-MM-DD")
+    daily.add_argument("--currency", required=True, help="frozen journal account currency")
+    daily.add_argument("--initial-capital", required=True, help="original exact journal capital")
+    daily.add_argument("--quantum", required=True, help="journal currency quantum, e.g. 0.01")
+    daily.add_argument("--reinvest-fraction", required=True, help="frozen journal allocation fraction")
+    daily.add_argument("--max-deployable", help="original frozen maximum deployable capital, if any")
+    daily.set_defaults(fn=cmd_daily_scorecard)
 
     research = sub.add_parser("research", help="register a search plan and audit every research attempt")
     rsub = research.add_subparsers(dest="sub", required=True)
