@@ -10,10 +10,9 @@ from __future__ import annotations
 from decimal import Decimal
 from pathlib import Path
 
-from lab.binance_demo_export import _number, inspect_demo_export, load_demo_export, normalize_demo_export
+from lab.binance_demo_export import _number, load_demo_export, normalize_demo_export
 
 _MS_NS = 1_000_000
-_KNOWN_INCOME = {"FUNDING_FEE", "COMMISSION", "REALIZED_PNL", "TRANSFER"}
 
 
 def _ceil_ms(ns: int) -> int:
