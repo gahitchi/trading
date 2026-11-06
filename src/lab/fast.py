@@ -38,6 +38,22 @@ F_LAST = 128
 EXECUTION_MODEL = "observed-flat-gap-v1"
 
 
+def _fatal_paper_evidence(risk, kill_file, stage: str, exc: Exception):
+    """Persist a fail-closed halt even when Nautilus swallows a callback error."""
+    reason = f"paper {stage} evidence capture failed: {type(exc).__name__}: {exc}"
+    risk._state_error = reason
+    risk.state = TradingState.HALTED
+    risk.reason = reason
+    if kill_file is not None:
+        from pathlib import Path
+
+        from lab.safety import set_kill_switch
+
+        with suppress(OSError):
+            set_kill_switch(Path(kill_file), "halt", reason, preserve_existing=True)
+    raise RuntimeError(reason) from exc
+
+
 class ReplayUnavailable(ValueError):
     """The recording cannot establish a performance result for this execution model."""
 
@@ -128,8 +144,25 @@ class FastStrategy(RiskManagedStrategy):
         self.replay = False  # replay results stop at the last observed event, before shutdown execution
         self.paper_capture = None  # only set for explicit sandbox/replay receipt capture
         self._paper_capture_kill_file = None
+        self.paper_account_path = None
+        self.paper_account_journal = None
+        self.paper_account_id = None
 
     def on_start(self):
+        if self.paper_account_path is not None:
+            try:
+                from pathlib import Path
+
+                from lab.nautilus_snapshot import verify_fresh_sandbox_start
+                from lab.paper_account_snapshot import PaperAccountSnapshotJournal
+
+                account_id = verify_fresh_sandbox_start(self.cache, self.iid, self.paper_capture)
+                self.paper_account_journal = PaperAccountSnapshotJournal(
+                    Path(self.paper_account_path), self.paper_capture, account_id=account_id
+                )
+                self.paper_account_id = account_id
+            except Exception as exc:
+                _fatal_paper_evidence(self.risk, self._paper_capture_kill_file, "account baseline", exc)
         self._sample_equity()
         self.subscribe_book_deltas(self.iid, BookType.L2_MBP, managed=True)
         if self.config.report:
@@ -153,6 +186,26 @@ class FastStrategy(RiskManagedStrategy):
 
     def _on_report(self, _event):
         self._write_report(running=True)
+        if self.paper_account_journal is not None:
+            self.record_paper_account_snapshot()
+
+    def record_paper_account_snapshot(self):
+        """A supervised, blocking snapshot operation, NOT an order hot path."""
+        if self.paper_account_journal is None:
+            raise ValueError("sandbox account snapshot capture has not started")
+        try:
+            from lab.nautilus_snapshot import record_sandbox_snapshot
+
+            return record_sandbox_snapshot(
+                self.cache,
+                self.iid,
+                self.paper_capture,
+                self.paper_account_journal,
+                at_ns=self.clock.timestamp_ns(),
+                initial_account_id=self.paper_account_id,
+            )
+        except Exception as exc:
+            _fatal_paper_evidence(self.risk, self._paper_capture_kill_file, "account", exc)
 
     def _write_report(self, *, running: bool):
         try:
@@ -232,22 +285,7 @@ class FastStrategy(RiskManagedStrategy):
         try:
             self.paper_capture.append(event, received_ns=self.clock.timestamp_ns())
         except Exception as exc:
-            reason = f"paper order evidence capture failed: {type(exc).__name__}: {exc}"
-            # Persist the halt in the normal risk governor, even when Nautilus
-            # catches a strategy callback exception and continues its event loop.
-            self.risk._state_error = reason
-            self.risk.state = TradingState.HALTED
-            self.risk.reason = reason
-            if self._paper_capture_kill_file is not None:
-                from pathlib import Path
-
-                from lab.safety import set_kill_switch
-
-                # Keep the in-memory governor halted if the durable kill
-                # write fails; never hide the original capture exception.
-                with suppress(OSError):
-                    set_kill_switch(Path(self._paper_capture_kill_file), "halt", reason, preserve_existing=True)
-            raise RuntimeError(reason) from exc
+            _fatal_paper_evidence(self.risk, self._paper_capture_kill_file, "order", exc)
 
     def on_order_filled(self, event):
         coid = str(event.client_order_id)
@@ -383,6 +421,7 @@ def backtest(
     evidence=None,
     capture_path: str | None = None,
     capture_session: str | None = None,
+    snapshot_path: str | None = None,
 ) -> dict:
     """Replays recorded order-book deltas and trades through NautilusTrader's matching engine (L2 book, queue
     position, consumed liquidity) with a fixed order latency, through the same risk manager as paper trading (its
@@ -448,6 +487,8 @@ def backtest(
         strategy.replay = True
         if (capture_path is None) != (capture_session is None):
             raise ValueError("replay capture requires both capture_path and capture_session")
+        if snapshot_path is not None and capture_path is None:
+            raise ValueError("sandbox snapshot requires a durable order capture")
         if capture_path is not None:
             from pathlib import Path
 
@@ -456,6 +497,7 @@ def backtest(
             strategy.paper_capture = PaperOrderEventCapture(
                 Path(capture_path), session_id=capture_session, instrument_id=str(strategy.iid)
             )
+            strategy.paper_account_path = snapshot_path
         add_strategy(engine, strategy, risk)
         for index, (book_data, trade_data) in enumerate(batches):
             if index:
@@ -475,6 +517,8 @@ def backtest(
                 engine.add_data(trade_data)
             engine.run(streaming=True)  # pause before shutdown can advance clocks or settle trailing orders
         strategy._sample_equity()  # final mark, including any position still open at the recording's end
+        if snapshot_path is not None:
+            strategy.record_paper_account_snapshot()
         account = engine.cache.account_for_venue(Venue(str(inst.id.venue)))
         cash = account.balance_total(quote).as_double() if account else None
         equity = strategy._equity_or_none()
@@ -521,6 +565,7 @@ def build_paper_node(
     audit_path: str | None = None,
     capture_path: str | None = None,
     capture_session: str | None = None,
+    snapshot_path: str | None = None,
 ):
     """Binance USD-M public data + NautilusTrader's sandbox execution: simulated fills on the live book. The risk
     manager's state (the day's starting equity and any daily-loss stop) persists in state_path across restarts."""
@@ -575,6 +620,8 @@ def build_paper_node(
     strategy = make_strategy(config, risk)
     if (capture_path is None) != (capture_session is None):
         raise ValueError("paper capture requires both capture_path and capture_session")
+    if snapshot_path is not None and capture_path is None:
+        raise ValueError("sandbox snapshot requires a durable order capture")
     if capture_path is not None:
         if not kill_file:
             raise ValueError("paper capture requires a persistent kill_file for fail-closed operation")
@@ -586,5 +633,6 @@ def build_paper_node(
             Path(capture_path), session_id=capture_session, instrument_id=str(strategy.iid)
         )
         strategy._paper_capture_kill_file = kill_file
+        strategy.paper_account_path = snapshot_path
     add_strategy(node, strategy, risk)
     return node, strategy
