@@ -37,6 +37,30 @@ For a network-free code-path check, use an existing recorded-data catalog
 with `lab.fast.backtest(..., capture_path=..., capture_session=...)`; its
 actual NautilusTrader callback capture has automated integration coverage.
 
+### Portable Termux/Debian validation
+
+The raw archive, economic journal, and independent fill-reconciliation tests
+use only the Python standard library and pytest. Run the following in the
+existing Python 3.13 virtual environment without installing NautilusTrader:
+
+```bash
+PYTHONPATH=src:. python -m pytest \
+  tests/test_profit_allocation.py \
+  tests/test_profit_journal.py \
+  tests/test_position_reconcile.py \
+  tests/test_paper_evidence.py \
+  tests/test_sandbox_capture.py -q
+```
+
+That portable subset currently contains **103** tests. The two tests
+requiring `lab.fast` / `nautilus_trader` reside in
+`tests/test_sandbox_capture_nautilus.py`. They are skipped when the optional
+engine is unavailable in a normal local environment, but must execute in
+the full GitHub CI suite: if the engine is absent in CI, they fail.
+This separation prevents a missing optional native package from aborting
+collection of the portable tests; it does **not** constitute external
+NautilusTrader acceptance on the mobile platform.
+
 ## Evidence and validation contract
 
 The append-only receipt archive contains:
