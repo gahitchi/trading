@@ -281,3 +281,28 @@ def test_oversize_and_nonobject_root_fail_closed(tmp_path):
     path.write_bytes(b"[]")
     with pytest.raises(ValueError, match="schema mismatch"):
         inspect_demo_export(path)
+
+def test_demo_import_cli_is_offline_read_only(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_binance_demo_export
+
+    p = write_bundle(tmp_path)
+    before = p.read_bytes()
+    args = build_parser().parse_args(["demo-account-import", "--file", str(p)])
+    assert cmd_binance_demo_export(None, args) == 0
+    displayed = capsys.readouterr().out
+    assert '"risk_ready": false' in displayed
+    assert '"nautilus_simulator_account_matched": false' in displayed
+    assert "UNVERIFIED DEMO SOURCE" in displayed
+    assert p.read_bytes() == before
+
+
+def test_demo_import_cli_fails_for_missing_report_without_creating_it(tmp_path):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_binance_demo_export
+
+    missing = tmp_path / "not-created.json"
+    args = build_parser().parse_args(["demo-account-import", "--file", str(missing)])
+    with pytest.raises(SystemExit, match="BLOCKED"):
+        cmd_binance_demo_export(None, args)
+    assert not missing.exists()
