@@ -1009,6 +1009,34 @@ def cmd_crash_release(cfg, a):
     raise SystemExit("crash holdout release is disabled on this branch until qualification is complete")
 
 
+def cmd_paper_mark_align(cfg, a):
+    """Supervised read-only account/mark timing check; never posts P&L."""
+    import json
+
+    from lab.paper_account_snapshot import PaperAccountSnapshotJournal
+    from lab.paper_mark_alignment import align_paper_account_mark
+    from lab.public_market_evidence import PublicMarketEvidenceJournal
+    from lab.sandbox_capture import PaperOrderEventCapture
+
+    try:
+        paths = (Path(a.orders), Path(a.snapshots), Path(a.market))
+        heads = tuple(path.with_name(path.name + ".head.json") for path in paths)
+        locks = tuple(path.with_name(path.name + ".lock") for path in paths)
+        if any(not path.is_file() or path.is_symlink() for path in (*paths, *heads, *locks)):
+            raise ValueError("complete preexisting order/account/market evidence and checkpoints are required")
+        capture = PaperOrderEventCapture(
+            paths[0], session_id=a.session, instrument_id=f"{a.symbol}-PERP.BINANCE"
+        )
+        account = PaperAccountSnapshotJournal(paths[1], capture, account_id=a.account)
+        market = PublicMarketEvidenceJournal(paths[2], session_id=a.session, symbol=a.symbol)
+        result = align_paper_account_mark(account, market, max_age_ns=a.max_mark_age_ms * 1_000_000)
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"paper mark alignment BLOCKED: {exc}") from exc
+    print(json.dumps(result, sort_keys=True, indent=2))
+    print("DIAGNOSTIC ONLY: cannot post funding/P&L or authorize trading.")
+    return 0
+
+
 def cmd_public_market_sample(cfg, a):
     """Capture read-only public market data, never an account settlement."""
     from lab.public_market_evidence import PublicMarketEvidenceJournal, fetch_public_market_sample
@@ -1130,6 +1158,21 @@ def build_parser() -> argparse.ArgumentParser:
     market.add_argument("--session", required=True, help="fresh paper session ID")
     market.add_argument("--out", help="optional output JSONL archive path")
     market.set_defaults(fn=cmd_public_market_sample)
+
+    alignment = sub.add_parser(
+        "paper-mark-align",
+        help="read-only alignment of verified account snapshots and earlier observed public marks",
+    )
+    alignment.add_argument("--orders", required=True, help="existing sandbox order JSONL evidence")
+    alignment.add_argument("--snapshots", required=True, help="existing sandbox account snapshot JSONL")
+    alignment.add_argument("--market", required=True, help="existing public market evidence JSONL")
+    alignment.add_argument("--session", required=True, help="exact matching capture session ID")
+    alignment.add_argument("--symbol", required=True, help="USD-M USDT perpetual symbol, e.g. BTCUSDT")
+    alignment.add_argument("--account", required=True, help="exact sandbox account ID")
+    alignment.add_argument(
+        "--max-mark-age-ms", type=int, default=5000, help="bounded 0–60000 ms mark age allowance"
+    )
+    alignment.set_defaults(fn=cmd_paper_mark_align)
 
     research = sub.add_parser("research", help="register a search plan and audit every research attempt")
     rsub = research.add_subparsers(dest="sub", required=True)
