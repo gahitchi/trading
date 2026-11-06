@@ -233,16 +233,30 @@ The separate collector is **not implemented or authenticated**:
 neither claimed funding payments nor fee identities constitute
 independent broker cash settlement proof, and `risk_ready=false`.
 
-Remaining dependencies are (1) a genuinely **independent,
-authorized, read-only account report producer**, deployed and
-independently synchronized market observations and *actual*
-account-specific funding/cash settlements with complete order
-lifecycle; (2) per-venue contract/multiplier/fee/margin
-specifications, cross-restart and cash-delta reconciliation before
-any economic journal bridge; (3) operational risk drills and a
-statistically qualified bearish short-horizon edge.
-This is research infrastructure, **not** a demonstrated
-profitable strategy or live-order authorization.
+The portable `lab.binance_demo_export` reader now validates
+**manually supplied, offline** Binance USD-M *demo* REST GET responses
+for account V3, balance V3, position risk V3, all-symbol open orders
+and income history, without exchange keys or network calls. It
+checks exact currency and position quantities, source clock bounds,
+client-order remaining sizes (scoped by symbol) and incomplete
+income pages. A `lab demo-account-import` CLI prints diagnostics.
+See [offline demo export](docs/binance-demo-export.md).
+This data is **not** automatically authenticated: the export's
+claims, completeness and collection timing remain unverified, and
+a Binance demo account is **not** the Nautilus sandbox account.
+No simulator identity mapping, P&L journal connection or trading
+authorization is provided. The repository prohibits API-key
+access without the user's explicit decision.
+
+Remaining dependencies are (1) user-approved, independently
+**authenticated** demo account read-only collection, verified
+coverage and consistency of separately sampled endpoints, and
+actual account-specific funding/cash settlements; (2)
+per-venue contract/multiplier/fee/margin data, cross-restart
+and cash-delta reconciliation before any economic bridge;
+(3) operational risk drills and a statistically qualified
+bearish short-horizon edge. No reported test passes establish
+a profitable strategy or live-order authorization.
 
 **Priority update (2026-11-05):** a time-series of **net daily P&L and cumulative
 equity growth**, not a target winning-day percentage, is the primary short-horizon
