@@ -1042,6 +1042,21 @@ def cmd_daily_scorecard(cfg, a):
     return 0
 
 
+def cmd_demo_wallet_audit(cfg, a):
+    """Compare two manual USD-M demo exports without writing any economic data."""
+    import json
+
+    from lab.binance_demo_wallet_audit import compare_demo_wallet_exports
+
+    try:
+        result = compare_demo_wallet_exports(Path(a.before), Path(a.after))
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"Binance demo wallet audit BLOCKED: {exc}") from exc
+    print(json.dumps(result, indent=2, sort_keys=True))
+    print("UNVERIFIED WALLET DELTA: no authenticated account income, profit, reinvestment or order permission.")
+    return 0
+
+
 def cmd_binance_demo_export(cfg, a):
     """Inspect an offline demo GET export; no API keys, HTTP or journal writes."""
     import json
@@ -1262,6 +1277,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     demo.add_argument("--file", required=True, help="preexisting local demo-account export JSON bundle")
     demo.set_defaults(fn=cmd_binance_demo_export)
+
+    wallet = sub.add_parser(
+        "demo-wallet-audit",
+        help="compare two saved Binance USD-M demo exports (offline, no P&L posting)",
+    )
+    wallet.add_argument("--before", required=True, help="older existing demo-export JSON")
+    wallet.add_argument("--after", required=True, help="newer existing demo-export JSON")
+    wallet.set_defaults(fn=cmd_demo_wallet_audit)
 
     daily = sub.add_parser(
         "daily-scorecard", help="read-only UTC daily net-PnL scorecard from a verified economic research journal"
