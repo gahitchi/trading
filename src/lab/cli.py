@@ -1009,6 +1009,21 @@ def cmd_crash_release(cfg, a):
     raise SystemExit("crash holdout release is disabled on this branch until qualification is complete")
 
 
+def cmd_binance_demo_export(cfg, a):
+    """Inspect an offline demo GET export; no API keys, HTTP or journal writes."""
+    import json
+
+    from lab.binance_demo_export import inspect_demo_export
+
+    try:
+        report = inspect_demo_export(Path(a.file))
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"Binance demo export BLOCKED: {exc}") from exc
+    print(json.dumps(report, indent=2, sort_keys=True))
+    print("UNVERIFIED DEMO SOURCE: not the Nautilus sandbox; no risk authorization or economic posting.")
+    return 0
+
+
 def cmd_paper_settlement_check(cfg, a):
     """Check two claimed fee/funding records; never post cash or enable trading."""
     import json
@@ -1207,6 +1222,13 @@ def build_parser() -> argparse.ArgumentParser:
     settlement.add_argument("--account", required=True, help="exact paper account ID")
     settlement.add_argument("--max-skew-ms", type=int, default=1000, help="bounded 0..5000 ms")
     settlement.set_defaults(fn=cmd_paper_settlement_check)
+
+    demo = sub.add_parser(
+        "demo-account-import",
+        help="inspect locally exported Binance USD-M demo GET responses (offline; no API keys)",
+    )
+    demo.add_argument("--file", required=True, help="preexisting local demo-account export JSON bundle")
+    demo.set_defaults(fn=cmd_binance_demo_export)
 
     research = sub.add_parser("research", help="register a search plan and audit every research attempt")
     rsub = research.add_subparsers(dest="sub", required=True)
