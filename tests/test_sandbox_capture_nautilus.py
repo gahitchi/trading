@@ -74,6 +74,7 @@ def test_real_nautilus_backtest_captures_order_events_without_network(tmp_path):
     expected_qty = Decimal(str(result["terminal"]["net_qty"]))
     assert Decimal(archive.compare_flat_start_positions({IID: str(expected_qty)})[IID]) == expected_qty
 
+
 def test_real_nautilus_cache_account_snapshot_adapter_without_network(tmp_path):
     require_nautilus()
 
@@ -93,9 +94,7 @@ def test_real_nautilus_cache_account_snapshot_adapter_without_network(tmp_path):
         capture_session="cache-integration",
         snapshot_path=str(accounts),
     )
-    capture = PaperOrderEventCapture(
-        raw, session_id="cache-integration", instrument_id=IID
-    )
+    capture = PaperOrderEventCapture(raw, session_id="cache-integration", instrument_id=IID)
     fills = [r for r in capture.receipts() if r["kind"] == "OrderFilled"]
     assert len(fills) == result["fills"]
     assert fills
@@ -106,6 +105,7 @@ def test_real_nautilus_cache_account_snapshot_adapter_without_network(tmp_path):
     assert snapshots[0].account_id == source_account
     assert Decimal(store.latest_report()["signed_quantity"]) == Decimal(str(result["terminal"]["net_qty"]))
     assert store.latest_report()["risk_ready"] is False
+
 
 def test_nautilus_snapshot_timer_records_multiple_account_states(tmp_path):
     require_nautilus()
@@ -126,9 +126,7 @@ def test_nautilus_snapshot_timer_records_multiple_account_states(tmp_path):
         capture_session="timed-snapshots",
         snapshot_path=str(accounts),
     )
-    capture = PaperOrderEventCapture(
-        orders, session_id="timed-snapshots", instrument_id=IID
-    )
+    capture = PaperOrderEventCapture(orders, session_id="timed-snapshots", instrument_id=IID)
     filled = [row for row in capture.receipts() if row["kind"] == "OrderFilled"]
     assert filled
     journal = PaperAccountSnapshotJournal(accounts, capture, account_id=filled[0]["account_id"])

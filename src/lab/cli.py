@@ -470,11 +470,7 @@ def cmd_fast_paper(cfg, a):
     capture_path = str(risk_dir / f"paper-orders-{a.capture_session}.jsonl") if a.capture_session else None
     if a.capture_account_state and not a.capture_session:
         raise SystemExit("--capture-account-state requires --capture-session")
-    snapshot_path = (
-        str(risk_dir / f"paper-account-{a.capture_session}.jsonl")
-        if a.capture_account_state
-        else None
-    )
+    snapshot_path = str(risk_dir / f"paper-account-{a.capture_session}.jsonl") if a.capture_account_state else None
     try:
         node, _ = build_paper_node(
             _fast_config(cfg, a, report=str(risk_dir / "paper.json")),
@@ -1159,7 +1155,8 @@ def build_parser() -> argparse.ArgumentParser:
                 help="archive sandbox order events to results/fast/paper-orders-ID.jsonl; new ID each run",
             )
             fp.add_argument(
-                "--capture-account-state", action="store_true",
+                "--capture-account-state",
+                action="store_true",
                 help="persist sandbox cache account snapshots (requires --capture-session; paper only)",
             )
 

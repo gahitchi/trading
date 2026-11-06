@@ -87,9 +87,7 @@ class Cache:
 
 
 def init(tmp_path):
-    capture = PaperOrderEventCapture(
-        tmp_path / "orders.jsonl", session_id="session-a", instrument_id=IID
-    )
+    capture = PaperOrderEventCapture(tmp_path / "orders.jsonl", session_id="session-a", instrument_id=IID)
     return Cache(), capture
 
 
@@ -101,13 +99,9 @@ def test_producer_reads_actual_cache_balances_and_fill_signed_inventory(tmp_path
     source.append(event(), received_ns=NS + 2)
     cache._positions = [Position("-0.25")]
     cache._orders = [Order("FILLED", "CO-1", "0")]
-    report = record_sandbox_snapshot(
-        cache, Instrument(), source, store, at_ns=NS + 3, initial_account_id=aid
-    )
+    report = record_sandbox_snapshot(cache, Instrument(), source, store, at_ns=NS + 3, initial_account_id=aid)
     assert report["signed_quantity"] == "-0.25"
-    assert report["cash"]["USDT"] == {
-        "total": "1000.00", "available": "1000.00", "locked": "0.00"
-    }
+    assert report["cash"]["USDT"] == {"total": "1000.00", "available": "1000.00", "locked": "0.00"}
     assert not report["risk_ready"]
     reopened = PaperAccountSnapshotJournal(store.path, source, account_id=aid)
     assert len(reopened.snapshots()) == 1
@@ -122,16 +116,17 @@ def test_next_snapshot_captures_live_order_and_partial_close(tmp_path):
     record_sandbox_snapshot(cache, Instrument(), source, store, at_ns=NS + 3, initial_account_id=aid)
     source.append(
         event(
-            event_id="evt-2", trade_id="trade-2", client_order_id="CO-2",
-            order_side="BUY", last_qty="0.1",
+            event_id="evt-2",
+            trade_id="trade-2",
+            client_order_id="CO-2",
+            order_side="BUY",
+            last_qty="0.1",
         ),
         received_ns=NS + 5,
     )
     cache._positions = [Position("-0.15")]
     cache._orders = [Order("ACCEPTED", "CO-2", "0.1")]
-    report = record_sandbox_snapshot(
-        cache, Instrument(), source, store, at_ns=NS + 6, initial_account_id=aid
-    )
+    report = record_sandbox_snapshot(cache, Instrument(), source, store, at_ns=NS + 6, initial_account_id=aid)
     assert report["signed_quantity"] == "-0.15"
     assert report["open_orders_known_ids"] == 1
     assert not report["order_state_complete"]
@@ -149,10 +144,13 @@ def test_initial_inventory_and_other_orders_block_fresh_baseline(tmp_path):
         verify_fresh_sandbox_start(cache, Instrument(), source)
 
 
-@pytest.mark.parametrize("balance", [
-    Balance(total="1000.00", free="1001.00", locked="0.00"),
-    Balance(total="NaN", free="NaN", locked="0.00"),
-])
+@pytest.mark.parametrize(
+    "balance",
+    [
+        Balance(total="1000.00", free="1001.00", locked="0.00"),
+        Balance(total="NaN", free="NaN", locked="0.00"),
+    ],
+)
 def test_unreconciled_sandbox_balances_block_production(tmp_path, balance):
     cache, source = init(tmp_path)
     cache.account = Account(balance)
