@@ -149,7 +149,7 @@ def test_stale_and_reversed_capture_clock_fail_closed():
         (T, T + 11_000_000_000, T + 12_000_000_000, T + 13_000_000_000),
         (T, T + 1, T - 1, T + 1),
     ):
-        with pytest.raises(ValueError, match="took too long|predates"):
+        with pytest.raises(ValueError, match=r"took too long|predates"):
             parse_public_market_sample(
                 session_id=SESSION,
                 symbol=SYMBOL,
@@ -190,7 +190,7 @@ def test_duplicate_or_reordered_samples_rejected(tmp_path):
     point = parsed()
     journal.append(point)
     raw = journal.path.read_bytes()
-    with pytest.raises(ValueError, match="overlapping|repeated"):
+    with pytest.raises(ValueError, match=r"overlapping|repeated"):
         journal.append(point)
     assert journal.path.read_bytes() == raw
 
