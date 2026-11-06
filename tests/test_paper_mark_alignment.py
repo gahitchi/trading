@@ -1,7 +1,6 @@
 """Portable and replay-verified sandbox/public-market temporal alignment."""
 
 import json
-from dataclasses import replace
 
 import pytest
 
@@ -224,3 +223,65 @@ def test_replacing_historical_funding_rate_cannot_create_payment(tmp_path):
     sample = public.samples()[0]
     assert sample.historical_funding_rate == "0.00015"
     assert not hasattr(sample, "account_funding_payment")
+
+def test_readonly_cli_aligns_without_modifying_evidence(tmp_path, capsys):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_paper_mark_align
+
+    orders, account, public = evidence_pair(tmp_path)
+    originals = {p: p.read_bytes() for p in (orders.path, account.path, public.path)}
+    args = build_parser().parse_args([
+        "paper-mark-align",
+        "--orders", str(orders.path),
+        "--snapshots", str(account.path),
+        "--market", str(public.path),
+        "--session", SESSION,
+        "--symbol", SYMBOL,
+        "--account", "sandbox-1",
+    ])
+    assert cmd_paper_mark_align(None, args) == 0
+    assert '"economic_posting_allowed": false' in capsys.readouterr().out
+    assert {p: p.read_bytes() for p in originals} == originals
+
+
+def test_readonly_cli_rejects_missing_account_and_market_journals(tmp_path):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_paper_mark_align
+
+    orders, account, public = evidence_pair(tmp_path)
+    missing = tmp_path / "missing.jsonl"
+    paths = [
+        "--orders", str(orders.path),
+        "--snapshots", str(account.path),
+        "--market", str(missing),
+        "--session", SESSION,
+        "--symbol", SYMBOL,
+        "--account", "sandbox-1",
+    ]
+    with pytest.raises(SystemExit, match="preexisting"):
+        cmd_paper_mark_align(None, build_parser().parse_args(["paper-mark-align", *paths]))
+    assert not missing.exists()
+    assert not missing.with_name(missing.name + ".head.json").exists()
+    paths[paths.index(str(missing))] = str(public.path)
+    account._head.unlink()
+    with pytest.raises(SystemExit, match="preexisting"):
+        cmd_paper_mark_align(None, build_parser().parse_args(["paper-mark-align", *paths]))
+
+
+def test_cli_rejects_clock_domain_mismatch_with_simulated_epoch(tmp_path):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_paper_mark_align
+
+    orders, account, public = evidence_pair(tmp_path, sample_ns=None)
+    public.append(public_sample(1_700_000_000_000_000_000))
+    args = build_parser().parse_args([
+        "paper-mark-align",
+        "--orders", str(orders.path),
+        "--snapshots", str(account.path),
+        "--market", str(public.path),
+        "--session", SESSION,
+        "--symbol", SYMBOL,
+        "--account", "sandbox-1",
+    ])
+    with pytest.raises(SystemExit, match="stale"):
+        cmd_paper_mark_align(None, args)
