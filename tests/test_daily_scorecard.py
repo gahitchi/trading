@@ -1,6 +1,6 @@
 """Portable daily scorecard acceptance: all days, recovery, cost and capital."""
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -178,7 +178,7 @@ def test_tampered_journal_blocks_scorecard(tmp_path):
     close_day(j, "day1", 0)
     original = j.path.read_bytes()
     j.path.write_bytes(original.replace(b"1.00", b"9.00", 1))
-    with pytest.raises(ValueError, match="digest|mismatch"):
+    with pytest.raises(ValueError, match=r"digest|mismatch"):
         daily_scorecard(j, START)
 
 
@@ -186,5 +186,5 @@ def test_missing_journal_checkpoint_blocks_scorecard(tmp_path):
     j = opened(tmp_path)
     close_day(j, "day1", 0)
     j._head.unlink()
-    with pytest.raises(ValueError, match="checkpoint missing"):
+    with pytest.raises(ValueError, match="checkpoint is missing"):
         daily_scorecard(j, START)
