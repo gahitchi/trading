@@ -113,7 +113,16 @@ def record_sandbox_snapshot(
     for position in cache.positions_open():
         if str(position.instrument_id) != capture.instrument_id:
             raise ValueError("other instrument position in isolated sandbox account")
-        signed += Decimal(_exact(position.signed_qty, "sandbox signed position"))
+        side = getattr(getattr(position, "side", None), "name", None)
+        if side not in {"LONG", "SHORT"}:
+            raise ValueError("sandbox position has unknown long/short direction")
+        quantity = getattr(position, "quantity", None)
+        if quantity is None or not hasattr(quantity, "as_decimal"):
+            raise ValueError("sandbox position lacks a fixed-point native quantity")
+        amount = Decimal(_exact(quantity.as_decimal(), "sandbox position quantity"))
+        if amount <= 0:
+            raise ValueError("open sandbox position quantity must be positive")
+        signed += amount if side == "LONG" else -amount
     if signed:
         positions[capture.instrument_id] = str(signed)
     orders = _active_orders(cache, capture.instrument_id)
