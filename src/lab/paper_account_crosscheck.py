@@ -9,8 +9,12 @@ authorize orders, infer equity/margin or automatically post economic P&L.
 
 from __future__ import annotations
 
+import json
+import os
 import re
-from dataclasses import dataclass
+import stat
+from dataclasses import dataclass, fields
+from pathlib import Path
 from decimal import Decimal, InvalidOperation
 
 from lab.paper_account_snapshot import PaperAccountSnapshotJournal
@@ -48,6 +52,52 @@ class ReadOnlyAccountReport:
     positions: dict[str, str]
     open_orders: dict[str, str]
     balances: dict[str, dict[str, str]]
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate external account report key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_constant(value: str):
+    raise ValueError(f"nonfinite JSON constant in external account report: {value}")
+
+
+def load_read_only_report(path: Path) -> ReadOnlyAccountReport:
+    """Strict, size-bounded, read-only input. File content is UNTRUSTED.
+
+    This function never contacts a provider or treats self-described
+    source labels as proof of a separately authorized report origin.
+    """
+    original = Path(path)
+    if original.is_symlink():
+        raise ValueError("external account report cannot be a symbolic link")
+    fd = os.open(original, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 1_048_576:
+            raise ValueError("external account report is not a bounded regular file")
+        raw = os.read(fd, 1_048_577)
+    finally:
+        os.close(fd)
+    if not raw or len(raw) > 1_048_576:
+        raise ValueError("external account report is empty or too large")
+    try:
+        obj = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_no_duplicate_keys,
+            parse_constant=_reject_constant,
+        )
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("external account report must contain UTF-8 JSON") from exc
+    expected = {f.name for f in fields(ReadOnlyAccountReport)}
+    if not isinstance(obj, dict) or set(obj) != expected:
+        raise ValueError("external account report schema mismatch")
+    return ReadOnlyAccountReport(**obj)
 
 
 def _identifier(text: object, name: str) -> str:
