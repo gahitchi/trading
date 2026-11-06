@@ -1009,6 +1009,33 @@ def cmd_crash_release(cfg, a):
     raise SystemExit("crash holdout release is disabled on this branch until qualification is complete")
 
 
+def cmd_public_market_sample(cfg, a):
+    """Capture read-only public market data, never an account settlement."""
+    from lab.public_market_evidence import PublicMarketEvidenceJournal, fetch_public_market_sample
+
+    try:
+        # Validate and fetch BEFORE constructing the archive; a network or
+        # parsing failure must not create apparently qualified evidence.
+        sample = fetch_public_market_sample(a.session, a.symbol)
+        path = (
+            Path(a.out)
+            if a.out
+            else cfg.results_dir / "fast" / f"public-mark-{a.session}-{a.symbol}.jsonl"
+        )
+        journal = PublicMarketEvidenceJournal(path, session_id=a.session, symbol=a.symbol)
+        journal.append(sample)
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"public market sample BLOCKED: {exc}") from exc
+    print(f"recorded public USD-M mark for {sample.symbol}: {sample.mark_price} at venue time {sample.venue_mark_time_ms}")
+    print(
+        "historical funding RATE only: "
+        f"{sample.historical_funding_rate} at {sample.historical_funding_time_ms}; "
+        "no observed account payment, no qualified equity"
+    )
+    print("public exchange quote is NOT account/order evidence.")
+    return 0
+
+
 def cmd_paper_crosscheck(cfg, a):
     """Compare two supplied paper account sources; never authorize orders."""
     import json
@@ -1096,6 +1123,15 @@ def build_parser() -> argparse.ArgumentParser:
     cross.add_argument("--account", required=True, help="exact sandbox account ID")
     cross.add_argument("--max-skew-ms", type=int, default=1000, help="allowed observation skew, 0..5000 ms")
     cross.set_defaults(fn=cmd_paper_crosscheck)
+
+    market = sub.add_parser(
+        "public-market-sample",
+        help="archive Binance USD-M public mark and historical funding rate (no orders or account P&L)",
+    )
+    market.add_argument("symbol", help="USDT perpetual, e.g. BTCUSDT")
+    market.add_argument("--session", required=True, help="fresh paper session ID")
+    market.add_argument("--out", help="optional output JSONL archive path")
+    market.set_defaults(fn=cmd_public_market_sample)
 
     research = sub.add_parser("research", help="register a search plan and audit every research attempt")
     rsub = research.add_subparsers(dest="sub", required=True)
