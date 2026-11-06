@@ -283,7 +283,10 @@ class FastStrategy(RiskManagedStrategy):
         if self.paper_capture is None:
             return
         try:
-            self.paper_capture.append(event, received_ns=self.clock.timestamp_ns())
+            # Reading the Rust clock reentrantly here can borrow-fail.
+            # ts_init is the engine's event-init timestamp in the same
+            # timeline as the periodic cache snapshot, not wall-clock time.
+            self.paper_capture.append(event, received_ns=event.ts_init)
         except Exception as exc:
             _fatal_paper_evidence(self.risk, self._paper_capture_kill_file, "order", exc)
 
