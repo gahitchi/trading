@@ -1009,6 +1009,35 @@ def cmd_crash_release(cfg, a):
     raise SystemExit("crash holdout release is disabled on this branch until qualification is complete")
 
 
+def cmd_paper_settlement_check(cfg, a):
+    """Check two claimed fee/funding records; never post cash or enable trading."""
+    import json
+
+    from lab.paper_account_snapshot import PaperAccountSnapshotJournal
+    from lab.paper_settlement_claims import compare_settlement_claims, load_read_only_settlement
+    from lab.sandbox_capture import PaperOrderEventCapture
+
+    try:
+        paths = (Path(a.orders), Path(a.snapshots))
+        heads = tuple(p.with_name(p.name + ".head.json") for p in paths)
+        locks = tuple(p.with_name(p.name + ".lock") for p in paths)
+        if any(not p.is_file() or p.is_symlink() for p in (*paths, *heads, *locks)):
+            raise ValueError("complete preexisting order/account archives and checkpoints are required")
+        capture = PaperOrderEventCapture(
+            paths[0], session_id=a.session, instrument_id=a.instrument
+        )
+        account = PaperAccountSnapshotJournal(paths[1], capture, account_id=a.account)
+        report = load_read_only_settlement(Path(a.report))
+        result = compare_settlement_claims(
+            account, report, max_skew_ns=a.max_skew_ms * 1_000_000
+        )
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"paper settlement check BLOCKED: {exc}") from exc
+    print(json.dumps(result, sort_keys=True, indent=2))
+    print("DIAGNOSTIC ONLY: no authenticated funding payments, P&L posting or risk authorization.")
+    return 0
+
+
 def cmd_paper_mark_align(cfg, a):
     """Supervised read-only account/mark timing check; never posts P&L."""
     import json
@@ -1169,6 +1198,19 @@ def build_parser() -> argparse.ArgumentParser:
     alignment.add_argument("--account", required=True, help="exact sandbox account ID")
     alignment.add_argument("--max-mark-age-ms", type=int, default=5000, help="bounded 0–60000 ms mark age allowance")
     alignment.set_defaults(fn=cmd_paper_mark_align)
+
+    settlement = sub.add_parser(
+        "paper-settlement-check",
+        help="read-only sandbox fill-fee comparison and unverified account funding claims",
+    )
+    settlement.add_argument("--orders", required=True, help="existing sandbox order JSONL")
+    settlement.add_argument("--snapshots", required=True, help="existing account snapshot JSONL")
+    settlement.add_argument("--report", required=True, help="separately supplied fee/funding report JSON")
+    settlement.add_argument("--session", required=True, help="exact paper capture session")
+    settlement.add_argument("--instrument", required=True, help="exact captured instrument ID")
+    settlement.add_argument("--account", required=True, help="exact paper account ID")
+    settlement.add_argument("--max-skew-ms", type=int, default=1000, help="bounded 0..5000 ms")
+    settlement.set_defaults(fn=cmd_paper_settlement_check)
 
     research = sub.add_parser("research", help="register a search plan and audit every research attempt")
     rsub = research.add_subparsers(dest="sub", required=True)
