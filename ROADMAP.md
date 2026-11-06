@@ -163,15 +163,24 @@ risk governor and signals the persistent kill switch. See
 This is an **unverified local simulation trace**, NOT a
 complete authenticated account or qualified P&L ledger.
 
-Remaining dependencies are (1) independent sourced/verified
-market marks, full order reports, funding and cash evidence plus
-validated conversion to the economic paper archive; (2)
-account-level independent position, outstanding order,
-margin/liquidation and partial-fill reconciliation across
-restart and corrections; (3) pre-trade risk-manager integration
-and operational drill evidence. This is accounting infrastructure,
-**not** a backtested profitable strategy or an order-routing
-permission.
+A new portable `lab.paper_account_snapshot` research adapter now
+binds caller-supplied sandbox account snapshots to exact, hashed
+order-event prefixes. The append-only snapshot journal validates
+signed flat-start fill deltas, single-account scope and internal
+cash arithmetic, and records reported outstanding-order IDs.
+**The snapshot provider is not authenticated, order completeness
+and cash equity are not independently reconciled, and
+`risk_ready` is always false.** See
+[paper account snapshot contract](docs/paper-account-snapshots.md).
+
+Remaining dependencies are (1) independent sandbox account-state
+producer and verified market marks, complete order/remaining quantity
+reports, funding/cash evidence and conversion into the economic
+paper archive; (2) cross-restart, cross-source position, order,
+margin/liquidation, fee and partial-fill reconciliation;
+(3) pre-trade risk-manager integration and operational drills.
+This is accounting infrastructure, **not** a backtested profitable
+strategy or an order-routing permission.
 
 **Priority update (2026-11-05):** a time-series of **net daily P&L and cumulative
 equity growth**, not a target winning-day percentage, is the primary short-horizon
