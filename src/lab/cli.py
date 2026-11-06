@@ -1022,7 +1022,8 @@ def cmd_paper_crosscheck(cfg, a):
         # read-only verifier must NEVER create or replace audit evidence.
         paths = (Path(a.orders), Path(a.snapshots))
         heads = (p.with_name(p.name + ".head.json") for p in paths)
-        if any(not p.is_file() or p.is_symlink() for p in (*paths, *heads)):
+        locks = (p.with_name(p.name + ".lock") for p in paths)
+        if any(not p.is_file() or p.is_symlink() for p in (*paths, *heads, *locks)):
             raise ValueError("complete preexisting order/account archives and checkpoints are required")
         capture = PaperOrderEventCapture(
             paths[0], session_id=a.session, instrument_id=a.instrument
