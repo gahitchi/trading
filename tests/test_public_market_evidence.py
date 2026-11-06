@@ -248,3 +248,35 @@ def test_repaired_record_digest_does_not_silently_authorize_cash(tmp_path):
     journal.append(parsed())
     assert "funding_payment" not in json.dumps([s.__dict__ for s in journal.samples()])
     assert "realized_profit" not in json.dumps([s.__dict__ for s in journal.samples()])
+
+def test_cli_archives_public_evidence_without_nautilus_trader(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("pandas")
+    from types import SimpleNamespace
+
+    from lab.cli import build_parser, cmd_public_market_sample
+
+    monkeypatch.setattr(evidence, "fetch_public_market_sample", lambda session, symbol: parsed())
+    args = build_parser().parse_args(["public-market-sample", SYMBOL, "--session", SESSION])
+    assert cmd_public_market_sample(SimpleNamespace(results_dir=tmp_path), args) == 0
+    archive = tmp_path / "fast" / f"public-mark-{SESSION}-{SYMBOL}.jsonl"
+    journal = PublicMarketEvidenceJournal(archive, session_id=SESSION, symbol=SYMBOL)
+    assert journal.samples() == (parsed(),)
+    output = capsys.readouterr().out
+    assert "no observed account payment" in output
+    assert "NOT account/order evidence" in output
+
+
+def test_failed_public_request_does_not_initialize_archive(tmp_path, monkeypatch):
+    pytest.importorskip("pandas")
+    from types import SimpleNamespace
+
+    from lab.cli import build_parser, cmd_public_market_sample
+
+    def unavailable(_session, _symbol):
+        raise OSError("offline")
+
+    monkeypatch.setattr(evidence, "fetch_public_market_sample", unavailable)
+    args = build_parser().parse_args(["public-market-sample", SYMBOL, "--session", SESSION])
+    with pytest.raises(SystemExit, match="BLOCKED: offline"):
+        cmd_public_market_sample(SimpleNamespace(results_dir=tmp_path), args)
+    assert not (tmp_path / "fast").exists()
