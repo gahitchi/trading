@@ -36,7 +36,7 @@ def daily_scorecard(journal: ProfitJournal, through: date) -> dict:
     """
     if not isinstance(journal, ProfitJournal):
         raise ValueError("daily scorecard requires a verified profit journal")
-    if isinstance(through, type(None)) or isinstance(through, bool) or type(through) is not date:
+    if type(through) is not date:
         raise ValueError("scorecard end date must be an exact date")
 
     # events() verifies journal hash chain, checkpoint and replay while
