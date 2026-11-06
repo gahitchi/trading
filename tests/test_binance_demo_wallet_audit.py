@@ -243,11 +243,15 @@ def test_demo_wallet_cli_is_read_only_and_never_posts_pnl(tmp_path, capsys):
 
     before, after, _first, _second = files(tmp_path)
     originals = {path: path.read_bytes() for path in (before, after)}
-    args = build_parser().parse_args([
-        "demo-wallet-audit",
-        "--before", str(before),
-        "--after", str(after),
-    ])
+    args = build_parser().parse_args(
+        [
+            "demo-wallet-audit",
+            "--before",
+            str(before),
+            "--after",
+            str(after),
+        ]
+    )
     assert cmd_demo_wallet_audit(None, args) == 0
     out = capsys.readouterr().out
     assert '"economic_posting_allowed": false' in out
@@ -263,11 +267,15 @@ def test_demo_wallet_cli_denies_missing_file_without_creating_it(tmp_path):
 
     before, _after, _first, _second = files(tmp_path)
     missing = tmp_path / "not-created.json"
-    args = build_parser().parse_args([
-        "demo-wallet-audit",
-        "--before", str(before),
-        "--after", str(missing),
-    ])
+    args = build_parser().parse_args(
+        [
+            "demo-wallet-audit",
+            "--before",
+            str(before),
+            "--after",
+            str(missing),
+        ]
+    )
     with pytest.raises(SystemExit, match="BLOCKED"):
         cmd_demo_wallet_audit(None, args)
     assert not missing.exists()
@@ -278,11 +286,15 @@ def test_demo_wallet_cli_reports_residual_without_fabricated_income(tmp_path, ca
     from lab.cli import build_parser, cmd_demo_wallet_audit
 
     before, after, _first, _second = files(tmp_path, wallet="1000.0100")
-    args = build_parser().parse_args([
-        "demo-wallet-audit",
-        "--before", str(before),
-        "--after", str(after),
-    ])
+    args = build_parser().parse_args(
+        [
+            "demo-wallet-audit",
+            "--before",
+            str(before),
+            "--after",
+            str(after),
+        ]
+    )
     assert cmd_demo_wallet_audit(None, args) == 0
     out = capsys.readouterr().out
     assert '"wallet_delta_matches_claimed_income": false' in out
