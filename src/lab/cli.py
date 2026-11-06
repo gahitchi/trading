@@ -1023,14 +1023,10 @@ def cmd_paper_settlement_check(cfg, a):
         locks = tuple(p.with_name(p.name + ".lock") for p in paths)
         if any(not p.is_file() or p.is_symlink() for p in (*paths, *heads, *locks)):
             raise ValueError("complete preexisting order/account archives and checkpoints are required")
-        capture = PaperOrderEventCapture(
-            paths[0], session_id=a.session, instrument_id=a.instrument
-        )
+        capture = PaperOrderEventCapture(paths[0], session_id=a.session, instrument_id=a.instrument)
         account = PaperAccountSnapshotJournal(paths[1], capture, account_id=a.account)
         report = load_read_only_settlement(Path(a.report))
-        result = compare_settlement_claims(
-            account, report, max_skew_ns=a.max_skew_ms * 1_000_000
-        )
+        result = compare_settlement_claims(account, report, max_skew_ns=a.max_skew_ms * 1_000_000)
     except (ValueError, OSError) as exc:
         raise SystemExit(f"paper settlement check BLOCKED: {exc}") from exc
     print(json.dumps(result, sort_keys=True, indent=2))

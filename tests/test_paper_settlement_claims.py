@@ -20,9 +20,7 @@ ACCOUNT = "sandbox-1"
 
 
 def scenario(tmp_path, *, multiple=True, funding=True, commission="0.01 USDT"):
-    source = PaperOrderEventCapture(
-        tmp_path / "orders.jsonl", session_id=SESSION, instrument_id=IID
-    )
+    source = PaperOrderEventCapture(tmp_path / "orders.jsonl", session_id=SESSION, instrument_id=IID)
     source.append(event(commission=commission), received_ns=NS + 2)
     fees = [{"trade_id": "trade-1", "event_ns": NS, "currency": "USDT", "amount": "0.010"}]
     quantity = "-0.25"
@@ -41,9 +39,7 @@ def scenario(tmp_path, *, multiple=True, funding=True, commission="0.01 USDT"):
         )
         quantity = "-0.35"
         fees.append({"trade_id": "trade-2", "event_ns": NS + 3, "currency": "USDT", "amount": "0.020"})
-    journal = PaperAccountSnapshotJournal(
-        tmp_path / "account.jsonl", source, account_id=ACCOUNT
-    )
+    journal = PaperAccountSnapshotJournal(tmp_path / "account.jsonl", source, account_id=ACCOUNT)
     state = snapshot(source, identifier="snap-1", captured_ns=NS + 10, positions={IID: quantity})
     journal.append(state)
     rows = [{"payment_id": "pay-1", "event_ns": NS + 6, "currency": "USDT", "amount": "-0.0034"}] if funding else []
@@ -143,7 +139,10 @@ def test_missing_or_mismatched_claim_blocks(tmp_path, field, value, match):
         ({"trade_id": "trade-1", "event_ns": NS, "currency": "USDT", "amount": "-0.01"}, "invalid fee amount"),
         ({"trade_id": "trade-1", "event_ns": NS, "currency": "USDT", "amount": 0.01}, "bounded exact decimal string"),
         ({"trade_id": "trade-1", "event_ns": NS, "currency": "USDT", "amount": "NaN"}, "bounded exact decimal string"),
-        ({"trade_id": "trade-1", "event_ns": NS, "currency": "USDT", "amount": "1e1000000"}, "bounded exact decimal string"),
+        (
+            {"trade_id": "trade-1", "event_ns": NS, "currency": "USDT", "amount": "1e1000000"},
+            "bounded exact decimal string",
+        ),
         ({"trade_id": "trade-1", "event_ns": NS, "currency": "USDT", "amount": "0.01", "test": True}, "invalid schema"),
         ({"trade_id": "trade-1", "event_ns": NS + 20, "currency": "USDT", "amount": "0.01"}, "future-dated"),
     ],
@@ -172,7 +171,10 @@ def test_duplicate_fees_or_missing_source_commission_fail_closed(tmp_path):
         ({"payment_id": "pay-1", "event_ns": NS + 6, "currency": "USDT", "amount": "NaN"}, "bounded exact decimal"),
         ({"payment_id": "pay-1", "event_ns": NS + 6, "currency": "usd", "amount": "0.01"}, "currency"),
         ({"payment_id": "pay-1", "event_ns": NS + 6, "currency": "USDT", "amount": 0.01}, "bounded exact decimal"),
-        ({"payment_id": "pay-1", "event_ns": NS + 6, "currency": "USDT", "amount": "0.01", "extra": 0}, "invalid schema"),
+        (
+            {"payment_id": "pay-1", "event_ns": NS + 6, "currency": "USDT", "amount": "0.01", "extra": 0},
+            "invalid schema",
+        ),
     ],
 )
 def test_invalid_funding_cash_claims_rejected(tmp_path, row, match):
@@ -213,16 +215,19 @@ def test_report_is_strict_json_and_does_not_authenticate_collector(tmp_path):
     assert compare_settlement_claims(journal, loaded)["source_authenticated"] is False
 
 
-@pytest.mark.parametrize("blob", [
-    "",
-    '{"report_id":"abc","report_id":"def"}',
-    '{"funding_items":[{"payment_id":"x","payment_id":"y"}]}',
-    '{"field":NaN}',
-    '{"field":Infinity}',
-    '{"bad":"schema"}',
-    "[]",
-    "{invalid",
-])
+@pytest.mark.parametrize(
+    "blob",
+    [
+        "",
+        '{"report_id":"abc","report_id":"def"}',
+        '{"funding_items":[{"payment_id":"x","payment_id":"y"}]}',
+        '{"field":NaN}',
+        '{"field":Infinity}',
+        '{"bad":"schema"}',
+        "[]",
+        "{invalid",
+    ],
+)
 def test_report_parser_rejects_duplicates_unknown_fields_and_nonfinite_json(tmp_path, blob):
     p = tmp_path / "bad.json"
     p.write_text(blob, encoding="utf-8")
@@ -240,6 +245,7 @@ def test_parser_refuses_symlink_and_large_file(tmp_path):
     with pytest.raises(ValueError, match="symlink"):
         load_read_only_settlement(link)
 
+
 def test_settlement_cli_is_read_only_and_does_not_post_economics(tmp_path, capsys):
     pytest.importorskip("pandas")
     from lab.cli import build_parser, cmd_paper_settlement_check
@@ -248,15 +254,23 @@ def test_settlement_cli_is_read_only_and_does_not_post_economics(tmp_path, capsy
     raw = tmp_path / "settlement-report.json"
     raw.write_text(json.dumps(asdict(report)), encoding="utf-8")
     before = {p: p.read_bytes() for p in (source.path, account.path, raw)}
-    args = build_parser().parse_args([
-        "paper-settlement-check",
-        "--orders", str(source.path),
-        "--snapshots", str(account.path),
-        "--report", str(raw),
-        "--session", SESSION,
-        "--instrument", IID,
-        "--account", ACCOUNT,
-    ])
+    args = build_parser().parse_args(
+        [
+            "paper-settlement-check",
+            "--orders",
+            str(source.path),
+            "--snapshots",
+            str(account.path),
+            "--report",
+            str(raw),
+            "--session",
+            SESSION,
+            "--instrument",
+            IID,
+            "--account",
+            ACCOUNT,
+        ]
+    )
     assert cmd_paper_settlement_check(None, args) == 0
     output = capsys.readouterr().out
     assert '"funding_payment_verified": false' in output
@@ -275,12 +289,18 @@ def test_cli_refuses_missing_archives_without_creating_files(tmp_path):
     missing = tmp_path / "missing-account.jsonl"
     cli = [
         "paper-settlement-check",
-        "--orders", str(source.path),
-        "--snapshots", str(missing),
-        "--report", str(raw),
-        "--session", SESSION,
-        "--instrument", IID,
-        "--account", ACCOUNT,
+        "--orders",
+        str(source.path),
+        "--snapshots",
+        str(missing),
+        "--report",
+        str(raw),
+        "--session",
+        SESSION,
+        "--instrument",
+        IID,
+        "--account",
+        ACCOUNT,
     ]
     with pytest.raises(SystemExit, match="preexisting"):
         cmd_paper_settlement_check(None, build_parser().parse_args(cli))
@@ -299,14 +319,22 @@ def test_cli_blocks_forged_fee_disagreement(tmp_path):
     source, account, report = scenario(tmp_path)
     raw = tmp_path / "fake.json"
     raw.write_text(json.dumps(asdict(replace(report, fee_items=[]))), encoding="utf-8")
-    args = build_parser().parse_args([
-        "paper-settlement-check",
-        "--orders", str(source.path),
-        "--snapshots", str(account.path),
-        "--report", str(raw),
-        "--session", SESSION,
-        "--instrument", IID,
-        "--account", ACCOUNT,
-    ])
+    args = build_parser().parse_args(
+        [
+            "paper-settlement-check",
+            "--orders",
+            str(source.path),
+            "--snapshots",
+            str(account.path),
+            "--report",
+            str(raw),
+            "--session",
+            SESSION,
+            "--instrument",
+            IID,
+            "--account",
+            ACCOUNT,
+        ]
+    )
     with pytest.raises(SystemExit, match="BLOCKED"):
         cmd_paper_settlement_check(None, args)
