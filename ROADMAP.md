@@ -173,14 +173,25 @@ and cash equity are not independently reconciled, and
 `risk_ready` is always false.** See
 [paper account snapshot contract](docs/paper-account-snapshots.md).
 
-Remaining dependencies are (1) independent sandbox account-state
-producer and verified market marks, complete order/remaining quantity
-reports, funding/cash evidence and conversion into the economic
-paper archive; (2) cross-restart, cross-source position, order,
-margin/liquidation, fee and partial-fill reconciliation;
-(3) pre-trade risk-manager integration and operational drills.
-This is accounting infrastructure, **not** a backtested profitable
-strategy or an order-routing permission.
+The next optional supervised adapter now reads actual **local
+NautilusTrader sandbox account cache** orders, positions and
+exact-Decimal cash balances, captures a flat-start baseline, and
+persists periodic or replay-terminal snapshots matched to the
+hash-linked simulated execution receipts. Its real NautilusTrader
+callback and timer paths have native CI integration tests; see
+[the sandbox snapshot integration contract](docs/nautilus-snapshot-integration.md).
+These are still **self-consistent local sandbox sources**, not
+independently authenticated broker statements, complete order
+reconciliation, qualified marked equity, or risk authorization.
+
+Remaining dependencies are (1) an independent sandbox
+account-report source, verified market marks and fully accounted
+order/remaining-quantity, funding/cash evidence, followed by
+validated conversion to the economic paper journal; (2)
+cross-source and cross-restart position, margin/liquidation, fee
+and partial-fill reconciliation; (3) operational risk-gate drills
+and strategy qualification. This is research infrastructure,
+**not** a demonstrated profitable edge or live-order permission.
 
 **Priority update (2026-11-05):** a time-series of **net daily P&L and cumulative
 equity growth**, not a target winning-day percentage, is the primary short-horizon
