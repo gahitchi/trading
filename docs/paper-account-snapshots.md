@@ -6,11 +6,13 @@ order submission. Only the `chatgpt/codex-maintenance` branch is changed.
 
 ## Trust boundary
 
-A snapshot here is supplied by an **external caller** and carries
-`source_kind="sandbox-cache"`; the source name, signed booleans and hash
-**do not authenticate** the provider. Without independently archived
-NautilusTrader cache, wallet and order-report evidence, this is a
-validation *interface*, not qualified broker/account reconciliation.
+A snapshot here is supplied by a **caller**, which may now be the
+opt-in real NautilusTrader **local cache producer**
+(`lab.nautilus_snapshot`; see [integration](nautilus-snapshot-integration.md)).
+The `source_kind="sandbox-cache"` label, signed booleans and hash
+**do not authenticate** the provider. The cache and the order callbacks
+come from the same simulated engine; without a truly independent
+account statement, this remains unqualified broker/account reconciliation.
 
 `PaperAccountSnapshot` requires:
 
@@ -67,10 +69,11 @@ can forge a consistent history.
 
 ## Required follow-up
 
-1. Implement an independently captured NautilusTrader sandbox
-   account-state producer with stable account, order and position IDs,
-   full open orders and remaining quantities, fill/fee/source chain
-   and explicit session reset/flat-start evidence.
+1. The NautilusTrader **local cache** producer is now implemented
+   and native-engine tested. Still required: an independently
+   corroborated account/report source with full open-order and
+   remaining-quantity evidence, fill/fee provenance and authenticated
+   session reset/flat-start evidence.
 2. Add real capture timestamps and snapshot/receipt synchronization;
    test lost events, partial fills, position marks, corrections,
    disconnect, restart with open inventory, concurrent readers and
