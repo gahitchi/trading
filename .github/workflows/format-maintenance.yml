@@ -1,0 +1,28 @@
+name: Temporary Ruff format for paper account snapshots
+on:
+  push:
+    branches:
+      - chatgpt/codex-maintenance
+    paths:
+      - .github/workflows/format-maintenance.yml
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Format only new snapshot modules
+        run: |
+          uvx ruff format src/lab/paper_account_snapshot.py src/lab/sandbox_capture.py tests/test_paper_account_snapshot.py
+          git diff --check
+      - name: Commit mechanical formatting
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lab/paper_account_snapshot.py src/lab/sandbox_capture.py tests/test_paper_account_snapshot.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'style: Ruff-format paper account snapshot implementation'
+            git push origin HEAD:chatgpt/codex-maintenance
+          fi
