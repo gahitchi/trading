@@ -2,6 +2,7 @@
 
 import json
 from copy import deepcopy
+from decimal import Decimal
 
 import pytest
 
@@ -396,6 +397,4 @@ def test_large_income_totals_do_not_hide_microsettlement():
     assert Decimal(result["income_claims_by_type_currency"]["COMMISSION:USDT"]) == Decimal(
         "1000000000000000000000000.000000000000000001"
     )
-    assert result["actual_cash_settlements_verified"] is False if "actual_cash_settlements_verified" in result else (
-        result["economic_posting_allowed"] is False
-    )
+    assert result["economic_posting_allowed"] is False
