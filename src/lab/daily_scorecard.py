@@ -146,31 +146,33 @@ def daily_scorecard(journal: ProfitJournal, through: date) -> dict:
         slip_total += slip
         trade_funding_total += trade_funding
         funding_adjustment_total += funding_adjustment
-        samples.append({
-            "day": day.isoformat(),
-            "net_pnl": _str(row.net_pnl),
-            "realized_net_pnl": _str(row.realized_net_pnl),
-            "unrealized_change": _str(row.unrealized_change),
-            "external_flows": _str(row.external_flows),
-            "start_equity": _str(row.start_equity),
-            "end_equity": _str(row.end_equity),
-            "flow_neutral_equity": _str(neutral_equity),
-            "daily_return_on_start_equity_pct": ret,
-            "cumulative_net_pnl": _str(running_pnl),
-            "trade_event_count": trades,
-            "zero_trade_day": trades == 0,
-            "trade_fees": _str(fees),
-            "trade_slippage": _str(slip),
-            "trade_funding_included": _str(trade_funding),
-            "standalone_funding_adjustments": _str(funding_adjustment),
-            "cash_adjustments_including_funding": _str(cash_adjustments_by_day.get(day, _ZERO)),
-            "reinvested_realized_profit": _str(row.reinvested_profit),
-            "retained_realized_profit": _str(row.retained_profit),
-            "deployable": _str(row.deployable),
-            "reserve": _str(row.reserve),
-            "open_unrealized": _str(row.open_unrealized),
-            "flow_neutral_drawdown": _str(drawdown),
-        })
+        samples.append(
+            {
+                "day": day.isoformat(),
+                "net_pnl": _str(row.net_pnl),
+                "realized_net_pnl": _str(row.realized_net_pnl),
+                "unrealized_change": _str(row.unrealized_change),
+                "external_flows": _str(row.external_flows),
+                "start_equity": _str(row.start_equity),
+                "end_equity": _str(row.end_equity),
+                "flow_neutral_equity": _str(neutral_equity),
+                "daily_return_on_start_equity_pct": ret,
+                "cumulative_net_pnl": _str(running_pnl),
+                "trade_event_count": trades,
+                "zero_trade_day": trades == 0,
+                "trade_fees": _str(fees),
+                "trade_slippage": _str(slip),
+                "trade_funding_included": _str(trade_funding),
+                "standalone_funding_adjustments": _str(funding_adjustment),
+                "cash_adjustments_including_funding": _str(cash_adjustments_by_day.get(day, _ZERO)),
+                "reinvested_realized_profit": _str(row.reinvested_profit),
+                "retained_realized_profit": _str(row.retained_profit),
+                "deployable": _str(row.deployable),
+                "reserve": _str(row.reserve),
+                "open_unrealized": _str(row.open_unrealized),
+                "flow_neutral_drawdown": _str(drawdown),
+            }
+        )
 
     if sum((r.net_pnl for r in days), _ZERO) != running_pnl or running_pnl != Decimal(base["net_pnl"]):
         raise ValueError("reported and independently aggregated daily net P&L disagree")

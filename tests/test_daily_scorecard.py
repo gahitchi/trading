@@ -85,10 +85,16 @@ def test_external_deposit_does_not_fabricate_profit_or_eliminate_drawdown(tmp_pa
 
 def test_fees_slippage_and_funding_are_descriptive_not_double_counted(tmp_path):
     j = opened(tmp_path)
-    j.append(trade(
-        "filled", "10.00", gross="11.30", fees="1.00",
-        slippage="0.50", funding="0.20",
-    ))
+    j.append(
+        trade(
+            "filled",
+            "10.00",
+            gross="11.30",
+            fees="1.00",
+            slippage="0.50",
+            funding="0.20",
+        )
+    )
     j.append(event("fee", "adjustment", "-0.05", minutes=2, reason="fee"))
     j.append(event("funding", "adjustment", "-0.03", minutes=3, reason="funding"))
     close_day(j, "d1", 0)
@@ -189,6 +195,7 @@ def test_missing_journal_checkpoint_blocks_scorecard(tmp_path):
     with pytest.raises(ValueError, match="checkpoint is missing"):
         daily_scorecard(j, START)
 
+
 def test_scorecard_cli_is_read_only_and_requires_matching_frozen_policy(tmp_path, capsys):
     pytest.importorskip("pandas")
     from lab.cli import build_parser, cmd_daily_scorecard
@@ -199,14 +206,22 @@ def test_scorecard_cli_is_read_only_and_requires_matching_frozen_policy(tmp_path
     initial = j.path.read_bytes()
     argv = [
         "daily-scorecard",
-        "--journal", str(j.path),
-        "--start-day", START.isoformat(),
-        "--through", START.isoformat(),
-        "--currency", "USD",
-        "--initial-capital", "1000.00",
-        "--quantum", "0.01",
-        "--reinvest-fraction", "0.5",
-        "--max-deployable", "1500.00",
+        "--journal",
+        str(j.path),
+        "--start-day",
+        START.isoformat(),
+        "--through",
+        START.isoformat(),
+        "--currency",
+        "USD",
+        "--initial-capital",
+        "1000.00",
+        "--quantum",
+        "0.01",
+        "--reinvest-fraction",
+        "0.5",
+        "--max-deployable",
+        "1500.00",
     ]
     args = build_parser().parse_args(argv)
     assert cmd_daily_scorecard(None, args) == 0
@@ -227,13 +242,20 @@ def test_scorecard_cli_never_constructs_missing_economic_journal(tmp_path):
     missing = tmp_path / "does-not-exist.jsonl"
     argv = [
         "daily-scorecard",
-        "--journal", str(missing),
-        "--start-day", START.isoformat(),
-        "--through", START.isoformat(),
-        "--currency", "USD",
-        "--initial-capital", "1000.00",
-        "--quantum", "0.01",
-        "--reinvest-fraction", "0.5",
+        "--journal",
+        str(missing),
+        "--start-day",
+        START.isoformat(),
+        "--through",
+        START.isoformat(),
+        "--currency",
+        "USD",
+        "--initial-capital",
+        "1000.00",
+        "--quantum",
+        "0.01",
+        "--reinvest-fraction",
+        "0.5",
     ]
     with pytest.raises(SystemExit, match="preexisting"):
         cmd_daily_scorecard(None, build_parser().parse_args(argv))
