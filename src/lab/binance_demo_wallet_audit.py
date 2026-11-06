@@ -89,7 +89,6 @@ def compare_demo_wallet_exports(before: Path, after: Path) -> dict:
         }
         unexplained = {asset: deltas[asset] - totals[asset] for asset in deltas}
         exact = all(amount == 0 for amount in unexplained.values())
-        str_value = lambda x: format(x, "f")
         return {
             "status": "wallet_delta_consistent_unverified" if exact else "wallet_delta_unexplained",
             "session_id": first["session_id"],
@@ -98,9 +97,9 @@ def compare_demo_wallet_exports(before: Path, after: Path) -> dict:
             "current_source_sha256": second_sha,
             "period_start_ns": lower,
             "period_end_ns": upper,
-            "currency_wallet_delta": {k: str_value(v) for k, v in sorted(deltas.items())},
-            "currency_income_claims": {k: str_value(v) for k, v in sorted(totals.items())},
-            "currency_unexplained_residual": {k: str_value(v) for k, v in sorted(unexplained.items())},
+            "currency_wallet_delta": {k: format(v, "f") for k, v in sorted(deltas.items())},
+            "currency_income_claims": {k: format(v, "f") for k, v in sorted(totals.items())},
+            "currency_unexplained_residual": {k: format(v, "f") for k, v in sorted(unexplained.items())},
             "income_claim_count": len(source_ids),
             "unknown_income_types": sorted(unknown_types),
             "wallet_delta_matches_claimed_income": exact,
