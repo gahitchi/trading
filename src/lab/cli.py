@@ -1024,9 +1024,7 @@ def cmd_paper_mark_align(cfg, a):
         locks = tuple(path.with_name(path.name + ".lock") for path in paths)
         if any(not path.is_file() or path.is_symlink() for path in (*paths, *heads, *locks)):
             raise ValueError("complete preexisting order/account/market evidence and checkpoints are required")
-        capture = PaperOrderEventCapture(
-            paths[0], session_id=a.session, instrument_id=f"{a.symbol}-PERP.BINANCE"
-        )
+        capture = PaperOrderEventCapture(paths[0], session_id=a.session, instrument_id=f"{a.symbol}-PERP.BINANCE")
         account = PaperAccountSnapshotJournal(paths[1], capture, account_id=a.account)
         market = PublicMarketEvidenceJournal(paths[2], session_id=a.session, symbol=a.symbol)
         result = align_paper_account_mark(account, market, max_age_ns=a.max_mark_age_ms * 1_000_000)
@@ -1169,9 +1167,7 @@ def build_parser() -> argparse.ArgumentParser:
     alignment.add_argument("--session", required=True, help="exact matching capture session ID")
     alignment.add_argument("--symbol", required=True, help="USD-M USDT perpetual symbol, e.g. BTCUSDT")
     alignment.add_argument("--account", required=True, help="exact sandbox account ID")
-    alignment.add_argument(
-        "--max-mark-age-ms", type=int, default=5000, help="bounded 0–60000 ms mark age allowance"
-    )
+    alignment.add_argument("--max-mark-age-ms", type=int, default=5000, help="bounded 0–60000 ms mark age allowance")
     alignment.set_defaults(fn=cmd_paper_mark_align)
 
     research = sub.add_parser("research", help="register a search plan and audit every research attempt")

@@ -33,12 +33,14 @@ def public_sample(
         "nextFundingTime": t + 4 * 3_600_000,
         "time": t + 1000 if mark_time_ms is None else mark_time_ms,
     }
-    history = [{
-        "symbol": symbol,
-        "fundingTime": t - 8 * 3_600_000,
-        "fundingRate": "0.00015",
-        "markPrice": "100.00",
-    }]
+    history = [
+        {
+            "symbol": symbol,
+            "fundingTime": t - 8 * 3_600_000,
+            "fundingRate": "0.00015",
+            "markPrice": "100.00",
+        }
+    ]
     return parse_public_market_sample(
         session_id=session,
         symbol=symbol,
@@ -52,20 +54,18 @@ def public_sample(
 
 
 def evidence_pair(tmp_path, *, account_ns=NS + 10 * SECOND, sample_ns=NS + 4 * SECOND):
-    orders = PaperOrderEventCapture(
-        tmp_path / "orders.jsonl", session_id=SESSION, instrument_id=IID
-    )
+    orders = PaperOrderEventCapture(tmp_path / "orders.jsonl", session_id=SESSION, instrument_id=IID)
     orders.append(event(), received_ns=NS + 2)
-    account = PaperAccountSnapshotJournal(
-        tmp_path / "account.jsonl", orders, account_id="sandbox-1"
+    account = PaperAccountSnapshotJournal(tmp_path / "account.jsonl", orders, account_id="sandbox-1")
+    account.append(
+        snapshot(
+            orders,
+            identifier="snap-a",
+            captured_ns=account_ns,
+            positions={IID: "-0.25"},
+        )
     )
-    account.append(snapshot(
-        orders, identifier="snap-a", captured_ns=account_ns,
-        positions={IID: "-0.25"},
-    ))
-    public = PublicMarketEvidenceJournal(
-        tmp_path / "marks.jsonl", session_id=SESSION, symbol=SYMBOL
-    )
+    public = PublicMarketEvidenceJournal(tmp_path / "marks.jsonl", session_id=SESSION, symbol=SYMBOL)
     if sample_ns is not None:
         public.append(public_sample(sample_ns))
     return orders, account, public
@@ -92,12 +92,8 @@ def test_recent_mark_is_diagnostic_and_never_posts_funding_or_equity(tmp_path):
 def test_archives_can_reopen_and_produce_same_mark_anchor(tmp_path):
     orders, account, public = evidence_pair(tmp_path)
     first = align_paper_account_mark(account, public)
-    recreated_account = PaperAccountSnapshotJournal(
-        account.path, orders, account_id="sandbox-1"
-    )
-    recreated_public = PublicMarketEvidenceJournal(
-        public.path, session_id=SESSION, symbol=SYMBOL
-    )
+    recreated_account = PaperAccountSnapshotJournal(account.path, orders, account_id="sandbox-1")
+    recreated_public = PublicMarketEvidenceJournal(public.path, session_id=SESSION, symbol=SYMBOL)
     assert align_paper_account_mark(recreated_account, recreated_public) == first
 
 
@@ -128,30 +124,31 @@ def test_market_session_and_instrument_must_match(tmp_path):
 
 
 def test_historical_rate_fetch_after_snapshot_must_not_be_used(tmp_path):
-    _orders, account, public = evidence_pair(
-        tmp_path, account_ns=NS + 6 * SECOND, sample_ns=NS + 4 * SECOND
-    )
+    _orders, account, public = evidence_pair(tmp_path, account_ns=NS + 6 * SECOND, sample_ns=NS + 4 * SECOND)
     with pytest.raises(ValueError, match="no fully observed"):
         align_paper_account_mark(account, public)
 
 
 def test_future_venue_mark_timestamp_never_anchors_earlier_account(tmp_path):
-    _orders, account, public = evidence_pair(
-        tmp_path, account_ns=NS + 7 * SECOND + 200_000_000, sample_ns=None
+    _orders, account, public = evidence_pair(tmp_path, account_ns=NS + 7 * SECOND + 200_000_000, sample_ns=None)
+    public.append(
+        public_sample(
+            NS + 4 * SECOND,
+            mark_time_ms=(NS + 7 * SECOND + 500_000_000) // 1_000_000,
+        )
     )
-    public.append(public_sample(
-        NS + 4 * SECOND,
-        mark_time_ms=(NS + 7 * SECOND + 500_000_000) // 1_000_000,
-    ))
     with pytest.raises(ValueError, match="no fully observed"):
         align_paper_account_mark(account, public)
 
 
-@pytest.mark.parametrize("start", [
-    NS - 50 * SECOND,
-    NS - 10 * SECOND,
-    NS - 2 * SECOND,
-])
+@pytest.mark.parametrize(
+    "start",
+    [
+        NS - 50 * SECOND,
+        NS - 10 * SECOND,
+        NS - 2 * SECOND,
+    ],
+)
 def test_old_market_mark_fails_explicit_freshness(tmp_path, start):
     _orders, account, public = evidence_pair(tmp_path, sample_ns=start)
     with pytest.raises(ValueError, match="stale"):
@@ -178,17 +175,13 @@ def test_newer_market_sample_not_available_to_earlier_account_is_ignored(tmp_pat
 
 
 def test_newer_eligible_public_sample_is_selected(tmp_path):
-    _orders, account, public = evidence_pair(
-        tmp_path, account_ns=NS + 35 * SECOND, sample_ns=NS + 4 * SECOND
-    )
+    _orders, account, public = evidence_pair(tmp_path, account_ns=NS + 35 * SECOND, sample_ns=NS + 4 * SECOND)
     public.append(public_sample(NS + 29 * SECOND, mark_price="99.9900"))
     assert align_paper_account_mark(account, public)["mark_price"] == "99.9900"
 
 
 def test_stale_older_mark_cannot_rescue_a_too_new_mark(tmp_path):
-    _orders, account, public = evidence_pair(
-        tmp_path, account_ns=NS + 35 * SECOND, sample_ns=NS + 4 * SECOND
-    )
+    _orders, account, public = evidence_pair(tmp_path, account_ns=NS + 35 * SECOND, sample_ns=NS + 4 * SECOND)
     public.append(public_sample(NS + 34 * SECOND, mark_price="99.9900"))
     with pytest.raises(ValueError, match="stale"):
         align_paper_account_mark(account, public)
@@ -224,21 +217,30 @@ def test_replacing_historical_funding_rate_cannot_create_payment(tmp_path):
     assert sample.historical_funding_rate == "0.00015"
     assert not hasattr(sample, "account_funding_payment")
 
+
 def test_readonly_cli_aligns_without_modifying_evidence(tmp_path, capsys):
     pytest.importorskip("pandas")
     from lab.cli import build_parser, cmd_paper_mark_align
 
     orders, account, public = evidence_pair(tmp_path)
     originals = {p: p.read_bytes() for p in (orders.path, account.path, public.path)}
-    args = build_parser().parse_args([
-        "paper-mark-align",
-        "--orders", str(orders.path),
-        "--snapshots", str(account.path),
-        "--market", str(public.path),
-        "--session", SESSION,
-        "--symbol", SYMBOL,
-        "--account", "sandbox-1",
-    ])
+    args = build_parser().parse_args(
+        [
+            "paper-mark-align",
+            "--orders",
+            str(orders.path),
+            "--snapshots",
+            str(account.path),
+            "--market",
+            str(public.path),
+            "--session",
+            SESSION,
+            "--symbol",
+            SYMBOL,
+            "--account",
+            "sandbox-1",
+        ]
+    )
     assert cmd_paper_mark_align(None, args) == 0
     assert '"economic_posting_allowed": false' in capsys.readouterr().out
     assert {p: p.read_bytes() for p in originals} == originals
@@ -251,12 +253,18 @@ def test_readonly_cli_rejects_missing_account_and_market_journals(tmp_path):
     orders, account, public = evidence_pair(tmp_path)
     missing = tmp_path / "missing.jsonl"
     paths = [
-        "--orders", str(orders.path),
-        "--snapshots", str(account.path),
-        "--market", str(missing),
-        "--session", SESSION,
-        "--symbol", SYMBOL,
-        "--account", "sandbox-1",
+        "--orders",
+        str(orders.path),
+        "--snapshots",
+        str(account.path),
+        "--market",
+        str(missing),
+        "--session",
+        SESSION,
+        "--symbol",
+        SYMBOL,
+        "--account",
+        "sandbox-1",
     ]
     with pytest.raises(SystemExit, match="preexisting"):
         cmd_paper_mark_align(None, build_parser().parse_args(["paper-mark-align", *paths]))
@@ -274,14 +282,22 @@ def test_cli_rejects_clock_domain_mismatch_with_simulated_epoch(tmp_path):
 
     orders, account, public = evidence_pair(tmp_path, sample_ns=None)
     public.append(public_sample(1_700_000_000_000_000_000))
-    args = build_parser().parse_args([
-        "paper-mark-align",
-        "--orders", str(orders.path),
-        "--snapshots", str(account.path),
-        "--market", str(public.path),
-        "--session", SESSION,
-        "--symbol", SYMBOL,
-        "--account", "sandbox-1",
-    ])
+    args = build_parser().parse_args(
+        [
+            "paper-mark-align",
+            "--orders",
+            str(orders.path),
+            "--snapshots",
+            str(account.path),
+            "--market",
+            str(public.path),
+            "--session",
+            SESSION,
+            "--symbol",
+            SYMBOL,
+            "--account",
+            "sandbox-1",
+        ]
+    )
     with pytest.raises(SystemExit, match="stale"):
         cmd_paper_mark_align(None, args)

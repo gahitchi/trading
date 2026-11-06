@@ -287,6 +287,7 @@ def test_failed_public_request_does_not_initialize_archive(tmp_path, monkeypatch
         cmd_public_market_sample(SimpleNamespace(results_dir=tmp_path), args)
     assert not (tmp_path / "fast").exists()
 
+
 def test_public_rest_funding_request_cannot_overlap_mark_acquisition():
     mark, history = responses()
     with pytest.raises(ValueError, match="predates completion of mark request"):
