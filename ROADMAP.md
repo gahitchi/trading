@@ -248,6 +248,20 @@ No simulator identity mapping, P&L journal connection or trading
 authorization is provided. The repository prohibits API-key
 access without the user's explicit decision.
 
+The read-only `lab.binance_demo_wallet_audit` diagnostic now
+compares **two successive offline demo account exports** with
+an identical claimed account alias, verified file integrity,
+nonoverlapping acquisition times and income-query interval coverage.
+It reports exact per-currency wallet differences minus claimed
+income movements, including **unexplained residuals**, while refusing
+transactions inside non-atomic sampling windows or changed wallet
+currency inventories. A `lab demo-wallet-audit` CLI is available;
+see [offline wallet audit](docs/binance-demo-wallet-audit.md).
+Neither matching income nor positive wallet residuals can become
+economic postings, reinvestment capital or trading authorization.
+This remains **unverified local data**, not a genuine custody
+reconciliation.
+
 Remaining dependencies are (1) user-approved, independently
 **authenticated** demo account read-only collection, verified
 coverage and consistency of separately sampled endpoints, and
