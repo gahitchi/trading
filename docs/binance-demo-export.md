@@ -82,7 +82,15 @@ position map must agree across account/positionRisk responses.
 Open orders are checked for client ID uniqueness, recognized
 nonterminal states and exact positive remaining quantity:
 `origQty - executedQty`. Cash, position and income amounts are
-strict decimal strings, never binary floats.
+strict decimal strings, never binary floats. Arithmetic for
+wallet + unrealized P&L = margin balance, order remaining
+quantity and per-income-type totals uses an explicit high-precision
+Decimal context: **Python's default 28-digit precision is insufficient
+for the permitted 25-digit integer and 18-digit fractional fields**.
+Regression tests establish that microamounts are neither silently
+lost nor fabricated as matching margins alongside large balances.
+These extreme-value tests check parser arithmetic, not a claim
+that a real demo wallet holds such a balance.
 
 Income history must use its full unfiltered type coverage and
 strict start/end window, with unique `(incomeType, tranId)` pairs
