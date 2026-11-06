@@ -239,3 +239,74 @@ def test_parser_refuses_symlink_and_large_file(tmp_path):
     link.symlink_to(p)
     with pytest.raises(ValueError, match="symlink"):
         load_read_only_settlement(link)
+
+def test_settlement_cli_is_read_only_and_does_not_post_economics(tmp_path, capsys):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_paper_settlement_check
+
+    source, account, report = scenario(tmp_path)
+    raw = tmp_path / "settlement-report.json"
+    raw.write_text(json.dumps(asdict(report)), encoding="utf-8")
+    before = {p: p.read_bytes() for p in (source.path, account.path, raw)}
+    args = build_parser().parse_args([
+        "paper-settlement-check",
+        "--orders", str(source.path),
+        "--snapshots", str(account.path),
+        "--report", str(raw),
+        "--session", SESSION,
+        "--instrument", IID,
+        "--account", ACCOUNT,
+    ])
+    assert cmd_paper_settlement_check(None, args) == 0
+    output = capsys.readouterr().out
+    assert '"funding_payment_verified": false' in output
+    assert '"risk_ready": false' in output
+    assert "no authenticated funding" in output
+    assert before == {p: p.read_bytes() for p in before}
+
+
+def test_cli_refuses_missing_archives_without_creating_files(tmp_path):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_paper_settlement_check
+
+    source, account, report = scenario(tmp_path)
+    raw = tmp_path / "settlement-report.json"
+    raw.write_text(json.dumps(asdict(report)), encoding="utf-8")
+    missing = tmp_path / "missing-account.jsonl"
+    cli = [
+        "paper-settlement-check",
+        "--orders", str(source.path),
+        "--snapshots", str(missing),
+        "--report", str(raw),
+        "--session", SESSION,
+        "--instrument", IID,
+        "--account", ACCOUNT,
+    ]
+    with pytest.raises(SystemExit, match="preexisting"):
+        cmd_paper_settlement_check(None, build_parser().parse_args(cli))
+    assert not missing.exists()
+    assert not missing.with_name(missing.name + ".head.json").exists()
+    cli[cli.index(str(missing))] = str(account.path)
+    account._head.unlink()
+    with pytest.raises(SystemExit, match="preexisting"):
+        cmd_paper_settlement_check(None, build_parser().parse_args(cli))
+
+
+def test_cli_blocks_forged_fee_disagreement(tmp_path):
+    pytest.importorskip("pandas")
+    from lab.cli import build_parser, cmd_paper_settlement_check
+
+    source, account, report = scenario(tmp_path)
+    raw = tmp_path / "fake.json"
+    raw.write_text(json.dumps(asdict(replace(report, fee_items=[]))), encoding="utf-8")
+    args = build_parser().parse_args([
+        "paper-settlement-check",
+        "--orders", str(source.path),
+        "--snapshots", str(account.path),
+        "--report", str(raw),
+        "--session", SESSION,
+        "--instrument", IID,
+        "--account", ACCOUNT,
+    ])
+    with pytest.raises(SystemExit, match="BLOCKED"):
+        cmd_paper_settlement_check(None, args)
