@@ -2,11 +2,12 @@
 
 import json
 from copy import deepcopy
+from decimal import Decimal
 
 import pytest
 
 from lab.binance_demo_wallet_audit import compare_demo_wallet_exports
-from tests.test_binance_demo_export import T, T_MS, bundle
+from tests.test_binance_demo_export import T_MS, T, bundle
 
 NS_MS = 1_000_000
 SECOND = 1_000_000_000
@@ -33,7 +34,7 @@ def files(tmp_path, *, gap_income="-0.0500", wallet="999.95000000", extra_income
         second["income"].append(extra_income)
     second["account"]["totalWalletBalance"] = wallet
     second["account"]["totalMarginBalance"] = str(
-        __import__("decimal").Decimal(wallet) + __import__("decimal").Decimal("1.25")
+        Decimal(wallet) + Decimal("1.25")
     )
     second["account"]["assets"][0]["walletBalance"] = wallet
     second["balances"][0]["balance"] = wallet
@@ -75,14 +76,14 @@ def test_unexplained_loss_must_not_be_silently_filled_with_profit(tmp_path):
     report = compare_demo_wallet_exports(before, after)
     assert report["status"] == "wallet_delta_unexplained"
     assert report["wallet_delta_matches_claimed_income"] is False
-    assert report["currency_unexplained_residual"]["USDT"] == "-0.0500"
+    assert Decimal(report["currency_unexplained_residual"]["USDT"]) == Decimal("-0.0500")
     assert not report["economic_posting_allowed"]
 
 
 def test_unexplained_gain_must_not_be_booked_as_realized_pnl(tmp_path):
     before, after, _first, _second = files(tmp_path, wallet="1000.0100")
     report = compare_demo_wallet_exports(before, after)
-    assert report["currency_unexplained_residual"]["USDT"] == "0.0600"
+    assert Decimal(report["currency_unexplained_residual"]["USDT"]) == Decimal("0.0600")
     assert not report["economic_posting_allowed"]
 
 
@@ -158,7 +159,7 @@ def test_repeated_identical_export_is_not_second_observation(tmp_path):
     T_MS + 101_000,  # later account collection interval
 ])
 def test_income_inside_nonatomic_collection_window_is_ambiguous(tmp_path, event_ms):
-    before, after, first, second = files(tmp_path)
+    before, after, _first, second = files(tmp_path)
     second["income_end_ms"] = (T_MS + 103_000)
     second["income"][0]["time"] = event_ms
     if event_ms == T_MS + 1_000:
@@ -190,7 +191,7 @@ def test_unrelated_earlier_income_overlap_is_not_double_counted(tmp_path):
 
 
 def test_outside_wallet_asset_is_blocked(tmp_path):
-    before, after, first, second = files(tmp_path)
+    before, after, _first, second = files(tmp_path)
     second["income"].append({
         "symbol": "", "incomeType": "TRANSFER",
         "income": "1.00", "asset": "BNB", "time": T_MS + 40_000, "tranId": 999,
