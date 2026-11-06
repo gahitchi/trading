@@ -2,8 +2,8 @@
 
 import os
 from decimal import Decimal
-from itertools import pairwise
 from importlib.util import find_spec
+from itertools import pairwise
 from types import SimpleNamespace
 
 import pytest
