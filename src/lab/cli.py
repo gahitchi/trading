@@ -1018,11 +1018,17 @@ def cmd_paper_crosscheck(cfg, a):
     from lab.sandbox_capture import PaperOrderEventCapture
 
     try:
+        # The archive constructors can initialize a missing journal. This
+        # read-only verifier must NEVER create or replace audit evidence.
+        paths = (Path(a.orders), Path(a.snapshots))
+        heads = (p.with_name(p.name + ".head.json") for p in paths)
+        if any(not p.is_file() or p.is_symlink() for p in (*paths, *heads)):
+            raise ValueError("complete preexisting order/account archives and checkpoints are required")
         capture = PaperOrderEventCapture(
-            Path(a.orders), session_id=a.session, instrument_id=a.instrument
+            paths[0], session_id=a.session, instrument_id=a.instrument
         )
         journal = PaperAccountSnapshotJournal(
-            Path(a.snapshots), capture, account_id=a.account
+            paths[1], capture, account_id=a.account
         )
         report = load_read_only_report(Path(a.external_report))
         result = compare_read_only_report(
