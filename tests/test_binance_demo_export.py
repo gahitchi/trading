@@ -30,12 +30,10 @@ def bundle():
             "totalMarginBalance": "1001.25000000",
             "totalInitialMargin": "25.00",
             "totalMaintMargin": "10.00",
-            "assets": [
-                {"asset": "USDT", "walletBalance": "1000.00000000"}
-            ],
+            "assets": [{"asset": "USDT", "walletBalance": "1000.00000000"}],
             "positions": [
                 {"symbol": "BTCUSDT", "positionSide": "BOTH", "positionAmt": "-0.25"},
-                {"symbol": "ETHUSDT", "positionSide": "BOTH", "positionAmt": "0"}
+                {"symbol": "ETHUSDT", "positionSide": "BOTH", "positionAmt": "0"},
             ],
         },
         "balances": [
@@ -185,8 +183,30 @@ def test_mismatched_or_duplicate_assets_cannot_be_silent():
         ("position_risk", {"symbol": "BTCUSDT", "positionSide": "BOTH", "positionAmt": "0.1"}, "disagree"),
         ("position_risk", {"symbol": "BTCUSDT", "positionSide": "LONG", "positionAmt": "0.25"}, "hedged"),
         ("position_risk", {"symbol": "BTCUSDC", "positionSide": "BOTH", "positionAmt": "0.1"}, "unsupported"),
-        ("open_orders", {"symbol": "BTCUSDT", "clientOrderId": "co-2", "status": "FILLED", "side": "BUY", "origQty": "0.4", "executedQty": "0.1"}, "nonterminal"),
-        ("open_orders", {"symbol": "BTCUSDT", "clientOrderId": "co-2", "status": "NEW", "side": "BUY", "origQty": "0.4", "executedQty": "0.6"}, "remaining"),
+        (
+            "open_orders",
+            {
+                "symbol": "BTCUSDT",
+                "clientOrderId": "co-2",
+                "status": "FILLED",
+                "side": "BUY",
+                "origQty": "0.4",
+                "executedQty": "0.1",
+            },
+            "nonterminal",
+        ),
+        (
+            "open_orders",
+            {
+                "symbol": "BTCUSDT",
+                "clientOrderId": "co-2",
+                "status": "NEW",
+                "side": "BUY",
+                "origQty": "0.4",
+                "executedQty": "0.6",
+            },
+            "remaining",
+        ),
     ],
 )
 def test_position_and_order_state_fail_closed(where, row, message):
@@ -205,14 +225,16 @@ def test_duplicate_orders_block():
 
 def test_income_types_all_preserved_including_transfers_without_funding_inference():
     d = bundle()
-    d["income"].append({
-        "symbol": "",
-        "incomeType": "UNEXPECTED_REBATE",
-        "income": "0.010",
-        "asset": "USDT",
-        "time": T_MS - 3000,
-        "tranId": 104,
-    })
+    d["income"].append(
+        {
+            "symbol": "",
+            "incomeType": "UNEXPECTED_REBATE",
+            "income": "0.010",
+            "asset": "USDT",
+            "time": T_MS - 3000,
+            "tranId": 104,
+        }
+    )
     result = normalize_demo_export(d, source_sha256=HASH)
     assert result["unknown_income_type_count"] == 1
     assert result["income_claims_by_type_currency"]["UNEXPECTED_REBATE:USDT"] == "0.010"
@@ -243,9 +265,7 @@ def test_duplicate_income_id_and_full_page_refused():
     with pytest.raises(ValueError, match="duplicate demo income transaction"):
         normalize_demo_export(d, source_sha256=HASH)
     d = bundle()
-    d["income"] = [
-        {**d["income"][0], "tranId": i} for i in range(1000)
-    ]
+    d["income"] = [{**d["income"][0], "tranId": i} for i in range(1000)]
     with pytest.raises(ValueError, match="page limit"):
         normalize_demo_export(d, source_sha256=HASH)
 
@@ -282,6 +302,7 @@ def test_oversize_and_nonobject_root_fail_closed(tmp_path):
     with pytest.raises(ValueError, match="schema mismatch"):
         inspect_demo_export(path)
 
+
 def test_demo_import_cli_is_offline_read_only(tmp_path, monkeypatch, capsys):
     pytest.importorskip("pandas")
     from lab.cli import build_parser, cmd_binance_demo_export
@@ -307,16 +328,19 @@ def test_demo_import_cli_fails_for_missing_report_without_creating_it(tmp_path):
         cmd_binance_demo_export(None, args)
     assert not missing.exists()
 
+
 def test_client_order_ids_are_scoped_by_symbol_not_globally():
     d = bundle()
-    d["open_orders"].append({
-        "symbol": "ETHUSDT",
-        "clientOrderId": "co-1",
-        "status": "NEW",
-        "side": "SELL",
-        "origQty": "1.0",
-        "executedQty": "0",
-    })
+    d["open_orders"].append(
+        {
+            "symbol": "ETHUSDT",
+            "clientOrderId": "co-1",
+            "status": "NEW",
+            "side": "SELL",
+            "origQty": "1.0",
+            "executedQty": "0",
+        }
+    )
     result = normalize_demo_export(d, source_sha256=HASH)
     assert set(result["open_orders"]) == {"BTCUSDT:co-1", "ETHUSDT:co-1"}
     assert not result["risk_ready"]

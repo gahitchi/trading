@@ -27,10 +27,19 @@ _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,110}\Z")
 _SENSITIVE_KEYS = {"apikey", "apisecret", "secret", "signature", "privatekey", "authorization", "xmbxapikey"}
 _TYPES = {"FUNDING_FEE", "COMMISSION", "REALIZED_PNL", "TRANSFER"}
 _REQUIRED = {
-    "schema_version", "source", "scope", "session_id",
-    "collected_start_ns", "collected_end_ns",
-    "income_start_ms", "income_end_ms",
-    "account", "balances", "position_risk", "open_orders", "income",
+    "schema_version",
+    "source",
+    "scope",
+    "session_id",
+    "collected_start_ns",
+    "collected_end_ns",
+    "income_start_ms",
+    "income_end_ms",
+    "account",
+    "balances",
+    "position_risk",
+    "open_orders",
+    "income",
 }
 
 
@@ -150,10 +159,15 @@ def normalize_demo_export(bundle: dict, *, source_sha256: str) -> dict:
     if account.get("multiAssetsMargin") is not False:
         raise ValueError("multi-assets demo margin mode is unsupported")
     totals = {}
-    for field in ("totalWalletBalance", "totalUnrealizedProfit", "totalMarginBalance", "totalInitialMargin", "totalMaintMargin"):
+    for field in (
+        "totalWalletBalance",
+        "totalUnrealizedProfit",
+        "totalMarginBalance",
+        "totalInitialMargin",
+        "totalMaintMargin",
+    ):
         totals[field] = _number(
-            account.get(field), f"demo account {field}",
-            nonnegative=field in {"totalInitialMargin", "totalMaintMargin"}
+            account.get(field), f"demo account {field}", nonnegative=field in {"totalInitialMargin", "totalMaintMargin"}
         )
     if totals["totalWalletBalance"] + totals["totalUnrealizedProfit"] != totals["totalMarginBalance"]:
         raise ValueError("demo margin balance does not equal wallet plus unrealized PnL")
@@ -261,12 +275,8 @@ def normalize_demo_export(bundle: dict, *, source_sha256: str) -> dict:
         "wallet_balances": {k: str(v) for k, v in sorted(balances.items())},
         "open_positions": {k: str(v) for k, v in sorted(risk_positions.items())},
         "open_orders": dict(sorted(orders.items())),
-        "income_claims_by_type_currency": {
-            f"{k[0]}:{k[1]}": str(v) for k, v in sorted(totals_income.items())
-        },
-        "unknown_income_type_count": sum(
-            1 for item in income if item["incomeType"] not in _TYPES
-        ),
+        "income_claims_by_type_currency": {f"{k[0]}:{k[1]}": str(v) for k, v in sorted(totals_income.items())},
+        "unknown_income_type_count": sum(1 for item in income if item["incomeType"] not in _TYPES),
         "provider_identity_authenticated": False,
         "independent_collection_verified": False,
         "complete_income_coverage_verified": False,
