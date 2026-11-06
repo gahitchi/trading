@@ -14,8 +14,8 @@ import os
 import re
 import stat
 from dataclasses import dataclass, fields
-from pathlib import Path
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 from lab.paper_account_snapshot import PaperAccountSnapshotJournal
 
