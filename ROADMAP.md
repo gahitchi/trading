@@ -207,15 +207,28 @@ cash transfer, qualified equity, order authorization or proof of
 any profitable strategy. A supervised external fetch remains
 unverified, and no P&L is posted from this archive.
 
+The read-only `lab.paper_mark_alignment` stage now pairs the
+**latest verified local account snapshot** with the newest fully
+collected public USD-M mark observed strictly before that snapshot.
+It checks exact session/instrument scope, bounded price age and
+clock ordering without forward fill or future sample selection;
+the `lab paper-mark-align` CLI reports the evidence hashes and
+timing, and blocks missing archives. See
+[account/mark alignment](docs/paper-mark-alignment.md). The
+clock-domain assumption is **not independently verified**,
+historical funding rate is not a cash payment, and all matching
+reports still have `risk_ready=false` and economic posting disabled.
+
 Remaining dependencies are (1) an **actually independent read-only
-account-report producer**, independently synchronized mark/book
-observations and *account-specific executed* funding/cash settlements
-with complete order/remaining-quantity history; (2) a validated
-conversion bridge to the economic journal only after contract,
-multiplier, fee, margin/liquidation and cross-restart reconciliation;
-(3) operational risk-gate drills and statistically qualified bearish
-short-horizon trading edge. This is research infrastructure, **not**
-a demonstrated profitable strategy or live-order authorization.
+account-report producer**, deployed and independently synchronized
+mark/book observations and *account-specific executed* funding/cash
+settlements with complete order/remaining-quantity history;
+(2) qualified contract/multiplier, fee and margin/liquidation
+data and validated conversion bridge into the economic journal,
+including cross-restart evidence; (3) operational risk-gate
+drills and a statistically qualified bearish short-horizon edge.
+This is research infrastructure, **not** a demonstrated
+profitable strategy or live-order authorization.
 
 **Priority update (2026-11-05):** a time-series of **net daily P&L and cumulative
 equity growth**, not a target winning-day percentage, is the primary short-horizon
