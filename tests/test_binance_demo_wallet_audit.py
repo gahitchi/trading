@@ -22,20 +22,20 @@ def files(tmp_path, *, gap_income="-0.0500", wallet="999.95000000", extra_income
     second["collected_end_ns"] = AFTER_START + 3 * SECOND
     second["income_start_ms"] = BEFORE_END // NS_MS
     second["income_end_ms"] = AFTER_START // NS_MS
-    second["income"] = [{
-        "symbol": "BTCUSDT",
-        "incomeType": "COMMISSION",
-        "income": gap_income,
-        "asset": "USDT",
-        "time": T_MS + 30_000,
-        "tranId": 200,
-    }]
+    second["income"] = [
+        {
+            "symbol": "BTCUSDT",
+            "incomeType": "COMMISSION",
+            "income": gap_income,
+            "asset": "USDT",
+            "time": T_MS + 30_000,
+            "tranId": 200,
+        }
+    ]
     if extra_income is not None:
         second["income"].append(extra_income)
     second["account"]["totalWalletBalance"] = wallet
-    second["account"]["totalMarginBalance"] = str(
-        Decimal(wallet) + Decimal("1.25")
-    )
+    second["account"]["totalMarginBalance"] = str(Decimal(wallet) + Decimal("1.25"))
     second["account"]["assets"][0]["walletBalance"] = wallet
     second["balances"][0]["balance"] = wallet
     before = tmp_path / "before.json"
@@ -89,10 +89,15 @@ def test_unexplained_gain_must_not_be_booked_as_realized_pnl(tmp_path):
 
 def test_positive_and_negative_income_by_category_and_currency(tmp_path):
     before, after, _first, _second = files(
-        tmp_path, wallet="999.9750",
+        tmp_path,
+        wallet="999.9750",
         extra_income={
-            "symbol": "BTCUSDT", "incomeType": "FUNDING_FEE", "income": "0.0250",
-            "asset": "USDT", "time": T_MS + 40_000, "tranId": 201,
+            "symbol": "BTCUSDT",
+            "incomeType": "FUNDING_FEE",
+            "income": "0.0250",
+            "asset": "USDT",
+            "time": T_MS + 40_000,
+            "tranId": 201,
         },
     )
     report = compare_demo_wallet_exports(before, after)
@@ -104,10 +109,15 @@ def test_positive_and_negative_income_by_category_and_currency(tmp_path):
 
 def test_unknown_income_types_reported_but_never_promoted(tmp_path):
     before, after, _first, _second = files(
-        tmp_path, wallet="999.9500",
+        tmp_path,
+        wallet="999.9500",
         extra_income={
-            "symbol": "", "incomeType": "UNCLASSIFIED", "income": "0.00",
-            "asset": "USDT", "time": T_MS + 40_000, "tranId": 201,
+            "symbol": "",
+            "incomeType": "UNCLASSIFIED",
+            "income": "0.00",
+            "asset": "USDT",
+            "time": T_MS + 40_000,
+            "tranId": 201,
         },
     )
     report = compare_demo_wallet_exports(before, after)
@@ -116,10 +126,17 @@ def test_unknown_income_types_reported_but_never_promoted(tmp_path):
     assert not report["equity_reconciled"]
 
 
-@pytest.mark.parametrize("change", [
-    "different-session", "different-alias", "overlap",
-    "coverage-start-gap", "coverage-end-gap", "lost-asset",
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        "different-session",
+        "different-alias",
+        "overlap",
+        "coverage-start-gap",
+        "coverage-end-gap",
+        "lost-asset",
+    ],
+)
 def test_invalid_alignment_or_incomplete_wallet_coverage_fails(tmp_path, change):
     before, after, first, second = files(tmp_path)
     if change == "different-session":
@@ -138,11 +155,16 @@ def test_invalid_alignment_or_incomplete_wallet_coverage_fails(tmp_path, change)
         second["income"] = []
     elif change == "lost-asset":
         second["account"]["assets"].append({"asset": "BNB", "walletBalance": "5.0"})
-        second["balances"].append({
-            "accountAlias": "SgsR", "asset": "BNB", "balance": "5.0",
-            "crossWalletBalance": "5.0", "crossUnPnl": "0",
-            "availableBalance": "5.0",
-        })
+        second["balances"].append(
+            {
+                "accountAlias": "SgsR",
+                "asset": "BNB",
+                "balance": "5.0",
+                "crossWalletBalance": "5.0",
+                "crossUnPnl": "0",
+                "availableBalance": "5.0",
+            }
+        )
     after.write_text(json.dumps(second), encoding="utf-8")
     with pytest.raises(ValueError):
         compare_demo_wallet_exports(before, after)
@@ -154,13 +176,16 @@ def test_repeated_identical_export_is_not_second_observation(tmp_path):
         compare_demo_wallet_exports(before, before)
 
 
-@pytest.mark.parametrize("event_ms", [
-    T_MS + 1_000,  # prior account collection interval
-    T_MS + 101_000,  # later account collection interval
-])
+@pytest.mark.parametrize(
+    "event_ms",
+    [
+        T_MS + 1_000,  # prior account collection interval
+        T_MS + 101_000,  # later account collection interval
+    ],
+)
 def test_income_inside_nonatomic_collection_window_is_ambiguous(tmp_path, event_ms):
     before, after, _first, second = files(tmp_path)
-    second["income_end_ms"] = (T_MS + 103_000)
+    second["income_end_ms"] = T_MS + 103_000
     second["income"][0]["time"] = event_ms
     if event_ms == T_MS + 1_000:
         second["income_start_ms"] = T_MS
@@ -192,10 +217,16 @@ def test_unrelated_earlier_income_overlap_is_not_double_counted(tmp_path):
 
 def test_outside_wallet_asset_is_blocked(tmp_path):
     before, after, _first, second = files(tmp_path)
-    second["income"].append({
-        "symbol": "", "incomeType": "TRANSFER",
-        "income": "1.00", "asset": "BNB", "time": T_MS + 40_000, "tranId": 999,
-    })
+    second["income"].append(
+        {
+            "symbol": "",
+            "incomeType": "TRANSFER",
+            "income": "1.00",
+            "asset": "BNB",
+            "time": T_MS + 40_000,
+            "tranId": 999,
+        }
+    )
     after.write_text(json.dumps(second), encoding="utf-8")
     with pytest.raises(ValueError, match="currency has no matching wallet"):
         compare_demo_wallet_exports(before, after)

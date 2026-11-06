@@ -50,10 +50,7 @@ def compare_demo_wallet_exports(before: Path, after: Path) -> dict:
 
     # Cross-export overlap is useful for detecting restated income rows,
     # although matching records are not provider authentication.
-    historical = {
-        (entry["incomeType"], entry["tranId"]): entry
-        for entry in first["income"]
-    }
+    historical = {(entry["incomeType"], entry["tranId"]): entry for entry in first["income"]}
     with localcontext() as context:
         context.prec = 80
         totals = {asset: Decimal(0) for asset in first_wallet}
@@ -83,10 +80,7 @@ def compare_demo_wallet_exports(before: Path, after: Path) -> dict:
             source_ids.append(f"{entry['incomeType']}:{entry['tranId']}")
             if entry["incomeType"] not in {"FUNDING_FEE", "COMMISSION", "REALIZED_PNL", "TRANSFER"}:
                 unknown_types.add(entry["incomeType"])
-        deltas = {
-            asset: Decimal(second_wallet[asset]) - Decimal(first_wallet[asset])
-            for asset in first_wallet
-        }
+        deltas = {asset: Decimal(second_wallet[asset]) - Decimal(first_wallet[asset]) for asset in first_wallet}
         unexplained = {asset: deltas[asset] - totals[asset] for asset in deltas}
         exact = all(amount == 0 for amount in unexplained.values())
         return {
