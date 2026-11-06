@@ -1,0 +1,31 @@
+name: One-time Ruff format for Nautilus account snapshot integration
+on:
+  push:
+    branches:
+      - chatgpt/codex-maintenance
+    paths:
+      - .github/workflows/format-maintenance.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Format new snapshot bridge and tests
+        run: |
+          uvx ruff format src/lab/nautilus_snapshot.py src/lab/fast.py src/lab/sandbox_capture.py src/lab/cli.py tests/test_nautilus_snapshot.py tests/test_sandbox_capture_nautilus.py
+          uvx ruff check src tests
+          git diff --check
+      - name: Commit style changes only to maintenance branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/lab/nautilus_snapshot.py src/lab/fast.py src/lab/sandbox_capture.py src/lab/cli.py tests/test_nautilus_snapshot.py tests/test_sandbox_capture_nautilus.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'style: format supervised Nautilus snapshot bridge'
+            git push origin HEAD:chatgpt/codex-maintenance
+          fi
