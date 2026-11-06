@@ -1009,6 +1009,32 @@ def cmd_crash_release(cfg, a):
     raise SystemExit("crash holdout release is disabled on this branch until qualification is complete")
 
 
+def cmd_paper_crosscheck(cfg, a):
+    """Compare two supplied paper account sources; never authorize orders."""
+    import json
+
+    from lab.paper_account_crosscheck import compare_read_only_report, load_read_only_report
+    from lab.paper_account_snapshot import PaperAccountSnapshotJournal
+    from lab.sandbox_capture import PaperOrderEventCapture
+
+    try:
+        capture = PaperOrderEventCapture(
+            Path(a.orders), session_id=a.session, instrument_id=a.instrument
+        )
+        journal = PaperAccountSnapshotJournal(
+            Path(a.snapshots), capture, account_id=a.account
+        )
+        report = load_read_only_report(Path(a.external_report))
+        result = compare_read_only_report(
+            journal, report, max_skew_ns=a.max_skew_ms * 1_000_000
+        )
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"paper account crosscheck BLOCKED: {exc}") from exc
+    print(json.dumps(result, sort_keys=True, indent=2))
+    print("DIAGNOSTIC ONLY: source provenance, margin and equity are NOT qualified.")
+    return 0
+
+
 def cmd_kill(cfg, a):
     from lab.notify import Notifier
     from lab.safety import set_kill_switch
@@ -1057,6 +1083,18 @@ def build_parser() -> argparse.ArgumentParser:
     mon.add_argument("--port", type=int, default=8766)
     mon.add_argument("--host", choices=["127.0.0.1", "0.0.0.0"], default="127.0.0.1")
     mon.set_defaults(fn=cmd_monitor)
+
+    cross = sub.add_parser(
+        "paper-crosscheck", help="read-only comparison of two supplied sandbox account reports (no trading permission)"
+    )
+    cross.add_argument("--orders", required=True, help="path to durable sandbox order receipts JSONL")
+    cross.add_argument("--snapshots", required=True, help="path to durable local account snapshots JSONL")
+    cross.add_argument("--external-report", required=True, help="path to separate read-only report JSON")
+    cross.add_argument("--session", required=True, help="existing paper capture session ID")
+    cross.add_argument("--instrument", required=True, help="exact instrument ID, e.g. BTCUSDT-PERP.BINANCE")
+    cross.add_argument("--account", required=True, help="exact sandbox account ID")
+    cross.add_argument("--max-skew-ms", type=int, default=1000, help="allowed observation skew, 0..5000 ms")
+    cross.set_defaults(fn=cmd_paper_crosscheck)
 
     research = sub.add_parser("research", help="register a search plan and audit every research attempt")
     rsub = research.add_subparsers(dest="sub", required=True)
