@@ -286,3 +286,17 @@ def test_failed_public_request_does_not_initialize_archive(tmp_path, monkeypatch
     with pytest.raises(SystemExit, match="BLOCKED: offline"):
         cmd_public_market_sample(SimpleNamespace(results_dir=tmp_path), args)
     assert not (tmp_path / "fast").exists()
+
+def test_public_rest_funding_request_cannot_overlap_mark_acquisition():
+    mark, history = responses()
+    with pytest.raises(ValueError, match="predates completion of mark request"):
+        parse_public_market_sample(
+            session_id=SESSION,
+            symbol=SYMBOL,
+            mark_raw=json.dumps(mark).encode(),
+            funding_raw=json.dumps(history).encode(),
+            mark_start_ns=T,
+            mark_end_ns=T + 2_000_000_000,
+            funding_start_ns=T + 1_000_000_000,
+            funding_end_ns=T + 3_000_000_000,
+        )
