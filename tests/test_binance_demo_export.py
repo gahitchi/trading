@@ -93,7 +93,7 @@ def test_complete_provider_export_does_not_become_account_authority(tmp_path):
     report = inspect_demo_export(path)
     assert report["status"] == "demo_account_export_consistent_unverified"
     assert report["open_positions"] == {"BTCUSDT": "-0.250"}
-    assert report["open_orders"] == {"co-1": {"symbol": "BTCUSDT", "remaining": "0.250"}}
+    assert report["open_orders"] == {"BTCUSDT:co-1": {"symbol": "BTCUSDT", "remaining": "0.250"}}
     assert report["wallet_balances"] == {"USDT": "1000.00000000"}
     assert report["income_claims_by_type_currency"] == {
         "COMMISSION:USDT": "-0.0500",
@@ -254,7 +254,7 @@ def test_raw_credentials_must_never_be_accepted(tmp_path):
     for key in ("signature", "apiKey", "api_secret", "Authorization", "X-MBX-APIKEY"):
         d = bundle()
         d["account"][key] = "private"
-        with pytest.raises(ValueError, match="credential|schema"):
+        with pytest.raises(ValueError, match=r"credential|schema"):
             inspect_demo_export(write_bundle(tmp_path, d))
 
 
@@ -306,3 +306,17 @@ def test_demo_import_cli_fails_for_missing_report_without_creating_it(tmp_path):
     with pytest.raises(SystemExit, match="BLOCKED"):
         cmd_binance_demo_export(None, args)
     assert not missing.exists()
+
+def test_client_order_ids_are_scoped_by_symbol_not_globally():
+    d = bundle()
+    d["open_orders"].append({
+        "symbol": "ETHUSDT",
+        "clientOrderId": "co-1",
+        "status": "NEW",
+        "side": "SELL",
+        "origQty": "1.0",
+        "executedQty": "0",
+    })
+    result = normalize_demo_export(d, source_sha256=HASH)
+    assert set(result["open_orders"]) == {"BTCUSDT:co-1", "ETHUSDT:co-1"}
+    assert not result["risk_ready"]
