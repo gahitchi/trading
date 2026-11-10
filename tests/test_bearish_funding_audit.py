@@ -182,3 +182,17 @@ def test_funding_adapter_is_pure_and_preserves_trades_and_sources():
     funded(r, source)
     assert source == before
     assert r.trades == (t,)
+
+
+def test_unbounded_round_trip_cost_budget_refused():
+    from lab.bearish_ensemble import RoundTripCosts
+
+    source = evidence()
+    with pytest.raises(ValueError, match="round-trip cost budget"):
+        short_funding_bounds(
+            replay(),
+            RoundTripCosts(5_000, 5, 2, 1),
+            source,
+            boundary=CUTOFF,
+            expected_plan_sha256=source["plan_sha256"],
+        )
