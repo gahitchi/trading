@@ -1,7 +1,5 @@
 """Portable, no-I/O tests for pre-holdout bearish signal screening."""
 
-from dataclasses import replace
-
 import pandas as pd
 import pytest
 
