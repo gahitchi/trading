@@ -21,28 +21,32 @@ PATHS = {
 
 def snapshot():
     responses = {
-        "position": [{
-            "symbol": "BTCUSDT",
-            "positionSide": "BOTH",
-            "marginAsset": "USDT",
-            "positionAmt": "-2",
-            "entryPrice": "600",
-            "markPrice": "600",
-            "unRealizedProfit": "0",
-            "isolatedWallet": "300",
-            "isolatedMargin": "300",
-            "positionInitialMargin": "120",
-            "maintMargin": "7",
-            "notional": "-1200",
-            "updateTime": ANCHOR - 120_000,
-        }],
-        "symbol_config": [{
-            "symbol": "BTCUSDT",
-            "marginType": "ISOLATED",
-            "isAutoAddMargin": False,
-            "leverage": 10,
-            "maxNotionalValue": "5000",
-        }],
+        "position": [
+            {
+                "symbol": "BTCUSDT",
+                "positionSide": "BOTH",
+                "marginAsset": "USDT",
+                "positionAmt": "-2",
+                "entryPrice": "600",
+                "markPrice": "600",
+                "unRealizedProfit": "0",
+                "isolatedWallet": "300",
+                "isolatedMargin": "300",
+                "positionInitialMargin": "120",
+                "maintMargin": "7",
+                "notional": "-1200",
+                "updateTime": ANCHOR - 120_000,
+            }
+        ],
+        "symbol_config": [
+            {
+                "symbol": "BTCUSDT",
+                "marginType": "ISOLATED",
+                "isAutoAddMargin": False,
+                "leverage": 10,
+                "maxNotionalValue": "5000",
+            }
+        ],
         "position_mode": {"dualSidePosition": False},
         "asset_mode": {"multiAssetsMargin": False},
         "brackets": brackets(),
