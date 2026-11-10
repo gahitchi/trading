@@ -92,4 +92,4 @@ The BTC historical data and previous failures have already been inspected: any B
 PYTHONPATH=src:. python -m pytest tests/test_bearish_ensemble_research.py -q
 ```
 
-The 8 synthetic tests cover exact pre-registration planning, missing/mismatched registration, accepted guarded replay, recorded source-read failure, unavailable open inventory, cutoff mutation, and exclusive plan publication. Run the full suite only in an environment with the project's optional NautilusTrader dependency.
+The 9 synthetic tests cover exact pre-registration planning, missing/mismatched registration, accepted guarded replay, recorded source-read failure, unavailable open inventory, cutoff mutation, exclusive plan publication, and the actual production minute-grid/open-interest adapter (with no archive I/O). Run the full suite only in an environment with the project's optional NautilusTrader dependency.
