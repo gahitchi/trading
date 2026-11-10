@@ -83,12 +83,14 @@ def _events(replay: ShortReplay, source: dict, bounds) -> tuple[_Action, ...]:
             if entry + ENTRY_UNCERTAINTY < when < exit_ - EXIT_UNCERTAINTY:
                 certain += 1
                 actions.append(
-                    _Action(max(start, when_ns), 1, i, float(raw["fundingRate"]) * float(raw["markPrice"]))
+                    _Action(max(start, when_ns), 3 if when_ns <= start else 1, i,
+                            float(raw["fundingRate"]) * float(raw["markPrice"]))
                 )
             elif entry - ENTRY_UNCERTAINTY <= when <= exit_ + ENTRY_UNCERTAINTY:
                 ambiguous += 1
                 actions.append(
-                    _Action(max(start, when_ns), 1, i, float(raw["fundingRate"]) * float(raw["markPrice"]))
+                    _Action(max(start, when_ns), 3 if when_ns <= start else 1, i,
+                            float(raw["fundingRate"]) * float(raw["markPrice"]))
                 )
         if certain != result.certain_settlements or ambiguous != result.ambiguous_settlements:
             raise ValueError("funding settlement classification differs from pinned audit")
@@ -121,7 +123,7 @@ def _scenario(
         funding_today = 0.0
         while pointer < len(actions):
             action = actions[pointer]
-            if action.time_ns > mark_ns or (action.time_ns == mark_ns and action.priority == 2):
+            if action.time_ns > mark_ns or (action.time_ns == mark_ns and action.priority >= 2):
                 break
             trade = replay.trades[action.trade_index]
             i = action.trade_index
@@ -132,7 +134,7 @@ def _scenario(
                 quantities[i] = qty
                 cash -= qty * trade.entry_fill * fee_rate
                 active = i
-            elif action.priority == 1:
+            elif action.priority in (1, 3):
                 qty = quantities[i]
                 if qty <= 0:
                     raise ValueError("funding event attributed before entry sizing")
