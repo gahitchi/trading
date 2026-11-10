@@ -1,6 +1,7 @@
 """Offline synthetic Binance demo account-to-maintenance cross-check tests."""
 
 from copy import deepcopy
+from decimal import Decimal
 
 import pytest
 
@@ -88,9 +89,10 @@ def test_current_mark_must_reconcile_with_short_unrealized_and_notional():
     pos["unRealizedProfit"] = "-40"
     pos["notional"] = "-1240"
     pos["maintMargin"] = "7.4"
+    pos["positionInitialMargin"] = "124"
     r = run(b)
     assert r.snapshot_mark_price == 620 and r.current_equity == 260
-    assert r.modeled_maintenance == r.reported_maintenance == 7.4
+    assert r.modeled_maintenance == r.reported_maintenance == Decimal("7.4")
 
 
 def test_position_reported_maintenance_cannot_override_tier_math():
@@ -218,3 +220,19 @@ def test_tolerance_is_bounded_and_source_remains_unmodified():
     assert b == saved
     with pytest.raises(ValueError, match="unsupported tolerance"):
         run(b, tolerance="1")
+
+
+def test_position_initial_margin_must_match_leverage():
+    b = snapshot()
+    b["sources"]["position"]["payload"][0]["positionInitialMargin"] = "50"
+    with pytest.raises(ValueError, match="initial margin disagrees"):
+        run(b)
+
+
+def test_nonpositive_maintenance_excess_is_not_reported_as_consistent():
+    b = snapshot()
+    b["sources"]["position"]["payload"][0]["isolatedWallet"] = "1"
+    result = run(b)
+    assert result.current_maintenance_excess == -6
+    assert result.status == "MAINTENANCE_EXCESS_NONPOSITIVE_UNQUALIFIED"
+    assert not result.execution_authorized
