@@ -74,13 +74,13 @@ def test_ambiguous_positive_funding_is_upper_only_even_at_exit_boundary():
     assert result.upper_end_equity == pytest.approx(10_000 * (1 + 0.25 * (no_reserve(t) + 0.003)))
 
 
-def test_post_exit_ambiguous_settlement_posts_only_at_its_own_time():
+def test_event_after_exit_uncertainty_window_cannot_be_booked():
     b = candles()
     t = short(b, "2026-01-01T07:50:00Z", "2026-01-01T07:59:00Z")
     result = interval(b, replay(t), evidence(rate_at_0800="0.003"))
-    assert result.ambiguous_settlements == 1
-    assert result.days[0].upper_path_funding_cashflow == pytest.approx(7.5)
-    assert result.days[0].upper_end_equity > result.days[0].lower_end_equity
+    assert result.ambiguous_settlements == 0
+    assert result.days[0].upper_path_funding_cashflow == 0
+    assert result.lower_end_equity == pytest.approx(result.upper_end_equity)
 
 
 def test_overnight_funding_posted_by_utc_day_not_final_exit_day():
