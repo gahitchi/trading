@@ -105,7 +105,7 @@ def _ms(value: object, field: str) -> int:
 
 
 def _snapshot_position(row: object, symbol: str) -> tuple[Decimal, Decimal, Decimal, Decimal]:
-    if not isinstance(row, dict) or not _POSITION_FIELDS <= set(row):
+    if not isinstance(row, dict) or not set(row) >= _POSITION_FIELDS:
         raise ValueError("incomplete positionRisk V3 snapshot")
     if row["symbol"] != symbol or row["positionSide"] != "BOTH" or row["marginAsset"] != "USDT":
         raise ValueError("position symbol/side/collateral mismatch")
