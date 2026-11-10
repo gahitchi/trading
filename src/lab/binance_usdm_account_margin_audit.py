@@ -184,8 +184,14 @@ def audit_demo_account_margin(
             bracket_source, symbol=symbol, expected_sha256=expected_bracket_sha256
         )
         tier = schedule.tier(q * mark)
-        if leverage > tier.max_initial_leverage or q * mark > max_notional:
+        entry_tier = schedule.tier(q * entry)
+        if (
+            leverage > min(tier.max_initial_leverage, entry_tier.max_initial_leverage)
+            or max(q * mark, q * entry) > max_notional
+        ):
             raise ValueError("account configured leverage/notional exceeds supported tier")
+        if abs(reported_initial - q * mark / Decimal(leverage)) > tol:
+            raise ValueError("reported position initial margin disagrees with selected leverage")
         modeled_mm, _ = _maintenance(schedule, q, mark)
         if abs(modeled_mm - reported_mm) > tol:
             raise ValueError("exchange-reported maintenance disagrees with pinned bracket math")
@@ -213,4 +219,9 @@ def audit_demo_account_margin(
             current_maintenance_excess=excess,
             maintenance_bracket=tier.bracket,
             selected_leverage=leverage,
+            status=(
+                "MAINTENANCE_EXCESS_NONPOSITIVE_UNQUALIFIED"
+                if excess <= 0
+                else "CONSISTENT_UNAUTHENTICATED_RESEARCH_ONLY"
+            ),
         )
