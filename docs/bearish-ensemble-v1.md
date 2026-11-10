@@ -41,3 +41,26 @@ This is an **algorithm prototype**, not an evidence-backed claim that any strate
 `src/lab/bearish_ensemble_screen.py` exposes `screen_research_frame` as an **in-memory, read-only diagnostic**. It accepts preloaded closed minute bars and an explicit UTC-midnight pre-holdout boundary. It refuses any observation at or after that boundary, rejects duplicate/out-of-order timestamps, quarantines invalid candles and `oi_invalid` quality markers, and leaves source frames unchanged. It reports candidate timestamps, setups, warmup/gap/quality veto counts, and valid-vs-discarded candle counts. Unit tests use **synthetic data only**. No backtest fills, funding, equity, production controls, trial registration, public broker credentials, or real trades are involved.
 
 A future guarded CLI should load research-only candles using `crash_data.load(root, "klines", symbol, before=boundary)` and build the full source-quality frame with the existing `crash_study.bars`. The cutoff must apply **before any parquet file is opened**, and the results must be trial-registered before historical outcomes are examined. This adapter deliberately does not select a boundary or open files for the caller. **Do not interpret its signals as trades, imply a performance edge, or run it on the protected BTC holdout.**
+
+
+## Conservative short-side OHLC replay (2026-11-10)
+
+`src/lab/bearish_ensemble_replay.py` now consumes the protected, read-only signal census with original signal stop/target distances. It is **not** a production execution model and does not read historical files, register experiments, open any holdout or place orders. A proposed short is referenced at the open of the candle **after one complete minute of entry delay** (the second subsequent candle). Signal overlap with an open modeled position is skipped. The entry/exit reference prices are adjusted for half-spread on each side, adverse slippage and fees on both executed notionals, and a configurable adverse funding reserve. All costs are reconciled to the original candle-open reference notional; the reserve is **not** evidence of actual funding settlement.
+
+Each short exits at its stop, target or time limit (15 candles by default). For intrabar ambiguity, **stop wins**; adverse gap-through exits pay the worse candle-open price, while favorable gaps earn no better than the predetermined target. Any invalid/missing candle or OI-quality quarantine during an open position causes an **unresolved inventory** result and halts the replay. A missing/invalid entry delay is skipped without assuming a fill. No portfolio marked equity, daily return, lending/borrow costs, liquidation, partial fills, actual bid/ask quotes, queue position, order rejection, real latency or capital compounding is inferred.
+
+This is a **synthetic unit-test target** only until a separate research-family member is registered under the existing trial machinery and the archived input sources are fingerprinted. Do not compare observed historical returns, vary parameters against data, or claim an advantage over retired strategies before that work. Later L2/tick replay must validate the 50/150/300/1,000-ms latency scenarios before live/paper candidacy.
+
+### Additional portable tests
+
+```sh
+cd ~/trading-journal-validation
+source ~/trading-venv/bin/activate
+git fetch origin
+git switch --detach origin/chatgpt/codex-maintenance
+ruff check src tests
+ruff format --check src tests
+PYTHONPATH=src:. python -m pytest tests/test_bearish_ensemble.py tests/test_bearish_ensemble_screen.py tests/test_bearish_ensemble_replay.py -q
+```
+
+These three files contain 31 synthetic cases. Passing means the **defined model rules** are consistent; it does not establish a net-profitable edge.
