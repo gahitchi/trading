@@ -245,8 +245,15 @@ def test_mark_price_symbol_and_endpoint_provenance_cannot_be_swapped():
     raw = brackets()
     klines = bars()
     digest = source_sha256({"endpoint": "/fapi/v1/markPriceKlines", "symbol": "BTCUSDT", "candles": klines})
-    evidence = MarkEvidence(klines, digest, START, START + 3 * 60_000, START + 3 * 60_000, "ETHUSDT",
-                            "/fapi/v1/markPriceKlines")
+    evidence = MarkEvidence(
+        klines,
+        digest,
+        START,
+        START + 3 * 60_000,
+        START + 3 * 60_000,
+        "ETHUSDT",
+        "/fapi/v1/markPriceKlines",
+    )
     with pytest.raises(ValueError, match="endpoint or symbol provenance"):
         assess_isolated_short(
             raw, position(), evidence, expected_bracket_sha256=source_sha256(raw), expected_mark_sha256=digest
