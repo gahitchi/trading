@@ -46,12 +46,29 @@ _CURRENT_KEYS = (
 )
 _KEYS = set(_OPENING_KEYS + _CURRENT_KEYS)
 _SECRET_KEYS = {
-    "apikey", "apisecret", "secret", "signature", "authorization", "cookie",
-    "token", "accesstoken", "privatekey", "xmbxapikey", "password", "passphrase",
+    "apikey",
+    "apisecret",
+    "secret",
+    "signature",
+    "authorization",
+    "cookie",
+    "token",
+    "accesstoken",
+    "privatekey",
+    "xmbxapikey",
+    "password",
+    "passphrase",
 }
 _POSITION_FIELDS = {
-    "symbol", "positionSide", "positionAmt", "entryPrice", "markPrice",
-    "unRealizedProfit", "isolatedWallet", "marginAsset", "updateTime",
+    "symbol",
+    "positionSide",
+    "positionAmt",
+    "entryPrice",
+    "markPrice",
+    "unRealizedProfit",
+    "isolatedWallet",
+    "marginAsset",
+    "updateTime",
 }
 
 
@@ -128,10 +145,20 @@ def validate_offline_risk_bundle(bundle: object, *, expected_sha256: str) -> Off
     _no_secrets(bundle)
     if source_sha256(bundle) != expected_sha256:
         raise ValueError("risk evidence bundle SHA-256 mismatch")
-    if set(bundle) != {
-        "version", "kind", "environment", "symbol", "entry_minute_start_ms",
-        "assessment_ms", "captures", "sources", "costs",
-    } or type(bundle["version"]) is not int or bundle["version"] != 1 or bundle["kind"] != KIND:
+    required = {
+        "version",
+        "kind",
+        "environment",
+        "symbol",
+        "entry_minute_start_ms",
+        "assessment_ms",
+        "captures",
+        "sources",
+        "costs",
+    }
+    if set(bundle) != required or type(bundle["version"]) is not int:
+        raise ValueError("unsupported risk bundle schema")
+    if bundle["version"] != 1 or bundle["kind"] != KIND:
         raise ValueError("unsupported risk bundle schema")
     if not isinstance(bundle["environment"], str) or bundle["environment"] not in {"demo", "mainnet"}:
         raise ValueError("unsupported or unknown risk snapshot environment")
