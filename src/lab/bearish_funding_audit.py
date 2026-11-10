@@ -23,7 +23,6 @@ from lab.bearish_equity import _reconcile
 from lab.crash_funding_ledger import ENTRY_UNCERTAINTY, funding_bounds
 
 MODEL = "bearish-source-pinned-funding-bounds-v1"
-EXIT_UNCERTAINTY = pd.Timedelta(minutes=1) + ENTRY_UNCERTAINTY
 
 
 @dataclass(frozen=True)
