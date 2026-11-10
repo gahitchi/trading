@@ -86,13 +86,16 @@ def assess(
         position_ or position(),
         MarkEvidence(
             klines,
-            source_sha256(klines),
+            source_sha256({"endpoint": "/fapi/v1/markPriceKlines", "symbol": "BTCUSDT", "candles": klines}),
             START,
             capture_at if capture_at is not None else START + 3 * 60_000,
             mark_at if mark_at is not None else START + 3 * 60_000,
+            symbol="BTCUSDT",
+            endpoint="/fapi/v1/markPriceKlines",
         ),
         expected_bracket_sha256=expected_rules or source_sha256(raw),
-        expected_mark_sha256=expected_marks or source_sha256(klines),
+        expected_mark_sha256=expected_marks
+        or source_sha256({"endpoint": "/fapi/v1/markPriceKlines", "symbol": "BTCUSDT", "candles": klines}),
     )
 
 
@@ -236,3 +239,20 @@ def test_malformed_bracket_tiers_do_not_leak_into_risk_math():
     bad2["brackets"][2]["bracket"] = 2
     with pytest.raises(ValueError, match="unordered"):
         assess(raw=bad2)
+
+
+def test_mark_price_symbol_and_endpoint_provenance_cannot_be_swapped():
+    raw = brackets()
+    klines = bars()
+    digest = source_sha256({"endpoint": "/fapi/v1/markPriceKlines", "symbol": "BTCUSDT", "candles": klines})
+    evidence = MarkEvidence(klines, digest, START, START + 3 * 60_000, START + 3 * 60_000, "ETHUSDT",
+                            "/fapi/v1/markPriceKlines")
+    with pytest.raises(ValueError, match="endpoint or symbol provenance"):
+        assess_isolated_short(
+            raw, position(), evidence, expected_bracket_sha256=source_sha256(raw), expected_mark_sha256=digest
+        )
+    wrong = replace(evidence, symbol="BTCUSDT", endpoint="/fapi/v1/klines")
+    with pytest.raises(ValueError, match="endpoint or symbol provenance"):
+        assess_isolated_short(
+            raw, position(), wrong, expected_bracket_sha256=source_sha256(raw), expected_mark_sha256=digest
+        )
