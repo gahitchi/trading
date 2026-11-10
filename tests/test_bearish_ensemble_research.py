@@ -27,11 +27,13 @@ def configured(tmp_path: Path) -> Path:
 def fake_archives(monkeypatch, b):
     calls = []
     k = b.drop(columns=["oi_invalid"]).reset_index(names="ts")
-    oi = pd.DataFrame({
-        "ts": b.index[::5],
-        "oi_qty": [100.0] * len(b.index[::5]),
-        "oi_value": [10000.0] * len(b.index[::5]),
-    })
+    oi = pd.DataFrame(
+        {
+            "ts": b.index[::5],
+            "oi_qty": [100.0] * len(b.index[::5]),
+            "oi_value": [10000.0] * len(b.index[::5]),
+        }
+    )
 
     def load(_root, kind, symbol, *, before):
         calls.append((kind, symbol, before))
