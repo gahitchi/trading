@@ -83,14 +83,22 @@ def _events(replay: ShortReplay, source: dict, bounds) -> tuple[_Action, ...]:
             if entry + ENTRY_UNCERTAINTY < when < exit_ - EXIT_UNCERTAINTY:
                 certain += 1
                 actions.append(
-                    _Action(max(start, when_ns), 3 if when_ns <= start else 1, i,
-                            float(raw["fundingRate"]) * float(raw["markPrice"]))
+                    _Action(
+                        max(start, when_ns),
+                        3 if when_ns <= start else 1,
+                        i,
+                        float(raw["fundingRate"]) * float(raw["markPrice"]),
+                    )
                 )
             elif entry - ENTRY_UNCERTAINTY <= when <= exit_ + ENTRY_UNCERTAINTY:
                 ambiguous += 1
                 actions.append(
-                    _Action(max(start, when_ns), 3 if when_ns <= start else 1, i,
-                            float(raw["fundingRate"]) * float(raw["markPrice"]))
+                    _Action(
+                        max(start, when_ns),
+                        3 if when_ns <= start else 1,
+                        i,
+                        float(raw["fundingRate"]) * float(raw["markPrice"]),
+                    )
                 )
         if certain != result.certain_settlements or ambiguous != result.ambiguous_settlements:
             raise ValueError("funding settlement classification differs from pinned audit")
