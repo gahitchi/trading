@@ -92,7 +92,12 @@ def audit_demo_account_margin(
     margin, or backward application of current tiers, is permitted.
     """
     if not isinstance(bundle, dict) or set(bundle) != {
-        "version", "environment", "symbol", "collected_start_ms", "collected_end_ms", "sources"
+        "version",
+        "environment",
+        "symbol",
+        "collected_start_ms",
+        "collected_end_ms",
+        "sources",
     }:
         raise ValueError("invalid account snapshot envelope schema")
     _deny_secrets(bundle)
@@ -116,7 +121,9 @@ def audit_demo_account_margin(
         raise ValueError("missing or unexpected account snapshot endpoints")
     start, end = bundle["collected_start_ms"], bundle["collected_end_ms"]
     if (
-        type(start) is not int or type(end) is not int or start <= 0
+        type(start) is not int
+        or type(end) is not int
+        or start <= 0
         or not start <= end <= start + _MAX_CAPTURE_WINDOW_MS
     ):
         raise ValueError("account collection intervals must be bounded and ordered")
@@ -180,9 +187,7 @@ def audit_demo_account_margin(
         bracket_sha = source_sha256(bracket_source)
         if bracket_sha != expected_bracket_sha256:
             raise ValueError("bracket SHA-256 disagrees with separately frozen source")
-        schedule = parse_leverage_brackets(
-            bracket_source, symbol=symbol, expected_sha256=expected_bracket_sha256
-        )
+        schedule = parse_leverage_brackets(bracket_source, symbol=symbol, expected_sha256=expected_bracket_sha256)
         tier = schedule.tier(q * mark)
         entry_tier = schedule.tier(q * entry)
         if (
