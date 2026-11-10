@@ -94,6 +94,7 @@ def test_refuses_malformed_provenance_or_time_order():
     b = history()
     with pytest.raises(ValueError, match="quality"):
         scan(b.drop(columns=["oi_invalid"]))
+    b["oi_invalid"] = b["oi_invalid"].astype(object)  # permit a deliberately missing marker without a dtype warning
     b.loc[b.index[199], "oi_invalid"] = None
     with pytest.raises(ValueError, match="quality"):
         scan(b)
