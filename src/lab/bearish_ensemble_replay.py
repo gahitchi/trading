@@ -102,16 +102,24 @@ def _fill(short_entry: float, exit_ref: float, costs: RoundTripCosts) -> dict:
     if bid <= 0:
         raise ValueError("spread makes entry bid nonpositive")
     result = fill_accounting(-1, bid, ask, costs.fee_per_side_bps, costs.slippage_per_side_bps)
-    base = fill_accounting(-1, short_entry, exit_ref, costs.fee_per_side_bps, costs.slippage_per_side_bps)
+    # The shared fill kernel uses its entry reference as denominator
+    # (bid here). Normalize every term to the ORIGINAL candle-open
+    # reference to keep a single, checkable economic identity.
+    scale = bid / short_entry
+    gross = (short_entry - exit_ref) / short_entry
+    spread = (short_entry - bid + ask - exit_ref) / short_entry
+    slippage = result["slippage_cost"] * scale
+    fee = result["fee_cost"] * scale
     reserve = costs.adverse_funding_bps / 10_000
+    net = gross - spread - slippage - fee - reserve
     return {
         "entry_fill": result["entry_fill"],
         "exit_fill": result["exit_fill"],
-        "gross_return": result["reference_gross"],
-        "net_return": result["net"] - reserve,
-        "fee_cost": result["fee_cost"],
-        "slippage_cost": result["slippage_cost"],
-        "spread_cost": base["net"] - result["net"],
+        "gross_return": gross,
+        "net_return": net,
+        "fee_cost": fee,
+        "slippage_cost": slippage,
+        "spread_cost": spread,
         "funding_reserve_cost": reserve,
     }
 
