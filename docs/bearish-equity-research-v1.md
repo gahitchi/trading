@@ -28,8 +28,9 @@ BTC v1 for this feature.**
   are **not observed** by this module.
 - An open short at the UTC close is valued at the candle close with an
   extra **hypothetical adverse buy-to-cover spread and slippage**, both
-  commissions and a linearly accrued fraction of the trade's total
-  funding reserve. This is a hypothetical close-out valuation, not an
+  commissions and the FULL adverse fixed funding reserve. Charging
+  the complete reserve while open avoids using the future exit duration
+  in earlier day valuations. This is a hypothetical close-out valuation, not an
   executable bid/ask price or authenticated mark source.
 - The first bar ends at **00:01 UTC** and every successive minute must be
   present until the last **00:00 UTC** candle-end stamp. Each day is
