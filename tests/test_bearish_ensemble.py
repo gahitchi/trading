@@ -49,22 +49,19 @@ def test_short_candidate_requires_multiple_independent_bearish_gates():
 
 def test_uptrend_and_weak_participation_are_vetoed():
     up = ready(falling=False)
-    assert up.on_closed_bar(
-        bar(200, falling=False, volume=3000, sell_share=0.8), COSTS, flat=True, risk_ready=True
-    ).action == "FLAT"
+    assert (
+        up.on_closed_bar(bar(200, falling=False, volume=3000, sell_share=0.8), COSTS, flat=True, risk_ready=True).action
+        == "FLAT"
+    )
     down = ready()
     d = down.on_closed_bar(bar(200), COSTS, flat=True, risk_ready=True)
     assert "sell_participation" in d.vetoes
 
 
-@pytest.mark.parametrize(
-    "flat,risk_ready,reason", [(False, True, "position_open"), (True, False, "risk_not_ready")]
-)
+@pytest.mark.parametrize("flat,risk_ready,reason", [(False, True, "position_open"), (True, False, "risk_not_ready")])
 def test_external_risk_and_position_guards_are_required(flat, risk_ready, reason):
     engine = ready()
-    d = engine.on_closed_bar(
-        bar(200, volume=3000, sell_share=0.72), COSTS, flat=flat, risk_ready=risk_ready
-    )
+    d = engine.on_closed_bar(bar(200, volume=3000, sell_share=0.72), COSTS, flat=flat, risk_ready=risk_ready)
     assert d.action == "FLAT" and reason in d.vetoes
 
 
@@ -84,9 +81,7 @@ def test_gap_discards_all_indicators_and_requires_new_warmup():
     gap = replace(bar(200, volume=3000, sell_share=0.72), end_ns=START + 300 * MINUTE_NS)
     d = engine.on_closed_bar(gap, COSTS, flat=True, risk_ready=True)
     assert d.vetoes == ("history_gap",)
-    d = engine.on_closed_bar(
-        replace(gap, end_ns=gap.end_ns + MINUTE_NS), COSTS, flat=True, risk_ready=True
-    )
+    d = engine.on_closed_bar(replace(gap, end_ns=gap.end_ns + MINUTE_NS), COSTS, flat=True, risk_ready=True)
     assert d.vetoes == ("warmup",)
 
 
@@ -97,13 +92,9 @@ def test_malformed_unordered_or_duplicate_bars_fail_closed():
     with pytest.raises(ValueError):
         engine.on_closed_bar(replace(bar(200), high=0), COSTS, flat=True, risk_ready=True)
     with pytest.raises(ValueError):
-        engine.on_closed_bar(
-            replace(bar(200), taker_buy_quote=2000), COSTS, flat=True, risk_ready=True
-        )
+        engine.on_closed_bar(replace(bar(200), taker_buy_quote=2000), COSTS, flat=True, risk_ready=True)
     with pytest.raises(ValueError):
-        engine.on_closed_bar(
-            bar(200), RoundTripCosts(float("nan"), 0, 0), flat=True, risk_ready=True
-        )
+        engine.on_closed_bar(bar(200), RoundTripCosts(float("nan"), 0, 0), flat=True, risk_ready=True)
 
 
 def test_prefix_invariance_no_lookahead_and_automatic_cooldown():
@@ -114,13 +105,12 @@ def test_prefix_invariance_no_lookahead_and_automatic_cooldown():
     b = other.on_closed_bar(signal, COSTS, flat=True, risk_ready=True)
     assert a == b and a.action == "SHORT_CANDIDATE"
     # Any future bars cannot change the signal already returned.
-    first.on_closed_bar(
-        bar(201, volume=3000, sell_share=0.72), COSTS, flat=True, risk_ready=True
-    )
+    first.on_closed_bar(bar(201, volume=3000, sell_share=0.72), COSTS, flat=True, risk_ready=True)
     assert a == b
-    assert "cooldown" in first.on_closed_bar(
-        bar(202, volume=3000, sell_share=0.72), COSTS, flat=True, risk_ready=True
-    ).vetoes
+    assert (
+        "cooldown"
+        in first.on_closed_bar(bar(202, volume=3000, sell_share=0.72), COSTS, flat=True, risk_ready=True).vetoes
+    )
 
 
 def test_invalid_settings_rejected():
