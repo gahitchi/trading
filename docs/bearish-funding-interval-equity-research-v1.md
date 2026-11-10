@@ -1,6 +1,6 @@
 # Funding-uncertainty daily equity envelope — research-only v1 (2026-11-10)
 
-**Status: new code and 11 synthetic tests awaiting Termux acceptance.**
+**Status: new code and 13 synthetic tests awaiting Termux acceptance.**
 No new strategy evaluation, market data import, network request, holdout
 opening, paper/live trading authorization, or research-family mutation.
 
@@ -86,10 +86,10 @@ PYTHONPATH=src:. python -m pytest \
   tests/test_bearish_funding_interval_equity.py -q
 ```
 
-11 new synthetic cases exercise flat days, certain funding parity
+13 new synthetic cases exercise flat days, certain funding parity
 with the strict ledger, ambiguous debits and receipts, exact
 exit boundaries, a provably post-exit event, overnight UTC
-settlements, scenario-dependent reinvestment, source-tampering
+settlements, midnight entry/exit posting, scenario-dependent reinvestment, source-tampering
 detection, holdout/gap enforcement, unresolved or modified
 positions and funding-free shorts. All tests use constructed
 data; they do **not** demonstrate strategy profitability.
