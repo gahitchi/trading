@@ -241,7 +241,9 @@ def daily_short_equity(
             j = idx.get_indexer([pd.Timestamp(end, unit="ns", tz="UTC")])[0]
             worst_cover = _closeout(float(prices[i : j + 1, 1].max()), costs)
             worst_fee = fee_entry + qty * worst_cover * costs.fee_per_side_bps / 10_000
-            stress_equity = base + qty * (trade.entry_fill - worst_cover) - worst_fee - notional * trade.funding_reserve_cost
+            stress_equity = (
+                base + qty * (trade.entry_fill - worst_cover) - worst_fee - notional * trade.funding_reserve_cost
+            )
             if stress_equity <= notional * a.minimum_equity_fraction:
                 raise ValueError("intrabar equity floor breached; liquidation not modeled")
             active = (trade, qty, base, fee_entry)
