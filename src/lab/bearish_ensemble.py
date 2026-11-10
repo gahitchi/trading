@@ -12,6 +12,7 @@ and market-data-quality checks. Never convert a signal to a live order.
 from __future__ import annotations
 
 from collections import deque
+from itertools import pairwise
 from dataclasses import dataclass
 from math import isfinite
 from statistics import fmean, median
@@ -191,7 +192,7 @@ class BearishEnsemble:
         atr_inputs = prior[-s.atr_bars - 1:]
         ranges = [
             max(b.high - b.low, abs(b.high - p.close), abs(b.low - p.close))
-            for p, b in zip(atr_inputs, atr_inputs[1:])
+            for p, b in pairwise(atr_inputs)
         ]
         atr = fmean(ranges)
         stop_bps = s.stop_atr_multiple * atr / bar.close * 10_000 if atr > 0 else 0.0
