@@ -17,7 +17,10 @@ and attempt IDs remain in the operator's durable
 - Prior research history retained at new registration: 12 entries.
 - BTC protected cutoff: `2026-05-08T00:00:00+00:00`; reported `holdout_used=false`.
 - Recovered original local caches: 44 BTC kline parquet periods and 1,038 OI parquet periods (including later protected periods, which the guarded loader must never open during this study).
-- The evaluation command appears **twice** in the operator's transcript. The number, identity, inputs and outcomes of the newly persisted attempts must be confirmed from `lab.trials.history` before any statement about independent repetitions.
+- The operator's subsequent read-only ledger audit confirmed **14 total historical research entries**, including **12 older preserved entries** and **2 new completed evaluations** of this exact member.
+- New completed attempt IDs: `20f63defa3f64caf81f3df8a6e0ed477` and `35c97f49e68a4ab2be90cf25b755d1ce`.
+- `_generations` and `_assert_history_chain` verified the registration chain. Both new attempts reported `RETROSPECTIVE_UNQUALIFIED`. Their SHA-256 input-evidence manifests and complete serialized result dictionaries were identical.
+- These are **two deterministic replays of the same observed historical inputs**, not two independent samples, separate out-of-sample trials, or independent code implementations. Keep both attempt records in the cumulative search history.
 
 ## Observed descriptive report
 
@@ -63,9 +66,10 @@ trade-return sums as daily P&L.
 
 ## Next engineering work (without re-running this candidate)
 
-1. Audit the **two possibly duplicated evaluations** using the authoritative
-   `history()`: statuses, exact family links, fingerprints, input digests,
-   result equality, and the current count of attempts.
+1. **Audit completed:** two separate completed and identical evaluations
+   are in the authoritative ledger; source-input hashes and serialized
+   result outputs match, and registration history is valid. Preserve both
+   records when reporting the complete 14-entry research history.
 2. Verify that the full `research_family` history and prior negative BTC
    attempts remain intact.
 3. Build a separate marked-equity / margin / actual-funding accounting
