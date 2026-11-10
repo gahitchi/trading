@@ -6,8 +6,8 @@ from dataclasses import replace
 import pandas as pd
 import pytest
 
-from lab.bearish_funding_interval_equity import interval_daily_short_equity
 from lab.bearish_funded_equity import funded_daily_short_equity
+from lab.bearish_funding_interval_equity import interval_daily_short_equity
 from tests.test_bearish_equity import COSTS, candles, replay
 from tests.test_bearish_funded_equity import CUTOFF, evidence, short
 
