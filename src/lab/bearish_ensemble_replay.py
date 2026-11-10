@@ -162,17 +162,26 @@ def replay_research_frame(
             skipped += 1
             continue
         signal_ns = int(census.candidate_times_ns[position])
-        # Entry delay is one or more WHOLE minutes after the signal,
-        # rather than an invented fill at 50/150/300 ms.
+        # Only the COMPLETED candles before the entry opening can veto
+        # an entry. The entry candle's OI flag, high, low and close are
+        # unknown at its open and MUST NOT be consulted here.
         if any(
             frame.index[i].value != signal_ns + (i - signal_i) * MINUTE_NS or _bar(frame, i) is None
-            for i in range(int(signal_i) + 1, entry_i + 1)
+            for i in range(int(signal_i) + 1, entry_i)
         ):
             skipped += 1
             continue
-        first = _bar(frame, entry_i)
-        assert first is not None  # guarded above; no state mutation
-        entry_ref = first.open
+        entry_end_ns = int(frame.index[entry_i].value)
+        if entry_end_ns != signal_ns + (entry_i - signal_i) * MINUTE_NS:
+            skipped += 1
+            continue
+        entry_ref = float(frame["open"].iat[entry_i])
+        if not isfinite(entry_ref) or entry_ref <= 0:
+            # Missing price evidence at entry: position existence is
+            # uncertain. Never continue to claim subsequent clean fills.
+            unresolved += 1
+            halted = True
+            break
         stop_bps = census.candidate_stops_bps[position]
         target_bps = census.candidate_targets_bps[position]
         if not all(isfinite(v) and v > 0 for v in (stop_bps, target_bps)):
@@ -186,7 +195,7 @@ def replay_research_frame(
         completed = False
         for j in range(entry_i, min(n, entry_i + assumptions.max_hold_minutes)):
             candle = _bar(frame, j)
-            if candle is None or candle.end_ns != first.end_ns + (j - entry_i) * MINUTE_NS:
+            if candle is None or candle.end_ns != entry_end_ns + (j - entry_i) * MINUTE_NS:
                 # There is an unobserved path while inventory is open.
                 # Fail closed: do not fabricate an exit or keep trading.
                 unresolved += 1
@@ -207,7 +216,7 @@ def replay_research_frame(
             trades.append(
                 ShortTrade(
                     signal_end_ns=signal_ns,
-                    entry_minute_start_ns=int(first.end_ns - MINUTE_NS),
+                    entry_minute_start_ns=entry_end_ns - MINUTE_NS,
                     exit_bar_end_ns=candle.end_ns,
                     setup=census.candidate_setups[position],
                     exit_reason=reason,
