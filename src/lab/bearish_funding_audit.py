@@ -114,7 +114,8 @@ def short_funding_bounds(
         raise ValueError("funding cannot value unresolved replay inventory")
     if not isinstance(costs, RoundTripCosts):
         raise ValueError("invalid cost assumptions")
-    costs.total_bps  # validates estimates including the frozen funding reserve
+    if costs.total_bps >= 10_000:
+        raise ValueError("round-trip cost budget must be below 10000 bps")
     plan, events, times = _checked_evidence(
         evidence, boundary=boundary, symbol=symbol, expected_plan_sha256=expected_plan_sha256
     )
