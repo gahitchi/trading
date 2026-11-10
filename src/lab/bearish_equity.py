@@ -127,6 +127,8 @@ def daily_short_equity(
     frame: pd.DataFrame,
     replay: ShortReplay,
     costs: RoundTripCosts,
+    *,
+    boundary: pd.Timestamp,
     assumptions: EquityAssumptions | None = None,
 ) -> EquityReport:
     """Full UTC-day reference equity, with flat days and MTM open shorts.
@@ -142,9 +144,14 @@ def daily_short_equity(
         raise ValueError("cannot mark an unresolved short replay")
     if not isinstance(frame, pd.DataFrame) or not isinstance(frame.index, pd.DatetimeIndex):
         raise ValueError("equity requires a UTC candle-end-indexed DataFrame")
+    boundary = pd.Timestamp(boundary)
+    if boundary.tzinfo is None or boundary.utcoffset() != timedelta(0) or boundary != boundary.floor("D"):
+        raise ValueError("equity requires a fixed UTC-midnight protected boundary")
     idx = frame.index
     if idx.tz is None or str(idx.tz) != "UTC" or not idx.is_monotonic_increasing or not idx.is_unique:
         raise ValueError("equity requires unique increasing UTC candle-end stamps")
+    if len(idx) and idx[-1] >= boundary:
+        raise ValueError("protected holdout observations cannot enter the equity ledger")
     if len(idx) < 1440 or (idx.asi8 <= 0).any() or (idx.asi8 % MINUTE_NS).any():
         raise ValueError("equity requires complete positive UTC minute timestamps")
     if idx[0] != idx[0].floor("D") + pd.Timedelta(minutes=1) or idx[-1] != idx[-1].floor("D"):
