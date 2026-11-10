@@ -154,3 +154,39 @@ def test_plan_out_does_not_overwrite_existing_file(tmp_path):
     rs._write_exclusive(dest, rs.proposed_plan(cfg))
     with pytest.raises(FileExistsError):
         rs._write_exclusive(dest, rs.proposed_plan(cfg))
+
+
+def test_real_crash_grid_builds_eligible_preholdout_ensemble_inputs(tmp_path, monkeypatch):
+    """Exercise production grid/quality construction, not the mocked grid."""
+    cfg = configured(tmp_path)
+    register_family(tmp_path / "results", rs.proposed_plan(cfg))
+    candles = sample_history(240)
+    k = candles.drop(columns=["oi_invalid"]).reset_index(names="ts")
+    oi_times = candles.index[::5]
+    oi = pd.DataFrame(
+        {
+            "ts": oi_times,
+            "oi_qty": [100.0] * len(oi_times),
+            "oi_value": [10000.0] * len(oi_times),
+        }
+    )
+    calls = []
+
+    def loader(_root, kind, symbol, *, before):
+        assert symbol == "BTCUSDT" and before == rs.BOUNDARY
+        calls.append(kind)
+        return k.copy() if kind == "klines" else oi.copy()
+
+    monkeypatch.setattr(crash_data, "load", loader)
+    # Do NOT patch crash_study.bars: test actual open-interest lag,
+    # missing-source indicators, time grid and candle fields.
+    report = rs.evaluate(cfg)
+    assert calls == ["klines", "oi"]
+    assert report["status"] == "RETROSPECTIVE_UNQUALIFIED"
+    assert report["valid_bars"] > 180
+    assert report["signals"] == 1
+    assert report["trades"] == 1
+    assert report["holdout_used"] is False
+    attempts = history(tmp_path / "results")
+    assert len(attempts) == 1
+    assert len(attempts[0]["inputs"]["streams"]) == 3
