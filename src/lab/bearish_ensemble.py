@@ -12,8 +12,8 @@ and market-data-quality checks. Never convert a signal to a live order.
 from __future__ import annotations
 
 from collections import deque
-from itertools import pairwise
 from dataclasses import dataclass
+from itertools import pairwise
 from math import isfinite
 from statistics import fmean, median
 from typing import Literal
@@ -137,9 +137,7 @@ class BearishEnsemble:
     def __init__(self, settings: EnsembleSettings | None = None):
         self.settings = settings or EnsembleSettings()
         s = self.settings
-        self._warmup = max(
-            3 * s.slow_ema, s.volume_bars + 1, s.support_bars + 1, s.atr_bars + 2, s.momentum_bars + 1
-        )
+        self._warmup = max(3 * s.slow_ema, s.volume_bars + 1, s.support_bars + 1, s.atr_bars + 2, s.momentum_bars + 1)
         self._history: deque[MinuteBar] = deque(maxlen=self._warmup + 1)
         self._last_signal_ns: int | None = None
 
@@ -155,9 +153,7 @@ class BearishEnsemble:
             e += alpha * (v - e)
         return e
 
-    def on_closed_bar(
-        self, bar: MinuteBar, costs: RoundTripCosts, *, flat: bool, risk_ready: bool
-    ) -> EnsembleDecision:
+    def on_closed_bar(self, bar: MinuteBar, costs: RoundTripCosts, *, flat: bool, risk_ready: bool) -> EnsembleDecision:
         """Evaluate one complete bar. No external trade or risk side effects."""
         bar.validate()
         if type(flat) is not bool or type(risk_ready) is not bool:
@@ -180,20 +176,17 @@ class BearishEnsemble:
         slow = self._ema(closes, s.slow_ema)
         trending = fast < slow and bar.close < fast
         momentum = (bar.close / prior[-s.momentum_bars].close - 1) * 10_000 <= -s.momentum_min_bps
-        support = min(b.low for b in prior[-s.support_bars:])
-        minor_support = min(b.low for b in prior[-s.continuation_bars:])
+        support = min(b.low for b in prior[-s.support_bars :])
+        minor_support = min(b.low for b in prior[-s.continuation_bars :])
         breakdown = bar.close < support * (1 - s.break_buffer_bps / 10_000)
         continuation = bar.close < minor_support * (1 - s.break_buffer_bps / 10_000)
-        volume_baseline = median(b.quote_volume for b in prior[-s.volume_bars:])
+        volume_baseline = median(b.quote_volume for b in prior[-s.volume_bars :])
         volume_ok = volume_baseline > 0 and bar.quote_volume >= s.volume_multiple * volume_baseline
         sell_ok = bar.quote_volume > 0 and (1 - bar.taker_buy_quote / bar.quote_volume) >= s.sell_share
         body_ok = bar.close < bar.open
 
-        atr_inputs = prior[-s.atr_bars - 1:]
-        ranges = [
-            max(b.high - b.low, abs(b.high - p.close), abs(b.low - p.close))
-            for p, b in pairwise(atr_inputs)
-        ]
+        atr_inputs = prior[-s.atr_bars - 1 :]
+        ranges = [max(b.high - b.low, abs(b.high - p.close), abs(b.low - p.close)) for p, b in pairwise(atr_inputs)]
         atr = fmean(ranges)
         stop_bps = s.stop_atr_multiple * atr / bar.close * 10_000 if atr > 0 else 0.0
         target_bps = stop_bps * s.reward_to_risk
