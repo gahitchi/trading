@@ -191,9 +191,9 @@ def _scenario(
     for i, (trade, result) in enumerate(zip(replay.trades, bounds.trades, strict=True)):
         if not isclose(
             per_trade_funding[i],
-            quantities[i] * trade.entry_reference * (
-                result.funding_upper_return if upper else result.funding_lower_return
-            ),
+            quantities[i]
+            * trade.entry_reference
+            * (result.funding_upper_return if upper else result.funding_lower_return),
             rel_tol=1e-9,
             abs_tol=1e-7,
         ):
