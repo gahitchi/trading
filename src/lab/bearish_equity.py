@@ -243,9 +243,7 @@ def daily_short_equity(
             mark_px = float(frame.loc[mark, "close"])
             cover = _closeout(mark_px, costs)
             exit_commission = qty * cover * costs.fee_per_side_bps / 10_000
-            elapsed = (ns - trade.entry_minute_start_ns) / (
-                trade.exit_bar_end_ns - trade.entry_minute_start_ns
-            )
+            elapsed = (ns - trade.entry_minute_start_ns) / (trade.exit_bar_end_ns - trade.entry_minute_start_ns)
             if not 0 <= elapsed < 1:
                 raise ValueError("invalid open-position mark interval")
             estimated_reserve = qty * trade.entry_reference * trade.funding_reserve_cost * elapsed
