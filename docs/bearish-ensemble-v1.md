@@ -34,3 +34,10 @@ PYTHONPATH=src:. python -m pytest tests/test_bearish_ensemble.py -q
 The 11 no-network regression tests cover bearish entry, upward/weak-selling vetoes, estimated-cost veto, risk position and risk-governor checks, missing-minute warmup reset, malformed/out-of-order input, prefix invariance, signal cooldown, extension veto, and prohibition on long candidates.
 
 This is an **algorithm prototype**, not an evidence-backed claim that any strategy has an edge or can produce daily profit.
+
+
+## Offline signal census adapter (2026-11-10)
+
+`src/lab/bearish_ensemble_screen.py` exposes `screen_research_frame` as an **in-memory, read-only diagnostic**. It accepts preloaded closed minute bars and an explicit UTC-midnight pre-holdout boundary. It refuses any observation at or after that boundary, rejects duplicate/out-of-order timestamps, quarantines invalid candles and `oi_invalid` quality markers, and leaves source frames unchanged. It reports candidate timestamps, setups, warmup/gap/quality veto counts, and valid-vs-discarded candle counts. Unit tests use **synthetic data only**. No backtest fills, funding, equity, production controls, trial registration, public broker credentials, or real trades are involved.
+
+A future guarded CLI should load research-only candles using `crash_data.load(root, "klines", symbol, before=boundary)` and build the full source-quality frame with the existing `crash_study.bars`. The cutoff must apply **before any parquet file is opened**, and the results must be trial-registered before historical outcomes are examined. This adapter deliberately does not select a boundary or open files for the caller. **Do not interpret its signals as trades, imply a performance edge, or run it on the protected BTC holdout.**
