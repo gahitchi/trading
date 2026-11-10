@@ -64,3 +64,32 @@ PYTHONPATH=src:. python -m pytest tests/test_bearish_ensemble.py tests/test_bear
 ```
 
 These three files contain 32 synthetic cases. Passing means the **defined model rules** are consistent; it does not establish a net-profitable edge.
+
+
+## Guarded BTC research-family harness (2026-11-10)
+
+`lab.bearish_ensemble_research` now exposes two explicit commands:
+
+```sh
+# Metadata-only candidate proposal; no price/OI source files read.
+python -m lab.bearish_ensemble_research --config lab.toml --plan-out /tmp/btc-bearish-ensemble-plan.json
+
+# NEVER run the following before reviewing the existing registered
+# research family and ensuring every predecessor experiment is accounted for:
+# lab research register /tmp/btc-bearish-ensemble-plan.json
+# python -m lab.bearish_ensemble_research --config lab.toml --evaluate
+```
+
+The evaluation path fails before any market read if the plan isn't registered, its exact candidate settings are missing, the runtime/source identity changed, or the existing BTC holdout boundary differs from **2026-05-08 00:00 UTC**. Once registered, it reserves a durable trial before reading any source and fingerprints the actual pre-holdout klines, OI and resulting screening frame. It validates OI provenance and bars, with missing OI coverage explicitly vetoed, and reports signal and exit counts, including dates with no completed exits.
+
+**The output is deliberately NOT a marked-equity daily P&L series.** The replay cannot price intratrade inventory, independently authenticate funding, or measure queue position and execution latency. Raw net trade-return sums (if all inventory resolves) are denominated per trade and are **not cumulative portfolio returns**. If inventory cannot be accounted for at a data gap, there are no net trade-return summary fields and the result is unavailable. Statistical qualification and paper/live order authorization always remain false.
+
+The BTC historical data and previous failures have already been inspected: any BTC result is **retrospective**, not a new independent discovery. New ETH/SOL candidate families require their own prospective boundaries and coverage checks. This stage adds software safeguards, not validated trading performance.
+
+### New guarded-study tests
+
+```sh
+PYTHONPATH=src:. python -m pytest tests/test_bearish_ensemble_research.py -q
+```
+
+The 8 synthetic tests cover exact pre-registration planning, missing/mismatched registration, accepted guarded replay, recorded source-read failure, unavailable open inventory, cutoff mutation, and exclusive plan publication. Run the full suite only in an environment with the project's optional NautilusTrader dependency.
