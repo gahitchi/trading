@@ -63,6 +63,14 @@ strategy when any sample member fails. When a future full evaluation is
 needed, integrate a rigorous liability/receivable interval ledger
 instead of selecting only unambiguous trades.
 
+The synthetic daily candle window ends at **2026-01-03T00:00Z**.
+Its funding source therefore uses an explicit later protected boundary,
+**2026-01-04T00:00Z**, and includes complete regular funding events
+through 2026-01-03. The first version of this synthetic test erroneously
+set the holdout to the final candle's endpoint; the existing safety guard
+correctly rejected it. This test-fixture correction does **not** modify
+the original protected BTC holdout on May 8, 2026.
+
 ## Test the implementation
 
 ```sh
@@ -75,12 +83,12 @@ ruff format --check src tests
 PYTHONPATH=src:. python -m pytest tests/test_bearish_funded_equity.py -q
 ```
 
-Eleven new synthetic cases exercise signed exchange funding at its
+Twelve new synthetic cases exercise signed exchange funding at its
 actual event time, positive funding receipts, trades without events,
 midnight/overnight marking, reinvestment after settlement cashflows,
 flat days, refused ambiguous ownership, source-digest errors,
 holdout and gap protection, adverse funding loss stress and
-source/trade immutability. Passes demonstrate code behavior only,
+source/trade immutability and an exact holdout-boundary candle regression. Passes demonstrate code behavior only,
 not a verified market edge.
 
 ## Outstanding critical prerequisites
