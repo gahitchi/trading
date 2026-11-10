@@ -9,6 +9,7 @@ or independent historical experiments. No IO, networking or order placement.
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import timedelta
 from math import isclose, isfinite
@@ -71,13 +72,17 @@ def _events(replay: ShortReplay, source: dict, bounds) -> tuple[_Action, ...]:
     """
     actions: list[_Action] = []
     events = source["events"]
+    times_ms = [event["fundingTime"] for event in events]
     for i, (trade, result) in enumerate(zip(replay.trades, bounds.trades, strict=True)):
         start, end = trade.entry_minute_start_ns, trade.exit_bar_end_ns
         actions.extend((_Action(start, 2, i), _Action(end, 0, i)))
         entry = pd.Timestamp(start, unit="ns", tz="UTC")
         exit_ = pd.Timestamp(end, unit="ns", tz="UTC")
+        first_ms = int((entry - ENTRY_UNCERTAINTY).value // 1_000_000)
+        last_ms = int((exit_ + ENTRY_UNCERTAINTY).value // 1_000_000)
+        nearby = events[bisect_left(times_ms, first_ms) : bisect_right(times_ms, last_ms)]
         certain = ambiguous = 0
-        for raw in events:
+        for raw in nearby:
             when_ns = int(raw["fundingTime"]) * 1_000_000
             when = pd.Timestamp(when_ns, unit="ns", tz="UTC")
             if entry + ENTRY_UNCERTAINTY < when < exit_ - EXIT_UNCERTAINTY:
