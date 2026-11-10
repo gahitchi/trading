@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, localcontext
 
@@ -88,7 +89,7 @@ def parse_leverage_brackets(raw: object, *, symbol: str, expected_sha256: str) -
         raise ValueError("invalid leverage-bracket response")
     if set(raw) - {"symbol", "brackets", "notionalCoef"}:
         raise ValueError("unknown leverage-bracket response fields")
-    if not isinstance(symbol, str) or not symbol.endswith("USDT") or not symbol[:-4].isalnum():
+    if not isinstance(symbol, str) or re.fullmatch(r"[A-Z0-9]{2,16}USDT", symbol) is None:
         raise ValueError("only explicit USDT-margined USD-M symbol supported")
     if raw["symbol"] != symbol or _decimal(raw.get("notionalCoef", "1"), "notionalCoef") != 1:
         raise ValueError("symbol mismatch or unsupported account notional coefficient")
