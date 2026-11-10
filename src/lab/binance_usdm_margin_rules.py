@@ -155,6 +155,8 @@ class MarkEvidence:
     entry_minute_start_ms: int
     bracket_capture_ms: int
     assessment_ms: int
+    symbol: str
+    endpoint: str
 
 
 @dataclass(frozen=True)
@@ -178,9 +180,12 @@ class IsolatedShortRisk:
     qualified: bool = False
 
 
-def _mark_prices(data: MarkEvidence, *, expected_sha256: str) -> tuple[Decimal, Decimal]:
+def _mark_prices(data: MarkEvidence, *, expected_sha256: str, symbol: str) -> tuple[Decimal, Decimal]:
     _digest(expected_sha256)
-    if expected_sha256 != data.source_sha256 or source_sha256(data.raw_candles) != expected_sha256:
+    if data.endpoint != "/fapi/v1/markPriceKlines" or data.symbol != symbol:
+        raise ValueError("mark-price endpoint or symbol provenance mismatch")
+    envelope = {"endpoint": data.endpoint, "symbol": data.symbol, "candles": data.raw_candles}
+    if expected_sha256 != data.source_sha256 or source_sha256(envelope) != expected_sha256:
         raise ValueError("mark-price source SHA-256 mismatch")
     if (
         type(data.entry_minute_start_ms) is not int
@@ -285,7 +290,7 @@ def assess_isolated_short(
     if reserve < 0 or fee < 0 or buffer < 0 or fee + buffer >= 10_000:
         raise ValueError("invalid adverse funding or liquidation fee/buffer assumptions")
     schedule = parse_leverage_brackets(raw_brackets, symbol=position.symbol, expected_sha256=expected_bracket_sha256)
-    mark, high = _mark_prices(mark_data, expected_sha256=expected_mark_sha256)
+    mark, high = _mark_prices(mark_data, expected_sha256=expected_mark_sha256, symbol=position.symbol)
     with localcontext() as ctx:
         ctx.prec = 70
         entry_notional = q * entry
