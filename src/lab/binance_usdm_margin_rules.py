@@ -19,6 +19,7 @@ MINUTE_MS = 60_000
 MAX_MARK_BARS = 10_080
 MAX_CAPTURE_LAG_MS = 60_000
 MAX_MARK_LAG_MS = 60_000
+_TIER_FIELDS = {"bracket", "initialLeverage", "notionalCap", "notionalFloor", "maintMarginRatio", "cum"}
 
 
 def source_sha256(data: object) -> str:
@@ -99,9 +100,7 @@ def parse_leverage_brackets(raw: object, *, symbol: str, expected_sha256: str) -
     with localcontext() as ctx:
         ctx.prec = 70
         for i, row in enumerate(rows, 1):
-            if not isinstance(row, dict) or set(row) != {
-                "bracket", "initialLeverage", "notionalCap", "notionalFloor", "maintMarginRatio", "cum"
-            }:
+            if not isinstance(row, dict) or set(row) != _TIER_FIELDS:
                 raise ValueError("incomplete or unexpected leverage tier fields")
             if type(row["bracket"]) is not int or row["bracket"] != i:
                 raise ValueError("unordered notional bracket IDs")
