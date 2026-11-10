@@ -151,7 +151,13 @@ def test_intrabar_high_spike_triggers_equity_floor_veto():
     b.loc[exit_, "close"] = 99.0
     b.loc[pd.Timestamp("2026-01-01T02:02:00Z"), "high"] = 1_000.0
     with pytest.raises(ValueError, match="equity floor"):
-        daily_short_equity(b, replay(trade(b, entry, exit_)), COSTS, boundary=BOUNDARY, assumptions=EquityAssumptions(notional_fraction=1))
+        daily_short_equity(
+            b,
+            replay(trade(b, entry, exit_)),
+            COSTS,
+            boundary=BOUNDARY,
+            assumptions=EquityAssumptions(notional_fraction=1),
+        )
 
 
 def test_trailing_zero_trade_days_do_not_disappear_from_equity_history():
