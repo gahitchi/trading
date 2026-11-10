@@ -30,11 +30,7 @@ def test_bearish_replay_uses_delayed_short_only_entry_and_reconciles_costs():
     assert trade.entry_fill < trade.entry_reference
     assert trade.exit_fill > trade.exit_reference
     assert trade.net_return == pytest.approx(
-        trade.gross_return
-        - trade.fee_cost
-        - trade.slippage_cost
-        - trade.spread_cost
-        - trade.funding_reserve_cost
+        trade.gross_return - trade.fee_cost - trade.slippage_cost - trade.spread_cost - trade.funding_reserve_cost
     )
     assert r.total_net_trade_return == trade.net_return
     assert trade.exit_reason == "target"
