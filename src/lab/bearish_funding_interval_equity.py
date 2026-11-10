@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
-from datetime import timedelta
 from math import isclose, isfinite
 
 import pandas as pd
