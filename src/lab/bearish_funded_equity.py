@@ -177,9 +177,7 @@ def funded_daily_short_equity(
                 # Research-only adverse high envelope. A funding debit is
                 # fully charged; favorable uncertain funding is never used
                 # to assert that a position survived an intrabar margin call.
-                first = frame.index.get_loc(
-                    pd.Timestamp(trade.entry_minute_start_ns + MINUTE_NS, unit="ns", tz="UTC")
-                )
+                first = frame.index.get_loc(pd.Timestamp(trade.entry_minute_start_ns + MINUTE_NS, unit="ns", tz="UTC"))
                 last = frame.index.get_loc(pd.Timestamp(trade.exit_bar_end_ns, unit="ns", tz="UTC"))
                 worst_high = float(frame["high"].iloc[first : last + 1].max())
                 cover = _closeout(worst_high, costs)
