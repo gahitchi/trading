@@ -10,6 +10,7 @@ from lab.bearish_ensemble_replay import ShortReplay, ShortTrade
 from lab.bearish_equity import EquityAssumptions, daily_short_equity
 
 COSTS = RoundTripCosts(5, 5, 2, 1)
+BOUNDARY = pd.Timestamp("2026-05-08T00:00:00Z")
 
 
 def candles(days=2):
@@ -58,7 +59,7 @@ def replay(*trades, halted=False):
 
 
 def test_flat_utc_days_include_no_trade_days_with_zero_returns():
-    result = daily_short_equity(candles(), replay(), COSTS)
+    result = daily_short_equity(candles(), replay(), COSTS, boundary=BOUNDARY)
     assert len(result.days) == 2
     assert result.end_equity == 10_000
     assert result.flat_days == 2
@@ -72,7 +73,7 @@ def test_overnight_position_marked_at_midnight_and_realized_only_once():
     exit_ = pd.Timestamp("2026-01-02T00:03:00Z")
     b.loc[exit_, "close"] = 99.0
     t = trade(b, entry, exit_)
-    result = daily_short_equity(b, replay(t), COSTS)
+    result = daily_short_equity(b, replay(t), COSTS, boundary=BOUNDARY)
     first, second = result.days
     assert first.open_position and first.entries == 1 and first.exits == 0
     assert first.end_equity < 10_000 and first.realized_cash == 10_000
@@ -89,7 +90,7 @@ def test_sequential_shorts_reinvest_only_realized_equity():
     i2, x2 = pd.Timestamp("2026-01-02T02:00:00Z"), pd.Timestamp("2026-01-02T02:03:00Z")
     b.loc[[x1, x2], "close"] = 99.0
     t1, t2 = trade(b, i1, x1), trade(b, i2, x2)
-    result = daily_short_equity(b, replay(t1, t2), COSTS)
+    result = daily_short_equity(b, replay(t1, t2), COSTS, boundary=BOUNDARY)
     expected = 10_000 * (1 + 0.25 * t1.net_return) * (1 + 0.25 * t2.net_return)
     assert result.end_equity == pytest.approx(expected)
     assert [d.entries for d in result.days] == [1, 1]
@@ -99,11 +100,11 @@ def test_sequential_shorts_reinvest_only_realized_equity():
 def test_missing_minutes_and_partial_utc_days_fail_closed():
     b = candles()
     with pytest.raises(ValueError, match="gaps"):
-        daily_short_equity(b.drop(index=b.index[100]), replay(), COSTS)
+        daily_short_equity(b.drop(index=b.index[100]), replay(), COSTS, boundary=BOUNDARY)
     with pytest.raises(ValueError, match="full UTC days"):
-        daily_short_equity(b.iloc[:-1], replay(), COSTS)
+        daily_short_equity(b.iloc[:-1], replay(), COSTS, boundary=BOUNDARY)
     with pytest.raises(ValueError, match="full UTC days"):
-        daily_short_equity(b.iloc[1:], replay(), COSTS)
+        daily_short_equity(b.iloc[1:], replay(), COSTS, boundary=BOUNDARY)
 
 
 def test_tampered_trade_costs_or_halted_replay_rejected():
@@ -112,9 +113,9 @@ def test_tampered_trade_costs_or_halted_replay_rejected():
     b.loc[exit_, "close"] = 99.0
     t = trade(b, entry, exit_)
     with pytest.raises(ValueError, match="conservation"):
-        daily_short_equity(b, replay(replace(t, fee_cost=t.fee_cost - 0.0001)), COSTS)
+        daily_short_equity(b, replay(replace(t, fee_cost=t.fee_cost - 0.0001)), COSTS, boundary=BOUNDARY)
     with pytest.raises(ValueError, match="unresolved"):
-        daily_short_equity(b, replay(t, halted=True), COSTS)
+        daily_short_equity(b, replay(t, halted=True), COSTS, boundary=BOUNDARY)
 
 
 def test_untrusted_source_or_entry_price_mismatch_rejected():
@@ -124,12 +125,12 @@ def test_untrusted_source_or_entry_price_mismatch_rejected():
     t = trade(b, entry, exit_)
     b.loc[pd.Timestamp("2026-01-01T02:02:00Z"), "oi_invalid"] = True
     with pytest.raises(ValueError, match="source quality"):
-        daily_short_equity(b, replay(t), COSTS)
+        daily_short_equity(b, replay(t), COSTS, boundary=BOUNDARY)
     b = candles()
     b.loc[exit_, "close"] = 99.0
     b.loc[entry, ["open", "high"]] = [102.0, 103.0]
     with pytest.raises(ValueError, match="entry reference"):
-        daily_short_equity(b, replay(t), COSTS)
+        daily_short_equity(b, replay(t), COSTS, boundary=BOUNDARY)
 
 
 def test_overlapping_shorts_and_post_window_trade_rejected():
@@ -138,10 +139,10 @@ def test_overlapping_shorts_and_post_window_trade_rejected():
     b.loc[exit_, "close"] = 99.0
     t = trade(b, entry, exit_)
     with pytest.raises(ValueError, match="overlapping"):
-        daily_short_equity(b, replay(t, t), COSTS)
+        daily_short_equity(b, replay(t, t), COSTS, boundary=BOUNDARY)
     late_end = pd.Timestamp("2026-01-03T00:01:00Z")
     with pytest.raises(ValueError, match="beyond complete source"):
-        daily_short_equity(b, replay(replace(t, exit_bar_end_ns=int(late_end.value))), COSTS)
+        daily_short_equity(b, replay(replace(t, exit_bar_end_ns=int(late_end.value))), COSTS, boundary=BOUNDARY)
 
 
 def test_intrabar_high_spike_triggers_equity_floor_veto():
@@ -150,16 +151,24 @@ def test_intrabar_high_spike_triggers_equity_floor_veto():
     b.loc[exit_, "close"] = 99.0
     b.loc[pd.Timestamp("2026-01-01T02:02:00Z"), "high"] = 1_000.0
     with pytest.raises(ValueError, match="equity floor"):
-        daily_short_equity(b, replay(trade(b, entry, exit_)), COSTS, EquityAssumptions(notional_fraction=1))
+        daily_short_equity(b, replay(trade(b, entry, exit_)), COSTS, boundary=BOUNDARY, assumptions=EquityAssumptions(notional_fraction=1))
 
 
 def test_trailing_zero_trade_days_do_not_disappear_from_equity_history():
     b = candles(days=3)
     entry, exit_ = pd.Timestamp("2026-01-01T02:00:00Z"), pd.Timestamp("2026-01-01T02:03:00Z")
     b.loc[exit_, "close"] = 99.0
-    result = daily_short_equity(b, replay(trade(b, entry, exit_)), COSTS)
+    result = daily_short_equity(b, replay(trade(b, entry, exit_)), COSTS, boundary=BOUNDARY)
     assert len(result.days) == 3
     assert result.days[0].exits == 1
     assert result.days[1].daily_return == 0
     assert result.days[2].daily_return == 0
     assert result.flat_days == 2 and result.positive_days == 1
+
+
+def test_equity_rejects_holdout_or_missing_utc_boundary():
+    b = candles()
+    with pytest.raises(ValueError, match="protected holdout"):
+        daily_short_equity(b, replay(), COSTS, boundary=b.index[-1].normalize())
+    with pytest.raises(ValueError, match="UTC-midnight"):
+        daily_short_equity(b, replay(), COSTS, boundary=pd.Timestamp("2026-05-08T01:00:00Z"))
