@@ -29,6 +29,8 @@ class SignalCensus:
     discarded_quality_bars: int
     candidate_times_ns: tuple[int, ...]
     candidate_setups: tuple[str, ...]
+    candidate_stops_bps: tuple[float, ...]
+    candidate_targets_bps: tuple[float, ...]
     veto_counts: dict[str, int]
 
 
@@ -72,6 +74,8 @@ def screen_research_frame(
     veto_counts: Counter[str] = Counter()
     candidates: list[int] = []
     setups: list[str] = []
+    stops: list[float] = []
+    targets: list[float] = []
     discarded = 0
     valid = 0
     for record in frame[list(FIELDS)].itertuples(index=True, name=None):
@@ -94,6 +98,10 @@ def screen_research_frame(
         if decision.action == "SHORT_CANDIDATE":
             candidates.append(decision.signal_end_ns)
             setups.append(decision.setup or "unknown")
+            stops.append(float(decision.stop_bps))
+            targets.append(float(decision.target_bps))
         else:
             veto_counts.update(decision.vetoes)
-    return SignalCensus(len(frame), valid, discarded, tuple(candidates), tuple(setups), dict(veto_counts))
+    return SignalCensus(
+        len(frame), valid, discarded, tuple(candidates), tuple(setups), tuple(stops), tuple(targets), dict(veto_counts)
+    )
