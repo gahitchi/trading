@@ -35,7 +35,8 @@ BTC v1 for this feature.**
 - The first bar ends at **00:01 UTC** and every successive minute must be
   present until the last **00:00 UTC** candle-end stamp. Each day is
   recorded at that end stamp with the label of the immediately preceding
-  UTC date. Intraday price gaps, invalid candles, partial UTC days,
+  UTC date. An explicit **UTC-midnight cutoff is mandatory**; the frame
+  must contain no observations at or beyond that protected boundary. Intraday price gaps, invalid candles, partial UTC days,
   out-of-window entries/exits, unresolved positions and nonpositive
   account equity **stop the calculation**. Do not fill gaps, skip
   losing days, or fabricate a terminal close.
@@ -57,10 +58,10 @@ ruff format --check src tests
 PYTHONPATH=src:. python -m pytest tests/test_bearish_equity.py -q
 ```
 
-Nine isolated synthetic scenarios exercise flat days, overnight marks,
+Ten isolated synthetic scenarios exercise flat days, overnight marks,
 sequential reinvestment, incomplete inputs, tampered fills/costs,
 untrusted active position data, overlap, adverse high price spikes and
-terminal inactivity. Passing these tests shows conformance to **the
+terminal inactivity, and protected-holdout rejection. Passing these tests shows conformance to **the
 model rules**, not financial profitability.
 
 A future independent research registration must specify data coverage,
