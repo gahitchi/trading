@@ -14,9 +14,7 @@ COSTS = RoundTripCosts(5, 5, 2, 1)
 
 
 def replay(b, *, costs=COSTS, assumptions=None):
-    return replay_research_frame(
-        b, boundary=boundary(b), costs=costs, assumptions=assumptions
-    )
+    return replay_research_frame(b, boundary=boundary(b), costs=costs, assumptions=assumptions)
 
 
 def test_bearish_replay_uses_delayed_short_only_entry_and_reconciles_costs():
@@ -67,9 +65,7 @@ def test_gapped_stop_uses_worse_open_not_favorable_stop():
     b.loc[b.index[202], "low"] = entry - 0.01
     b.loc[b.index[202], "close"] = entry
     # An adverse gap between bars crosses the protective stop.
-    b.loc[b.index[203], ["open", "high", "low", "close"]] = [
-        stop + 0.2, stop + 0.3, stop + 0.1, stop + 0.2
-    ]
+    b.loc[b.index[203], ["open", "high", "low", "close"]] = [stop + 0.2, stop + 0.3, stop + 0.1, stop + 0.2]
     t = replay(b).trades[0]
     assert t.exit_reason == "stop"
     assert t.exit_reference == pytest.approx(stop + 0.2)
