@@ -89,9 +89,21 @@ def test_unknown_inventory_path_halts_without_credited_trade():
     assert r.halted and r.unresolved_after_entry == 1
 
 
-def test_bad_entry_is_skipped_instead_of_assuming_a_fill():
+def test_entry_candle_quality_is_not_used_to_avoid_an_entry():
     b = history(240)
+    # The flag on candle 202 is unknown at candle 202's OPEN.
+    # The modeled short cannot be retroactively canceled.
     b.loc[b.index[202], "oi_invalid"] = True
+    r = replay(b)
+    assert not r.trades
+    assert r.halted and r.unresolved_after_entry == 1
+    assert r.skipped_before_entry == 0
+
+
+def test_quality_known_before_entry_can_veto_the_trade():
+    b = history(240)
+    # Candle 201 completes exactly as the modeled entry starts.
+    b.loc[b.index[201], "oi_invalid"] = True
     r = replay(b)
     assert not r.trades and not r.halted
     assert r.skipped_before_entry == 1
