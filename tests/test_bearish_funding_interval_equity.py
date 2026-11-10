@@ -149,3 +149,29 @@ def test_complete_source_but_no_settlement_within_trade_means_no_reserve():
     assert r.certain_settlements == r.ambiguous_settlements == 0
     assert r.lower_end_equity == pytest.approx(10_000 * (1 + 0.25 * no_reserve(t)))
     assert r.upper_end_equity == pytest.approx(r.lower_end_equity)
+
+
+def test_midnight_entry_and_coincident_funding_belong_to_next_utc_day():
+    b = candles()
+    t = short(b, "2026-01-02T00:01:00Z", "2026-01-02T00:05:00Z")
+    result = interval(b, replay(t))
+    first, second = result.days
+    assert first.lower_end_equity == first.upper_end_equity == 10_000
+    assert not first.open_position
+    assert first.lower_path_funding_cashflow == first.upper_path_funding_cashflow == 0
+    assert result.ambiguous_settlements == 1
+    assert second.lower_path_funding_cashflow == 0
+    assert second.upper_path_funding_cashflow == pytest.approx(2.5)
+
+
+def test_midnight_exit_and_ambiguous_funding_post_to_preceding_utc_day():
+    b = candles()
+    t = short(b, "2026-01-01T22:01:00Z", "2026-01-02T00:00:00Z")
+    result = interval(b, replay(t))
+    first, second = result.days
+    assert result.ambiguous_settlements == 1
+    assert not first.open_position
+    assert first.lower_path_funding_cashflow == 0
+    assert first.upper_path_funding_cashflow == pytest.approx(2.5)
+    assert second.lower_path_funding_cashflow == second.upper_path_funding_cashflow == 0
+    assert first.lower_end_equity < first.upper_end_equity
