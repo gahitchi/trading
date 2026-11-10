@@ -146,9 +146,7 @@ def _descriptive_result(outcome, frame: pd.DataFrame) -> dict:
     }
     if not outcome.halted:
         result["sum_net_trade_return_not_portfolio"] = outcome.total_net_trade_return
-        result["mean_net_trade_bps"] = (
-            sum(t.net_return for t in rows) * 10_000 / len(rows) if rows else None
-        )
+        result["mean_net_trade_bps"] = sum(t.net_return for t in rows) * 10_000 / len(rows) if rows else None
     return result
 
 
