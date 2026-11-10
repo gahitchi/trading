@@ -99,9 +99,7 @@ def margin_envelope(
         exit_fee = quantity * cover * costs.fee_per_side_bps / 10_000
         funding_reserve = notional * trade.funding_reserve_cost
         stressed_equity = base + quantity * (trade.entry_fill - cover) - initial_fee - exit_fee - funding_reserve
-        requirement = quantity * highest * (
-            m.maintenance_margin_fraction + m.liquidation_buffer_bps / 10_000
-        )
+        requirement = quantity * highest * (m.maintenance_margin_fraction + m.liquidation_buffer_bps / 10_000)
         excess = stressed_equity - requirement
         if not all(isfinite(v) for v in (stressed_equity, requirement, excess)):
             raise ValueError("nonfinite margin stress accounting")
