@@ -18,7 +18,16 @@ MAX_EVENTS = 10_000
 MAX_SPAN_MS = 3_600_000
 MAX_CLOCK_SKEW_MS = 60_000
 _SUPPORTED_REASONS = {"ORDER", "FUNDING_FEE", "DEPOSIT", "WITHDRAW", "MARGIN_TYPE_CHANGE", "ASSET_TRANSFER"}
-_SECRET_NAMES = {"apikey", "apisecret", "authorization", "signature", "privatekey", "password", "token", "secret"}
+_SECRET_NAMES = {
+    "apikey",
+    "apisecret",
+    "authorization",
+    "signature",
+    "privatekey",
+    "password",
+    "token",
+    "secret",
+}
 
 
 @dataclass(frozen=True)
@@ -66,7 +75,9 @@ def _snapshot(value: object, symbol: str) -> tuple[Decimal, Decimal]:
         raise ValueError("incomplete comparison snapshot")
     if value["symbol"] != symbol:
         raise ValueError("snapshot symbol mismatch")
-    return _decimal(value["wallet_balance"], "wallet balance"), _decimal(value["position_amt"], "position quantity")
+    wallet = _decimal(value["wallet_balance"], "wallet balance")
+    quantity = _decimal(value["position_amt"], "position quantity")
+    return wallet, quantity
 
 
 def audit_user_stream(bundle: object, *, expected_sha256: str) -> StreamAudit:
@@ -80,7 +91,11 @@ def audit_user_stream(bundle: object, *, expected_sha256: str) -> StreamAudit:
     if not isinstance(bundle, dict):
         raise ValueError("user-data evidence must be a JSON object")
     _no_secrets(bundle)
-    if not isinstance(expected_sha256, str) or len(expected_sha256) != 64 or source_sha256(bundle) != expected_sha256:
+    if (
+        not isinstance(expected_sha256, str)
+        or len(expected_sha256) != 64
+        or source_sha256(bundle) != expected_sha256
+    ):
         raise ValueError("user-data source SHA-256 mismatch")
     required = {
         "version", "environment", "symbol", "start_ms", "end_ms",
@@ -158,18 +173,24 @@ def audit_user_stream(bundle: object, *, expected_sha256: str) -> StreamAudit:
                 if asset in used_assets or asset != "USDT":
                     raise ValueError("duplicate or unsupported balance asset")
                 used_assets.add(asset)
-                wallet = _decimal(balance["wb"], "USDT wallet")
+                updated_wallet = _decimal(balance["wb"], "USDT wallet")
                 _decimal(balance["cw"], "cross wallet")
-                _decimal(balance["bc"], "balance change")
+                balance_change = _decimal(balance["bc"], "balance change")
+                if updated_wallet - wallet != balance_change:
+                    raise ValueError("balance change does not conserve observed wallet cash")
+                wallet = updated_wallet
             used_positions = set()
             for position in data["P"]:
-                if not isinstance(position, dict) or set(position) != {"s", "pa", "ep", "cr", "up", "mt", "iw", "ps"}:
+                required_fields = {"s", "pa", "ep", "cr", "up", "mt", "iw", "ps"}
+                if not isinstance(position, dict) or set(position) != required_fields:
                     raise ValueError("incomplete position update")
                 key = (position["s"], position["ps"])
                 if key in used_positions or key != (symbol, "BOTH") or position["mt"] != "isolated":
                     raise ValueError("unsupported/duplicate one-way isolated position update")
                 used_positions.add(key)
                 quantity = _decimal(position["pa"], "positionAmt")
+                if quantity > 0:
+                    raise ValueError("one-way short-only scope violated by intermediate long")
                 _decimal(position["ep"], "entryPrice")
                 _decimal(position["cr"], "accumulated realized")
                 _decimal(position["up"], "unrealized profit")
