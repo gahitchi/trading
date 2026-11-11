@@ -57,7 +57,7 @@ synthetic or locally constructed data. **For a real audit, pin the
 expected digest separately BEFORE any data changes**. A hash guards
 integrity of the supplied record, not its exchange provenance.
 
-The event parser supports the bounded subset `ACCOUNT_UPDATE` and
+The event parser verifies each observed USDT wallet balance-change amount against the prior observed wallet, and rejects even temporary long inventory. It supports the bounded subset `ACCOUNT_UPDATE` and
 `ORDER_TRADE_UPDATE`, with strict event/transaction/receive timestamp
 checks, isolated one-way position identity, and fixed USDT wallet
 updates. It refuses unknown reasons/events, credential-like fields,
@@ -106,5 +106,5 @@ PYTHONPATH=src:. python -m pytest \
 ```
 
 The three earlier risk suites were accepted in Termux (53 tests).
-The 15 new synthetic user-data audit tests require acceptance there.
+The 17 new synthetic user-data audit tests require acceptance there.
 A passing audit establishes observed internal consistency only.
