@@ -208,7 +208,9 @@ def test_duplicate_trade_id_or_cumulative_fill_regression_rejected():
 
 def test_trade_cumulative_fill_increment_must_match_last_fill():
     b = bundle()
-    b["events"].extend([trade_update(), trade_update(time_ms=START + 60_000, trade_id=5, filled="0.2", last="0.02")])
+    b["events"].extend(
+        [trade_update(), trade_update(time_ms=START + 60_000, trade_id=5, filled="0.2", last="0.02")]
+    )
     with pytest.raises(ValueError, match="does not conserve"):
         check(b)
 
@@ -240,3 +242,17 @@ def test_original_evidence_untouched_after_audit():
     original = deepcopy(b)
     check(b)
     assert b == original
+
+
+def test_wallet_balance_change_field_must_match_observed_wallet_delta():
+    b = bundle()
+    b["events"][0]["payload"]["a"]["B"][0]["bc"] = "0"
+    with pytest.raises(ValueError, match="balance change does not conserve"):
+        check(b)
+
+
+def test_intermediate_long_is_rejected_even_when_closing_short_reconciles():
+    b = bundle()
+    b["events"][0]["payload"]["a"]["P"][0]["pa"] = "3"
+    with pytest.raises(ValueError, match="intermediate long"):
+        check(b)
