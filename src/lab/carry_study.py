@@ -294,10 +294,10 @@ def top_positions(hs: dict[str, pd.DataFrame], s: CarrySettings) -> dict[str, pd
         grid = grid.union(h.index)
     on_grid = [h.reindex(grid) for h in hs.values()]
     x = np.column_stack([signal(h, s) for h in on_grid])
-    tradable = np.column_stack([h["tradable"].fillna(False).to_numpy(dtype=bool) for h in on_grid])
+    tradable = np.column_stack([h["tradable"].to_numpy(dtype=bool, na_value=False) for h in on_grid])
     ok = np.column_stack(
         [
-            h["tradable"].fillna(False).to_numpy(dtype=bool) & liquid(h, s) & ~np.isnan(sig)
+            h["tradable"].to_numpy(dtype=bool, na_value=False) & liquid(h, s) & ~np.isnan(sig)
             for h, sig in zip(on_grid, x.T, strict=True)
         ]
     )
