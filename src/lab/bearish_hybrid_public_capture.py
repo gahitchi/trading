@@ -269,15 +269,15 @@ def first_seen_oi(captures: Sequence[FeatureCapture], *, decision_ns: int) -> OI
     for snapshot in captures:
         if not isinstance(snapshot, FeatureCapture) or snapshot.kind != "open-interest":
             raise ValueError("expected open-interest captures")
-        if symbol is None:
-            symbol = snapshot.symbol
-        elif symbol != snapshot.symbol:
-            raise ValueError("mixed-symbol open-interest captures")
         if type(snapshot.received_ns) is not int or snapshot.received_ns <= last_received:
             raise ValueError("nonchronological open-interest captures")
         last_received = snapshot.received_ns
         if snapshot.received_ns > decision_ns:
             break  # No future source contents may affect this decision.
+        if symbol is None:
+            symbol = snapshot.symbol
+        elif symbol != snapshot.symbol:
+            raise ValueError("mixed-symbol open-interest captures")
         if type(snapshot.payload) is not dict or snapshot.payload.get("symbol") != symbol:
             raise ValueError("invalid open-interest capture payload")
         measured = _integer_ms(snapshot.payload.get("time"), "OI measurement", snapshot.received_ns)
@@ -324,15 +324,15 @@ def first_seen_funding(captures: Sequence[FeatureCapture], *, decision_ns: int) 
     for snapshot in captures:
         if not isinstance(snapshot, FeatureCapture) or snapshot.kind != "settled-funding":
             raise ValueError("expected settled-funding captures")
-        if symbol is None:
-            symbol = snapshot.symbol
-        elif symbol != snapshot.symbol:
-            raise ValueError("mixed-symbol funding captures")
         if snapshot.received_ns <= last:
             raise ValueError("nonchronological funding captures")
         last = snapshot.received_ns
         if snapshot.received_ns > decision_ns:
-            continue
+            break  # Never validate future funding content before it is received.
+        if symbol is None:
+            symbol = snapshot.symbol
+        elif symbol != snapshot.symbol:
+            raise ValueError("mixed-symbol funding captures")
         for item in snapshot.payload:
             settled = item["fundingTime"] * 1_000_000
             rate = float(item["fundingRate"])
