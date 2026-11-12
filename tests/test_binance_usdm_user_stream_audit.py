@@ -208,9 +208,7 @@ def test_duplicate_trade_id_or_cumulative_fill_regression_rejected():
 
 def test_trade_cumulative_fill_increment_must_match_last_fill():
     b = bundle()
-    b["events"].extend(
-        [trade_update(), trade_update(time_ms=START + 60_000, trade_id=5, filled="0.2", last="0.02")]
-    )
+    b["events"].extend([trade_update(), trade_update(time_ms=START + 60_000, trade_id=5, filled="0.2", last="0.02")])
     with pytest.raises(ValueError, match="does not conserve"):
         check(b)
 
