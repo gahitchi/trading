@@ -89,9 +89,15 @@ def load_hybrid_archive(
     bundle = _shape(decoded, {"version", "venue", "symbol", "bars", "oi", "funding", "market"}, "archive")
     if bundle["version"] != 1 or type(bundle["version"]) is not int:
         raise ValueError("unsupported archive version")
-    if bundle["venue"] != "binance-usdm" or type(bundle["symbol"]) is not str or not (
-        5 <= len(bundle["symbol"]) <= 20 and bundle["symbol"].isalnum() and bundle["symbol"].endswith("USDT")
-        and bundle["symbol"].isupper()
+    if (
+        bundle["venue"] != "binance-usdm"
+        or type(bundle["symbol"]) is not str
+        or not (
+            5 <= len(bundle["symbol"]) <= 20
+            and bundle["symbol"].isalnum()
+            and bundle["symbol"].endswith("USDT")
+            and bundle["symbol"].isupper()
+        )
     ):
         raise ValueError("unsupported archive market")
     if (
@@ -160,9 +166,7 @@ def load_hybrid_archive(
     markets: list[MarketEligibility] = []
     previous_market_ns = -1
     for row in bundle["market"]:
-        r = _shape(
-            row, {"asof_ns", "spot_listed", "usdm_listed", "mean_daily_turnover_usdt_30d"}, "market metadata"
-        )
+        r = _shape(row, {"asof_ns", "spot_listed", "usdm_listed", "mean_daily_turnover_usdt_30d"}, "market metadata")
         asof = _integer(r["asof_ns"], "market metadata")
         _before_boundary(asof, boundary_ns)
         if asof <= previous_market_ns:
