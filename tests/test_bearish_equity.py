@@ -58,6 +58,20 @@ def replay(*trades, halted=False):
     return ShortReplay(None, tuple(trades), 0, 0, 0, halted, None)
 
 
+@pytest.mark.parametrize("timestamp_unit", ["ns", "us"])
+def test_daily_equity_normalizes_datetime_index_timestamp_units(timestamp_unit):
+    frame = candles(days=1)
+    frame.index = frame.index.as_unit(timestamp_unit)
+    result = daily_short_equity(frame, replay(), COSTS, boundary=BOUNDARY)
+    assert len(result.days) == 1 and result.flat_days == 1
+    assert result.end_equity == 10_000
+    missing = candles(days=2)
+    missing.index = missing.index.as_unit(timestamp_unit)
+    missing = missing.drop(missing.index[50])
+    with pytest.raises(ValueError, match="minute-price gaps"):
+        daily_short_equity(missing, replay(), COSTS, boundary=BOUNDARY)
+
+
 def test_flat_utc_days_include_no_trade_days_with_zero_returns():
     result = daily_short_equity(candles(), replay(), COSTS, boundary=BOUNDARY)
     assert len(result.days) == 2

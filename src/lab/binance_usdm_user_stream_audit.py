@@ -91,15 +91,18 @@ def audit_user_stream(bundle: object, *, expected_sha256: str) -> StreamAudit:
     if not isinstance(bundle, dict):
         raise ValueError("user-data evidence must be a JSON object")
     _no_secrets(bundle)
-    if (
-        not isinstance(expected_sha256, str)
-        or len(expected_sha256) != 64
-        or source_sha256(bundle) != expected_sha256
-    ):
+    if not isinstance(expected_sha256, str) or len(expected_sha256) != 64 or source_sha256(bundle) != expected_sha256:
         raise ValueError("user-data source SHA-256 mismatch")
     required = {
-        "version", "environment", "symbol", "start_ms", "end_ms",
-        "opening", "closing", "stream", "events",
+        "version",
+        "environment",
+        "symbol",
+        "start_ms",
+        "end_ms",
+        "opening",
+        "closing",
+        "stream",
+        "events",
     }
     if set(bundle) != required or type(bundle["version"]) is not int or bundle["version"] != 1:
         raise ValueError("unsupported user-data evidence schema")
@@ -116,7 +119,11 @@ def audit_user_stream(bundle: object, *, expected_sha256: str) -> StreamAudit:
     ending_wallet, ending_position = _snapshot(bundle["closing"], symbol)
     stream = bundle["stream"]
     if not isinstance(stream, dict) or set(stream) != {
-        "connected_ms", "disconnected_ms", "reconnects", "listen_key_expired", "message_capture_complete"
+        "connected_ms",
+        "disconnected_ms",
+        "reconnects",
+        "listen_key_expired",
+        "message_capture_complete",
     }:
         raise ValueError("incomplete websocket capture metadata")
     if (
