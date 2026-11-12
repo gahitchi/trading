@@ -24,7 +24,9 @@ def sample(*, rows=1440, header=True, micro=False, tweak=None, member=None, extr
     start_ms = int(datetime(2024, 2, 10, tzinfo=UTC).timestamp()) * 1_000
     lines = []
     if header:
-        lines.append("open_time,open,high,low,close,volume,close_time,quote_asset_volume,number_of_trades,taker_buy_base_asset_volume,taker_buy_quote_asset_volume,ignore")
+        lines.append(
+            "open_time,open,high,low,close,volume,close_time,quote_asset_volume,number_of_trades,taker_buy_base_asset_volume,taker_buy_quote_asset_volume,ignore"
+        )
     for i in range(rows):
         opening_ms = start_ms + i * 60_000
         close_ms = opening_ms + 59_999
@@ -121,6 +123,7 @@ def test_missing_or_shifted_minute_refused(tmp_path):
 
 def test_nonfinite_and_negative_values_refused(tmp_path):
     for column, value in [(1, "NaN"), (7, "-1"), (10, "1500"), (2, "90")]:
+
         def damage(row, i, *, column=column, value=value):
             if i == 100:
                 row[column] = value
@@ -149,7 +152,10 @@ def test_btc_and_post_holdout_rejected_before_network_or_storage(tmp_path):
         acquire_binance_usdm_day(tmp_path, "BTCUSDT", DAY, boundary_ns=BOUNDARY, source=source)
     with pytest.raises(ValueError, match="holdout"):
         acquire_binance_usdm_day(
-            tmp_path, SYMBOL, DAY, boundary_ns=int(datetime(2024, 2, 11, tzinfo=UTC).timestamp()) * 1_000_000_000,
+            tmp_path,
+            SYMBOL,
+            DAY,
+            boundary_ns=int(datetime(2024, 2, 11, tzinfo=UTC).timestamp()) * 1_000_000_000,
             source=source,
         )
     assert calls == []
