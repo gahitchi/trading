@@ -207,12 +207,10 @@ def replay_hybrid_dynamic(
                 if size <= 0:
                     skipped += 1
                 else:
-                    entry_fill = bar.open * (1 - costs.full_spread_bps / 20_000) * (
-                        1 - costs.slippage_per_side_bps / 10_000
+                    entry_fill = (
+                        bar.open * (1 - costs.full_spread_bps / 20_000) * (1 - costs.slippage_per_side_bps / 10_000)
                     )
-                    active = _Active(
-                        pending.signal_ns, i, bar.open, pending.stop, pending.target, size, entry_fill
-                    )
+                    active = _Active(pending.signal_ns, i, bar.open, pending.stop, pending.target, size, entry_fill)
                     notionals.append(size)
                     entry_equities.append(capital)
                     entries_today += 1
