@@ -52,9 +52,7 @@ def market_at(end_ns, *, turnover=25_000_000, spot=True, perp=True, age_min=0):
 
 
 def oi_at(end_ns, *, rise=1.03, age_min=2):
-    return OIObservation(
-        end_ns - (age_min + 15) * MINUTE_NS, 1_000_000, end_ns - age_min * MINUTE_NS, 1_000_000 * rise
-    )
+    return OIObservation(end_ns - (age_min + 15) * MINUTE_NS, 1_000_000, end_ns - age_min * MINUTE_NS, 1_000_000 * rise)
 
 
 def run(
