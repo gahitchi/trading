@@ -104,7 +104,7 @@ def test_wrong_checksum_filename_and_multiline_refused(tmp_path):
 @pytest.mark.parametrize("rows", [1, 1439, 1441])
 def test_partial_or_overlong_day_refused(tmp_path, rows):
     zipped, checksum = sample(rows=rows)
-    with pytest.raises(ValueError, match="incomplete|missing, duplicate|shifted"):
+    with pytest.raises(ValueError, match=r"incomplete|missing, duplicate|shifted"):
         request(tmp_path, zipped, checksum)
 
 
@@ -121,13 +121,13 @@ def test_missing_or_shifted_minute_refused(tmp_path):
 
 def test_nonfinite_and_negative_values_refused(tmp_path):
     for column, value in [(1, "NaN"), (7, "-1"), (10, "1500"), (2, "90")]:
-        def damage(row, i):
+        def damage(row, i, *, column=column, value=value):
             if i == 100:
                 row[column] = value
             return row
 
         zipped, checksum = sample(tweak=damage)
-        with pytest.raises(ValueError, match="invalid|nonfinite|inconsistent"):
+        with pytest.raises(ValueError, match=r"invalid|nonfinite|inconsistent"):
             request(tmp_path, zipped, checksum)
 
 
