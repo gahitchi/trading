@@ -141,9 +141,7 @@ def run_registered_study(
     family = load_family(results_dir)
     if family is None or member not in family["plan"]["members"]:
         raise ValueError("study must exactly match a frozen, prospective research family member")
-    with trial_run(
-        results_dir, KIND, spec.symbol, member["params"], tuple(member["window"]), holdout=False
-    ) as attempt:
+    with trial_run(results_dir, KIND, spec.symbol, member["params"], tuple(member["window"]), holdout=False) as attempt:
         # trial_run is authoritative and reserves before yielding to this block.
         raw = Path(archive_path).read_bytes()
         attempt.inputs.blob("hybrid-source-archive", raw)
