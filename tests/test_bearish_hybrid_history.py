@@ -28,13 +28,15 @@ def history():
         "venue": "binance-usdm",
         "symbol": "BTCUSDT",
         "bars": [{**vars(row), "source_complete": True} for row in rows],
-        "oi": [
-            {"measured_ns": ns, "published_ns": ns, "value": 1_000_000 + i * 4000}
-            for i, ns in enumerate(oi_times)
-        ],
+        "oi": [{"measured_ns": ns, "published_ns": ns, "value": 1_000_000 + i * 4000} for i, ns in enumerate(oi_times)],
         "funding": [vars(f) for f in funding],
         "market": [
-            {"asof_ns": row.end_ns, "spot_listed": True, "usdm_listed": True, "mean_daily_turnover_usdt_30d": 30_000_000}
+            {
+                "asof_ns": row.end_ns,
+                "spot_listed": True,
+                "usdm_listed": True,
+                "mean_daily_turnover_usdt_30d": 30_000_000,
+            }
             for row in rows
         ],
     }
@@ -68,9 +70,7 @@ def test_integrity_mismatch_and_duplicate_json_keys_are_rejected():
         load_hybrid_archive(payload, expected_sha256="0" * 64, boundary_ns=boundary)
     duplicate = payload.replace(b'"version": 1', b'"version": 1, "version": 1', 1)
     with pytest.raises(ValueError, match="duplicate archive JSON key"):
-        load_hybrid_archive(
-            duplicate, expected_sha256=hashlib.sha256(duplicate).hexdigest(), boundary_ns=boundary
-        )
+        load_hybrid_archive(duplicate, expected_sha256=hashlib.sha256(duplicate).hexdigest(), boundary_ns=boundary)
 
 
 def test_holdout_observation_rejected_without_truncating():
