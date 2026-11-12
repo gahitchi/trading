@@ -251,36 +251,62 @@ def load_public_features(root: Path, symbol: str, kind: str) -> tuple[FeatureCap
 
 
 def first_seen_oi(captures: Sequence[FeatureCapture], *, decision_ns: int) -> OIObservation | None:
-    """Conservative two-snapshot OI using response-received timestamps.
+    """Compare distinct, recently measured OI samples first received by decision.
 
-    Never substitute the endpoint's measurement time for first reception.
-    Five to sixty minutes must separate snapshots to match the hybrid gate.
+    A newer HTTP receipt is NOT evidence of a new OI measurement. Repeated
+    nominal measurement times cannot fabricate an OI move or refresh its
+    availability age. Received timestamps remain the signal's as-of clocks.
     """
     if type(decision_ns) is not int or decision_ns <= 0 or decision_ns % MINUTE_NS:
         raise ValueError("decision requires completed UTC minute")
-    eligible = []
-    last = -1
+    # Conservative freshness policy, NOT a venue publication-time guarantee.
+    max_sample_lag_ns = 2 * MINUTE_NS
+    eligible: list[tuple[FeatureCapture, int, float]] = []
+    last_received = -1
+    last_measured = -1
+    last_value = 0.0
+    symbol: str | None = None
     for snapshot in captures:
-        if not isinstance(snapshot, FeatureCapture) or snapshot.kind != "open-interest":
+        if not isinstance(snapshot, FeatureCapture):
             raise ValueError("expected open-interest captures")
-        if snapshot.received_ns <= last:
+        if type(snapshot.received_ns) is not int or snapshot.received_ns <= last_received:
             raise ValueError("nonchronological open-interest captures")
-        last = snapshot.received_ns
-        if snapshot.received_ns <= decision_ns:
-            eligible.append(snapshot)
-    if len(eligible) < 2 or decision_ns - eligible[-1].received_ns > 60 * MINUTE_NS:
+        last_received = snapshot.received_ns
+        if snapshot.received_ns > decision_ns:
+            break  # No future source contents may affect this decision.
+        if snapshot.kind != "open-interest":
+            raise ValueError("expected open-interest captures")
+        if symbol is None:
+            symbol = snapshot.symbol
+        elif symbol != snapshot.symbol:
+            raise ValueError("mixed-symbol open-interest captures")
+        if type(snapshot.payload) is not dict or snapshot.payload.get("symbol") != symbol:
+            raise ValueError("invalid open-interest capture payload")
+        measured = _integer_ms(snapshot.payload.get("time"), "OI measurement", snapshot.received_ns)
+        value = _finite_decimal(snapshot.payload.get("openInterest"), "open interest", positive=True)
+        if measured < last_measured:
+            raise ValueError("out-of-order open-interest measurements")
+        if measured == last_measured:
+            if value != last_value:
+                raise ValueError("conflicting revisions to open-interest measurement")
+            continue  # Re-polling an unchanged event never refreshes its age.
+        last_measured, last_value = measured, value
+        if snapshot.received_ns - measured <= max_sample_lag_ns:
+            eligible.append((snapshot, measured, value))
+    if len(eligible) < 2 or decision_ns - eligible[-1][0].received_ns > 60 * MINUTE_NS:
         return None
-    current = eligible[-1]
-    for previous in reversed(eligible[:-1]):
-        separation = current.received_ns - previous.received_ns
-        if separation >= 5 * MINUTE_NS:
-            if separation > 60 * MINUTE_NS:
+    current, current_measurement, current_value = eligible[-1]
+    for previous, prior_measurement, prior_value in reversed(eligible[:-1]):
+        receive_gap = current.received_ns - previous.received_ns
+        sample_gap = current_measurement - prior_measurement
+        if receive_gap >= 5 * MINUTE_NS and sample_gap >= 5 * MINUTE_NS:
+            if receive_gap > 60 * MINUTE_NS or sample_gap > 60 * MINUTE_NS:
                 return None
             return OIObservation(
                 previous_ns=previous.received_ns,
-                previous_value=float(previous.payload["openInterest"]),
+                previous_value=prior_value,
                 observed_ns=current.received_ns,
-                value=float(current.payload["openInterest"]),
+                value=current_value,
             )
     return None
 
@@ -296,14 +322,21 @@ def first_seen_funding(captures: Sequence[FeatureCapture], *, decision_ns: int) 
         raise ValueError("decision requires completed UTC minute")
     seen: dict[int, FundingEvent] = {}
     last = -1
+    symbol: str | None = None
     for snapshot in captures:
-        if not isinstance(snapshot, FeatureCapture) or snapshot.kind != "settled-funding":
+        if not isinstance(snapshot, FeatureCapture):
             raise ValueError("expected settled-funding captures")
         if snapshot.received_ns <= last:
             raise ValueError("nonchronological funding captures")
         last = snapshot.received_ns
         if snapshot.received_ns > decision_ns:
-            continue
+            break  # Never validate future funding content before it is received.
+        if snapshot.kind != "settled-funding":
+            raise ValueError("expected settled-funding captures")
+        if symbol is None:
+            symbol = snapshot.symbol
+        elif symbol != snapshot.symbol:
+            raise ValueError("mixed-symbol funding captures")
         for item in snapshot.payload:
             settled = item["fundingTime"] * 1_000_000
             rate = float(item["fundingRate"])
