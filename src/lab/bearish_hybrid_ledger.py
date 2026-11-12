@@ -6,9 +6,9 @@ or authenticated execution. Rejects incomplete days and unresolved inventory.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from math import isclose, isfinite
-from collections.abc import Sequence
 
 import pandas as pd
 
