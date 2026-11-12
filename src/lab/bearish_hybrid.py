@@ -201,7 +201,9 @@ def paper_size(a: VirtualAccount, risk: Risk, stop_bps: float, costs_bps: float)
     if cap_loss <= 0:
         return 0.0
     max_loss_ratio = (stop_bps + costs_bps) / 10_000
-    margin_stress = max(risk.margin_fraction, risk.stressed_rally_fraction + risk.maintenance_fraction + risk.reserve_fraction)
+    margin_stress = max(
+        risk.margin_fraction, risk.stressed_rally_fraction + risk.maintenance_fraction + risk.reserve_fraction
+    )
     bound = min(
         cap_loss / max_loss_ratio,
         risk.max_symbol_notional_fraction * a.equity,
@@ -239,10 +241,32 @@ class Settings:
     min_30d_perp_daily_turnover_usdt: float = 20_000_000.0
 
     def __post_init__(self) -> None:
-        ints = (self.impulse_bars, self.baseline_bars, self.atr_bars, self.min_wait_bars, self.max_wait_bars, self.cooldown_bars, self.max_oi_age_min)
+        ints = (
+            self.impulse_bars,
+            self.baseline_bars,
+            self.atr_bars,
+            self.min_wait_bars,
+            self.max_wait_bars,
+            self.cooldown_bars,
+            self.max_oi_age_min,
+        )
         if any(type(n) is not int or n <= 0 for n in ints) or self.max_wait_bars < self.min_wait_bars:
             raise ValueError("invalid sampling or state-machine windows")
-        vs = [v for k, v in vars(self).items() if k not in ("impulse_bars", "baseline_bars", "atr_bars", "min_wait_bars", "max_wait_bars", "cooldown_bars", "max_oi_age_min", "funding_boost_apr")]
+        vs = [
+            v
+            for k, v in vars(self).items()
+            if k
+            not in (
+                "impulse_bars",
+                "baseline_bars",
+                "atr_bars",
+                "min_wait_bars",
+                "max_wait_bars",
+                "cooldown_bars",
+                "max_oi_age_min",
+                "funding_boost_apr",
+            )
+        ]
         if any(not isfinite(v) or v <= 0 for v in vs) or not isfinite(self.funding_boost_apr):
             raise ValueError("invalid signal parameters")
         if self.impulse_sell_share > 1 or self.confirmation_sell_share > 1:
@@ -282,7 +306,9 @@ class BearishHybrid:
     def __init__(self, settings: Settings | None = None, risk: Risk | None = None) -> None:
         self.s = settings or Settings()
         self.risk = risk or Risk()
-        self._history: deque[Bar] = deque(maxlen=max(self.s.baseline_bars + self.s.impulse_bars + 1, self.s.atr_bars + 2))
+        self._history: deque[Bar] = deque(
+            maxlen=max(self.s.baseline_bars + self.s.impulse_bars + 1, self.s.atr_bars + 2)
+        )
         self._impulse: _Impulse | None = None
         self._last_signal_ns: int | None = None
 
@@ -293,7 +319,7 @@ class BearishHybrid:
 
     def _baseline(self) -> float | None:
         # Exclude impulse candles from reference, including the candidate's candle.
-        prev = list(self._history)[:-self.s.impulse_bars]
+        prev = list(self._history)[: -self.s.impulse_bars]
         window = prev[-self.s.baseline_bars :]
         return median(b.quote_volume for b in window) if len(window) == self.s.baseline_bars else None
 
@@ -349,13 +375,25 @@ class BearishHybrid:
             if bar.high >= p.low + p.atr * self.s.min_pullback_atr:
                 p.pulled_back = True
             breaking = bar.close < p.low * (1 - self.s.break_buffer_bps / 10_000)
-            sells = bar.quote_volume > 0 and 1 - bar.taker_buy_quote / bar.quote_volume >= self.s.confirmation_sell_share
+            sells = (
+                bar.quote_volume > 0 and 1 - bar.taker_buy_quote / bar.quote_volume >= self.s.confirmation_sell_share
+            )
             volume = bar.quote_volume >= self.s.confirmation_volume_multiple * baseline
-            if not (age >= self.s.min_wait_bars and prior_pullback and breaking and bar.close < bar.open and sells and volume):
+            if not (
+                age >= self.s.min_wait_bars
+                and prior_pullback
+                and breaking
+                and bar.close < bar.open
+                and sells
+                and volume
+            ):
                 return Decision("WATCH", bar.end_ns, ("awaiting_renewed_breakdown",), estimated_cost_bps=total_cost)
             self._impulse = None
             vetoes: list[str] = []
-            if self._last_signal_ns is not None and bar.end_ns - self._last_signal_ns <= self.s.cooldown_bars * MINUTE_NS:
+            if (
+                self._last_signal_ns is not None
+                and bar.end_ns - self._last_signal_ns <= self.s.cooldown_bars * MINUTE_NS
+            ):
                 vetoes.append("cooldown")
             if total_cost > self.s.max_cost_bps:
                 vetoes.append("friction_too_high")
@@ -396,16 +434,47 @@ class BearishHybrid:
             if virtual_notional <= 0 and not (account.equity == 0 and account.kill_mode == "run"):
                 vetoes.append("virtual_account_risk")
             if vetoes:
-                return Decision("FLAT", bar.end_ns, tuple(vetoes), oi_regime, apr, event_count, estimated_cost_bps=total_cost, priority=priority)
+                return Decision(
+                    "FLAT",
+                    bar.end_ns,
+                    tuple(vetoes),
+                    oi_regime,
+                    apr,
+                    event_count,
+                    estimated_cost_bps=total_cost,
+                    priority=priority,
+                )
             self._last_signal_ns = bar.end_ns
             if virtual_notional == 0:
                 return Decision(
-                    "UNFUNDED_SIGNAL", bar.end_ns, ("eligible_but_unfunded",), oi_regime, apr, event_count,
-                    bar.close, stop, target, total_cost, priority, 0.0, 0.0,
+                    "UNFUNDED_SIGNAL",
+                    bar.end_ns,
+                    ("eligible_but_unfunded",),
+                    oi_regime,
+                    apr,
+                    event_count,
+                    bar.close,
+                    stop,
+                    target,
+                    total_cost,
+                    priority,
+                    0.0,
+                    0.0,
                 )
             return Decision(
-                "RESEARCH_SHORT", bar.end_ns, ("impulse_pause_breakdown",), oi_regime, apr, event_count,
-                bar.close, stop, target, total_cost, priority, virtual_notional, 0.0,
+                "RESEARCH_SHORT",
+                bar.end_ns,
+                ("impulse_pause_breakdown",),
+                oi_regime,
+                apr,
+                event_count,
+                bar.close,
+                stop,
+                target,
+                total_cost,
+                priority,
+                virtual_notional,
+                0.0,
             )
         if self._last_signal_ns is not None and bar.end_ns - self._last_signal_ns <= self.s.cooldown_bars * MINUTE_NS:
             return Decision("FLAT", bar.end_ns, ("cooldown",), estimated_cost_bps=total_cost)
