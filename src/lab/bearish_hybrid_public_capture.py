@@ -144,11 +144,7 @@ def record_public_feature(
         raw = source(url)
         identity = "injected-test-source"
     received_ns = clock_ns()
-    if (
-        type(received_ns) is not int
-        or received_ns < requested_ns
-        or received_ns - requested_ns > MAX_REQUEST_NS
-    ):
+    if type(received_ns) is not int or received_ns < requested_ns or received_ns - requested_ns > MAX_REQUEST_NS:
         raise ValueError("unreliable feature receive clock")
     parsed = _payload(raw, kind, symbol, received_ns)
     record = {
@@ -200,19 +196,38 @@ def load_public_features(root: Path, symbol: str, kind: str) -> tuple[FeatureCap
         except (ValueError, UnicodeError) as exc:
             raise ValueError("invalid recorded feature receipt JSON") from exc
         if type(record) is not dict or set(record) != {
-            "version", "venue", "symbol", "kind", "url", "requested_ns", "received_ns",
-            "raw_sha256", "raw_base64", "source", "independently_authenticated",
-            "historical_publication_verified", "funding_history_complete",
+            "version",
+            "venue",
+            "symbol",
+            "kind",
+            "url",
+            "requested_ns",
+            "received_ns",
+            "raw_sha256",
+            "raw_base64",
+            "source",
+            "independently_authenticated",
+            "historical_publication_verified",
+            "funding_history_complete",
         }:
             raise ValueError("unrecognized feature receipt schema")
         t = record["received_ns"]
         start = record["requested_ns"]
         if (
-            type(t) is not int or t <= previous or t <= 0 or path.stem != str(t)
-            or type(start) is not int or start <= 0 or t < start or t - start > MAX_REQUEST_NS
-            or record["version"] != 1 or type(record["version"]) is not int
-            or record["venue"] != "binance-usdm" or record["symbol"] != symbol
-            or record["kind"] != kind or record["url"] != _url(symbol, kind)
+            type(t) is not int
+            or t <= previous
+            or t <= 0
+            or path.stem != str(t)
+            or type(start) is not int
+            or start <= 0
+            or t < start
+            or t - start > MAX_REQUEST_NS
+            or record["version"] != 1
+            or type(record["version"]) is not int
+            or record["venue"] != "binance-usdm"
+            or record["symbol"] != symbol
+            or record["kind"] != kind
+            or record["url"] != _url(symbol, kind)
             or record["source"] not in ("binance-public-https", "injected-test-source")
             or record["independently_authenticated"] is not False
             or record["historical_publication_verified"] is not False
@@ -228,7 +243,9 @@ def load_public_features(root: Path, symbol: str, kind: str) -> tuple[FeatureCap
             raise ValueError("invalid encoded feature payload") from exc
         if type(record["raw_sha256"]) is not str or _sha(raw) != record["raw_sha256"]:
             raise ValueError("modified feature response payload")
-        captures.append(FeatureCapture(symbol, kind, start, t, _sha(raw), record["source"], _payload(raw, kind, symbol, t)))
+        captures.append(
+            FeatureCapture(symbol, kind, start, t, _sha(raw), record["source"], _payload(raw, kind, symbol, t))
+        )
         previous = t
     return tuple(captures)
 
