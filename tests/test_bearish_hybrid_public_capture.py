@@ -27,11 +27,22 @@ def clock(start=T, duration_ns=10_000_000):
 
 
 def oi(*, symbol=S, time_ms=None, value="1000"):
-    return json.dumps({"symbol": symbol, "openInterest": value, "time": (T - MINUTE_NS) // 1_000_000 if time_ms is None else time_ms}).encode()
+    return json.dumps(
+        {"symbol": symbol, "openInterest": value, "time": (T - MINUTE_NS) // 1_000_000 if time_ms is None else time_ms}
+    ).encode()
 
 
 def funding(*, symbol=S, settled_ms=None, rate="-0.0002"):
-    return json.dumps([{"symbol": symbol, "fundingRate": rate, "fundingTime": (T - HOUR_NS) // 1_000_000 if settled_ms is None else settled_ms, "markPrice": "200"}]).encode()
+    return json.dumps(
+        [
+            {
+                "symbol": symbol,
+                "fundingRate": rate,
+                "fundingTime": (T - HOUR_NS) // 1_000_000 if settled_ms is None else settled_ms,
+                "markPrice": "200",
+            }
+        ]
+    ).encode()
 
 
 HOUR_NS = 60 * MINUTE_NS
@@ -71,9 +82,11 @@ def test_funding_receipt_keeps_event_time_separate_from_reception(tmp_path):
 
 def test_invalid_symbol_and_kind_rejected_without_calling_network(tmp_path):
     calls = []
+
     def source(url):
         calls.append(url)
         raise AssertionError("source must never be reached")
+
     for symbol in ("BTCUSDT", "../ETHUSDT", "ethusdt", "ETHUSD"):
         with pytest.raises(ValueError, match="non-BTC"):
             record_public_feature(tmp_path, symbol, "open-interest", source=source)
@@ -83,14 +96,25 @@ def test_invalid_symbol_and_kind_rejected_without_calling_network(tmp_path):
 
 
 def test_oi_wrong_symbol_future_measurement_and_zero_rejected(tmp_path):
-    for raw in (oi(symbol="SOLUSDT"), oi(time_ms=(T + MINUTE_NS) // 1_000_000), oi(value="0"), oi(value="NaN"), oi(value="inf")):
+    for raw in (
+        oi(symbol="SOLUSDT"),
+        oi(time_ms=(T + MINUTE_NS) // 1_000_000),
+        oi(value="0"),
+        oi(value="NaN"),
+        oi(value="inf"),
+    ):
         with pytest.raises(ValueError):
             record(tmp_path, raw=raw)
     assert not list(tmp_path.rglob("*.json"))
 
 
 def test_funding_wrong_symbol_future_settlement_invalid_rate_rejected(tmp_path):
-    for raw in (funding(symbol="SOLUSDT"), funding(settled_ms=(T + MINUTE_NS) // 1_000_000), funding(rate="NaN"), funding(rate="3")):
+    for raw in (
+        funding(symbol="SOLUSDT"),
+        funding(settled_ms=(T + MINUTE_NS) // 1_000_000),
+        funding(rate="NaN"),
+        funding(rate="3"),
+    ):
         with pytest.raises(ValueError):
             record(tmp_path, "settled-funding", raw=raw)
     assert not list(tmp_path.rglob("*.json"))
@@ -103,7 +127,7 @@ def test_funding_unordered_duplicate_entries_rejected(tmp_path):
 
 
 def test_invalid_json_and_duplicate_keys_rejected(tmp_path):
-    for raw in (b"{", b' {"symbol":"ETHUSDT","symbol":"ETHUSDT"}', b'{"v":NaN}', b'\xff'):
+    for raw in (b"{", b' {"symbol":"ETHUSDT","symbol":"ETHUSDT"}', b'{"v":NaN}', b"\xff"):
         with pytest.raises(ValueError):
             record(tmp_path, raw=raw)
 
