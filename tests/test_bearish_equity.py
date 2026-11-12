@@ -58,7 +58,6 @@ def replay(*trades, halted=False):
     return ShortReplay(None, tuple(trades), 0, 0, 0, halted, None)
 
 
-
 @pytest.mark.parametrize("timestamp_unit", ["ns", "us"])
 def test_daily_equity_normalizes_datetime_index_timestamp_units(timestamp_unit):
     frame = candles(days=1)
