@@ -191,14 +191,14 @@ def test_out_of_order_funding_capture_files_are_sorted_and_reloadable(tmp_path):
 
 def test_oi_is_unavailable_on_or_before_receive_time(tmp_path):
     early = record(tmp_path, start=T)
-    late = record(tmp_path, raw=oi(value="1010"), start=T + 6 * MINUTE_NS)
+    late = record(tmp_path, raw=oi(value="1010", time_ms=(T + 6 * MINUTE_NS) // 1_000_000), start=T + 6 * MINUTE_NS)
     assert first_seen_oi([early, late], decision_ns=T + 6 * MINUTE_NS) is None
     assert first_seen_oi([early, late], decision_ns=T + 7 * MINUTE_NS) is not None
 
 
 def test_oi_window_uses_received_time_not_source_measurement_time(tmp_path):
     early = record(tmp_path, start=T)
-    late = record(tmp_path, raw=oi(value="1010", time_ms=(T - MINUTE_NS) // 1_000_000), start=T + 6 * MINUTE_NS)
+    late = record(tmp_path, raw=oi(value="1010", time_ms=(T + 6 * MINUTE_NS) // 1_000_000), start=T + 6 * MINUTE_NS)
     result = first_seen_oi([early, late], decision_ns=T + 7 * MINUTE_NS)
     assert result.previous_ns == early.received_ns
     assert result.observed_ns == late.received_ns
@@ -207,7 +207,7 @@ def test_oi_window_uses_received_time_not_source_measurement_time(tmp_path):
 
 def test_oi_stale_or_insufficient_history_return_none(tmp_path):
     first = record(tmp_path, start=T)
-    near = record(tmp_path, raw=oi(value="1010"), start=T + 2 * MINUTE_NS)
+    near = record(tmp_path, raw=oi(value="1010", time_ms=(T + MINUTE_NS) // 1_000_000), start=T + 2 * MINUTE_NS)
     assert first_seen_oi([first, near], decision_ns=T + 3 * MINUTE_NS) is None
     assert first_seen_oi([first, near], decision_ns=T + 70 * MINUTE_NS) is None
     with pytest.raises(ValueError, match="nonchronological"):
