@@ -152,11 +152,13 @@ def daily_short_equity(
         raise ValueError("equity requires unique increasing UTC candle-end stamps")
     if len(idx) and idx[-1] >= boundary:
         raise ValueError("protected holdout observations cannot enter the equity ledger")
-    if len(idx) < 1440 or (idx.asi8 <= 0).any() or (idx.asi8 % MINUTE_NS).any():
+    # Pandas may use microsecond-backed DatetimeIndex values; normalize to nanoseconds before integer arithmetic.
+    closed_ns = idx.as_unit("ns").asi8
+    if len(idx) < 1440 or (closed_ns <= 0).any() or (closed_ns % MINUTE_NS).any():
         raise ValueError("equity requires complete positive UTC minute timestamps")
     if idx[0] != idx[0].floor("D") + pd.Timedelta(minutes=1) or idx[-1] != idx[-1].floor("D"):
         raise ValueError("equity window must consist of full UTC days")
-    if np.any(np.diff(idx.asi8) != MINUTE_NS):
+    if np.any(np.diff(closed_ns) != MINUTE_NS):
         raise ValueError("minute-price gaps prohibit continuous equity marks")
     if not {"open", "high", "low", "close", "oi_invalid"} <= set(frame.columns):
         raise ValueError("equity requires OHLC and source-quality evidence")
@@ -181,7 +183,6 @@ def daily_short_equity(
     if any(trades[i].entry_minute_start_ns < trades[i - 1].exit_bar_end_ns for i in range(1, len(trades))):
         raise ValueError("overlapping or unordered inventory")
 
-    closed_ns = idx.asi8
     starts = [int(trade.entry_minute_start_ns) for trade in trades]
     ends = [int(trade.exit_bar_end_ns) for trade in trades]
     for trade, start, end in zip(trades, starts, ends, strict=True):
