@@ -56,9 +56,7 @@ def trade_at(rows, *, entry_i=42, exit_i=43, exit_ref=99.0, stop=101.5, target=9
 
 
 def result(trades=(), notionals=(), *, hold=2, halted=False, unresolved=0):
-    return HybridReplay(
-        tuple(trades), tuple(notionals), (), (), 0, unresolved, halted, ReplayAssumptions(1, hold)
-    )
+    return HybridReplay(tuple(trades), tuple(notionals), (), (), 0, unresolved, halted, ReplayAssumptions(1, hold))
 
 
 def mark(rows, bound, replay, *, account=PAPER):
