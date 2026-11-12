@@ -7,14 +7,13 @@ import pytest
 from lab.bearish_hybrid import (
     HOUR_NS,
     MINUTE_NS,
-    MarketEligibility,
     Bar,
     BearishHybrid,
     Costs,
     FundingEvent,
+    MarketEligibility,
     OIObservation,
     Risk,
-    Settings,
     VirtualAccount,
     paper_size,
     trailing_funding_apr,
@@ -42,7 +41,10 @@ def crash_sequence():
 
 
 def events(end_ns, *, rate=0.0001):
-    return tuple(FundingEvent(end_ns - HOUR_NS - k * 8 * HOUR_NS, end_ns - HOUR_NS - k * 8 * HOUR_NS, rate) for k in range(8, -1, -1))
+    return tuple(
+        FundingEvent(end_ns - HOUR_NS - k * 8 * HOUR_NS, end_ns - HOUR_NS - k * 8 * HOUR_NS, rate)
+        for k in range(8, -1, -1)
+    )
 
 
 def market_at(end_ns, *, turnover=25_000_000, spot=True, perp=True, age_min=0):
@@ -50,20 +52,29 @@ def market_at(end_ns, *, turnover=25_000_000, spot=True, perp=True, age_min=0):
 
 
 def oi_at(end_ns, *, rise=1.03, age_min=2):
-    return OIObservation(end_ns - (age_min + 15) * MINUTE_NS, 1_000_000, end_ns - age_min * MINUTE_NS, 1_000_000 * rise)
+    return OIObservation(
+        end_ns - (age_min + 15) * MINUTE_NS, 1_000_000, end_ns - age_min * MINUTE_NS, 1_000_000 * rise
+    )
 
 
-def run(rows=None, *, account=PAPER, cost=COSTS, oi=None, market=None, funding=None, funding_verified=True, engine=None):
+def run(
+    rows=None, *, account=PAPER, cost=COSTS, oi=None, market=None, funding=None, funding_verified=True, engine=None
+):
     rows = crash_sequence() if rows is None else rows
     engine = engine or BearishHybrid()
     out = []
     for b in rows:
-        out.append(engine.on_bar(
-            b, oi=oi if oi is not None else oi_at(b.end_ns),
-            market=market if market is not None else market_at(b.end_ns),
-            funding=funding if funding is not None else events(rows[0].end_ns),
-            funding_verified=funding_verified, costs=cost, account=account,
-        ))
+        out.append(
+            engine.on_bar(
+                b,
+                oi=oi if oi is not None else oi_at(b.end_ns),
+                market=market if market is not None else market_at(b.end_ns),
+                funding=funding if funding is not None else events(rows[0].end_ns),
+                funding_verified=funding_verified,
+                costs=cost,
+                account=account,
+            )
+        )
     return out
 
 
@@ -100,7 +111,16 @@ def test_zero_capital_blocks_virtual_trade_without_disabling_observation():
     assert result[-1].virtual_notional == result[-1].actual_notional == 0
 
 
-@pytest.mark.parametrize("a", [replace(PAPER, kill_mode="halt"), replace(PAPER, kill_mode="flatten"), replace(PAPER, risk_ready=False), replace(PAPER, day_pnl=-150), replace(PAPER, open_positions=1)])
+@pytest.mark.parametrize(
+    "a",
+    [
+        replace(PAPER, kill_mode="halt"),
+        replace(PAPER, kill_mode="flatten"),
+        replace(PAPER, risk_ready=False),
+        replace(PAPER, day_pnl=-150),
+        replace(PAPER, open_positions=1),
+    ],
+)
 def test_guarded_virtual_account_never_suggests_size(a):
     assert run(account=a)[-1].action == "FLAT"
 
@@ -108,7 +128,10 @@ def test_guarded_virtual_account_never_suggests_size(a):
 def test_conservative_cap_on_size_not_position_profit_claim():
     result = run()[-1]
     assert result.virtual_notional <= 3_000
-    assert result.virtual_notional * ((result.stop_price / result.reference_entry - 1) + COSTS.round_trip_bps / 10_000) <= 25 + 1e-6
+    assert (
+        result.virtual_notional * ((result.stop_price / result.reference_entry - 1) + COSTS.round_trip_bps / 10_000)
+        <= 25 + 1e-6
+    )
     assert paper_size(PAPER, Risk(), 40, 17) <= 3_000
 
 
@@ -119,7 +142,17 @@ def test_stale_and_missing_oi_fail_closed():
     eng = BearishHybrid()
     result = []
     for b in rows:
-        result.append(eng.on_bar(b, oi=None, market=market_at(b.end_ns), funding=events(rows[0].end_ns), funding_verified=True, costs=COSTS, account=PAPER))
+        result.append(
+            eng.on_bar(
+                b,
+                oi=None,
+                market=market_at(b.end_ns),
+                funding=events(rows[0].end_ns),
+                funding_verified=True,
+                costs=COSTS,
+                account=PAPER,
+            )
+        )
     assert "oi_missing" in result[-1].reasons
 
 
@@ -138,7 +171,18 @@ def test_untrusted_funding_blocks_and_funding_positive_only_prioritizes():
     assert last.action == "RESEARCH_SHORT" and last.priority == 1
     assert last.funding_apr_72h < 0
     eng = BearishHybrid()
-    got = [eng.on_bar(b, oi=oi_at(b.end_ns), market=market_at(b.end_ns), funding=(), funding_verified=True, costs=COSTS, account=PAPER) for b in rows]
+    got = [
+        eng.on_bar(
+            b,
+            oi=oi_at(b.end_ns),
+            market=market_at(b.end_ns),
+            funding=(),
+            funding_verified=True,
+            costs=COSTS,
+            account=PAPER,
+        )
+        for b in rows
+    ]
     assert "funding_history_unavailable" in got[-1].reasons
 
 
@@ -162,7 +206,15 @@ def test_duplicate_timestamp_fails_explicitly():
     for b in rows:
         e.on_bar(b, oi=None, market=market_at(b.end_ns), funding=(), funding_verified=False, costs=COSTS, account=PAPER)
     with pytest.raises(ValueError, match="out-of-order"):
-        e.on_bar(rows[-1], oi=None, market=market_at(rows[-1].end_ns), funding=(), funding_verified=False, costs=COSTS, account=PAPER)
+        e.on_bar(
+            rows[-1],
+            oi=None,
+            market=market_at(rows[-1].end_ns),
+            funding=(),
+            funding_verified=False,
+            costs=COSTS,
+            account=PAPER,
+        )
 
 
 def test_funding_uses_only_known_publications_and_variable_intervals():
@@ -182,7 +234,7 @@ def test_lookahead_funding_does_not_change_decision():
     rows = crash_sequence()
     known = events(rows[0].end_ns)
     future = FundingEvent(rows[-1].end_ns, rows[-1].end_ns + MINUTE_NS, 100)
-    a, b = run(funding=known)[-1], run(funding=known + (future,))[-1]
+    a, b = run(funding=known)[-1], run(funding=(*known, future))[-1]
     assert a == b
 
 
@@ -197,7 +249,7 @@ def test_short_needs_complete_causal_confirmation_and_oi_is_not_proof_of_bears()
 def test_invalid_ohlc_and_risk_data_are_rejected():
     rows = crash_sequence()
     with pytest.raises(ValueError, match="inconsistent OHLC"):
-        run(rows[:-1] + [replace(rows[-1], low=105)])
+        run([*rows[:-1], replace(rows[-1], low=105)])
     with pytest.raises(ValueError, match="invalid virtual account"):
         run(account=replace(PAPER, current_gross_notional=-2))
 
@@ -212,10 +264,26 @@ def test_future_open_interest_is_rejected_for_trade():
 def test_market_listings_liquidity_and_freshness_are_required():
     rows = crash_sequence()
     t = rows[-1].end_ns
-    for bad in (market_at(t, turnover=1_000_000), market_at(t, spot=False), market_at(t, perp=False), market_at(t, age_min=2)):
+    for bad in (
+        market_at(t, turnover=1_000_000),
+        market_at(t, spot=False),
+        market_at(t, perp=False),
+        market_at(t, age_min=2),
+    ):
         assert "market_ineligible" in run(market=bad)[-1].reasons
     eng = BearishHybrid()
-    result = [eng.on_bar(b, oi=oi_at(b.end_ns), market=None, funding=events(rows[0].end_ns), funding_verified=True, costs=COSTS, account=PAPER) for b in rows]
+    result = [
+        eng.on_bar(
+            b,
+            oi=oi_at(b.end_ns),
+            market=None,
+            funding=events(rows[0].end_ns),
+            funding_verified=True,
+            costs=COSTS,
+            account=PAPER,
+        )
+        for b in rows
+    ]
     assert "market_eligibility_missing" in result[-1].reasons
 
 
