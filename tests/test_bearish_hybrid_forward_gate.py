@@ -102,9 +102,7 @@ def test_audit_never_promotes_incomplete_source_or_funding():
     early = oi(T + 10_000_000, T)
     late = oi(T + 6 * MINUTE_NS + 10_000_000, T + 6 * MINUTE_NS, "1010")
     settled = funding(T + 10_000_000)
-    report = inspect_public_features(
-        bar(), SYMBOL, oi_captures=(early, late), funding_captures=(settled,)
-    )
+    report = inspect_public_features(bar(), SYMBOL, oi_captures=(early, late), funding_captures=(settled,))
     assert report.oi_receipts == 2 and report.funding_receipts == 1
     assert report.observation.oi is not None
     assert len(report.observation.funding) == 1
@@ -117,9 +115,7 @@ def test_audit_never_promotes_incomplete_source_or_funding():
 def test_audit_never_uses_future_oi_or_funding():
     future = oi(T + 8 * MINUTE_NS + 10_000_000, T + 8 * MINUTE_NS)
     future_funding = funding(T + 8 * MINUTE_NS + 10_000_000)
-    report = inspect_public_features(
-        bar(), SYMBOL, oi_captures=(future,), funding_captures=(future_funding,)
-    )
+    report = inspect_public_features(bar(), SYMBOL, oi_captures=(future,), funding_captures=(future_funding,))
     assert report.observation.oi is None
     assert report.observation.funding == ()
     assert report.oi_receipts == report.funding_receipts == 0
