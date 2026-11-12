@@ -467,6 +467,7 @@ def test_top_k_waits_for_prices_to_exit_but_does_not_require_entry_liquidity():
     assert cs.top_positions({"X": h}, s)["X"].tolist() == [1.0, 1.0, 0.0]
 
 
+@pytest.mark.filterwarnings("error:Downcasting object dtype arrays:FutureWarning")
 def test_top_k_cannot_recycle_a_held_slot_when_its_price_history_ends():
     idx = pd.date_range(T0, periods=4, freq="8h")
     h = pd.DataFrame({"funding": 0.01, "tradable": True, "turnover_d": 1e9}, index=idx)
