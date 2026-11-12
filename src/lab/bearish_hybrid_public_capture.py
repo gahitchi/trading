@@ -267,13 +267,15 @@ def first_seen_oi(captures: Sequence[FeatureCapture], *, decision_ns: int) -> OI
     last_value = 0.0
     symbol: str | None = None
     for snapshot in captures:
-        if not isinstance(snapshot, FeatureCapture) or snapshot.kind != "open-interest":
+        if not isinstance(snapshot, FeatureCapture):
             raise ValueError("expected open-interest captures")
         if type(snapshot.received_ns) is not int or snapshot.received_ns <= last_received:
             raise ValueError("nonchronological open-interest captures")
         last_received = snapshot.received_ns
         if snapshot.received_ns > decision_ns:
             break  # No future source contents may affect this decision.
+        if snapshot.kind != "open-interest":
+            raise ValueError("expected open-interest captures")
         if symbol is None:
             symbol = snapshot.symbol
         elif symbol != snapshot.symbol:
@@ -322,13 +324,15 @@ def first_seen_funding(captures: Sequence[FeatureCapture], *, decision_ns: int) 
     last = -1
     symbol: str | None = None
     for snapshot in captures:
-        if not isinstance(snapshot, FeatureCapture) or snapshot.kind != "settled-funding":
+        if not isinstance(snapshot, FeatureCapture):
             raise ValueError("expected settled-funding captures")
         if snapshot.received_ns <= last:
             raise ValueError("nonchronological funding captures")
         last = snapshot.received_ns
         if snapshot.received_ns > decision_ns:
             break  # Never validate future funding content before it is received.
+        if snapshot.kind != "settled-funding":
+            raise ValueError("expected settled-funding captures")
         if symbol is None:
             symbol = snapshot.symbol
         elif symbol != snapshot.symbol:
