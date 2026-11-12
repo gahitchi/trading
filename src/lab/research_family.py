@@ -22,7 +22,7 @@ FAMILY = "research_family.json"  # first, permanently frozen generation
 EPOCHS = "research_family_epochs"  # numbered immutable successor plans
 LOCK = "research_family.lock"
 REPORT = "research_family_report.json"
-KINDS = {"micro-study", "maker-study", "fast-backtest", "carry-study", "crash-study"}
+KINDS = {"micro-study", "maker-study", "fast-backtest", "carry-study", "crash-study", "bearish-hybrid-dynamic-study"}
 
 
 def _digest(value):

@@ -61,6 +61,7 @@ def load_hybrid_archive(
     expected_sha256: str,
     boundary_ns: int,
     funding_verified: bool = False,
+    expected_symbol: str | None = None,
 ) -> tuple[HybridObservation, ...]:
     """Validate a closed-minute archive before constructing public-as-of inputs.
 
@@ -100,6 +101,8 @@ def load_hybrid_archive(
         )
     ):
         raise ValueError("unsupported archive market")
+    if expected_symbol is not None and bundle["symbol"] != expected_symbol:
+        raise ValueError("archive symbol does not match frozen research registration")
     if (
         type(bundle["bars"]) is not list
         or not 1 <= len(bundle["bars"]) <= MAX_BARS

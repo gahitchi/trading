@@ -118,6 +118,12 @@ class InputEvidence:
             raise
         entry.update(sha256=digest.hexdigest(), complete=True)
 
+    def blob(self, name: str, raw: bytes) -> None:
+        """Fingerprint exact candidate archive bytes before interpreting the source."""
+        if type(raw) is not bytes:
+            raise ValueError("research blob must be exact bytes")
+        self._stream(name, [(None, {"byte_count": len(raw), "sha256": hashlib.sha256(raw).hexdigest()})])
+
     def frame(self, name, values):
         """Fingerprint a loaded candle/OI frame using exact typed row values.
 
