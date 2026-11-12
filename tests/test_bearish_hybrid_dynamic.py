@@ -34,10 +34,7 @@ def series(*, days=2, events_at=((120, "win"), (320, "win"))):
         else:
             raise ValueError(outcome)
     known = events(bars[0].end_ns)
-    observations = [
-        HybridObservation(b, market_at(b.end_ns), oi_at(b.end_ns), known, True, True)
-        for b in bars
-    ]
+    observations = [HybridObservation(b, market_at(b.end_ns), oi_at(b.end_ns), known, True, True) for b in bars]
     return observations, end_ns + DAY_NS
 
 
@@ -82,7 +79,9 @@ def test_loss_debits_trading_cash_even_with_zero_reinvestment():
 
 def test_split_profits_sum_to_total_equity_without_double_counting():
     report = run(fraction=0.25)
-    gains = [notional * trade.net_return for trade, notional in zip(report.trades, report.virtual_notionals, strict=True)]
+    gains = [
+        notional * trade.net_return for trade, notional in zip(report.trades, report.virtual_notionals, strict=True)
+    ]
     assert all(p > 0 for p in gains)
     assert report.reserved_virtual_profits == pytest.approx(sum(gains) * 0.75)
     assert report.ending_trading_cash == pytest.approx(PAPER.equity + sum(gains) * 0.25)
@@ -202,9 +201,7 @@ def test_overnight_open_short_marks_daily_equity_and_realizes_once():
     assert first.realized_cash == PAPER.equity
     assert first.unrealized_after_closeout < 0
     assert not second.open_position and second.entries == 0 and second.exits == 1
-    assert sum(d.net_pnl for d in report.days) == pytest.approx(
-        report.ending_total_virtual_equity - PAPER.equity
-    )
+    assert sum(d.net_pnl for d in report.days) == pytest.approx(report.ending_total_virtual_equity - PAPER.equity)
 
 
 def test_reserved_virtual_profits_are_not_spent_on_subsequent_loss():
