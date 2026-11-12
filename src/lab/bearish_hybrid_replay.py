@@ -7,9 +7,9 @@ The caller must pre-register trials and authenticate historical provenance.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from math import isfinite
-from typing import Sequence
 
 from lab.bearish_ensemble import RoundTripCosts
 from lab.bearish_ensemble_replay import ReplayAssumptions, ShortTrade, _fill
