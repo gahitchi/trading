@@ -36,8 +36,10 @@ def archive(*, symbol="ETHUSDT", days=1, invalid=False):
         }
         for i in range(1, days * 1440 + 1)
     ]
-    return json.dumps({"version": 1, "venue": "binance-usdm", "symbol": symbol, "bars": bars,
-                       "oi": [], "funding": [], "market": []}, separators=(",", ":")).encode()
+    return json.dumps(
+        {"version": 1, "venue": "binance-usdm", "symbol": symbol, "bars": bars, "oi": [], "funding": [], "market": []},
+        separators=(",", ":"),
+    ).encode()
 
 
 def spec_of(raw, *, symbol="ETHUSDT", end=START + DAY_NS):
@@ -56,7 +58,14 @@ def member_of(spec, *, policy=POLICY):
 
 def register(root, spec, *, policy=POLICY):
     member = member_of(spec, policy=policy)
-    return register_family(root, {"name": "prospective synthetic hybrid trial", "rationale": "freeze parameters before opening any outcomes", "members": [member]})
+    return register_family(
+        root,
+        {
+            "name": "prospective synthetic hybrid trial",
+            "rationale": "freeze parameters before opening any outcomes",
+            "members": [member],
+        },
+    )
 
 
 def evaluate(root, file, spec, *, policy=POLICY):
