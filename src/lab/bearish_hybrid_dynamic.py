@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from math import isclose, isfinite
 
 from lab.bearish_ensemble import RoundTripCosts
@@ -283,7 +283,7 @@ def replay_hybrid_dynamic(
                 raise ValueError("unqualified mark-to-market virtual insolvency")
             change = total_mark - previous_daily_equity
             label = bar.end_ns - MINUTE_NS
-            day = datetime.fromtimestamp(label / 1_000_000_000, tz=timezone.utc).date().isoformat()
+            day = datetime.fromtimestamp(label / 1_000_000_000, tz=UTC).date().isoformat()
             days.append(
                 VirtualDay(
                     day=day,
