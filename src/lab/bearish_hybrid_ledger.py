@@ -193,7 +193,9 @@ def daily_hybrid_virtual_ledger(
             entry_fee = qty * trade.entry_fill * fee_rate
             worst_cover = _closeout(bar.high, roundtrip)
             worst_fee = entry_fee + qty * worst_cover * fee_rate
-            worst_equity = cash + qty * (trade.entry_fill - worst_cover) - worst_fee - notional * trade.funding_reserve_cost
+            worst_equity = (
+                cash + qty * (trade.entry_fill - worst_cover) - worst_fee - notional * trade.funding_reserve_cost
+            )
             if worst_equity <= 0:
                 raise ValueError("unresolved virtual insolvency under intrabar adverse-price stress")
             if i == exits[active]:
@@ -211,15 +213,25 @@ def daily_hybrid_virtual_ledger(
                 cover = _closeout(bar.close, roundtrip)
                 entry_fee = qty * trade.entry_fill * fee_rate
                 exit_fee = qty * cover * fee_rate
-                equity += qty * (trade.entry_fill - cover) - entry_fee - exit_fee - notional * trade.funding_reserve_cost
+                equity += (
+                    qty * (trade.entry_fill - cover) - entry_fee - exit_fee - notional * trade.funding_reserve_cost
+                )
             if not isfinite(equity) or equity <= 0:
                 raise ValueError("unqualified insolvent daily virtual equity")
             net = equity - previous_equity
             day = pd.Timestamp(bar.end_ns - MINUTE_NS, unit="ns", tz="UTC").date().isoformat()
             results.append(
                 VirtualDay(
-                    day, previous_equity, equity, net, net / previous_equity,
-                    cash, equity - cash, day_entries, day_exits, active is not None,
+                    day,
+                    previous_equity,
+                    equity,
+                    net,
+                    net / previous_equity,
+                    cash,
+                    equity - cash,
+                    day_entries,
+                    day_exits,
+                    active is not None,
                 )
             )
             previous_equity = equity
