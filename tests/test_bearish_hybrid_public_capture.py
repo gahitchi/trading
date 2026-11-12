@@ -11,7 +11,6 @@ import pytest
 
 from lab.bearish_hybrid import MINUTE_NS
 from lab.bearish_hybrid_public_capture import (
-    FeatureCapture,
     first_seen_funding,
     first_seen_oi,
     load_public_features,
