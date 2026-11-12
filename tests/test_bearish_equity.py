@@ -65,7 +65,9 @@ def test_daily_equity_normalizes_datetime_index_timestamp_units(timestamp_unit):
     result = daily_short_equity(frame, replay(), COSTS, boundary=BOUNDARY)
     assert len(result.days) == 1 and result.flat_days == 1
     assert result.end_equity == 10_000
-    missing = frame.drop(frame.index[50])
+    missing = candles(days=2)
+    missing.index = missing.index.as_unit(timestamp_unit)
+    missing = missing.drop(missing.index[50])
     with pytest.raises(ValueError, match="minute-price gaps"):
         daily_short_equity(missing, replay(), COSTS, boundary=BOUNDARY)
 
