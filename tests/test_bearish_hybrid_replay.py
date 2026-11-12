@@ -25,10 +25,7 @@ def setup(*, exit_mode="target"):
     else:
         raise ValueError(exit_mode)
     funding = events(rows[0].end_ns)
-    records = [
-        HybridObservation(bar, market_at(bar.end_ns), oi_at(bar.end_ns), funding, True, True)
-        for bar in rows
-    ]
+    records = [HybridObservation(bar, market_at(bar.end_ns), oi_at(bar.end_ns), funding, True, True) for bar in rows]
     boundary = (rows[-1].end_ns // DAY_NS + 1) * DAY_NS
     return records, boundary
 
