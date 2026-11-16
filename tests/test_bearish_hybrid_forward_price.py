@@ -116,7 +116,9 @@ def test_reject_unreliable_clock_and_oversized_payload(tmp_path):
     with pytest.raises(ValueError, match="clock"):
         capture(tmp_path, start=0)
     with pytest.raises(ValueError, match="clock"):
-        record_forward_price(tmp_path, S, source=lambda _: source(), clock_ns=clock(T + 5_000_000_000))
+        record_forward_price(tmp_path, S, source=lambda _: source(),
+            clock_ns=iter((T + 5_000_000_000, T + 4_000_000_000)).__next__,
+        )
     with pytest.raises(ValueError, match="oversized"):
         capture(tmp_path, raw=b"x" * 10_000)
 
