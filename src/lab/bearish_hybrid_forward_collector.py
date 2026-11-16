@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.error import URLError
 
 from lab.bearish_hybrid import MINUTE_NS
+from lab.bearish_hybrid_forward_attempts import record_attempt_finish, record_attempt_start
 from lab.bearish_hybrid_forward_price import PriceCapture, record_forward_price
 from lab.bearish_hybrid_public_capture import FeatureCapture, _validate_symbol, record_public_feature
 
@@ -72,7 +73,9 @@ def capture_public_minute(root: Path, symbol: str, index: int) -> PublicMinuteCa
     return PublicMinuteCapture(price, oi, funding, tuple(failures))
 
 
-def run_bounded_capture(root: Path, symbol: str, cycles: int) -> tuple[PublicMinuteCapture, ...]:
+def run_bounded_capture(
+    root: Path, symbol: str, cycles: int, *, write_attempts: bool = True
+) -> tuple[PublicMinuteCapture, ...]:
     """Sample future UTC minutes, never backfill a missed price bar.
 
     After three consecutive failed price network attempts, stop and request
@@ -81,6 +84,8 @@ def run_bounded_capture(root: Path, symbol: str, cycles: int) -> tuple[PublicMin
     _validate_symbol(symbol)
     if type(cycles) is not int or not 1 <= cycles <= MAX_CYCLES:
         raise ValueError("cycles must be between 1 and 120")
+    if type(write_attempts) is not bool:
+        raise ValueError("write_attempts must be bool")
     samples = []
     last_end_ns = -1
     consecutive_price_network_failures = 0
@@ -88,7 +93,27 @@ def run_bounded_capture(root: Path, symbol: str, cycles: int) -> tuple[PublicMin
         now = time.time_ns()
         next_poll_ns = (now // MINUTE_NS + 1) * MINUTE_NS + POLL_OFFSET_NS
         time.sleep(max(0.0, (next_poll_ns - now) / 1_000_000_000))
-        snapshot = capture_public_minute(root, symbol, index)
+        intent = None
+        if write_attempts:
+            intent = record_attempt_start(
+                root, symbol, next_poll_ns - POLL_OFFSET_NS, time.time_ns(), index
+            )
+        try:
+            snapshot = capture_public_minute(root, symbol, index)
+        except Exception as exc:
+            if intent is not None:
+                record_attempt_finish(root, intent, aborted_error=type(exc).__name__)
+            raise
+        if intent is not None:
+            record_attempt_finish(
+                root,
+                intent,
+                price_received_ns=snapshot.price.received_ns if snapshot.price else None,
+                price_bar_end_ns=snapshot.price.bar.end_ns if snapshot.price else None,
+                oi_received_ns=snapshot.oi.received_ns if snapshot.oi else None,
+                funding_received_ns=snapshot.funding.received_ns if snapshot.funding else None,
+                network_failures=snapshot.network_failures,
+            )
 
         if snapshot.price is None:
             consecutive_price_network_failures += 1
