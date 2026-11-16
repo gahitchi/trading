@@ -25,8 +25,18 @@ T = 1_700_006_400_000_000_000
 def candle(opening_ns: int, *, close: str = "205", quote: str = "4050"):
     opening_ms = opening_ns // 1_000_000
     return [
-        opening_ms, "200", "210", "190", close, "20",
-        opening_ms + 59_999, quote, 20, "10", "2000", "0",
+        opening_ms,
+        "200",
+        "210",
+        "190",
+        close,
+        "20",
+        opening_ms + 59_999,
+        quote,
+        20,
+        "10",
+        "2000",
+        "0",
     ]
 
 
@@ -42,9 +52,7 @@ def clock(start=T + 5_000_000_000):
 
 
 def capture(tmp_path, raw=None, start=T + 5_000_000_000):
-    return record_forward_price(
-        tmp_path, S, source=lambda _: source() if raw is None else raw, clock_ns=clock(start)
-    )
+    return record_forward_price(tmp_path, S, source=lambda _: source() if raw is None else raw, clock_ns=clock(start))
 
 
 def receipt_file(tmp_path):
@@ -116,7 +124,10 @@ def test_reject_unreliable_clock_and_oversized_payload(tmp_path):
     with pytest.raises(ValueError, match="clock"):
         capture(tmp_path, start=0)
     with pytest.raises(ValueError, match="clock"):
-        record_forward_price(tmp_path, S, source=lambda _: source(),
+        record_forward_price(
+            tmp_path,
+            S,
+            source=lambda _: source(),
             clock_ns=iter((T + 5_000_000_000, T + 4_000_000_000)).__next__,
         )
     with pytest.raises(ValueError, match="oversized"):
