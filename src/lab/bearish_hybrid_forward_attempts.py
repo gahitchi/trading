@@ -79,9 +79,7 @@ def _prefix(start: AttemptStart) -> str:
     return f"{start.started_ns}-{start.index:03d}"
 
 
-def record_attempt_start(
-    root: Path, symbol: str, scheduled_ns: int, started_ns: int, index: int
-) -> AttemptStart:
+def record_attempt_start(root: Path, symbol: str, scheduled_ns: int, started_ns: int, index: int) -> AttemptStart:
     """Persist collection intent BEFORE the first public network request."""
     _validate_symbol(symbol)
     if (
@@ -150,12 +148,14 @@ def record_attempt_finish(
         type(network_failures) is not tuple
         or len(network_failures) > 3
         or any(
-            type(e) is not str
-            or re.fullmatch(r"(price|open-interest|settled-funding):[A-Za-z]{1,64}", e) is None
+            type(e) is not str or re.fullmatch(r"(price|open-interest|settled-funding):[A-Za-z]{1,64}", e) is None
             for e in network_failures
         )
         or len(network_failures) != len(set(network_failures))
-        or (aborted_error is not None and (type(aborted_error) is not str or re.fullmatch(r"[A-Za-z]{1,64}", aborted_error) is None))
+        or (
+            aborted_error is not None
+            and (type(aborted_error) is not str or re.fullmatch(r"[A-Za-z]{1,64}", aborted_error) is None)
+        )
     ):
         raise ValueError("invalid attempt failure metadata")
     finish = AttemptFinish(
@@ -230,8 +230,16 @@ def load_attempts(root: Path, symbol: str) -> tuple[Attempt, ...]:
             raise ValueError("attempt outcome without original intent")
         a = _load_object(files["start"])
         if set(a) != {
-            "version", "symbol", "scheduled_ns", "started_ns", "index",
-            "oi_due", "funding_due", "independently_authenticated", "qualified", "actual_notional",
+            "version",
+            "symbol",
+            "scheduled_ns",
+            "started_ns",
+            "index",
+            "oi_due",
+            "funding_due",
+            "independently_authenticated",
+            "qualified",
+            "actual_notional",
         }:
             raise ValueError("unrecognized attempt start schema")
         ns, idx, scheduled = a["started_ns"], a["index"], a["scheduled_ns"]
@@ -262,10 +270,20 @@ def load_attempts(root: Path, symbol: str) -> tuple[Attempt, ...]:
         if "finish" in files:
             b = _load_object(files["finish"])
             if set(b) != {
-                "version", "symbol", "started_ns", "index", "finished_ns",
-                "price_received_ns", "price_bar_end_ns", "oi_received_ns",
-                "funding_received_ns", "network_failures", "aborted_error",
-                "independently_authenticated", "qualified", "actual_notional",
+                "version",
+                "symbol",
+                "started_ns",
+                "index",
+                "finished_ns",
+                "price_received_ns",
+                "price_bar_end_ns",
+                "oi_received_ns",
+                "funding_received_ns",
+                "network_failures",
+                "aborted_error",
+                "independently_authenticated",
+                "qualified",
+                "actual_notional",
             }:
                 raise ValueError("unrecognized attempt finish schema")
             if (
@@ -287,29 +305,35 @@ def load_attempts(root: Path, symbol: str) -> tuple[Attempt, ...]:
             # checks as the recorder, but without writing to disk.
             end = b["finished_ns"]
             receipts = (
-                b["price_received_ns"], b["price_bar_end_ns"],
-                b["oi_received_ns"], b["funding_received_ns"],
+                b["price_received_ns"],
+                b["price_bar_end_ns"],
+                b["oi_received_ns"],
+                b["funding_received_ns"],
             )
-            if type(end) is not int or end < ns or any(
-                v is not None and (type(v) is not int or not ns <= v <= end) for v in receipts
+            if (
+                type(end) is not int
+                or end < ns
+                or any(v is not None and (type(v) is not int or not ns <= v <= end) for v in receipts)
             ):
                 raise ValueError("invalid attempt result clocks")
             if (receipts[0] is None) != (receipts[1] is None):
                 raise ValueError("partial price receipt")
-            if receipts[0] is not None and (
-                receipts[0] not in prices or prices[receipts[0]].bar.end_ns != receipts[1]
-            ):
+            if receipts[0] is not None and (receipts[0] not in prices or prices[receipts[0]].bar.end_ns != receipts[1]):
                 raise ValueError("attempt refers to missing/mismatched saved price")
             if receipts[2] is not None and (not start.oi_due or receipts[2] not in oi):
                 raise ValueError("attempt refers to missing/unexpected OI")
             if receipts[3] is not None and (not start.funding_due or receipts[3] not in funding):
                 raise ValueError("attempt refers to missing/unexpected funding")
             failures = b["network_failures"]
-            if len(failures) > 3 or any(
-                type(e) is not str
-                or re.fullmatch(r"(price|open-interest|settled-funding):[A-Za-z]{1,64}", e) is None
-                for e in failures
-            ) or len(failures) != len(set(failures)):
+            if (
+                len(failures) > 3
+                or any(
+                    type(e) is not str
+                    or re.fullmatch(r"(price|open-interest|settled-funding):[A-Za-z]{1,64}", e) is None
+                    for e in failures
+                )
+                or len(failures) != len(set(failures))
+            ):
                 raise ValueError("invalid saved network failures")
             aborted = b["aborted_error"]
             if aborted is not None and (type(aborted) is not str or re.fullmatch(r"[A-Za-z]{1,64}", aborted) is None):
