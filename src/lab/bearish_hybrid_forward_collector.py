@@ -95,9 +95,7 @@ def run_bounded_capture(
         time.sleep(max(0.0, (next_poll_ns - now) / 1_000_000_000))
         intent = None
         if write_attempts:
-            intent = record_attempt_start(
-                root, symbol, next_poll_ns - POLL_OFFSET_NS, time.time_ns(), index
-            )
+            intent = record_attempt_start(root, symbol, next_poll_ns - POLL_OFFSET_NS, time.time_ns(), index)
         try:
             snapshot = capture_public_minute(root, symbol, index)
         except Exception as exc:
