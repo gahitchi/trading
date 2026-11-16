@@ -88,7 +88,7 @@ def record_attempt_start(
         or scheduled_ns <= 0
         or scheduled_ns % MINUTE_NS
         or type(started_ns) is not int
-        or started_ns <= 0
+        or started_ns < scheduled_ns
         or type(index) is not int
         or index < 0
         or index >= 120
@@ -236,7 +236,7 @@ def load_attempts(root: Path, symbol: str) -> tuple[Attempt, ...]:
         ns, idx, scheduled = a["started_ns"], a["index"], a["scheduled_ns"]
         if (
             type(ns) is not int
-            or ns <= 0
+            or ns < scheduled
             or ns in seen_starts
             or type(idx) is not int
             or not 0 <= idx < 120
@@ -329,7 +329,7 @@ def coverage_from_attempts(attempts: tuple[Attempt, ...]) -> Coverage:
         interrupted=len(attempts) - len(finished),
         aborted=sum(a.finish.aborted_error is not None for a in finished),
         price_received=sum(a.finish.price_received_ns is not None for a in finished),
-        price_missing=sum(a.finish.price_received_ns is None for a in attempts if a.finish is None or a.finish is not None),
+        price_missing=sum(a.finish is None or a.finish.price_received_ns is None for a in attempts),
         oi_due=sum(a.start.oi_due for a in attempts),
         oi_received=sum(a.finish.oi_received_ns is not None for a in finished),
         funding_due=sum(a.start.funding_due for a in attempts),
