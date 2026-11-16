@@ -313,11 +313,10 @@ def load_attempts(root: Path, symbol: str) -> tuple[Attempt, ...]:
             if (
                 type(end) is not int
                 or end < ns
-                or any(v is not None and (type(v) is not int or not ns <= v <= end) for v in (receipts[0], *receipts[2:]))
-                or (
-                    receipts[1] is not None
-                    and (type(receipts[1]) is not int or not 0 < receipts[1] <= receipts[0])
+                or any(
+                    v is not None and (type(v) is not int or not ns <= v <= end) for v in (receipts[0], *receipts[2:])
                 )
+                or (receipts[1] is not None and (type(receipts[1]) is not int or not 0 < receipts[1] <= receipts[0]))
             ):
                 raise ValueError("invalid attempt result clocks")
             if (receipts[0] is None) != (receipts[1] is None):
