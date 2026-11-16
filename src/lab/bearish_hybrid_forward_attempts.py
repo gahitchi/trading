@@ -8,6 +8,7 @@ These local hashes are NOT an independent source or clock attestation.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import time
@@ -107,10 +108,10 @@ def record_attempt_start(
         "qualified": False,
         "actual_notional": 0,
     }
-    _immutably_save(
-        _folder(root, symbol) / f"{_prefix(start)}.start.json",
-        (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode(),
-    )
+    location = _folder(root, symbol) / f"{_prefix(start)}.start.json"
+    if location.exists() or location.is_symlink():
+        raise ValueError("duplicate immutable collection attempt")
+    _immutably_save(location, (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode())
     return start
 
 
@@ -340,3 +341,36 @@ def coverage_from_attempts(attempts: tuple[Attempt, ...]) -> Coverage:
             for a in finished
         ),
     )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Offline public UTC-minute attempt coverage (no trades)")
+    parser.add_argument("--root", type=Path, default=Path.home() / "trading-forward-evidence")
+    parser.add_argument("--symbol", default="ETHUSDT")
+    parser.add_argument("--last", type=int, default=12, help="Print last 1-120 observed attempts")
+    args = parser.parse_args(argv)
+    if not 1 <= args.last <= 120:
+        parser.error("--last must be between 1 and 120")
+    entries = load_attempts(args.root, args.symbol)
+    report = coverage_from_attempts(entries)
+    print(
+        f"attempts={report.attempts} completed={report.completed} interrupted={report.interrupted} "
+        f"aborted={report.aborted} price_received={report.price_received} "
+        f"price_missing={report.price_missing} OI_due={report.oi_due} OI_received={report.oi_received} "
+        f"funding_due={report.funding_due} funding_received={report.funding_received} "
+        f"late_attempts={report.late_attempts} wrong_minute_price={report.wrong_minute_price}"
+    )
+    for a in entries[-args.last :]:
+        status = "interrupted" if a.finish is None else "aborted" if a.finish.aborted_error else "finished"
+        print(
+            f"scheduled_ns={a.start.scheduled_ns} started_ns={a.start.started_ns} "
+            f"status={status} price_received_ns={a.finish.price_received_ns if a.finish else None} "
+            f"network_failures={a.finish.network_failures if a.finish else ()} "
+            f"aborted_error={a.finish.aborted_error if a.finish else None}"
+        )
+    print("coverage_scope=recorded_attempts_only qualified=False actual_notional=0")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
