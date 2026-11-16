@@ -28,9 +28,7 @@ def _bar(open_ns: int):
 
 def _price(root: Path, end_ns: int, *, delay_ns: int = 5_000_000_000):
     raw = json.dumps([_bar(end_ns - MINUTE_NS), _bar(end_ns)]).encode()
-    return record_forward_price(
-        root, S, source=lambda _: raw, clock_ns=_clock(end_ns + delay_ns)
-    )
+    return record_forward_price(root, S, source=lambda _: raw, clock_ns=_clock(end_ns + delay_ns))
 
 
 def _oi(root: Path, received_ns: int, measured_ns: int, value: str):
@@ -41,9 +39,7 @@ def _oi(root: Path, received_ns: int, measured_ns: int, value: str):
             "time": measured_ns // 1_000_000,
         }
     ).encode()
-    return record_public_feature(
-        root, S, "open-interest", source=lambda _: raw, clock_ns=_clock(received_ns)
-    )
+    return record_public_feature(root, S, "open-interest", source=lambda _: raw, clock_ns=_clock(received_ns))
 
 
 def _funding(root: Path, received_ns: int):
@@ -56,9 +52,7 @@ def _funding(root: Path, received_ns: int):
             }
         ]
     ).encode()
-    return record_public_feature(
-        root, S, "settled-funding", source=lambda _: raw, clock_ns=_clock(received_ns)
-    )
+    return record_public_feature(root, S, "settled-funding", source=lambda _: raw, clock_ns=_clock(received_ns))
 
 
 def test_one_price_bar_does_not_backdate_received_features(tmp_path):
