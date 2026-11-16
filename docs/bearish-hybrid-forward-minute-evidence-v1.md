@@ -24,7 +24,7 @@ The stored flags `independently_authenticated`, `historical_publication_verified
 - one open-interest receipt every sixth sampled minute (indices 0, 6, 12, etc.);
 - settled-funding history at the start and once per 60 sampled minutes.
 
-The three requests are sequential, **not atomic or exchange-synchronized snapshots**. Failure aborts rather than synthesizing missing receipts. The collector only runs for an explicit `--minutes` value from 1 to 120. It does not daemonize or silently recover gaps. If Termux is suspended or endpoints fail, there may be missing or duplicate minutes; gaps are reported and never backfilled. The source stores only locally received availability, not assumed historical publication times. OS clock integrity and actual venue identity are **not** independently attested.
+The three requests are sequential, **not atomic or exchange-synchronized snapshots**. A transient TLS/connection/timeout failure in one channel leaves that channel absent, records a visible warning, and permits independent channels to be collected. Three consecutive price-network failures halt collection for diagnosis; malformed source payloads and evidence-integrity failures abort immediately instead of being ignored. Existing successful immutable receipts remain unchanged. The collector only runs for an explicit `--minutes` value from 1 to 120. It does not daemonize or silently recover gaps. If Termux is suspended or endpoints fail, there may be missing or duplicate minutes; gaps are reported to stdout and never backfilled. The collector does not yet persist a separate signed outage log, so retain the terminal output for operational review. The source stores only locally received availability, not assumed historical publication times. OS clock integrity and actual venue identity are **not** independently attested.
 
 ## Independent local acceptance on Termux
 
@@ -63,3 +63,19 @@ PY
 ## Outstanding before strategy qualification
 
 Independent source and clock attestation; continuous prospectively covered price/funding/OI observations with auditable outages; funding-history completeness; spot/perp listing and as-of 30-day turnover; price/BBO and depth latency; realistic adverse spread and slippage; margin/liquidation, settlement and wallet evidence; registered negative controls and properly protected holdout analysis. Historical or prospective data collection alone cannot establish positive expectancy or daily profits. The bearish short-only engine must stand aside without independently validated conditions.
+
+## Termux TLS EOF acceptance observation (2026-11-16)
+
+An independent user run on `ac099d6` passed all 21 new synthetic price tests but failed at the first live `GET /fapi/v1/klines` while establishing TLS, with `urllib.error.URLError` wrapping `ssl.SSLZeroReturnError`. **No price HTTP response was received.** The user's previously stored OI receipts were not affected; the error is not evidence that Binance rejected an order or that the historical short strategy failed.
+
+This revision catches **only network transport errors** by channel and preserves gaps. It does **not** disable TLS certificate verification, change to unapproved hosts, conceal malformed responses, or claim network availability. If the public futures endpoint is inaccessible to the host or jurisdiction, halt and diagnose rather than circumvent restrictions.
+
+For a short read-only check of whether the same host is reachable (no keys, no orders):
+
+```bash
+curl -sS -o /dev/null --max-time 15 \
+  -w 'HTTP status=%{http_code} TLS verify=%{ssl_verify_result}\\n' \
+  'https://fapi.binance.com/fapi/v1/klines?symbol=ETHUSDT&interval=1m&limit=2'
+```
+
+A `000` status plus curl TLS error suggests a transport problem. An HTTP `4xx` response is a completed TLS/HTTP exchange and should be inspected as an exchange/region/rate-limit issue, not bypassed. No support is provided for insecure `-k` or certificate-verification bypass.
