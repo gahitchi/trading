@@ -132,11 +132,7 @@ def record_forward_price(
         raise ValueError("invalid price request clock")
     raw = _https_get(url, MAX_RESPONSE_BYTES) if source is None else source(url)
     received_ns = clock_ns()
-    if (
-        type(received_ns) is not int
-        or received_ns < requested_ns
-        or received_ns - requested_ns > MAX_REQUEST_NS
-    ):
+    if type(received_ns) is not int or received_ns < requested_ns or received_ns - requested_ns > MAX_REQUEST_NS:
         raise ValueError("unreliable price receive clock")
     bar = _closed_bar(raw, requested_ns, received_ns)
     identity = "binance-public-https" if source is None else "injected-test-source"
@@ -186,10 +182,21 @@ def load_forward_prices(root: Path, symbol: str) -> tuple[PriceCapture, ...]:
         except (UnicodeError, ValueError, TypeError) as exc:
             raise ValueError("invalid saved public price receipt") from exc
         expected_fields = {
-            "version", "venue", "symbol", "url", "requested_ns", "received_ns",
-            "raw_sha256", "raw_base64", "source", "selected_end_ns",
-            "independently_authenticated", "historical_publication_verified",
-            "price_history_complete", "qualified", "actual_notional",
+            "version",
+            "venue",
+            "symbol",
+            "url",
+            "requested_ns",
+            "received_ns",
+            "raw_sha256",
+            "raw_base64",
+            "source",
+            "selected_end_ns",
+            "independently_authenticated",
+            "historical_publication_verified",
+            "price_history_complete",
+            "qualified",
+            "actual_notional",
         }
         if type(saved) is not dict or set(saved) != expected_fields:
             raise ValueError("unrecognized public price receipt schema")
@@ -229,8 +236,7 @@ def load_forward_prices(root: Path, symbol: str) -> tuple[PriceCapture, ...]:
         if type(saved["selected_end_ns"]) is not int or saved["selected_end_ns"] != bar.end_ns:
             raise ValueError("modified selected public minute")
         if previous_bar is not None and (
-            bar.end_ns < previous_bar.end_ns
-            or (bar.end_ns == previous_bar.end_ns and bar != previous_bar)
+            bar.end_ns < previous_bar.end_ns or (bar.end_ns == previous_bar.end_ns and bar != previous_bar)
         ):
             raise ValueError("reordered or revised completed public minute")
         captures.append(PriceCapture(symbol, start, end, _sha(raw), saved["source"], bar))
