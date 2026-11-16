@@ -136,10 +136,10 @@ def test_wrong_symbol_and_invalid_clock_cannot_write_intent(tmp_path):
 
 
 def test_late_poll_and_wrong_minute_are_reported_not_reinterpreted(tmp_path):
-    start = record_attempt_start(tmp_path, S, SCHEDULE, START + 15_000_000_000, 0)
-    price = _price(tmp_path, START + 16_000_000_000)
+    start = record_attempt_start(tmp_path, S, T, T + 15_000_000_000, 0)
+    price = _price(tmp_path, START + 1_000_000_000)
     record_attempt_finish(
-        tmp_path, start, finished_ns=START + 18_000_000_000,
+        tmp_path, start, finished_ns=START + 2_000_000_000,
         price_received_ns=price.received_ns, price_bar_end_ns=price.bar.end_ns
     )
     report = coverage_from_attempts(load_attempts(tmp_path, S))
