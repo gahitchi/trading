@@ -147,8 +147,11 @@ def test_late_poll_and_wrong_minute_are_reported_not_reinterpreted(tmp_path):
     start = record_attempt_start(tmp_path, S, T, T + 15_000_000_000, 0)
     price = _price(tmp_path, START + 1_000_000_000)
     record_attempt_finish(
-        tmp_path, start, finished_ns=START + 2_000_000_000,
-        price_received_ns=price.received_ns, price_bar_end_ns=price.bar.end_ns
+        tmp_path,
+        start,
+        finished_ns=START + 2_000_000_000,
+        price_received_ns=price.received_ns,
+        price_bar_end_ns=price.bar.end_ns,
     )
     report = coverage_from_attempts(load_attempts(tmp_path, S))
     assert report.late_attempts == 1
