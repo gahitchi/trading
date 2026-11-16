@@ -43,8 +43,11 @@ def test_successful_poll_intent_links_to_real_saved_receipt(tmp_path):
     start = record_attempt_start(tmp_path, S, SCHEDULE, START, 0)
     assert start.oi_due and start.funding_due
     record_attempt_finish(
-        tmp_path, start, finished_ns=START + 2_000_000_000,
-        price_received_ns=price.received_ns, price_bar_end_ns=price.bar.end_ns
+        tmp_path,
+        start,
+        finished_ns=START + 2_000_000_000,
+        price_received_ns=price.received_ns,
+        price_bar_end_ns=price.bar.end_ns,
     )
     entries = load_attempts(tmp_path, S)
     assert len(entries) == 1
@@ -65,8 +68,10 @@ def test_successful_poll_intent_links_to_real_saved_receipt(tmp_path):
 def test_network_failure_is_durably_visible_without_fake_price(tmp_path):
     start = record_attempt_start(tmp_path, S, SCHEDULE, START, 0)
     record_attempt_finish(
-        tmp_path, start, finished_ns=START + 2_000_000_000,
-        network_failures=("price:URLError", "open-interest:TimeoutError")
+        tmp_path,
+        start,
+        finished_ns=START + 2_000_000_000,
+        network_failures=("price:URLError", "open-interest:TimeoutError"),
     )
     records = load_attempts(tmp_path, S)
     assert records[0].finish.price_received_ns is None
@@ -102,8 +107,11 @@ def test_aborted_malformed_payload_is_not_relabelled_network_failure(tmp_path):
 def test_forged_result_reference_does_not_pass_offline_audit(tmp_path):
     start = record_attempt_start(tmp_path, S, SCHEDULE, START, 0)
     record_attempt_finish(
-        tmp_path, start, finished_ns=START + 2_000_000_000,
-        price_received_ns=START + 1_000_000_000, price_bar_end_ns=SCHEDULE
+        tmp_path,
+        start,
+        finished_ns=START + 2_000_000_000,
+        price_received_ns=START + 1_000_000_000,
+        price_bar_end_ns=SCHEDULE,
     )
     with pytest.raises(ValueError, match="missing/mismatched"):
         load_attempts(tmp_path, S)
