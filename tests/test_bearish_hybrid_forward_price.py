@@ -223,3 +223,104 @@ def test_bounded_collector_rejects_unsafe_duration_without_sleep(tmp_path, monke
             run_bounded_capture(tmp_path, S, cycles)
     with pytest.raises(ValueError):
         capture_public_minute(tmp_path, S, -1)
+
+
+def test_tls_eof_price_failure_preserves_independent_oi_and_funding(tmp_path, monkeypatch):
+    from urllib.error import URLError
+
+    from lab import bearish_hybrid_forward_collector as runner
+
+    attempted = []
+
+    def failed_price(root, symbol):
+        attempted.append("price")
+        raise URLError("TLS EOF")
+
+    def independent_feature(root, symbol, kind):
+        attempted.append(kind)
+        return object()
+
+    monkeypatch.setattr(runner, "record_forward_price", failed_price)
+    monkeypatch.setattr(runner, "record_public_feature", independent_feature)
+
+    result = capture_public_minute(tmp_path, S, 0)
+    assert attempted == ["price", "open-interest", "settled-funding"]
+    assert result.price is None
+    assert result.oi is not None and result.funding is not None
+    assert result.network_failures == ("price:URLError",)
+    assert result.qualified is False and result.actual_notional == 0
+    assert not list(tmp_path.rglob("*.json"))
+
+
+def test_network_failure_in_one_feature_does_not_skip_other_feature(tmp_path, monkeypatch):
+    from urllib.error import URLError
+
+    from lab import bearish_hybrid_forward_collector as runner
+
+    fake_price = capture(tmp_path)
+    called = []
+
+    def feature(root, symbol, kind):
+        called.append(kind)
+        if kind == "open-interest":
+            raise URLError("TLS EOF")
+        return object()
+
+    monkeypatch.setattr(runner, "record_forward_price", lambda root, symbol: fake_price)
+    monkeypatch.setattr(runner, "record_public_feature", feature)
+
+    result = capture_public_minute(tmp_path, S, 0)
+    assert result.price == fake_price
+    assert result.oi is None and result.funding is not None
+    assert result.network_failures == ("open-interest:URLError",)
+    assert called == ["open-interest", "settled-funding"]
+
+
+def test_invalid_price_payload_is_not_suppressed_as_network_error(tmp_path, monkeypatch):
+    from lab import bearish_hybrid_forward_collector as runner
+
+    def invalid_price(root, symbol):
+        raise ValueError("inconsistent OHLC")
+
+    monkeypatch.setattr(runner, "record_forward_price", invalid_price)
+    with pytest.raises(ValueError, match="inconsistent OHLC"):
+        capture_public_minute(tmp_path, S, 0)
+
+
+def test_one_failed_poll_recovers_without_invented_bar(tmp_path, monkeypatch, capsys):
+    from lab import bearish_hybrid_forward_collector as runner
+
+    good = capture(tmp_path)
+    attempts = iter(
+        (
+            runner.PublicMinuteCapture(None, None, None, ("price:URLError",)),
+            runner.PublicMinuteCapture(good, None, None),
+        )
+    )
+    monkeypatch.setattr(runner, "capture_public_minute", lambda root, symbol, index: next(attempts))
+    monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(runner.time, "time_ns", lambda: T + 5_000_000_000)
+
+    result = run_bounded_capture(tmp_path, S, 2)
+    assert result[0].price is None
+    assert result[1].price == good
+    assert len(result) == 2
+    assert "no backfill" in capsys.readouterr().out
+
+
+def test_three_price_network_failures_fail_closed(tmp_path, monkeypatch):
+    from lab import bearish_hybrid_forward_collector as runner
+
+    attempts = []
+
+    def always_failed(root, symbol, index):
+        attempts.append(index)
+        return runner.PublicMinuteCapture(None, None, None, ("price:URLError",))
+
+    monkeypatch.setattr(runner, "capture_public_minute", always_failed)
+    monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(runner.time, "time_ns", lambda: T + 5_000_000_000)
+
+    with pytest.raises(ConnectionError, match="three consecutive"):
+        run_bounded_capture(tmp_path, S, 5)
+    assert attempts == [0, 1, 2]
