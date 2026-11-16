@@ -301,7 +301,7 @@ def test_one_failed_poll_recovers_without_invented_bar(tmp_path, monkeypatch, ca
     monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(runner.time, "time_ns", lambda: T + 5_000_000_000)
 
-    result = run_bounded_capture(tmp_path, S, 2)
+    result = run_bounded_capture(tmp_path, S, 2, write_attempts=False)
     assert result[0].price is None
     assert result[1].price == good
     assert len(result) == 2
@@ -322,5 +322,5 @@ def test_three_price_network_failures_fail_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(runner.time, "time_ns", lambda: T + 5_000_000_000)
 
     with pytest.raises(ConnectionError, match="three consecutive"):
-        run_bounded_capture(tmp_path, S, 5)
+        run_bounded_capture(tmp_path, S, 5, write_attempts=False)
     assert attempts == [0, 1, 2]
